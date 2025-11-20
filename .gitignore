@@ -145,7 +145,6 @@ temp/
 
 # Jupyter Notebooks
 .ipynb_checkpoints/
-*.ipynb
 
 # ========================================
 # Cloud & Deployment
