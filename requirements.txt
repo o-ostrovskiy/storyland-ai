@@ -1,0 +1,49 @@
+# StoryLand AI - Python Dependencies
+# Local notebook-based demo with Google API key
+
+# ========================================
+# Core AI (ADK)
+# ========================================
+google-adk>=1.0.0  # Agent Development Kit for building agents
+
+# ========================================
+# Notebook Environment
+# ========================================
+jupyter>=1.0.0
+ipykernel>=6.25.0
+ipywidgets>=8.1.0
+
+# ========================================
+# HTTP & API Clients
+# ========================================
+requests>=2.31.0
+urllib3>=2.0.0
+
+# ========================================
+# Data Validation & Serialization
+# ========================================
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# ========================================
+# Utilities
+# ========================================
+python-dotenv>=1.0.0  # Load .env files
+jsonschema>=4.20.0    # JSON schema validation
+tenacity>=8.2.3       # Retry logic with backoff
+
+# ========================================
+# Logging
+# ========================================
+structlog>=23.2.0
+
+# ========================================
+# Date/Time Handling
+# ========================================
+python-dateutil>=2.8.2
+
+# ========================================
+# Optional: Performance & Async
+# ========================================
+# asyncio (built-in Python 3.10+)
+# aiohttp>=3.9.0  # For async HTTP requests
