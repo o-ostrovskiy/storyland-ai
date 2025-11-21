@@ -4,7 +4,7 @@
 # ========================================
 # Core AI (ADK)
 # ========================================
-google-adk>=1.0.0  # Agent Development Kit for building agents
+google-adk>=1.19.0  # Agent Development Kit for building agents (v1.19+ fixes output_schema + tools bug)
 
 # ========================================
 # Notebook Environment
