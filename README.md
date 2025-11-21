@@ -39,6 +39,19 @@ Creating a meaningful travel plan from a book requires:
 
 A single LLM prompt can't handle this complexity. Agents can.
 
+## Table of Contents
+
+- [Getting Started](#getting-started)
+- [Quick Start](#quick-start)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Project Structure](#project-structure)
+- [CLI Usage](#cli-usage)
+- [Using Saved Data](#using-saved-data)
+- [Development](#development)
+- [Database Reference](#database-reference)
+- [Troubleshooting](#troubleshooting)
+
 ## Getting Started
 
 ### Prerequisites
@@ -73,53 +86,88 @@ A single LLM prompt can't handle this complexity. Agents can.
    ```
 
    Edit `.env` and add your Google API key:
-   ```
+   ```env
+   # Required
    GOOGLE_API_KEY=your-actual-api-key-here
+
+   # Optional - Enable database persistence
+   USE_DATABASE=false
+   DATABASE_URL=sqlite:///storyland_sessions.db
+
+   # Optional - Enable memory for personalization
+   USE_MEMORY=false
    ```
 
-### Quick Start
+## Quick Start
 
-**Option 1: Run the Jupyter Notebook (Recommended)**
+### Option 1: CLI (Production Ready)
 
-The easiest way to get started is with the demo notebook:
+The fastest way to get a travel itinerary:
 
 ```bash
-jupyter notebook storyland_ai_demo.ipynb
+# Basic usage
+python main.py "Gone with the Wind"
+
+# With author
+python main.py "The Nightingale" --author "Kristin Hannah"
+
+# With database persistence
+python main.py "1984" --database
+
+# With memory for personalization
+python main.py "Pride and Prejudice" --memory
+
+# Specify user (for multi-user support)
+python main.py "Gone with the Wind" --user-id alice
+
+# Full example
+python main.py "The Great Gatsby" --author "F. Scott Fitzgerald" --user-id charlie --database --memory
 ```
 
-This notebook demonstrates:
-- Complete multi-agent workflow (sequential + parallel agents)
-- Book metadata extraction using Google Books API
-- Location discovery with parallel agent execution
-- Travel itinerary composition
-- Full execution tracing and observability
+### Option 2: Jupyter Notebook (Interactive Demo)
 
-Simply configure your book in the notebook:
-```python
-BOOK_TITLE = "nightingale"  # Change to any book
-AUTHOR = ""                  # Optional
+For exploration and experimentation:
+
+```bash
+# Start Jupyter
+jupyter notebook
+
+# Open one of these notebooks:
+# - storyland_ai_demo.ipynb (original inline demo)
+# - storyland_ai_demo_modular.ipynb (modular demo with imports)
+# - sessions_memory_demo.ipynb (9 scenarios showing sessions & memory)
 ```
 
-Then run all cells to generate your literary travel itinerary!
+### Option 3: Programmatic Usage
 
-**Option 2: Run the Agent System Programmatically**
+Import and use the modular components:
 
 ```python
+from google.genai import types
+from google.adk.models.google_llm import Gemini
 from google.adk.runners import Runner
-from agents.storyland_orchestrator_agent import create_orchestrator
 
-# Create the orchestrator
-orchestrator = create_orchestrator()
+from services.session_service import create_session_service
+from services.memory_service import create_memory_service
+from tools.google_books import google_books_tool
+from agents.orchestrator import create_workflow
+
+# Configure model
+model = Gemini(model="gemini-2.0-flash-lite", api_key="your-key")
+
+# Create services
+session_service = create_session_service(use_database=True)
+memory_service = create_memory_service()
+
+# Create workflow
+workflow = create_workflow(model, google_books_tool)
 
 # Create runner
-runner = Runner(agent=orchestrator, app_name="storyland")
+runner = Runner(agent=workflow, app_name="storyland", session_service=session_service)
 
-# Run with your book
-response = runner.run(
-    user_id="user1",
-    session_id="session1",
-    new_message="Create a travel itinerary for 'The Nightingale'"
-)
+# Run!
+async for event in runner.run_async(user_id="alice", session_id="session1", new_message=...):
+    print(event)
 ```
 
 ### What You'll Get
@@ -131,151 +179,478 @@ The system generates a structured travel plan including:
 - **Practical details** (time of day, visiting tips)
 - **Thematic connections** explaining why each location matters
 
-**Example Output Structure:**
-```json
-{
-  "itinerary": {
-    "cities": [
-      {
-        "name": "Paris",
-        "country": "France",
-        "days_suggested": 2,
-        "stops": [
-          {
-            "name": "Musée de l'Homme",
-            "type": "museum",
-            "reason": "Featured in The Nightingale as resistance headquarters",
-            "time_of_day": "morning"
-          }
-        ]
-      }
-    ],
-    "summary_text": "A journey through WWII France..."
-  }
+## Features
+
+### 1. Sessions & State Management
+
+- **In-Memory (Default)**: Fast, perfect for development and testing
+- **SQLite-Backed**: Persistent sessions across restarts
+- **Multi-scoped State**: Session, user, app, and temporary scopes
+- **User Preferences**: Persist across sessions with `user:` prefix
+
+```python
+# Preferences persist automatically
+state["user:preferences"] = {
+    "prefers_museums": True,
+    "budget": "moderate",
+    "favorite_genres": ["classics"]
 }
 ```
 
+### 2. Long-Term Memory
+
+- **InMemoryMemoryService**: Keyword-based search for development
+- **Session Storage**: Save completed sessions for future reference
+- **Memory Queries**: Find relevant past interactions
+- **Reader Profile Agent**: Uses memory for personalized recommendations
+
+```python
+# Save to memory
+await memory_service.add_session_to_memory(session)
+
+# Query memories
+results = await memory_service.search_memory(
+    app_name="storyland",
+    user_id="alice",
+    query="travel preferences museums"
+)
+```
+
+### 3. Context Engineering
+
+- **Sliding Window**: Keep recent N events
+- **Token Estimation**: Track conversation size
+- **Compaction Detection**: Know when to reduce context
+- **ADK Integration**: Use built-in `GetSessionConfig`
+
+```python
+from services.context_manager import ContextManager
+
+context_manager = ContextManager(max_events=20)
+if context_manager.should_compact(session.events):
+    session.events = context_manager.limit_events(session.events)
+```
+
+### 4. Multi-User Support
+
+Each user has isolated sessions, preferences, and memory:
+
+```bash
+python main.py "Pride and Prejudice" --user-id alice --database
+python main.py "Dune" --user-id bob --database
+```
+
+### 5. Automated Research
+
+- Agents handle complexity of gathering scattered information
+- **Parallel Processing**: Multiple discovery agents work simultaneously
+- **Structured Output**: Clear, actionable travel plans
+
 ## Architecture
 
-StoryLand AI is built on Google's Agent Development Kit (ADK) and uses the **`storyland_orchestrator_agent`** as the central coordinator of a specialized agent ecosystem.
+StoryLand AI uses a modular architecture with Google's Agent Development Kit (ADK).
+
+### Project Structure
+
+```
+storyland-ai/
+├── models/              # Pydantic data models
+│   ├── book.py          # BookMetadata, BookContext, BookInfo
+│   ├── discovery.py     # CityDiscovery, LandmarkDiscovery, AuthorSites
+│   ├── itinerary.py     # TripItinerary, CityPlan, CityStop
+│   └── preferences.py   # TravelPreferences
+│
+├── tools/               # External API integrations
+│   └── google_books.py  # Google Books search tool
+│
+├── agents/              # AI agent definitions
+│   ├── book_metadata_agent.py    # Book metadata extraction
+│   ├── book_context_agent.py     # Book setting research
+│   ├── discovery_agents.py       # City/landmark/author discovery
+│   ├── trip_composer_agent.py    # Itinerary composition
+│   ├── reader_profile_agent.py   # Memory-powered personalization
+│   └── orchestrator.py           # Main workflow coordination
+│
+├── services/            # Core services
+│   ├── session_service.py   # Session management (InMemory/SQLite)
+│   ├── memory_service.py    # Long-term memory
+│   └── context_manager.py   # Context engineering
+│
+├── common/              # Shared utilities
+│   ├── config.py        # Configuration management
+│   └── logging.py       # Logging utilities
+│
+├── main.py              # CLI entry point
+├── *.ipynb              # Demo notebooks
+├── requirements.txt     # Dependencies
+└── .env.example         # Environment template
+```
+
+### Multi-Agent Workflow
+
+```
+SequentialAgent (workflow)
+├─ book_metadata_pipeline [fetch → format] → state["book_metadata"]
+├─ book_context_pipeline [research → format] → state["book_context"]
+├─ ParallelAgent (parallel_discovery) ⚡ CONCURRENT
+│  ├─ city_pipeline [research → format] → state["city_discovery"]
+│  ├─ landmark_pipeline [research → format] → state["landmark_discovery"]
+│  └─ author_pipeline [research → format] → state["author_sites"]
+└─ trip_composer_agent → state["final_itinerary"]
+```
+
+### Two-Stage Agent Pattern
+
+Each pipeline uses a two-stage approach:
+1. **Stage 1 (Researcher)**: Uses tools to gather data
+2. **Stage 2 (Formatter)**: Validates with Pydantic schema
+
+This pattern ensures type safety and clean data flow between agents.
 
 ### Core Components
 
-#### 1. **Book Context Specialist** (`book_info_agent`)
+#### 1. Book Metadata Agent
+- Extracts book information from Google Books API
+- Validates with `BookMetadata` Pydantic model
+- Saves to `state["book_metadata"]`
 
-**Purpose:** Understand the book at a high level—setting, key locations, themes
+#### 2. Book Context Agent
+- Researches setting, time period, and themes
+- Uses Google Search for deep context
+- Validates with `BookContext` Pydantic model
 
-**Tools:**
-- Google Books API (metadata, descriptions, categories)
-- Google Search (setting queries, location research)
+#### 3. Discovery Agents (Parallel)
+- **City Agent**: Finds cities to visit
+- **Landmark Agent**: Discovers specific places
+- **Author Agent**: Locates author-related sites
+- All run in parallel for efficiency
 
-**Output:** Structured data about primary locations, time period, and author-related places
+#### 4. Trip Composer Agent
+- Synthesizes all discoveries into coherent itinerary
+- Groups by city, suggests timing
+- Validates with `TripItinerary` Pydantic model
 
-**Pattern:** Sequential agent (runs early, provides foundation for other agents)
+#### 5. Reader Profile Agent (Optional)
+- Queries memory for past preferences
+- Personalizes recommendations
+- Uses ADK's `load_memory_tool`
 
----
+## CLI Usage
 
-#### 2. **Location Discovery Team** (Parallel Agents)
+### Basic Commands
 
-Once book context is established, these agents run **in parallel** to discover different aspects:
+```bash
+# Simple query (default user: user1)
+python main.py "Gone with the Wind"
 
-##### **City & Neighborhood Agent** (`city_discovery_agent`)
-- Identifies real cities, districts, and neighborhoods
-- Finds filming locations and setting-aligned places
-- Returns candidate locations with reference URLs
+# With author
+python main.py "The Nightingale" --author "Kristin Hannah"
 
-##### **Landmarks & Experiences Agent** (`landmark_discovery_agent`)
-- Focuses on museums, walking routes, viewpoints
-- Searches for book-themed experiences (literary walks, tours)
-- Identifies places travelers can actually visit
+# Custom user
+python main.py "1984" --user-id alice
+```
 
-##### **Author & History Agent** (`author_context_agent`)
-- Locates author's hometown, houses, statues
-- Finds literary sites and historical context
-- Adds depth: "where the story came from," not just "where it happens"
+### Advanced Usage
 
-**Pattern:** Parallel execution reduces latency and demonstrates concurrent agent workflows
+```bash
+# Enable SQLite persistence
+python main.py "Pride and Prejudice" --database
 
----
+# Enable memory for personalization
+python main.py "The Great Gatsby" --memory
 
-#### 3. **Trip Designer** (`trip_composer_agent`)
+# Both database and memory
+python main.py "To Kill a Mockingbird" --database --memory
+```
 
-**Purpose:** Transform research into a human-readable travel plan
+### Multi-User Support
 
-**Capabilities:**
-- Groups places by region or city
-- Suggests 1-day or weekend itineraries
-- Explains why each location matters for the book
-- Fills in practical details (hours, visiting order)
+```bash
+# User "alice" explores Pride and Prejudice
+python main.py "Pride and Prejudice" --user-id alice --database
 
-**Pattern:** Sequential agent (runs near end of pipeline, consumes discovery outputs)
+# User "bob" explores Dune (completely separate data)
+python main.py "Dune" --user-id bob --database
 
----
+# Alice explores another book (her preferences persist!)
+python main.py "Emma" --user-id alice --database
+```
 
-#### 4. **Preferences & Memory Agent** (`reader_profile_agent`)
+**Check user data:**
 
-**Purpose:** Personalize experiences across multiple uses
+```bash
+# See all users
+sqlite3 storyland_sessions.db "SELECT DISTINCT user_id FROM sessions;"
 
-**Manages:**
-- Session-level state (current book, in-progress results)
-- Long-term preferences ("travels with kids", "likes Europe", "prefers museums")
+# Count sessions per user
+sqlite3 storyland_sessions.db "
+SELECT user_id, COUNT(*) as session_count
+FROM sessions
+GROUP BY user_id;"
 
-**Implementation:** Session service / memory bank for adaptive planning
+# View specific user's sessions
+sqlite3 storyland_sessions.db "
+SELECT id,
+       json_extract(state, '$.book_title') as book,
+       create_time
+FROM sessions
+WHERE user_id = 'alice';"
+```
 
----
+### Help
 
-### Essential Tools
+```bash
+python main.py --help
+```
 
-All agents share access to:
+## Using Saved Data in Future Runs
 
-- **Google Search** – Open-web information about settings, locations, travel details
-- **Google Books API** – Official metadata, descriptions, and categories
-- **Evaluation UI** – Trace agent calls, inspect outputs, compare configurations
+When you enable database persistence (`--database` or `USE_DATABASE=true`), all data is saved and can be reused.
 
-## Features
+### 1. User Preferences Persist
 
-- **Automated Research:** Agents handle the complexity of gathering scattered information
-- **Parallel Processing:** Multiple discovery agents work simultaneously for faster results
-- **Personalization:** Remembers your preferences across books
-- **Structured Output:** Clear, actionable travel plans, not random search results
-- **Observability:** Full tracing and evaluation capabilities for continuous improvement
+```python
+# First session - set preferences
+await session_service.create_session(
+    app_name="storyland",
+    user_id="alice",
+    session_id="session-1",
+    state={
+        "book_title": "Pride and Prejudice",
+        "user:preferences": {
+            "prefers_museums": True,
+            "budget": "moderate"
+        }
+    }
+)
 
-## How It Works
+# Later session - preferences auto-loaded!
+new_session = await session_service.create_session(
+    app_name="storyland",
+    user_id="alice",  # Same user
+    session_id="session-2",
+    state={"book_title": "Emma"}
+)
 
-1. **Input:** User provides a book title
-2. **Book Analysis:** `book_info_agent` extracts setting, themes, and context
-3. **Parallel Discovery:** Three agents simultaneously research cities, landmarks, and author connections
-4. **Plan Composition:** `trip_composer_agent` merges findings into a coherent itinerary
-5. **Personalization:** `reader_profile_agent` adapts the plan to user preferences
-6. **Output:** A complete, book-themed travel inspiration plan
+prefs = new_session.state["user:preferences"]  # Available!
+```
+
+### 2. Resume Previous Sessions
+
+```python
+# Load existing session
+session = await session_service.get_session(
+    app_name="storyland",
+    user_id="alice",
+    session_id="previous-session-id"
+)
+
+# Access previous itinerary
+itinerary = session.state.get("final_itinerary")
+```
+
+### 3. Query User History
+
+```python
+import sqlite3
+
+def get_user_books(user_id: str):
+    conn = sqlite3.connect('storyland_sessions.db')
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT json_extract(state, '$.book_title') as book,
+               create_time
+        FROM sessions
+        WHERE user_id = ?
+        ORDER BY create_time DESC
+    """, (user_id,))
+    return cursor.fetchall()
+```
+
+### 4. Practical Demo
+
+See **[sessions_memory_demo.ipynb](sessions_memory_demo.ipynb)** for 9 complete scenarios.
+
+## Development
+
+### Adding New Agents
+
+1. Create agent file in `agents/`:
+
+```python
+# agents/my_new_agent.py
+from google.adk.agents import LlmAgent
+
+def create_my_agent(model):
+    return LlmAgent(
+        name="my_agent",
+        model=model,
+        instruction="Do something..."
+    )
+```
+
+2. Import in orchestrator and add to workflow
+
+### Adding New Tools
+
+1. Create tool file in `tools/`:
+
+```python
+# tools/my_tool.py
+from google.adk.tools import FunctionTool
+
+def my_function(query: str) -> str:
+    return result
+
+my_tool = FunctionTool(my_function)
+```
+
+2. Use in agents
+
+### Adding New Models
+
+```python
+# models/my_model.py
+from pydantic import BaseModel, Field
+
+class MyModel(BaseModel):
+    field1: str = Field(description="Description")
+    field2: int = Field(description="Description")
+```
+
+## Database Reference
+
+### Schema
+
+ADK's `DatabaseSessionService` creates:
+
+```sql
+CREATE TABLE sessions (
+    app_name VARCHAR(128) NOT NULL,
+    user_id VARCHAR(128) NOT NULL,
+    id VARCHAR(128) NOT NULL,
+    state TEXT NOT NULL,
+    create_time DATETIME NOT NULL,
+    update_time DATETIME NOT NULL,
+    PRIMARY KEY (app_name, user_id, id)
+)
+```
+
+**Important:** Column names are:
+- `id` (not `session_id`)
+- `create_time` (not `created_at`)
+- `update_time` (not `updated_at`)
+
+See **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** for complete reference.
+
+### Inspecting Database
+
+```bash
+# Open database
+sqlite3 storyland_sessions.db
+
+# Inside sqlite3:
+.tables                    # List tables
+.schema                    # Show structures
+.mode column              # Better formatting
+.headers on
+
+# View sessions
+SELECT * FROM sessions;
+
+# View latest
+SELECT * FROM sessions ORDER BY create_time DESC LIMIT 1;
+
+# Exit
+.quit
+```
+
+**Quick one-liners:**
+
+```bash
+# List tables
+sqlite3 storyland_sessions.db ".tables"
+
+# Count sessions
+sqlite3 storyland_sessions.db "SELECT COUNT(*) FROM sessions;"
+
+# Latest session
+sqlite3 -column -header storyland_sessions.db \
+  "SELECT id, user_id, create_time FROM sessions ORDER BY create_time DESC LIMIT 1;"
+```
+
+## Troubleshooting
+
+### Rate Limits (429 Errors)
+
+The workflow makes ~11 API calls per book, which can hit free tier limits (15 RPM).
+
+**Solution:** The retry logic will handle it automatically. Wait ~60 seconds between books.
+
+### Database Issues
+
+```bash
+# Delete database to start fresh
+rm storyland_sessions.db
+
+# Check database exists
+ls -lh *.db
+```
+
+### Import Errors
+
+```bash
+# Ensure you're in project root
+pwd
+
+# Check Python path
+python -c "import sys; print('\\n'.join(sys.path))"
+```
+
+### API Key Issues
+
+```bash
+# Check API key is set
+python -c "import os; from dotenv import load_dotenv; load_dotenv(); print('OK' if os.getenv('GOOGLE_API_KEY') else 'MISSING')"
+```
+
+## Configuration
+
+All configuration via environment variables in `.env`:
+
+```env
+# Required
+GOOGLE_API_KEY=your-google-ai-api-key-here
+
+# Database (optional)
+USE_DATABASE=false
+DATABASE_URL=sqlite:///storyland_sessions.db
+
+# Memory (optional)
+USE_MEMORY=false
+
+# Session (optional)
+SESSION_MAX_EVENTS=20
+
+# Context (optional)
+MAX_CONTEXT_TOKENS=30000
+
+# Model (optional)
+MODEL_NAME=gemini-2.0-flash-lite
+
+# Logging (optional)
+LOG_LEVEL=INFO
+```
 
 ## Technology Stack
 
 - **Framework:** Google Agent Development Kit (ADK)
-- **LLM:** Google Gemini
+- **LLM:** Google Gemini (gemini-2.0-flash-lite)
 - **APIs:** Google Books API, Google Search
-- **Agent Patterns:** Sequential and parallel agent orchestration
-- **Evaluation:** Google evaluation UI and logging tools
-
-## Project Structure
-
-```
-storyland-ai/
-├── agents/
-│   ├── storyland_orchestrator_agent.py  # Central coordinator
-│   ├── book_info_agent.py               # Book context specialist
-│   ├── city_discovery_agent.py          # City & neighborhood discovery
-│   ├── landmark_discovery_agent.py      # Landmarks & experiences
-│   ├── author_context_agent.py          # Author & history research
-│   ├── trip_composer_agent.py           # Travel plan composer
-│   └── reader_profile_agent.py          # Preferences & memory
-├── tools/
-│   ├── google_search.py                 # Google Search integration
-│   └── google_books.py                  # Google Books API wrapper
-├── common/
-│   └── logging.py                       # Logging utilities
-└── README.md
-```
+- **Database:** SQLite (via ADK's DatabaseSessionService)
+- **Memory:** InMemoryMemoryService (keyword search)
+- **Data Validation:** Pydantic models
+- **Agent Patterns:** Sequential and parallel orchestration
 
 ## Why StoryLand AI?
 
@@ -289,7 +664,8 @@ storyland-ai/
 - Demonstrates real-world multi-agent coordination
 - Shows parallel vs. sequential agent patterns
 - Implements memory and personalization in agent systems
-- Built with production-ready evaluation and observability
+- Modular architecture with clean separation of concerns
+- Production-ready with database persistence and error handling
 
 ## Vision
 
@@ -298,6 +674,11 @@ A great book doesn't just end—it opens a door. StoryLand AI helps readers step
 We believe that every story deserves to be experienced beyond the page, and every reader should be able to walk through the worlds they love without the friction of scattered information and endless research.
 
 **A single prompt can describe a world—but only agents can build a bridge between that world and real places someone can actually visit.**
+
+## Additional Resources
+
+- **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Complete database reference
+- **[sessions_memory_demo.ipynb](sessions_memory_demo.ipynb)** - 9 demo scenarios
 
 ---
 
