@@ -16,6 +16,7 @@ from .discovery_agents import (
     create_author_pipeline,
 )
 from .trip_composer_agent import create_trip_composer_agent
+from .reader_profile_agent import create_reader_profile_agent
 
 
 def create_workflow(model, google_books_tool):
@@ -26,11 +27,12 @@ def create_workflow(model, google_books_tool):
         SequentialAgent (workflow)
         ├─ book_metadata_pipeline [fetch → format] → state["book_metadata"]
         ├─ book_context_pipeline [research → format] → state["book_context"]
+        ├─ reader_profile_agent [read preferences] → state["reader_profile"]
         ├─ ParallelAgent (parallel_discovery) ⚡ CONCURRENT
         │  ├─ city_pipeline [research → format] → state["city_discovery"]
         │  ├─ landmark_pipeline [research → format] → state["landmark_discovery"]
         │  └─ author_pipeline [research → format] → state["author_sites"]
-        └─ trip_composer_agent → state["final_itinerary"]
+        └─ trip_composer_agent → state["final_itinerary"] (uses preferences!)
 
     Args:
         model: The LLM model to use for all agents
@@ -48,6 +50,7 @@ def create_workflow(model, google_books_tool):
     author_pipeline = create_author_pipeline(model, google_search)
 
     trip_composer = create_trip_composer_agent(model)
+    reader_profile = create_reader_profile_agent(model)
 
     # Create parallel discovery agent
     parallel_discovery = ParallelAgent(
@@ -55,15 +58,19 @@ def create_workflow(model, google_books_tool):
         sub_agents=[city_pipeline, landmark_pipeline, author_pipeline],
     )
 
+    # Build workflow with reader profile for personalization
+    sub_agents = [
+        book_metadata_pipeline,
+        book_context_pipeline,
+        reader_profile,  # Reads user:preferences from session state
+        parallel_discovery,
+        trip_composer,
+    ]
+
     # Create the main workflow
     workflow = SequentialAgent(
         name="workflow",
-        sub_agents=[
-            book_metadata_pipeline,
-            book_context_pipeline,
-            parallel_discovery,
-            trip_composer,
-        ],
+        sub_agents=sub_agents,
     )
 
     return workflow

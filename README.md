@@ -93,9 +93,6 @@ A single LLM prompt can't handle this complexity. Agents can.
    # Optional - Enable database persistence
    USE_DATABASE=false
    DATABASE_URL=sqlite:///storyland_sessions.db
-
-   # Optional - Enable memory for personalization
-   USE_MEMORY=false
    ```
 
 ## Quick Start
@@ -114,14 +111,14 @@ python main.py "The Nightingale" --author "Kristin Hannah"
 # With database persistence
 python main.py "1984" --database
 
-# With memory for personalization
-python main.py "Pride and Prejudice" --memory
+# With preferences
+python main.py "Pride and Prejudice" --budget luxury --pace relaxed --museums
 
-# Specify user (for multi-user support)
-python main.py "Gone with the Wind" --user-id alice
+# Family trip
+python main.py "Harry Potter" --with-kids --budget moderate
 
 # Full example
-python main.py "The Great Gatsby" --author "F. Scott Fitzgerald" --user-id charlie --database --memory
+python main.py "The Great Gatsby" --author "F. Scott Fitzgerald" --user-id charlie --database --budget luxury
 ```
 
 ### Option 2: Jupyter Notebook (Interactive Demo)
@@ -135,7 +132,7 @@ jupyter notebook
 # Open one of these notebooks:
 # - storyland_ai_demo.ipynb (original inline demo)
 # - storyland_ai_demo_modular.ipynb (modular demo with imports)
-# - sessions_memory_demo.ipynb (9 scenarios showing sessions & memory)
+# - sessions_memory_demo.ipynb (11 scenarios showing sessions & preferences)
 ```
 
 ### Option 3: Programmatic Usage
@@ -148,7 +145,6 @@ from google.adk.models.google_llm import Gemini
 from google.adk.runners import Runner
 
 from services.session_service import create_session_service
-from services.memory_service import create_memory_service
 from tools.google_books import google_books_tool
 from agents.orchestrator import create_workflow
 
@@ -157,7 +153,6 @@ model = Gemini(model="gemini-2.0-flash-lite", api_key="your-key")
 
 # Create services
 session_service = create_session_service(use_database=True)
-memory_service = create_memory_service()
 
 # Create workflow
 workflow = create_workflow(model, google_books_tool)
@@ -197,26 +192,7 @@ state["user:preferences"] = {
 }
 ```
 
-### 2. Long-Term Memory
-
-- **InMemoryMemoryService**: Keyword-based search for development
-- **Session Storage**: Save completed sessions for future reference
-- **Memory Queries**: Find relevant past interactions
-- **Reader Profile Agent**: Uses memory for personalized recommendations
-
-```python
-# Save to memory
-await memory_service.add_session_to_memory(session)
-
-# Query memories
-results = await memory_service.search_memory(
-    app_name="storyland",
-    user_id="alice",
-    query="travel preferences museums"
-)
-```
-
-### 3. Context Engineering
+### 2. Context Engineering
 
 - **Sliding Window**: Keep recent N events
 - **Token Estimation**: Track conversation size
@@ -231,9 +207,35 @@ if context_manager.should_compact(session.events):
     session.events = context_manager.limit_events(session.events)
 ```
 
+### 3. Personalized Itineraries
+
+The trip composer uses user preferences to tailor recommendations:
+
+```python
+# Set preferences in session state
+state["user:preferences"] = {
+    "budget": "luxury",           # budget, moderate, luxury
+    "preferred_pace": "relaxed",  # relaxed, moderate, fast-paced
+    "prefers_museums": True,
+    "travels_with_kids": False,
+    "dietary_restrictions": ["vegetarian"]
+}
+```
+
+**How preferences affect itineraries:**
+
+| Preference | Impact |
+|------------|--------|
+| `budget: "budget"` | Free museums, walking tours, affordable cafes |
+| `budget: "luxury"` | Premium experiences, fine dining, private tours |
+| `preferred_pace: "relaxed"` | 2-3 stops/day, longer breaks |
+| `preferred_pace: "fast-paced"` | 5+ stops/day, efficient routing |
+| `prefers_museums: true` | Prioritize literary museums, archives |
+| `travels_with_kids: true` | Family-friendly activities, avoid long queues |
+
 ### 4. Multi-User Support
 
-Each user has isolated sessions, preferences, and memory:
+Each user has isolated sessions and preferences:
 
 ```bash
 python main.py "Pride and Prejudice" --user-id alice --database
@@ -250,6 +252,39 @@ python main.py "Dune" --user-id bob --database
 
 StoryLand AI uses a modular architecture with Google's Agent Development Kit (ADK).
 
+```mermaid
+graph LR
+    subgraph "User Interface"
+        CLI[CLI<br/>main.py]
+        NB[Notebooks<br/>*.ipynb]
+    end
+
+    subgraph "Services"
+        SS[SessionService<br/>InMemory / SQLite]
+        CM[ContextManager<br/>Token Management]
+    end
+
+    subgraph "Tools"
+        GB[google_books_tool<br/>📚 Book Search]
+        GS[google_search<br/>🔍 Web Search]
+        PT[get_preferences_tool<br/>👤 State Access]
+    end
+
+    subgraph "Agents"
+        WF[Workflow<br/>SequentialAgent]
+    end
+
+    CLI --> SS
+    CLI --> WF
+    NB --> SS
+    NB --> WF
+    WF --> GB
+    WF --> GS
+    WF --> PT
+    PT -.-> SS
+    SS --> DB[(SQLite DB)]
+```
+
 ### Project Structure
 
 ```
@@ -261,19 +296,19 @@ storyland-ai/
 │   └── preferences.py   # TravelPreferences
 │
 ├── tools/               # External API integrations
-│   └── google_books.py  # Google Books search tool
+│   ├── google_books.py  # Google Books search tool
+│   └── preferences.py   # Session state preferences tool
 │
 ├── agents/              # AI agent definitions
 │   ├── book_metadata_agent.py    # Book metadata extraction
 │   ├── book_context_agent.py     # Book setting research
 │   ├── discovery_agents.py       # City/landmark/author discovery
 │   ├── trip_composer_agent.py    # Itinerary composition
-│   ├── reader_profile_agent.py   # Memory-powered personalization
+│   ├── reader_profile_agent.py   # Preferences-based personalization
 │   └── orchestrator.py           # Main workflow coordination
 │
 ├── services/            # Core services
 │   ├── session_service.py   # Session management (InMemory/SQLite)
-│   ├── memory_service.py    # Long-term memory
 │   └── context_manager.py   # Context engineering
 │
 ├── common/              # Shared utilities
@@ -288,16 +323,66 @@ storyland-ai/
 
 ### Multi-Agent Workflow
 
+```mermaid
+flowchart TB
+    subgraph Input
+        CLI[CLI Args] --> |"--budget, --pace, etc"| State
+        State[Session State<br/>user:preferences]
+    end
+
+    subgraph Workflow["SequentialAgent (workflow)"]
+        direction TB
+
+        BM[book_metadata_pipeline<br/>📚 Google Books API] --> |state.book_metadata| BC
+        BC[book_context_pipeline<br/>🔍 Google Search] --> |state.book_context| RP
+
+        RP[reader_profile_agent<br/>👤 get_preferences_tool] --> |state.reader_profile| PD
+
+        subgraph PD["ParallelAgent ⚡"]
+            direction LR
+            CP[city_pipeline<br/>🏙️]
+            LP[landmark_pipeline<br/>🏛️]
+            AP[author_pipeline<br/>✍️]
+        end
+
+        PD --> |discoveries| TC
+        TC[trip_composer<br/>🗺️ Personalized Itinerary]
+    end
+
+    State -.-> |ToolContext.state| RP
+    TC --> Output[TripItinerary<br/>JSON Output]
 ```
-SequentialAgent (workflow)
-├─ book_metadata_pipeline [fetch → format] → state["book_metadata"]
-├─ book_context_pipeline [research → format] → state["book_context"]
-├─ ParallelAgent (parallel_discovery) ⚡ CONCURRENT
-│  ├─ city_pipeline [research → format] → state["city_discovery"]
-│  ├─ landmark_pipeline [research → format] → state["landmark_discovery"]
-│  └─ author_pipeline [research → format] → state["author_sites"]
-└─ trip_composer_agent → state["final_itinerary"]
+
+### Data Flow
+
+```mermaid
+sequenceDiagram
+    participant CLI as main.py
+    participant SS as SessionService
+    participant WF as Workflow
+    participant RP as reader_profile_agent
+    participant TC as trip_composer
+
+    CLI->>SS: create_session(state={user:preferences})
+    CLI->>WF: run_async(prompt)
+
+    WF->>WF: book_metadata_pipeline
+    WF->>WF: book_context_pipeline
+
+    WF->>RP: Execute
+    RP->>SS: get_user_preferences() via ToolContext.state
+    SS-->>RP: {budget: "luxury", pace: "relaxed", ...}
+    RP-->>WF: "User prefers luxury budget, relaxed pace..."
+
+    WF->>WF: parallel_discovery (city, landmark, author)
+
+    WF->>TC: Execute with reader_profile in history
+    TC-->>WF: TripItinerary (personalized!)
+
+    WF-->>CLI: Final response
 ```
+
+The `reader_profile_agent` uses the `get_preferences_tool` to read `user:preferences` from session state via `ToolContext.state`, then summarizes them for the trip composer.
 
 ### Two-Stage Agent Pattern
 
@@ -328,12 +413,19 @@ This pattern ensures type safety and clean data flow between agents.
 #### 4. Trip Composer Agent
 - Synthesizes all discoveries into coherent itinerary
 - Groups by city, suggests timing
+- **Uses user preferences** for personalization:
+  - Budget level (budget/moderate/luxury)
+  - Pace (relaxed/moderate/fast-paced)
+  - Museum preference
+  - Traveling with kids
+  - Dietary restrictions
 - Validates with `TripItinerary` Pydantic model
 
-#### 5. Reader Profile Agent (Optional)
-- Queries memory for past preferences
-- Personalizes recommendations
-- Uses ADK's `load_memory_tool`
+#### 5. Reader Profile Agent
+- Uses `get_preferences_tool` to access `user:preferences` from session state
+- Tool reads from `ToolContext.state` (ADK's mechanism for state access)
+- Summarizes preferences for trip composer
+- Provides personalization context for itinerary generation
 
 ## CLI Usage
 
@@ -356,11 +448,11 @@ python main.py "1984" --user-id alice
 # Enable SQLite persistence
 python main.py "Pride and Prejudice" --database
 
-# Enable memory for personalization
-python main.py "The Great Gatsby" --memory
+# With preferences (via CLI flags)
+python main.py "The Great Gatsby" --budget luxury --pace relaxed
 
-# Both database and memory
-python main.py "To Kill a Mockingbird" --database --memory
+# Family trip with database
+python main.py "Harry Potter" --database --with-kids --budget moderate --museums
 ```
 
 ### Multi-User Support
@@ -469,7 +561,7 @@ def get_user_books(user_id: str):
 
 ### 4. Practical Demo
 
-See **[sessions_memory_demo.ipynb](sessions_memory_demo.ipynb)** for 9 complete scenarios.
+See **[sessions_memory_demo.ipynb](sessions_memory_demo.ipynb)** for 11 complete scenarios covering sessions, preferences, and context management.
 
 ## Development
 
@@ -626,9 +718,6 @@ GOOGLE_API_KEY=your-google-ai-api-key-here
 USE_DATABASE=false
 DATABASE_URL=sqlite:///storyland_sessions.db
 
-# Memory (optional)
-USE_MEMORY=false
-
 # Session (optional)
 SESSION_MAX_EVENTS=20
 
@@ -648,7 +737,6 @@ LOG_LEVEL=INFO
 - **LLM:** Google Gemini (gemini-2.0-flash-lite)
 - **APIs:** Google Books API, Google Search
 - **Database:** SQLite (via ADK's DatabaseSessionService)
-- **Memory:** InMemoryMemoryService (keyword search)
 - **Data Validation:** Pydantic models
 - **Agent Patterns:** Sequential and parallel orchestration
 
@@ -663,7 +751,8 @@ LOG_LEVEL=INFO
 **For Developers:**
 - Demonstrates real-world multi-agent coordination
 - Shows parallel vs. sequential agent patterns
-- Implements memory and personalization in agent systems
+- Implements session-based personalization via custom tools
+- Shows how tools access session state via `ToolContext`
 - Modular architecture with clean separation of concerns
 - Production-ready with database persistence and error handling
 
@@ -678,7 +767,7 @@ We believe that every story deserves to be experienced beyond the page, and ever
 ## Additional Resources
 
 - **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Complete database reference
-- **[sessions_memory_demo.ipynb](sessions_memory_demo.ipynb)** - 9 demo scenarios
+- **[sessions_memory_demo.ipynb](sessions_memory_demo.ipynb)** - 11 demo scenarios covering sessions, preferences, and context management
 
 ---
 

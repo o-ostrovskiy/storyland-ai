@@ -19,7 +19,6 @@ from common.logging import setup_logger
 
 # Import services
 from services.session_service import create_session_service
-from services.memory_service import create_memory_service
 from services.context_manager import ContextManager
 
 # Import tools and agents
@@ -32,7 +31,7 @@ async def create_itinerary(
     author: Optional[str] = None,
     user_id: str = "user1",
     use_database: bool = False,
-    use_memory: bool = False,
+    preferences: Optional[dict] = None,
 ):
     """
     Create a literary travel itinerary for a book.
@@ -42,7 +41,7 @@ async def create_itinerary(
         author: Optional author name
         user_id: User ID for session tracking
         use_database: If True, use SQLite for session persistence
-        use_memory: If True, enable memory service for personalization
+        preferences: Optional user preferences for personalization
 
     Returns:
         TripItinerary object with the complete travel plan
@@ -68,11 +67,6 @@ async def create_itinerary(
         connection_string=config.database_url, use_database=use_database or config.use_database
     )
 
-    memory_service = None
-    if use_memory or config.use_memory:
-        memory_service = create_memory_service()
-        logger.info("Memory service enabled")
-
     context_manager = ContextManager(max_events=config.session_max_events)
 
     # Create workflow
@@ -84,13 +78,21 @@ async def create_itinerary(
         agent=workflow, app_name="storyland", session_service=session_service
     )
 
+    # Build initial state
+    initial_state = {"book_title": book_title, "author": author or ""}
+
+    # Add user preferences if provided
+    if preferences:
+        initial_state["user:preferences"] = preferences
+        logger.info(f"User preferences set: {list(preferences.keys())}")
+
     # Create session
     session_id = str(uuid.uuid4())
     await session_service.create_session(
         app_name="storyland",
         user_id=user_id,
         session_id=session_id,
-        state={"book_title": book_title, "author": author or ""},
+        state=initial_state,
     )
     logger.info(f"Session created: {session_id[:8]}...")
 
@@ -106,6 +108,8 @@ Execute all steps and return the complete combined results."""
     print(f"Creating itinerary for: {book_title}")
     if author:
         print(f"Author: {author}")
+    if preferences:
+        print(f"Preferences: {', '.join(f'{k}={v}' for k, v in preferences.items())}")
     print(f"{'='*70}\n")
 
     final_response = None
@@ -141,13 +145,14 @@ Execute all steps and return the complete combined results."""
                     except json.JSONDecodeError as e:
                         logger.error(f"Failed to parse JSON: {e}")
 
-    # Store session in memory (if enabled)
-    if memory_service:
-        session = await session_service.get_session(
-            app_name="storyland", user_id=user_id, session_id=session_id
-        )
-        await memory_service.add_session_to_memory(session)
-        logger.info("Session added to memory")
+    # Get session for context stats
+    session = await session_service.get_session(
+        app_name="storyland", user_id=user_id, session_id=session_id
+    )
+
+    # Display context statistics
+    stats = context_manager.get_context_stats(session.events)
+    print(f"\n📊 Context: {stats['num_events']} events, ~{stats['estimated_tokens']} tokens")
 
     return result_data
 
@@ -234,11 +239,42 @@ async def main():
     parser.add_argument(
         "--database", "-d", action="store_true", help="Use SQLite database for sessions"
     )
+
+    # Preference arguments
     parser.add_argument(
-        "--memory", "-m", action="store_true", help="Enable memory service"
+        "--budget", choices=["budget", "moderate", "luxury"],
+        help="Budget preference"
     )
+    parser.add_argument(
+        "--pace", choices=["relaxed", "moderate", "fast-paced"],
+        help="Travel pace preference"
+    )
+    parser.add_argument(
+        "--museums", action="store_true", dest="prefers_museums",
+        help="Prefer museum visits"
+    )
+    parser.add_argument(
+        "--no-museums", action="store_false", dest="prefers_museums",
+        help="Avoid museum visits"
+    )
+    parser.add_argument(
+        "--with-kids", action="store_true",
+        help="Traveling with children"
+    )
+    parser.set_defaults(prefers_museums=None)
 
     args = parser.parse_args()
+
+    # Build preferences dict from arguments
+    preferences = {}
+    if args.budget:
+        preferences["budget"] = args.budget
+    if args.pace:
+        preferences["preferred_pace"] = args.pace
+    if args.prefers_museums is not None:
+        preferences["prefers_museums"] = args.prefers_museums
+    if args.with_kids:
+        preferences["travels_with_kids"] = True
 
     # Create itinerary
     result = await create_itinerary(
@@ -246,7 +282,7 @@ async def main():
         author=args.author,
         user_id=args.user_id,
         use_database=args.database,
-        use_memory=args.memory,
+        preferences=preferences if preferences else None,
     )
 
     # Display results

@@ -18,6 +18,7 @@ from .discovery_agents import (
     create_author_pipeline,
 )
 from .trip_composer_agent import create_trip_composer_agent
+from .reader_profile_agent import create_reader_profile_agent
 from .orchestrator import create_workflow
 
 __all__ = [
@@ -27,5 +28,6 @@ __all__ = [
     "create_landmark_pipeline",
     "create_author_pipeline",
     "create_trip_composer_agent",
+    "create_reader_profile_agent",
     "create_workflow",
 ]

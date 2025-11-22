@@ -28,9 +28,6 @@ class Config:
     # Session Management
     session_max_events: int = 20
 
-    # Memory Service
-    use_memory: bool = False
-
     # Context Management
     max_context_tokens: int = 30000
 
@@ -49,7 +46,6 @@ def load_config() -> Config:
         - GOOGLE_API_KEY (required): Google API key
         - DATABASE_URL (optional): Database connection string (e.g., sqlite:///sessions.db)
         - USE_DATABASE (optional): "true" or "false" (default: false)
-        - USE_MEMORY (optional): "true" or "false" (default: false)
         - SESSION_MAX_EVENTS (optional): Max events to keep in session (default: 20)
         - MAX_CONTEXT_TOKENS (optional): Max tokens for context (default: 30000)
         - MODEL_NAME (optional): Model to use (default: gemini-2.0-flash-lite)
@@ -76,7 +72,6 @@ def load_config() -> Config:
         google_api_key=google_api_key,
         database_url=os.getenv("DATABASE_URL"),
         use_database=os.getenv("USE_DATABASE", "false").lower() == "true",
-        use_memory=os.getenv("USE_MEMORY", "false").lower() == "true",
         session_max_events=int(os.getenv("SESSION_MAX_EVENTS", "20")),
         max_context_tokens=int(os.getenv("MAX_CONTEXT_TOKENS", "30000")),
         model_name=os.getenv("MODEL_NAME", "gemini-2.0-flash-lite"),

@@ -1,51 +1,49 @@
 """
 Reader profile agent.
 
-Uses memory service to query past user preferences and interactions to
-personalize travel itineraries.
+Reads user preferences from session state to personalize travel itineraries.
 """
 
 from google.adk.agents import LlmAgent
-from google.adk.tools import load_memory_tool
+from tools.preferences import get_preferences_tool
 
 
-def create_reader_profile_agent(model, memory_service):
+def create_reader_profile_agent(model):
     """
     Create the reader profile agent.
 
-    This agent queries the memory service to retrieve:
-    - User's past travel preferences
-    - Previously explored books
-    - Feedback on past itineraries
-    - Favorite genres and authors
+    This agent reads user preferences from session state (user:preferences)
+    and provides personalization context for the trip composer.
 
     Args:
         model: The LLM model to use
-        memory_service: The memory service instance (InMemoryMemoryService or custom)
 
     Returns:
-        LlmAgent that queries memory and provides personalized recommendations
+        LlmAgent that reads preferences and provides personalization context
     """
     return LlmAgent(
         name="reader_profile_agent",
         model=model,
-        tools=[load_memory_tool(memory_service)],
+        output_key="reader_profile",
+        tools=[get_preferences_tool],
         instruction="""You are a reader profile specialist focused on personalization.
 
-Use the load_memory tool to recall the user's history:
-1. Previous travel preferences (museums, budget, pace, etc.)
-2. Books they've explored before
-3. Feedback on past itineraries
-4. Favorite genres and authors
+FIRST, call the get_user_preferences tool to retrieve user preferences from session state.
 
-Based on the memory results, provide personalized recommendations for the current itinerary:
-- Should we focus more on museums or outdoor experiences?
-- What budget level should we target?
-- Does the user prefer a relaxed or fast-paced itinerary?
-- Are there any dietary restrictions or accessibility needs?
+The preferences may include:
+- budget: "budget", "moderate", or "luxury"
+- preferred_pace: "relaxed", "moderate", or "fast-paced"
+- prefers_museums: true/false
+- travels_with_kids: true/false
+- favorite_genres: list of genres
 
-If this is a new user with no history, respond with a message indicating no preferences found
-and suggest default settings (moderate budget, balanced pace, museum-friendly).
+Based on the tool response, provide a summary for the trip composer:
 
-Store your findings in a clear, structured format that the trip composer can use.""",
+1. If preferences exist (found=true), summarize them clearly:
+   "User prefers [budget] budget, [pace] pace, [does/doesn't] like museums..."
+
+2. If no preferences found (found=false), state:
+   "No user preferences found. Using defaults: moderate budget, balanced pace, museum-friendly."
+
+Keep your response concise - just summarize the preferences for the trip composer to use.""",
     )
