@@ -47,6 +47,7 @@ A single LLM prompt can't handle this complexity. Agents can.
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [CLI Usage](#cli-usage)
+- [Observability](#observability)
 - [Using Saved Data](#using-saved-data)
 - [Development](#development)
 - [Database Reference](#database-reference)
@@ -117,11 +118,24 @@ python main.py "Pride and Prejudice" --budget luxury --pace relaxed --museums
 # Family trip
 python main.py "Harry Potter" --with-kids --budget moderate
 
+# Verbose logging (DEBUG level)
+python main.py "1984" -v
+
 # Full example
 python main.py "The Great Gatsby" --author "F. Scott Fitzgerald" --user-id charlie --database --budget luxury
 ```
 
-### Option 2: Jupyter Notebook (Interactive Demo)
+### Option 2: ADK Web UI (Development)
+
+For interactive development and debugging:
+
+```bash
+python main.py --dev
+```
+
+This launches the ADK Web UI at http://localhost:8000 with full DEBUG logging.
+
+### Option 3: Jupyter Notebook (Interactive Demo)
 
 For exploration and experimentation:
 
@@ -135,7 +149,7 @@ jupyter notebook
 # - sessions_memory_demo.ipynb (11 scenarios showing sessions & preferences)
 ```
 
-### Option 3: Programmatic Usage
+### Option 4: Programmatic Usage
 
 Import and use the modular components:
 
@@ -305,7 +319,12 @@ storyland-ai/
 │   ├── discovery_agents.py       # City/landmark/author discovery
 │   ├── trip_composer_agent.py    # Itinerary composition
 │   ├── reader_profile_agent.py   # Preferences-based personalization
-│   └── orchestrator.py           # Main workflow coordination
+│   ├── orchestrator.py           # Main workflow coordination
+│   └── storyland/                # ADK Web UI agent
+│       └── agent.py              # root_agent for adk web
+│
+├── plugins/             # Custom ADK plugins (optional)
+│   └── observability.py # Custom logging example (uses ADK LoggingPlugin by default)
 │
 ├── services/            # Core services
 │   ├── session_service.py   # Session management (InMemory/SQLite)
@@ -313,7 +332,7 @@ storyland-ai/
 │
 ├── common/              # Shared utilities
 │   ├── config.py        # Configuration management
-│   └── logging.py       # Logging utilities
+│   └── logging.py       # Structured logging (structlog)
 │
 ├── main.py              # CLI entry point
 ├── *.ipynb              # Demo notebooks
@@ -494,6 +513,78 @@ WHERE user_id = 'alice';"
 ```bash
 python main.py --help
 ```
+
+## Observability
+
+StoryLand AI provides two modes for observability:
+
+### Development: ADK Web UI
+
+For interactive development and debugging, use the built-in ADK Web UI:
+
+```bash
+# Launch via CLI
+python main.py --dev
+
+# Or directly
+.venv/bin/adk web agents/
+```
+
+The Web UI provides:
+- Visual agent execution flow
+- Request/response inspection
+- Built-in DEBUG logging
+- Interactive testing
+
+> **Note:** Plugins are NOT supported in ADK web mode.
+
+### Production: ADK LoggingPlugin
+
+For production runs, ADK's built-in `LoggingPlugin` automatically logs agent, tool, and model activity:
+
+```bash
+# Normal run (INFO level logging)
+python main.py "1984" --author "George Orwell"
+
+# Verbose mode (DEBUG level)
+python main.py "1984" -v
+```
+
+**Sample output:**
+```
+🤖 AGENT STARTING
+   Agent Name: workflow
+   Invocation ID: e54b...
+🤖 AGENT STARTING
+   Agent Name: book_metadata_pipeline
+🔧 TOOL STARTING
+   Tool Name: search_book
+🔧 TOOL COMPLETED
+✅ AGENT COMPLETED
+   Agent Name: book_metadata_pipeline
+```
+
+**What's logged:**
+| Event | Description |
+|-------|-------------|
+| `🤖 AGENT STARTING/COMPLETED` | Agent execution |
+| `🔧 TOOL STARTING/COMPLETED` | Tool invocations |
+| `🧠 MODEL REQUEST/RESPONSE` | LLM calls |
+| `❌ ERROR` | Failures |
+
+### Configuration
+
+```env
+# .env
+LOG_LEVEL=INFO                 # DEBUG, INFO, WARNING, ERROR
+ENABLE_ADK_DEBUG=false         # Enable DEBUG for ADK internal logs
+```
+
+| Mode | Logging | Plugin | Use Case |
+|------|---------|--------|----------|
+| `--dev` | DEBUG (ADK Web) | None | Development, debugging |
+| Default | INFO | LoggingPlugin | Production |
+| `-v` | DEBUG | LoggingPlugin | Troubleshooting |
 
 ## Using Saved Data in Future Runs
 

@@ -8,6 +8,9 @@ This package contains agent factory functions for:
 - Trip composition
 - Reader profile and personalization
 - Workflow orchestration
+
+For ADK Web UI:
+    Run `adk web agents/` or `python main.py --dev`
 """
 
 from .book_metadata_agent import create_book_metadata_pipeline
