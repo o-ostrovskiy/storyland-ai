@@ -1,0 +1,50 @@
+{
+  "criteria": {
+    "rubric_based_final_response_quality_v1": {
+      "threshold": 0.8,
+      "judge_model_options": {
+        "judge_model": "gemini-2.5-flash-lite",
+        "num_samples": 1
+      },
+      "rubrics": [
+        {
+          "rubric_id": "book_relevance",
+          "rubric_content": {
+            "text_property": "The itinerary locations are directly connected to the book's settings, themes, characters, or author. Each suggested place has a clear and meaningful connection to the literary work."
+          }
+        },
+        {
+          "rubric_id": "preference_adherence",
+          "rubric_content": {
+            "text_property": "The travel recommendations respect the user's stated preferences including budget level, travel pace, accessibility needs, and interest in museums. The response acknowledges and adapts to these preferences."
+          }
+        },
+        {
+          "rubric_id": "completeness",
+          "rubric_content": {
+            "text_property": "The response includes a comprehensive itinerary with cities, landmarks, and author-related sites. The itinerary provides enough detail for the traveler to plan their trip."
+          }
+        },
+        {
+          "rubric_id": "actionability",
+          "rubric_content": {
+            "text_property": "The itinerary is practical and actionable with specific places, suggested times of day to visit, and logistical notes. The traveler could use this information to actually plan their trip."
+          }
+        },
+        {
+          "rubric_id": "geographical_accuracy",
+          "rubric_content": {
+            "text_property": "The locations mentioned are real places that can be visited. Cities and landmarks are correctly associated with their countries. The geographical information is accurate."
+          }
+        },
+        {
+          "rubric_id": "engagement",
+          "rubric_content": {
+            "text_property": "The summary and descriptions are engaging and evoke the spirit of the book. The language captures the literary connection and makes the trip feel like a meaningful journey."
+          }
+        }
+      ]
+    }
+  },
+  "eval_name": "storyland_evaluation"
+}

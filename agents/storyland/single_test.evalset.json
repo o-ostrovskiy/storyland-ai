@@ -1,0 +1,24 @@
+{
+  "eval_set_id": "single_test",
+  "name": "Single Test Scenario",
+  "description": "Minimal test for quick evaluation",
+  "creation_timestamp": 1732300800.0,
+  "eval_cases": [
+    {
+      "eval_id": "pride_and_prejudice",
+      "conversation": [
+        {
+          "invocation_id": "turn_1",
+          "user_content": {
+            "parts": [{"text": "Create a literary travel itinerary for Pride and Prejudice"}]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user",
+        "state": {}
+      }
+    }
+  ]
+}

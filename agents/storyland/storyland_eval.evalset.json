@@ -1,0 +1,103 @@
+{
+  "eval_set_id": "storyland_eval",
+  "name": "storyland_eval",
+  "eval_cases": [
+    {
+      "eval_id": "794b0031",
+      "conversation_scenario": {
+        "starting_prompt": "Create a literary travel itinerary for Pride and Prejudice by Jane Austen",
+        "conversation_plan": "Ask the agent to create a travel itinerary based on Pride and Prejudice. Verify the response includes relevant English locations like Bath, Derbyshire, or Chatsworth. If the itinerary seems incomplete, ask for more details about specific stops. End the conversation when a satisfactory itinerary with cities and landmarks is provided."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.069547
+    },
+    {
+      "eval_id": "808f3d4f",
+      "conversation_scenario": {
+        "starting_prompt": "I'd like a travel itinerary based on The Great Gatsby. I prefer luxury accommodations and a relaxed pace.",
+        "conversation_plan": "Request an itinerary for The Great Gatsby while specifying luxury budget and relaxed pace preferences. Verify the response reflects these preferences with upscale venue suggestions. Ask about specific restaurants or hotels if not mentioned. The conversation is complete when the itinerary clearly caters to luxury travel preferences."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.069897
+    },
+    {
+      "eval_id": "c63c401b",
+      "conversation_scenario": {
+        "starting_prompt": "Plan a family trip based on Harry Potter. We're traveling with kids and need accessible locations.",
+        "conversation_plan": "Request an itinerary for Harry Potter suitable for family travel with children. Emphasize accessibility needs. Verify suggestions include kid-friendly attractions like the Warner Bros Studio Tour. Ask about practical logistics for families. End when the itinerary addresses both the literary connection and family-friendly considerations."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.070068
+    },
+    {
+      "eval_id": "725d84f6",
+      "conversation_scenario": {
+        "starting_prompt": "I want to visit places from The Da Vinci Code but I'm on a tight budget",
+        "conversation_plan": "Request a budget-friendly itinerary based on The Da Vinci Code. The response should include locations in Paris and London related to the book. Ask for free or low-cost alternatives if suggestions seem expensive. Complete the conversation when budget-conscious options are provided."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.070213
+    },
+    {
+      "eval_id": "413ae6ad",
+      "conversation_scenario": {
+        "starting_prompt": "I'm interested in visiting places connected to Ernest Hemingway's life and works",
+        "conversation_plan": "Request an itinerary focused on Hemingway - both settings from his novels and places he lived. Expect suggestions like Paris, Key West, Cuba, or Spain. Ask about specific cafes or landmarks Hemingway frequented. End when comprehensive author-related sites are provided."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.070357
+    },
+    {
+      "eval_id": "b7c3445d",
+      "conversation_scenario": {
+        "starting_prompt": "Create a trip based on The Girl with the Dragon Tattoo. I love museums and want a fast-paced itinerary.",
+        "conversation_plan": "Request an itinerary for a contemporary thriller set in Sweden. Verify Stockholm and Swedish locations are included. The fast-paced preference should result in an efficient itinerary. Ask about museum recommendations since that preference was stated. Complete when the itinerary reflects both the book's settings and the user's travel style."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.070509
+    },
+    {
+      "eval_id": "be0a4460",
+      "conversation_scenario": {
+        "starting_prompt": "I've read all of Agatha Christie's novels. Plan a trip to visit locations from her books.",
+        "conversation_plan": "Request an itinerary covering multiple Agatha Christie works. Expect locations like Devon (her birthplace), various English villages, and possibly locations from Orient Express. Ask about her museum or memorial sites. The conversation is complete when a comprehensive Christie-themed itinerary is provided."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.070771
+    },
+    {
+      "eval_id": "d48fbd3c",
+      "conversation_scenario": {
+        "starting_prompt": "Plan a trip based on Under the Tuscan Sun. I'm vegetarian and prefer a moderate budget.",
+        "conversation_plan": "Request an Italian travel itinerary based on the memoir. Emphasize vegetarian dietary restrictions. Verify Tuscany and Cortona are included. Ask for restaurant recommendations that accommodate vegetarian diet. End when the itinerary includes food-related suggestions appropriate for vegetarians."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.07095
+    }
+  ],
+  "creation_timestamp": 1763863579.68724
+}
