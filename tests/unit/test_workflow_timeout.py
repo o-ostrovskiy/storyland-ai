@@ -49,10 +49,11 @@ class TestTimeoutConfiguration:
     @pytest.mark.asyncio
     @patch("main.load_config")
     @patch("main.create_session_service")
-    @patch("main.create_workflow")
+    @patch("main.create_metadata_stage")
+    @patch("main.create_main_workflow")
     @patch("main.Runner")
     async def test_uses_config_timeout_by_default(
-        self, mock_runner_class, mock_create_workflow, mock_session_service, mock_config
+        self, mock_runner_class, mock_create_main_workflow, mock_create_metadata_stage, mock_session_service, mock_config
     ):
         """Test that workflow uses config timeout by default."""
         # Setup mocks
@@ -69,11 +70,18 @@ class TestTimeoutConfiguration:
 
         mock_session = MagicMock()
         mock_session.create_session = AsyncMock()
-        mock_session.get_session = AsyncMock(return_value=MagicMock(events=[]))
+        # Return mock session with book_metadata in state
+        mock_session_state = MagicMock()
+        mock_session_state.state = {"book_metadata": {"book_title": "Test Book", "author": "Test Author"}}
+        mock_session_state.events = []
+        mock_session.get_session = AsyncMock(return_value=mock_session_state)
         mock_session_service.return_value = mock_session
 
-        mock_workflow = MagicMock()
-        mock_create_workflow.return_value = mock_workflow
+        mock_metadata_stage = MagicMock()
+        mock_create_metadata_stage.return_value = mock_metadata_stage
+
+        mock_main_workflow = MagicMock()
+        mock_create_main_workflow.return_value = mock_main_workflow
 
         # Create a mock runner that completes quickly
         async def quick_run(*args, **kwargs):
@@ -103,10 +111,11 @@ class TestTimeoutConfiguration:
     @pytest.mark.asyncio
     @patch("main.load_config")
     @patch("main.create_session_service")
-    @patch("main.create_workflow")
+    @patch("main.create_metadata_stage")
+    @patch("main.create_main_workflow")
     @patch("main.Runner")
     async def test_explicit_timeout_overrides_config(
-        self, mock_runner_class, mock_create_workflow, mock_session_service, mock_config
+        self, mock_runner_class, mock_create_main_workflow, mock_create_metadata_stage, mock_session_service, mock_config
     ):
         """Test that explicit timeout parameter overrides config."""
         # Setup mocks
@@ -123,11 +132,18 @@ class TestTimeoutConfiguration:
 
         mock_session = MagicMock()
         mock_session.create_session = AsyncMock()
-        mock_session.get_session = AsyncMock(return_value=MagicMock(events=[]))
+        # Return mock session with book_metadata in state
+        mock_session_state = MagicMock()
+        mock_session_state.state = {"book_metadata": {"book_title": "Test Book", "author": "Test Author"}}
+        mock_session_state.events = []
+        mock_session.get_session = AsyncMock(return_value=mock_session_state)
         mock_session_service.return_value = mock_session
 
-        mock_workflow = MagicMock()
-        mock_create_workflow.return_value = mock_workflow
+        mock_metadata_stage = MagicMock()
+        mock_create_metadata_stage.return_value = mock_metadata_stage
+
+        mock_main_workflow = MagicMock()
+        mock_create_main_workflow.return_value = mock_main_workflow
 
         # Create a slow runner that exceeds the explicit timeout
         async def slow_run(*args, **kwargs):

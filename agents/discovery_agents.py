@@ -51,12 +51,14 @@ Find at least 2-3 cities.""",
         output_key="city_discovery",
         instruction="""Format the cities into validated CityDiscovery.
 
-For each city, create a CityInfo with:
+IMPORTANT: If the research found no cities, return an empty list - do not hallucinate.
+
+For each city found, create a CityInfo with:
 - name: City name only (e.g., "Paris", not "Paris, France")
 - country: Country name (e.g., "France")
 - relevance: One sentence explaining the connection to the book
 
-Return CityDiscovery with a list of cities.""",
+Return CityDiscovery with a list of cities. Include only cities actually mentioned in the research.""",
     )
 
     return SequentialAgent(
@@ -108,12 +110,14 @@ Find at least 3-5 landmarks across the cities.""",
         output_key="landmark_discovery",
         instruction="""Format the landmarks into validated LandmarkDiscovery.
 
-For each landmark, create a LandmarkInfo with:
+IMPORTANT: If the research found no landmarks, return an empty list - do not hallucinate.
+
+For each landmark found, create a LandmarkInfo with:
 - name: Exact name of the landmark or place
 - city: City where it's located
 - connection: One sentence explaining how it relates to the book
 
-Return LandmarkDiscovery with a list of landmarks.""",
+Return LandmarkDiscovery with a list of landmarks. Include only landmarks actually mentioned in the research.""",
     )
 
     return SequentialAgent(
@@ -168,12 +172,14 @@ Find at least 2-3 author-related sites.""",
         output_key="author_sites",
         instruction="""Format the author sites into validated AuthorSites.
 
-For each site, create an AuthorSiteInfo with:
+IMPORTANT: If the research found no author sites, return an empty list - do not hallucinate.
+
+For each site found, create an AuthorSiteInfo with:
 - name: Exact name of the site
 - type: Type of site (e.g., "museum", "birthplace", "statue", "house")
 - city: City where it's located
 
-Return AuthorSites with a list of author_sites.""",
+Return AuthorSites with a list of author_sites. Include only sites actually mentioned in the research.""",
     )
 
     return SequentialAgent(

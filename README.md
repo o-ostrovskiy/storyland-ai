@@ -152,7 +152,7 @@ jupyter notebook
 
 ### Option 4: Programmatic Usage
 
-Import and use the modular components:
+Import and use the modular components with the two-phase workflow:
 
 ```python
 from google.genai import types
@@ -161,22 +161,30 @@ from google.adk.runners import Runner
 
 from services.session_service import create_session_service
 from tools.google_books import google_books_tool
-from agents.orchestrator import create_workflow
+from agents.orchestrator import create_metadata_stage, create_main_workflow
 
 # Configure model
 model = Gemini(model="gemini-2.0-flash-lite", api_key="your-key")
-
-# Create services
 session_service = create_session_service(use_database=True)
 
-# Create workflow
-workflow = create_workflow(model, google_books_tool)
+# Phase 1: Extract book metadata
+metadata_stage = create_metadata_stage(model, google_books_tool)
+metadata_runner = Runner(agent=metadata_stage, app_name="storyland", session_service=session_service)
 
-# Create runner
-runner = Runner(agent=workflow, app_name="storyland", session_service=session_service)
+async for event in metadata_runner.run_async(user_id="alice", session_id="session1", new_message=...):
+    pass
 
-# Run!
-async for event in runner.run_async(user_id="alice", session_id="session1", new_message=...):
+# Get exact title/author from session state
+session = await session_service.get_session(app_name="storyland", user_id="alice", session_id="session1")
+book_metadata = session.state.get("book_metadata", {})
+exact_title = book_metadata.get("book_title")
+exact_author = book_metadata.get("author")
+
+# Phase 2: Run main workflow with exact metadata
+main_workflow = create_main_workflow(model, book_title=exact_title, author=exact_author)
+main_runner = Runner(agent=main_workflow, app_name="storyland", session_service=session_service)
+
+async for event in main_runner.run_async(user_id="alice", session_id="session1", new_message=...):
     print(event)
 ```
 
@@ -316,11 +324,14 @@ storyland-ai/
 │
 ├── agents/              # AI agent definitions
 │   ├── book_metadata_agent.py    # Book metadata extraction
-│   ├── book_context_agent.py     # Book setting research
+│   ├── book_context_agent.py     # Book setting research (accepts title/author)
 │   ├── discovery_agents.py       # City/landmark/author discovery
 │   ├── trip_composer_agent.py    # Itinerary composition
 │   ├── reader_profile_agent.py   # Preferences-based personalization
-│   ├── orchestrator.py           # Main workflow coordination
+│   ├── orchestrator.py           # Two-phase workflow coordination
+│   │                             # - create_metadata_stage()
+│   │                             # - create_main_workflow(title, author)
+│   │                             # - create_workflow() (legacy)
 │   └── storyland/                # ADK Web UI agent
 │       └── agent.py              # root_agent for adk web
 │
@@ -351,7 +362,9 @@ storyland-ai/
 └── .env.example         # Environment template
 ```
 
-### Multi-Agent Workflow
+### Multi-Agent Workflow (Two-Phase Architecture)
+
+The workflow uses a two-phase architecture to ensure accurate book identification:
 
 ```mermaid
 flowchart TB
@@ -360,11 +373,15 @@ flowchart TB
         State[Session State<br/>user:preferences]
     end
 
-    subgraph Workflow["SequentialAgent (workflow)"]
+    subgraph Phase1["Phase 1: Metadata Stage"]
+        BM[book_metadata_pipeline<br/>📚 Google Books API] --> |state.book_metadata| Extract
+        Extract[Extract exact<br/>title & author]
+    end
+
+    subgraph Phase2["Phase 2: Main Workflow"]
         direction TB
 
-        BM[book_metadata_pipeline<br/>📚 Google Books API] --> |state.book_metadata| BC
-        BC[book_context_pipeline<br/>🔍 Google Search] --> |state.book_context| RP
+        BC[book_context_pipeline<br/>🔍 Uses exact title/author] --> |state.book_context| RP
 
         RP[reader_profile_agent<br/>👤 get_preferences_tool] --> |state.reader_profile| PD
 
@@ -379,9 +396,12 @@ flowchart TB
         TC[trip_composer<br/>🗺️ Personalized Itinerary]
     end
 
+    Extract --> |"title, author"| BC
     State -.-> |ToolContext.state| RP
     TC --> Output[TripItinerary<br/>JSON Output]
 ```
+
+**Why two phases?** Books with common titles (e.g., "The Nightingale") can match multiple books by different authors. Phase 1 resolves the exact book, then Phase 2 uses the precise title and author for all searches.
 
 ### Data Flow
 
@@ -389,30 +409,38 @@ flowchart TB
 sequenceDiagram
     participant CLI as main.py
     participant SS as SessionService
-    participant WF as Workflow
+    participant P1 as Phase 1: metadata_stage
+    participant P2 as Phase 2: main_workflow
     participant RP as reader_profile_agent
     participant TC as trip_composer
 
     CLI->>SS: create_session(state={user:preferences})
-    CLI->>WF: run_async(prompt)
 
-    WF->>WF: book_metadata_pipeline
-    WF->>WF: book_context_pipeline
+    Note over CLI,P1: Phase 1: Extract exact metadata
+    CLI->>P1: run_async("Find book metadata...")
+    P1->>P1: book_metadata_pipeline
+    P1-->>SS: state["book_metadata"] = {title, author}
+    CLI->>SS: get_session() → extract exact_title, exact_author
 
-    WF->>RP: Execute
+    Note over CLI,P2: Phase 2: Create workflow with exact values
+    CLI->>P2: create_main_workflow(exact_title, exact_author)
+    CLI->>P2: run_async(prompt)
+
+    P2->>P2: book_context_pipeline (searches: "title author setting")
+    P2->>RP: Execute
     RP->>SS: get_user_preferences() via ToolContext.state
     SS-->>RP: {budget: "luxury", pace: "relaxed", ...}
-    RP-->>WF: "User prefers luxury budget, relaxed pace..."
+    RP-->>P2: "User prefers luxury budget, relaxed pace..."
 
-    WF->>WF: parallel_discovery (city, landmark, author)
+    P2->>P2: parallel_discovery (city, landmark, author)
 
-    WF->>TC: Execute with reader_profile in history
-    TC-->>WF: TripItinerary (personalized!)
+    P2->>TC: Execute with reader_profile in history
+    TC-->>P2: TripItinerary (personalized!)
 
-    WF-->>CLI: Final response
+    P2-->>CLI: Final response
 ```
 
-The `reader_profile_agent` uses the `get_preferences_tool` to read `user:preferences` from session state via `ToolContext.state`, then summarizes them for the trip composer.
+The two-phase approach ensures the `book_context_pipeline` searches for the exact book (e.g., "The Nightingale Kristin Hannah setting") rather than a generic title that could match multiple books.
 
 ### Two-Stage Agent Pattern
 
@@ -422,14 +450,42 @@ Each pipeline uses a two-stage approach:
 
 This pattern ensures type safety and clean data flow between agents.
 
+### Prompt Engineering
+
+Agent prompts include several reliability improvements:
+
+**Error Handling Guidance:**
+```
+If the tool returns an error, report it clearly and explain what went wrong
+If no results found, acknowledge this and suggest the user verify the title/author
+```
+
+**Anti-Hallucination Instructions:**
+```
+IMPORTANT: If the research found no cities, return an empty list - do not hallucinate.
+Include only cities actually mentioned in the research.
+```
+
+**Disambiguation (Book Context):**
+```
+BOOK: "{book_title}" by {author}
+
+Search queries to use:
+- "{book_title} {author} setting location"
+```
+
 ### Core Components
 
 #### 1. Book Metadata Agent
 - Extracts book information from Google Books API
+- Uses both `title` and `author` parameters when available for accurate matching
+- Includes error handling guidance for failed searches
 - Validates with `BookMetadata` Pydantic model
 - Saves to `state["book_metadata"]`
 
 #### 2. Book Context Agent
+- Receives exact `book_title` and `author` from Phase 1
+- Searches with precise queries (e.g., "The Nightingale Kristin Hannah setting")
 - Researches setting, time period, and themes
 - Uses Google Search for deep context
 - Validates with `BookContext` Pydantic model
@@ -624,7 +680,7 @@ Run unit tests locally without any API calls:
 |--------|-------|-------------|
 | `test_models.py` | 32 | Pydantic model validation |
 | `test_tools.py` | 17 | Google Books, preferences tools |
-| `test_agents.py` | 24 | Agent factory functions |
+| `test_agents.py` | 33 | Agent factory functions (incl. two-phase workflow) |
 | `test_services.py` | 18 | Session service, context manager |
 
 ### ADK Evaluation (CLI)

@@ -25,7 +25,7 @@ from common.logging import configure_logging, get_logger
 from services.session_service import create_session_service
 from services.context_manager import ContextManager
 from tools.google_books import google_books_tool
-from agents.orchestrator import create_workflow
+from agents.orchestrator import create_metadata_stage, create_main_workflow
 from google.adk.plugins.logging_plugin import LoggingPlugin
 
 
@@ -84,15 +84,6 @@ async def create_itinerary(
     )
     context_manager = ContextManager(max_events=config.session_max_events)
 
-    # Create workflow with logging plugin
-    workflow = create_workflow(model, google_books_tool)
-    runner = Runner(
-        agent=workflow,
-        app_name="storyland",
-        session_service=session_service,
-        plugins=[LoggingPlugin()],
-    )
-
     # Build initial state
     initial_state = {"book_title": book_title, "author": author or ""}
     if preferences:
@@ -108,13 +99,6 @@ async def create_itinerary(
     )
     logger.info("session_created", session_id=session_id[:8])
 
-    # Create prompt
-    prompt = f"""Create a literary travel itinerary for "{book_title}" by {author or 'unknown author'}.
-
-Execute all steps and return the complete combined results."""
-
-    user_message = types.Content(role="user", parts=[types.Part(text=prompt)])
-
     # Determine workflow timeout
     workflow_timeout = timeout if timeout is not None else config.workflow_timeout
     logger.info(
@@ -124,7 +108,7 @@ Execute all steps and return the complete combined results."""
         timeout_seconds=workflow_timeout
     )
 
-    # Run workflow with timeout protection
+    # Display header
     print(f"\n{'='*70}")
     print(f"Creating itinerary for: {book_title}")
     if author:
@@ -139,8 +123,58 @@ Execute all steps and return the complete combined results."""
 
     try:
         async with asyncio.timeout(workflow_timeout):
-            async for event in runner.run_async(
-                user_id=user_id, session_id=session_id, new_message=user_message
+            # Phase 1: Extract book metadata
+            print("Phase 1: Extracting book metadata...")
+            metadata_stage = create_metadata_stage(model, google_books_tool)
+            metadata_runner = Runner(
+                agent=metadata_stage,
+                app_name="storyland",
+                session_service=session_service,
+                plugins=[LoggingPlugin()],
+            )
+
+            metadata_prompt = f"""Find book metadata for "{book_title}" by {author or 'unknown author'}."""
+            metadata_message = types.Content(role="user", parts=[types.Part(text=metadata_prompt)])
+
+            async for event in metadata_runner.run_async(
+                user_id=user_id, session_id=session_id, new_message=metadata_message
+            ):
+                event_count += 1
+                if event.author:
+                    print(f"[{event_count}] {event.author}")
+
+            # Get metadata from session state
+            session = await session_service.get_session(
+                app_name="storyland", user_id=user_id, session_id=session_id
+            )
+            book_metadata = session.state.get("book_metadata", {})
+            exact_title = book_metadata.get("book_title", book_title)
+            exact_author = book_metadata.get("author", author or "Unknown")
+
+            logger.info(
+                "metadata_extracted",
+                exact_title=exact_title,
+                exact_author=exact_author
+            )
+            print(f"\nFound: \"{exact_title}\" by {exact_author}")
+
+            # Phase 2: Run main workflow with exact metadata
+            print("\nPhase 2: Researching and composing itinerary...")
+            main_workflow = create_main_workflow(model, book_title=exact_title, author=exact_author)
+            main_runner = Runner(
+                agent=main_workflow,
+                app_name="storyland",
+                session_service=session_service,
+                plugins=[LoggingPlugin()],
+            )
+
+            main_prompt = f"""Create a literary travel itinerary for "{exact_title}" by {exact_author}.
+
+Execute all steps and return the complete combined results."""
+            main_message = types.Content(role="user", parts=[types.Part(text=main_prompt)])
+
+            async for event in main_runner.run_async(
+                user_id=user_id, session_id=session_id, new_message=main_message
             ):
                 event_count += 1
                 if event.author:
@@ -148,6 +182,7 @@ Execute all steps and return the complete combined results."""
                 if event.is_final_response():
                     final_response = event
                     print(f"\nWorkflow complete ({event_count} events)")
+
     except asyncio.TimeoutError:
         logger.error(
             "workflow_timeout",

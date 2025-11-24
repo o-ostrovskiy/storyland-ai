@@ -27,9 +27,14 @@ def create_book_metadata_pipeline(model, google_books_tool):
         tools=[google_books_tool],
         instruction="""You are a book metadata specialist. Extract complete book information.
 
-1. Use the search_book tool with the book title provided by the user
-2. Return ALL the information you receive from the tool
-3. Do not summarize or modify the data - pass it through completely""",
+1. Use the search_book tool with BOTH title AND author parameters when available
+   - If user provides "The Great Gatsby by F. Scott Fitzgerald", use title="The Great Gatsby" and author="F. Scott Fitzgerald"
+   - If user only provides a title, use just the title parameter
+2. If the tool returns an error, report it clearly and explain what went wrong
+3. If no results found, acknowledge this and suggest the user verify the title/author
+4. Return ALL the information from successful results - do not summarize
+
+IMPORTANT: Always pass the author parameter if mentioned - this prevents returning wrong books with same titles.""",
     )
 
     # Stage 2: Pydantic formatter
@@ -40,6 +45,8 @@ def create_book_metadata_pipeline(model, google_books_tool):
         output_key="book_metadata",
         instruction="""Format the book metadata into a validated BookMetadata object.
 
+IMPORTANT: If the researcher found no book or reported an error, return empty/null fields - do not hallucinate metadata.
+
 Extract from the previous response:
 - book_title: The full book title
 - author: Primary author name
@@ -48,7 +55,7 @@ Extract from the previous response:
 - categories: List of genres/categories
 - image_url: Cover image URL
 
-Return a properly structured BookMetadata object.""",
+Return a properly structured BookMetadata object. Include only data actually found in the research.""",
     )
 
     # Pipeline

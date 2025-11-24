@@ -18,6 +18,8 @@ from agents import (
     create_trip_composer_agent,
     create_reader_profile_agent,
     create_workflow,
+    create_metadata_stage,
+    create_main_workflow,
 )
 
 
@@ -86,19 +88,28 @@ class TestBookContextPipeline:
 
     def test_creates_sequential_agent(self, model_name, mock_google_search_tool):
         """Test that pipeline returns a SequentialAgent."""
-        pipeline = create_book_context_pipeline(model_name, mock_google_search_tool)
+        pipeline = create_book_context_pipeline(
+            model_name, mock_google_search_tool,
+            book_title="The Nightingale", author="Kristin Hannah"
+        )
 
         assert isinstance(pipeline, SequentialAgent)
 
     def test_pipeline_has_correct_name(self, model_name, mock_google_search_tool):
         """Test pipeline has expected name."""
-        pipeline = create_book_context_pipeline(model_name, mock_google_search_tool)
+        pipeline = create_book_context_pipeline(
+            model_name, mock_google_search_tool,
+            book_title="The Nightingale", author="Kristin Hannah"
+        )
 
         assert pipeline.name == "book_context_pipeline"
 
     def test_pipeline_has_sub_agents(self, model_name, mock_google_search_tool):
         """Test pipeline contains sub-agents."""
-        pipeline = create_book_context_pipeline(model_name, mock_google_search_tool)
+        pipeline = create_book_context_pipeline(
+            model_name, mock_google_search_tool,
+            book_title="The Nightingale", author="Kristin Hannah"
+        )
 
         assert len(pipeline.sub_agents) == 2
 
@@ -284,3 +295,98 @@ class TestCreateWorkflow:
         assert stage_names[2] == "reader_profile_agent"
         assert stage_names[3] == "parallel_discovery"
         assert stage_names[4] == "trip_composer"
+
+
+# =============================================================================
+# Metadata Stage Tests (Two-Phase Workflow)
+# =============================================================================
+
+class TestMetadataStage:
+    """Tests for create_metadata_stage."""
+
+    def test_creates_sequential_agent(self, model_name, mock_google_books_tool):
+        """Test that metadata stage returns a SequentialAgent."""
+        stage = create_metadata_stage(model_name, mock_google_books_tool)
+
+        assert isinstance(stage, SequentialAgent)
+
+    def test_stage_has_correct_name(self, model_name, mock_google_books_tool):
+        """Test metadata stage has expected name."""
+        stage = create_metadata_stage(model_name, mock_google_books_tool)
+
+        assert stage.name == "metadata_stage"
+
+    def test_stage_contains_metadata_pipeline(self, model_name, mock_google_books_tool):
+        """Test metadata stage contains book_metadata_pipeline."""
+        stage = create_metadata_stage(model_name, mock_google_books_tool)
+
+        assert len(stage.sub_agents) == 1
+        assert stage.sub_agents[0].name == "book_metadata_pipeline"
+
+
+# =============================================================================
+# Main Workflow Tests (Two-Phase Workflow)
+# =============================================================================
+
+class TestMainWorkflow:
+    """Tests for create_main_workflow."""
+
+    def test_creates_sequential_agent(self, model_name):
+        """Test that main workflow returns a SequentialAgent."""
+        workflow = create_main_workflow(
+            model_name, book_title="1984", author="George Orwell"
+        )
+
+        assert isinstance(workflow, SequentialAgent)
+
+    def test_workflow_has_correct_name(self, model_name):
+        """Test main workflow has expected name."""
+        workflow = create_main_workflow(
+            model_name, book_title="1984", author="George Orwell"
+        )
+
+        assert workflow.name == "main_workflow"
+
+    def test_workflow_has_four_stages(self, model_name):
+        """Test main workflow has 4 stages (no metadata pipeline)."""
+        workflow = create_main_workflow(
+            model_name, book_title="1984", author="George Orwell"
+        )
+
+        # book_context, reader_profile, parallel_discovery, trip_composer
+        assert len(workflow.sub_agents) == 4
+
+    def test_workflow_does_not_contain_metadata_pipeline(self, model_name):
+        """Test main workflow does NOT contain book_metadata_pipeline."""
+        workflow = create_main_workflow(
+            model_name, book_title="1984", author="George Orwell"
+        )
+
+        stage_names = [agent.name for agent in workflow.sub_agents]
+        assert "book_metadata_pipeline" not in stage_names
+
+    def test_workflow_stages_order(self, model_name):
+        """Test main workflow stages are in correct order."""
+        workflow = create_main_workflow(
+            model_name, book_title="1984", author="George Orwell"
+        )
+
+        stage_names = [agent.name for agent in workflow.sub_agents]
+
+        assert stage_names[0] == "book_context_pipeline"
+        assert stage_names[1] == "reader_profile_agent"
+        assert stage_names[2] == "parallel_discovery"
+        assert stage_names[3] == "trip_composer"
+
+    def test_workflow_contains_parallel_agent(self, model_name):
+        """Test main workflow contains a ParallelAgent for discovery."""
+        workflow = create_main_workflow(
+            model_name, book_title="1984", author="George Orwell"
+        )
+
+        parallel_agents = [
+            agent for agent in workflow.sub_agents
+            if isinstance(agent, ParallelAgent)
+        ]
+        assert len(parallel_agents) == 1
+        assert parallel_agents[0].name == "parallel_discovery"
