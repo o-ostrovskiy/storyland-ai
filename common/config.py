@@ -1,8 +1,7 @@
 """
 Configuration management for StoryLand AI.
 
-Loads configuration from environment variables and provides centralized
-access to application settings.
+All configuration loaded from environment variables - no defaults.
 """
 
 import os
@@ -16,65 +15,75 @@ load_dotenv()
 
 @dataclass
 class Config:
-    """Application configuration."""
+    """Application configuration - all values from environment."""
 
-    # API Keys
     google_api_key: str
+    database_url: Optional[str]
+    use_database: bool
+    session_max_events: int
+    max_context_tokens: int
+    model_name: str
+    workflow_timeout: int
+    agent_timeout: int
+    log_level: str
+    enable_adk_debug: bool
 
-    # Database
-    database_url: Optional[str] = None
-    use_database: bool = False
 
-    # Session Management
-    session_max_events: int = 20
+def _require_env(key: str) -> str:
+    """Get required environment variable or raise error."""
+    value = os.getenv(key)
+    if value is None:
+        raise ValueError(f"{key} environment variable is required.")
+    return value
 
-    # Context Management
-    max_context_tokens: int = 30000
 
-    # Model Configuration
-    model_name: str = "gemini-2.0-flash-lite"
+def _require_env_int(key: str) -> int:
+    """Get required integer environment variable."""
+    return int(_require_env(key))
 
-    # Logging
-    log_level: str = "INFO"
-    enable_adk_debug: bool = False  # Enable DEBUG for ADK internal loggers
+
+def _require_env_bool(key: str) -> bool:
+    """Get required boolean environment variable."""
+    return _require_env(key).lower() == "true"
 
 
 def load_config() -> Config:
     """
     Load configuration from environment variables.
 
-    Environment variables:
-        - GOOGLE_API_KEY (required): Google API key
-        - DATABASE_URL (optional): Database connection string
-        - USE_DATABASE (optional): "true" or "false" (default: false)
-        - SESSION_MAX_EVENTS (optional): Max events in session (default: 20)
-        - MAX_CONTEXT_TOKENS (optional): Max tokens for context (default: 30000)
-        - MODEL_NAME (optional): Model to use (default: gemini-2.0-flash-lite)
-        - LOG_LEVEL (optional): Logging level (default: INFO)
-        - ENABLE_ADK_DEBUG (optional): Enable DEBUG for ADK loggers (default: false)
+    All variables are required - set them in .env file.
+
+    Required environment variables:
+        - GOOGLE_API_KEY: Google API key
+        - USE_DATABASE: "true" or "false"
+        - SESSION_MAX_EVENTS: Max events in session
+        - MAX_CONTEXT_TOKENS: Max tokens for context
+        - MODEL_NAME: Model to use
+        - WORKFLOW_TIMEOUT: Max seconds for workflow
+        - AGENT_TIMEOUT: Max seconds per agent
+        - LOG_LEVEL: Logging level
+        - ENABLE_ADK_DEBUG: Enable DEBUG for ADK loggers
+
+    Optional:
+        - DATABASE_URL: Database connection string
 
     Returns:
         Config object
 
     Raises:
-        ValueError: If GOOGLE_API_KEY is not set
+        ValueError: If any required variable is not set
     """
-    google_api_key = os.getenv("GOOGLE_API_KEY")
-    if not google_api_key:
-        raise ValueError(
-            "GOOGLE_API_KEY environment variable is required. "
-            "Please set it in your .env file or environment."
-        )
-
     return Config(
-        google_api_key=google_api_key,
+        google_api_key=_require_env("GOOGLE_API_KEY"),
         database_url=os.getenv("DATABASE_URL"),
-        use_database=os.getenv("USE_DATABASE", "false").lower() == "true",
-        session_max_events=int(os.getenv("SESSION_MAX_EVENTS", "20")),
-        max_context_tokens=int(os.getenv("MAX_CONTEXT_TOKENS", "30000")),
-        model_name=os.getenv("MODEL_NAME", "gemini-2.0-flash-lite"),
-        log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
-        enable_adk_debug=os.getenv("ENABLE_ADK_DEBUG", "false").lower() == "true",
+        use_database=_require_env_bool("USE_DATABASE"),
+        session_max_events=_require_env_int("SESSION_MAX_EVENTS"),
+        max_context_tokens=_require_env_int("MAX_CONTEXT_TOKENS"),
+        model_name=_require_env("MODEL_NAME"),
+        workflow_timeout=_require_env_int("WORKFLOW_TIMEOUT"),
+        agent_timeout=_require_env_int("AGENT_TIMEOUT"),
+        log_level=_require_env("LOG_LEVEL").upper(),
+        enable_adk_debug=_require_env_bool("ENABLE_ADK_DEBUG"),
     )
 
 

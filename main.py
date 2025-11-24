@@ -10,6 +10,7 @@ Usage:
 """
 
 import asyncio
+import json
 import uuid
 import subprocess
 import sys
@@ -28,6 +29,11 @@ from agents.orchestrator import create_workflow
 from google.adk.plugins.logging_plugin import LoggingPlugin
 
 
+class WorkflowTimeoutError(Exception):
+    """Raised when workflow execution exceeds the configured timeout."""
+    pass
+
+
 async def create_itinerary(
     book_title: str,
     author: Optional[str] = None,
@@ -35,6 +41,7 @@ async def create_itinerary(
     use_database: bool = False,
     preferences: Optional[dict] = None,
     verbose: bool = False,
+    timeout: Optional[int] = None,
 ):
     """
     Create a literary travel itinerary for a book.
@@ -46,9 +53,13 @@ async def create_itinerary(
         use_database: If True, use SQLite for session persistence
         preferences: Optional user preferences for personalization
         verbose: Enable DEBUG logging
+        timeout: Maximum seconds for workflow execution (overrides config)
 
     Returns:
-        TripItinerary object with the complete travel plan
+        TripItinerary dict with the complete travel plan, or None on failure
+
+    Raises:
+        WorkflowTimeoutError: If workflow execution exceeds timeout
     """
     config = load_config()
 
@@ -104,35 +115,57 @@ Execute all steps and return the complete combined results."""
 
     user_message = types.Content(role="user", parts=[types.Part(text=prompt)])
 
-    # Run workflow
+    # Determine workflow timeout
+    workflow_timeout = timeout if timeout is not None else config.workflow_timeout
+    logger.info(
+        "workflow_starting",
+        book_title=book_title,
+        author=author,
+        timeout_seconds=workflow_timeout
+    )
+
+    # Run workflow with timeout protection
     print(f"\n{'='*70}")
     print(f"Creating itinerary for: {book_title}")
     if author:
         print(f"Author: {author}")
     if preferences:
         print(f"Preferences: {', '.join(f'{k}={v}' for k, v in preferences.items())}")
+    logger.debug("workflow_timeout_config", timeout_seconds=workflow_timeout)
     print(f"{'='*70}\n")
 
     final_response = None
     event_count = 0
 
-    async for event in runner.run_async(
-        user_id=user_id, session_id=session_id, new_message=user_message
-    ):
-        event_count += 1
-        if event.author:
-            print(f"[{event_count}] {event.author}")
-        if event.is_final_response():
-            final_response = event
-            print(f"\n✅ Workflow complete ({event_count} events)")
+    try:
+        async with asyncio.timeout(workflow_timeout):
+            async for event in runner.run_async(
+                user_id=user_id, session_id=session_id, new_message=user_message
+            ):
+                event_count += 1
+                if event.author:
+                    print(f"[{event_count}] {event.author}")
+                if event.is_final_response():
+                    final_response = event
+                    print(f"\nWorkflow complete ({event_count} events)")
+    except asyncio.TimeoutError:
+        logger.error(
+            "workflow_timeout",
+            book_title=book_title,
+            timeout_seconds=workflow_timeout,
+            events_processed=event_count
+        )
+        raise WorkflowTimeoutError(
+            f"Workflow exceeded {workflow_timeout}s timeout. "
+            f"Processed {event_count} events before timeout. "
+            "Consider increasing WORKFLOW_TIMEOUT or simplifying the request."
+        )
 
     # Extract result
     result_data = None
     if final_response and final_response.content and final_response.content.parts:
         for part in final_response.content.parts:
             if hasattr(part, "text") and part.text:
-                import json
-
                 json_start = part.text.find("{")
                 json_end = part.text.rfind("}") + 1
 
@@ -246,6 +279,7 @@ Examples:
     parser.add_argument("--user-id", "-u", default="user1", help="User ID")
     parser.add_argument("--database", "-d", action="store_true", help="Use SQLite for sessions")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable DEBUG logging")
+    parser.add_argument("--timeout", "-t", type=int, help="Workflow timeout in seconds (default: 300)")
     parser.add_argument("--dev", action="store_true", help="Launch ADK Web UI")
 
     # Preference arguments
@@ -275,16 +309,25 @@ Examples:
     if args.with_kids:
         preferences["travels_with_kids"] = True
 
-    result = await create_itinerary(
-        book_title=args.book_title,
-        author=args.author,
-        user_id=args.user_id,
-        use_database=args.database,
-        preferences=preferences if preferences else None,
-        verbose=args.verbose,
-    )
+    # Configure logging early for error handling
+    log_level = "DEBUG" if args.verbose else "INFO"
+    configure_logging(level=log_level)
+    logger = get_logger("storyland.cli")
 
-    display_itinerary(result)
+    try:
+        result = await create_itinerary(
+            book_title=args.book_title,
+            author=args.author,
+            user_id=args.user_id,
+            use_database=args.database,
+            preferences=preferences if preferences else None,
+            verbose=args.verbose,
+            timeout=args.timeout,
+        )
+        display_itinerary(result)
+    except WorkflowTimeoutError as e:
+        logger.error("workflow_failed", error=str(e))
+        sys.exit(1)
 
 
 if __name__ == "__main__":
