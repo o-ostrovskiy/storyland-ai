@@ -67,6 +67,10 @@ def search_books(
                 or None
             )
 
+            # Upgrade HTTP to HTTPS for Google Books images
+            if image_url and image_url.startswith("http://"):
+                image_url = image_url.replace("http://", "https://")
+
             results.append(
                 BookInfo(
                     title=vol.get("title", "Unknown"),
