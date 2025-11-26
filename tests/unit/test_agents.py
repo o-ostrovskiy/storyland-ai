@@ -17,9 +17,11 @@ from agents import (
     create_author_pipeline,
     create_trip_composer_agent,
     create_reader_profile_agent,
-    create_workflow,
+    create_region_analyzer_agent,
     create_metadata_stage,
-    create_main_workflow,
+    create_discovery_workflow,
+    create_composition_workflow,
+    create_eval_workflow,
 )
 
 
@@ -232,72 +234,6 @@ class TestReaderProfileAgent:
 # =============================================================================
 # Workflow Orchestrator Tests
 # =============================================================================
-
-class TestCreateWorkflow:
-    """Tests for create_workflow orchestrator."""
-
-    def test_creates_sequential_agent(self, model_name, mock_google_books_tool):
-        """Test that workflow returns a SequentialAgent."""
-        workflow = create_workflow(model_name, mock_google_books_tool)
-
-        assert isinstance(workflow, SequentialAgent)
-
-    def test_workflow_has_correct_name(self, model_name, mock_google_books_tool):
-        """Test workflow has expected name."""
-        workflow = create_workflow(model_name, mock_google_books_tool)
-
-        assert workflow.name == "workflow"
-
-    def test_workflow_has_five_stages(self, model_name, mock_google_books_tool):
-        """Test workflow has 5 main stages."""
-        workflow = create_workflow(model_name, mock_google_books_tool)
-
-        # book_metadata, book_context, reader_profile, parallel_discovery, trip_composer
-        assert len(workflow.sub_agents) == 5
-
-    def test_workflow_contains_parallel_agent(self, model_name, mock_google_books_tool):
-        """Test workflow contains a ParallelAgent for discovery."""
-        workflow = create_workflow(model_name, mock_google_books_tool)
-
-        parallel_agents = [
-            agent for agent in workflow.sub_agents
-            if isinstance(agent, ParallelAgent)
-        ]
-        assert len(parallel_agents) == 1
-        assert parallel_agents[0].name == "parallel_discovery"
-
-    def test_parallel_discovery_has_three_pipelines(self, model_name, mock_google_books_tool):
-        """Test parallel discovery contains city, landmark, author pipelines."""
-        workflow = create_workflow(model_name, mock_google_books_tool)
-
-        parallel_agent = next(
-            agent for agent in workflow.sub_agents
-            if isinstance(agent, ParallelAgent)
-        )
-
-        assert len(parallel_agent.sub_agents) == 3
-
-        # Verify names of sub-agents
-        names = [agent.name for agent in parallel_agent.sub_agents]
-        assert "city_pipeline" in names
-        assert "landmark_pipeline" in names
-        assert "author_pipeline" in names
-
-    def test_workflow_stages_order(self, model_name, mock_google_books_tool):
-        """Test workflow stages are in correct order."""
-        workflow = create_workflow(model_name, mock_google_books_tool)
-
-        stage_names = [agent.name for agent in workflow.sub_agents]
-
-        # Verify order: metadata first, then context, then profile, then discovery, then composer
-        assert stage_names[0] == "book_metadata_pipeline"
-        assert stage_names[1] == "book_context_pipeline"
-        assert stage_names[2] == "reader_profile_agent"
-        assert stage_names[3] == "parallel_discovery"
-        assert stage_names[4] == "trip_composer"
-
-
-# =============================================================================
 # Metadata Stage Tests (Two-Phase Workflow)
 # =============================================================================
 
@@ -327,47 +263,81 @@ class TestMetadataStage:
 # =============================================================================
 # Main Workflow Tests (Two-Phase Workflow)
 # =============================================================================
+# Region Analyzer Agent Tests
+# =============================================================================
 
-class TestMainWorkflow:
-    """Tests for create_main_workflow."""
+class TestRegionAnalyzerAgent:
+    """Tests for create_region_analyzer_agent."""
+
+    def test_creates_llm_agent(self, model_name):
+        """Test that region analyzer returns an LlmAgent."""
+        agent = create_region_analyzer_agent(model_name)
+
+        assert isinstance(agent, LlmAgent)
+
+    def test_agent_has_correct_name(self, model_name):
+        """Test agent has expected name."""
+        agent = create_region_analyzer_agent(model_name)
+
+        assert agent.name == "region_analyzer"
+
+    def test_agent_has_output_schema(self, model_name):
+        """Test agent has Pydantic output schema configured."""
+        agent = create_region_analyzer_agent(model_name)
+
+        assert hasattr(agent, 'output_schema') or hasattr(agent, 'output_key')
+
+    def test_agent_has_output_key(self, model_name):
+        """Test agent stores output in region_analysis key."""
+        agent = create_region_analyzer_agent(model_name)
+
+        assert agent.output_key == "region_analysis"
+
+
+# =============================================================================
+# Discovery Workflow Tests (Three-Phase Workflow)
+# =============================================================================
+
+class TestDiscoveryWorkflow:
+    """Tests for create_discovery_workflow."""
 
     def test_creates_sequential_agent(self, model_name):
-        """Test that main workflow returns a SequentialAgent."""
-        workflow = create_main_workflow(
+        """Test that discovery workflow returns a SequentialAgent."""
+        workflow = create_discovery_workflow(
             model_name, book_title="1984", author="George Orwell"
         )
 
         assert isinstance(workflow, SequentialAgent)
 
     def test_workflow_has_correct_name(self, model_name):
-        """Test main workflow has expected name."""
-        workflow = create_main_workflow(
+        """Test discovery workflow has expected name."""
+        workflow = create_discovery_workflow(
             model_name, book_title="1984", author="George Orwell"
         )
 
-        assert workflow.name == "main_workflow"
+        assert workflow.name == "discovery_workflow"
 
     def test_workflow_has_four_stages(self, model_name):
-        """Test main workflow has 4 stages (no metadata pipeline)."""
-        workflow = create_main_workflow(
+        """Test discovery workflow has 4 stages."""
+        workflow = create_discovery_workflow(
             model_name, book_title="1984", author="George Orwell"
         )
 
-        # book_context, reader_profile, parallel_discovery, trip_composer
+        # book_context, reader_profile, parallel_discovery, region_analyzer
         assert len(workflow.sub_agents) == 4
 
-    def test_workflow_does_not_contain_metadata_pipeline(self, model_name):
-        """Test main workflow does NOT contain book_metadata_pipeline."""
-        workflow = create_main_workflow(
+    def test_workflow_ends_with_region_analyzer(self, model_name):
+        """Test discovery workflow ends with region_analyzer."""
+        workflow = create_discovery_workflow(
             model_name, book_title="1984", author="George Orwell"
         )
 
         stage_names = [agent.name for agent in workflow.sub_agents]
-        assert "book_metadata_pipeline" not in stage_names
+        assert stage_names[-1] == "region_analyzer"
 
     def test_workflow_stages_order(self, model_name):
-        """Test main workflow stages are in correct order."""
-        workflow = create_main_workflow(
+        """Test discovery workflow stages are in correct order."""
+        workflow = create_discovery_workflow(
             model_name, book_title="1984", author="George Orwell"
         )
 
@@ -376,11 +346,11 @@ class TestMainWorkflow:
         assert stage_names[0] == "book_context_pipeline"
         assert stage_names[1] == "reader_profile_agent"
         assert stage_names[2] == "parallel_discovery"
-        assert stage_names[3] == "trip_composer"
+        assert stage_names[3] == "region_analyzer"
 
     def test_workflow_contains_parallel_agent(self, model_name):
-        """Test main workflow contains a ParallelAgent for discovery."""
-        workflow = create_main_workflow(
+        """Test discovery workflow contains a ParallelAgent for discovery."""
+        workflow = create_discovery_workflow(
             model_name, book_title="1984", author="George Orwell"
         )
 
@@ -390,3 +360,93 @@ class TestMainWorkflow:
         ]
         assert len(parallel_agents) == 1
         assert parallel_agents[0].name == "parallel_discovery"
+
+
+# =============================================================================
+# Composition Workflow Tests (Three-Phase Workflow)
+# =============================================================================
+
+class TestCompositionWorkflow:
+    """Tests for create_composition_workflow."""
+
+    def test_creates_sequential_agent(self, model_name):
+        """Test that composition workflow returns a SequentialAgent."""
+        workflow = create_composition_workflow(model_name)
+
+        assert isinstance(workflow, SequentialAgent)
+
+    def test_workflow_has_correct_name(self, model_name):
+        """Test composition workflow has expected name."""
+        workflow = create_composition_workflow(model_name)
+
+        assert workflow.name == "composition_workflow"
+
+    def test_workflow_has_one_stage(self, model_name):
+        """Test composition workflow has 1 stage (trip_composer only)."""
+        workflow = create_composition_workflow(model_name)
+
+        assert len(workflow.sub_agents) == 1
+
+    def test_workflow_contains_trip_composer(self, model_name):
+        """Test composition workflow contains trip_composer agent."""
+        workflow = create_composition_workflow(model_name)
+
+        assert workflow.sub_agents[0].name == "trip_composer"
+
+
+# =============================================================================
+# Eval Workflow Tests (For ADK Evals)
+# =============================================================================
+
+class TestEvalWorkflow:
+    """Tests for create_eval_workflow (used by ADK evals and web UI)."""
+
+    def test_creates_sequential_agent(self, model_name, mock_google_books_tool):
+        """Test that eval workflow returns a SequentialAgent."""
+        workflow = create_eval_workflow(model_name, mock_google_books_tool)
+
+        assert isinstance(workflow, SequentialAgent)
+
+    def test_workflow_has_correct_name(self, model_name, mock_google_books_tool):
+        """Test eval workflow has expected name."""
+        workflow = create_eval_workflow(model_name, mock_google_books_tool)
+
+        assert workflow.name == "eval_workflow"
+
+    def test_workflow_has_six_stages(self, model_name, mock_google_books_tool):
+        """Test eval workflow has 6 stages (metadata, context, profile, discovery, region_analyzer, composer)."""
+        workflow = create_eval_workflow(model_name, mock_google_books_tool)
+
+        # Should have 6 stages: metadata, context, reader_profile, parallel_discovery, region_analyzer, trip_composer
+        assert len(workflow.sub_agents) == 6
+
+    def test_workflow_stage_order(self, model_name, mock_google_books_tool):
+        """Test eval workflow stages are in correct order."""
+        workflow = create_eval_workflow(model_name, mock_google_books_tool)
+
+        stage_names = [agent.name for agent in workflow.sub_agents]
+        assert stage_names[0] == "book_metadata_pipeline"
+        assert stage_names[1] == "book_context_pipeline"
+        assert stage_names[2] == "reader_profile_agent"
+        assert stage_names[3] == "parallel_discovery"
+        assert stage_names[4] == "region_analyzer"
+        assert stage_names[5] == "trip_composer"
+
+    def test_workflow_contains_parallel_agent(self, model_name, mock_google_books_tool):
+        """Test eval workflow contains a ParallelAgent for discovery."""
+        workflow = create_eval_workflow(model_name, mock_google_books_tool)
+
+        parallel_agents = [
+            agent for agent in workflow.sub_agents
+            if isinstance(agent, ParallelAgent)
+        ]
+        assert len(parallel_agents) == 1
+        assert parallel_agents[0].name == "parallel_discovery"
+
+    def test_workflow_includes_region_analyzer(self, model_name, mock_google_books_tool):
+        """Test eval workflow includes region analyzer before trip composer."""
+        workflow = create_eval_workflow(model_name, mock_google_books_tool)
+
+        # Region analyzer should be at index 4 (before trip_composer)
+        assert workflow.sub_agents[4].name == "region_analyzer"
+        assert workflow.sub_agents[5].name == "trip_composer"

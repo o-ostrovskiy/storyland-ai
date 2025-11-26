@@ -14,7 +14,7 @@ import json
 import uuid
 import subprocess
 import sys
-from typing import Optional
+from typing import Optional, List
 
 from google.genai import types
 from google.adk.models.google_llm import Gemini
@@ -25,13 +25,106 @@ from common.logging import configure_logging, get_logger
 from services.session_service import create_session_service
 from services.context_manager import ContextManager
 from tools.google_books import google_books_tool
-from agents.orchestrator import create_metadata_stage, create_main_workflow
+from agents.orchestrator import (
+    create_metadata_stage,
+    create_discovery_workflow,
+    create_composition_workflow,
+)
 from google.adk.plugins.logging_plugin import LoggingPlugin
 
 
 class WorkflowTimeoutError(Exception):
     """Raised when workflow execution exceeds the configured timeout."""
     pass
+
+
+def display_region_options(region_analysis: dict) -> None:
+    """Display region options to the user."""
+    regions = region_analysis.get("regions", [])
+
+    if not regions:
+        print("\nNo regions found in analysis.")
+        return
+
+    print(f"\n{'='*70}")
+    print("TRAVEL REGION OPTIONS")
+    print(f"{'='*70}")
+    print(f"\n{region_analysis.get('analysis_note', '')}\n")
+
+    for region in regions:
+        region_id = region.get("region_id", "?")
+        region_name = region.get("region_name", "Unknown")
+        cities = region.get("cities", [])
+        days = region.get("estimated_days", "?")
+        travel_note = region.get("travel_note", "")
+        highlights = region.get("highlights", "")
+
+        city_names = ", ".join(
+            f"{c.get('name', '?')}" for c in cities
+        )
+
+        print(f"[{region_id}] {region_name}")
+        print(f"    Cities: {city_names}")
+        print(f"    Duration: ~{days} days")
+        print(f"    Travel: {travel_note}")
+        print(f"    Highlights: {highlights}")
+        print()
+
+
+def get_region_selection(region_analysis: dict) -> List[dict]:
+    """
+    Get user's region selection (supports multiple regions).
+
+    Args:
+        region_analysis: The region analysis dict from the agent
+
+    Returns:
+        List of selected region dicts
+    """
+    regions = region_analysis.get("regions", [])
+
+    if not regions:
+        return []
+
+    # If only one region, auto-select it
+    if len(regions) == 1:
+        print(f"\nOnly one region available - automatically selected.")
+        return [regions[0]]
+
+    # Interactive selection
+    valid_ids = [r.get("region_id") for r in regions]
+
+    print(f"\nEnter region number(s) separated by commas (e.g., '1,2' for multiple regions)")
+    print(f"Or press Enter to select all regions")
+
+    while True:
+        try:
+            choice = input(f"Which region(s) would you like to explore? [{'/'.join(map(str, valid_ids))}]: ")
+
+            # If empty, select all
+            if not choice.strip():
+                print(f"\nSelected all {len(regions)} regions")
+                return regions
+
+            # Parse comma-separated IDs
+            selected_ids = [int(x.strip()) for x in choice.split(",")]
+            selected = []
+
+            for region in regions:
+                if region.get("region_id") in selected_ids:
+                    selected.append(region)
+
+            if selected:
+                names = ", ".join(r.get("region_name", "?") for r in selected)
+                print(f"\nSelected {len(selected)} region(s): {names}")
+                return selected
+
+            print(f"Invalid choice. Please enter one or more of: {valid_ids}")
+        except ValueError:
+            print(f"Please enter number(s) separated by commas: {valid_ids}")
+        except (KeyboardInterrupt, EOFError):
+            print("\nSelection cancelled.")
+            return []
 
 
 async def create_itinerary(
@@ -45,6 +138,11 @@ async def create_itinerary(
 ):
     """
     Create a literary travel itinerary for a book.
+
+    Uses a three-phase workflow with human-in-the-loop region selection:
+    1. Metadata extraction - identify book and author
+    2. Discovery - find locations and group into travel regions
+    3. Composition - create itinerary for selected region(s)
 
     Args:
         book_title: Title of the book
@@ -124,6 +222,7 @@ async def create_itinerary(
     try:
         async with asyncio.timeout(workflow_timeout):
             # Phase 1: Extract book metadata
+            logger.info("phase_1_start", phase="metadata_extraction")
             print("Phase 1: Extracting book metadata...")
             metadata_stage = create_metadata_stage(model, google_books_tool)
             metadata_runner = Runner(
@@ -136,12 +235,13 @@ async def create_itinerary(
             metadata_prompt = f"""Find book metadata for "{book_title}" by {author or 'unknown author'}."""
             metadata_message = types.Content(role="user", parts=[types.Part(text=metadata_prompt)])
 
-            async for event in metadata_runner.run_async(
-                user_id=user_id, session_id=session_id, new_message=metadata_message
-            ):
-                event_count += 1
-                if event.author:
-                    print(f"[{event_count}] {event.author}")
+            async with metadata_runner:
+                async for event in metadata_runner.run_async(
+                    user_id=user_id, session_id=session_id, new_message=metadata_message
+                ):
+                    event_count += 1
+                    if event.author:
+                        logger.debug("agent_event", event_count=event_count, author=event.author)
 
             # Get metadata from session state
             session = await session_service.get_session(
@@ -158,30 +258,109 @@ async def create_itinerary(
             )
             print(f"\nFound: \"{exact_title}\" by {exact_author}")
 
-            # Phase 2: Run main workflow with exact metadata
-            print("\nPhase 2: Researching and composing itinerary...")
-            main_workflow = create_main_workflow(model, book_title=exact_title, author=exact_author)
-            main_runner = Runner(
-                agent=main_workflow,
+            # Phase 2: Discovery - find locations and analyze regions
+            logger.info("phase_2_start", phase="location_discovery")
+            print("\nPhase 2: Discovering locations and analyzing travel regions...")
+            discovery_workflow = create_discovery_workflow(
+                model, book_title=exact_title, author=exact_author
+            )
+            discovery_runner = Runner(
+                agent=discovery_workflow,
                 app_name="storyland",
                 session_service=session_service,
                 plugins=[LoggingPlugin()],
             )
 
-            main_prompt = f"""Create a literary travel itinerary for "{exact_title}" by {exact_author}.
+            discovery_prompt = f"""Discover travel locations for "{exact_title}" by {exact_author}.
 
-Execute all steps and return the complete combined results."""
-            main_message = types.Content(role="user", parts=[types.Part(text=main_prompt)])
+Find cities, landmarks, and author-related sites, then group them into practical travel regions."""
+            discovery_message = types.Content(
+                role="user", parts=[types.Part(text=discovery_prompt)]
+            )
 
-            async for event in main_runner.run_async(
-                user_id=user_id, session_id=session_id, new_message=main_message
-            ):
-                event_count += 1
-                if event.author:
-                    print(f"[{event_count}] {event.author}")
-                if event.is_final_response():
-                    final_response = event
-                    print(f"\nWorkflow complete ({event_count} events)")
+            async with discovery_runner:
+                async for event in discovery_runner.run_async(
+                    user_id=user_id, session_id=session_id, new_message=discovery_message
+                ):
+                    event_count += 1
+                    if event.author:
+                        logger.debug("agent_event", event_count=event_count, author=event.author)
+
+            # Get region analysis from session state
+            session = await session_service.get_session(
+                app_name="storyland", user_id=user_id, session_id=session_id
+            )
+            region_analysis = session.state.get("region_analysis", {})
+
+            logger.info(
+                "regions_discovered",
+                num_regions=len(region_analysis.get("regions", []))
+            )
+
+            # Display region options and get user selection
+            display_region_options(region_analysis)
+            selected_regions = get_region_selection(region_analysis)
+
+            if not selected_regions:
+                print("\nNo valid region selected. Using all discovered locations.")
+                selected_regions = region_analysis.get("regions", [])
+
+            # Validate that we have regions to work with
+            if not selected_regions:
+                error_msg = (
+                    "No regions available to create an itinerary. "
+                    "The discovery phase did not find enough locations to group into travel regions. "
+                    "Try a different book or check the discovery results."
+                )
+                logger.error("no_regions_available", book_title=exact_title, author=exact_author)
+                print(f"\n❌ Error: {error_msg}")
+                raise WorkflowTimeoutError(error_msg)
+
+            # Store selected regions in session state for trip_composer to access
+            # Note: State changes are automatically persisted by DatabaseSessionService
+            session = await session_service.get_session(
+                app_name="storyland", user_id=user_id, session_id=session_id
+            )
+            session.state["selected_regions"] = selected_regions
+
+            logger.info("selected_regions_stored", region_count=len(selected_regions))
+
+            # Phase 3: Composition - create itinerary for selected region(s)
+            if len(selected_regions) == 1:
+                region_name = selected_regions[0].get("region_name", "all locations")
+            else:
+                region_name = f"{len(selected_regions)} regions"
+            logger.info("phase_3_start", phase="itinerary_composition", region_count=len(selected_regions))
+            print(f"\nPhase 3: Creating itinerary for {region_name}...")
+
+            composition_workflow = create_composition_workflow(model)
+            composition_runner = Runner(
+                agent=composition_workflow,
+                app_name="storyland",
+                session_service=session_service,
+                plugins=[LoggingPlugin()],
+            )
+
+            composition_prompt = f"""Create a travel itinerary for "{exact_title}" by {exact_author}.
+
+Use ONLY the cities from the selected region(s): {json.dumps(selected_regions)}
+
+Create a personalized itinerary based on user preferences and the selected region(s).
+Include ALL cities from the selected regions in your itinerary."""
+            composition_message = types.Content(
+                role="user", parts=[types.Part(text=composition_prompt)]
+            )
+
+            async with composition_runner:
+                async for event in composition_runner.run_async(
+                    user_id=user_id, session_id=session_id, new_message=composition_message
+                ):
+                    event_count += 1
+                    if event.author:
+                        logger.debug("agent_event", event_count=event_count, author=event.author)
+                    if event.is_final_response():
+                        final_response = event
+                        logger.info("workflow_complete", total_events=event_count)
 
     except asyncio.TimeoutError:
         logger.error(
@@ -216,6 +395,7 @@ Execute all steps and return the complete combined results."""
         app_name="storyland", user_id=user_id, session_id=session_id
     )
     stats = context_manager.get_context_stats(session.events)
+    logger.info("context_stats", num_events=stats['num_events'], estimated_tokens=stats['estimated_tokens'])
     print(f"\n📊 Context: {stats['num_events']} events, ~{stats['estimated_tokens']} tokens")
 
     return result_data

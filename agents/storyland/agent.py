@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from google.genai import types
 from google.adk.models.google_llm import Gemini
 
-from agents.orchestrator import create_workflow
+from agents.orchestrator import create_eval_workflow
 from tools.google_books import google_books_tool
 
 # Load environment variables
@@ -36,5 +36,6 @@ model = Gemini(
     ),
 )
 
-# Create root agent for ADK web
-root_agent = create_workflow(model, google_books_tool)
+# Create root agent for ADK web and evals
+# Uses eval_workflow which includes region analysis but auto-selects all regions
+root_agent = create_eval_workflow(model, google_books_tool)

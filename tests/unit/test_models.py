@@ -11,7 +11,8 @@ from models.book import BookMetadata, BookContext, BookInfo
 from models.discovery import (
     CityDiscovery, CityInfo,
     LandmarkDiscovery, LandmarkInfo,
-    AuthorSites, AuthorSiteInfo
+    AuthorSites, AuthorSiteInfo,
+    RegionCity, RegionOption, RegionAnalysis,
 )
 from models.itinerary import TripItinerary, CityPlan, CityStop
 from models.preferences import TravelPreferences
@@ -353,3 +354,166 @@ class TestTravelPreferences:
         prefs = TravelPreferences(**sample_preferences_dict)
         assert prefs.budget == "moderate"
         assert "Jane Austen" in prefs.favorite_authors
+
+
+# =============================================================================
+# RegionCity Tests
+# =============================================================================
+
+class TestRegionCity:
+    """Tests for RegionCity model."""
+
+    def test_valid_region_city(self):
+        """Test creating valid RegionCity."""
+        city = RegionCity(name="Boston", country="USA")
+        assert city.name == "Boston"
+        assert city.country == "USA"
+
+    def test_region_city_requires_name(self):
+        """Test RegionCity requires name field."""
+        with pytest.raises(ValidationError):
+            RegionCity(country="USA")
+
+    def test_region_city_requires_country(self):
+        """Test RegionCity requires country field."""
+        with pytest.raises(ValidationError):
+            RegionCity(name="Boston")
+
+
+# =============================================================================
+# RegionOption Tests
+# =============================================================================
+
+class TestRegionOption:
+    """Tests for RegionOption model."""
+
+    def test_valid_region_option(self):
+        """Test creating valid RegionOption."""
+        region = RegionOption(
+            region_id=1,
+            region_name="New England, USA",
+            cities=[
+                RegionCity(name="Boston", country="USA"),
+                RegionCity(name="Providence", country="USA"),
+            ],
+            estimated_days=5,
+            travel_note="All cities accessible by car within 2 hours",
+            highlights="Historic sites, literary landmarks, coastal scenery",
+        )
+        assert region.region_id == 1
+        assert region.region_name == "New England, USA"
+        assert len(region.cities) == 2
+        assert region.estimated_days == 5
+
+    def test_region_option_days_validation_min(self):
+        """Test RegionOption estimated_days minimum is 1."""
+        with pytest.raises(ValidationError):
+            RegionOption(
+                region_id=1,
+                region_name="Test",
+                cities=[],
+                estimated_days=0,  # Invalid: must be >= 1
+                travel_note="Note",
+                highlights="Highlights",
+            )
+
+    def test_region_option_days_validation_max(self):
+        """Test RegionOption estimated_days maximum is 30."""
+        with pytest.raises(ValidationError):
+            RegionOption(
+                region_id=1,
+                region_name="Test",
+                cities=[],
+                estimated_days=31,  # Invalid: must be <= 30
+                travel_note="Note",
+                highlights="Highlights",
+            )
+
+    def test_region_option_empty_cities(self):
+        """Test RegionOption with empty cities list."""
+        region = RegionOption(
+            region_id=1,
+            region_name="Empty Region",
+            cities=[],
+            estimated_days=1,
+            travel_note="No cities",
+            highlights="None",
+        )
+        assert region.cities == []
+
+    def test_region_option_serialization(self):
+        """Test RegionOption serialization round-trip."""
+        region = RegionOption(
+            region_id=1,
+            region_name="Test Region",
+            cities=[RegionCity(name="City", country="Country")],
+            estimated_days=3,
+            travel_note="Note",
+            highlights="Highlights",
+        )
+        json_data = region.model_dump()
+        restored = RegionOption(**json_data)
+        assert restored.region_name == region.region_name
+        assert len(restored.cities) == 1
+
+
+# =============================================================================
+# RegionAnalysis Tests
+# =============================================================================
+
+class TestRegionAnalysis:
+    """Tests for RegionAnalysis model."""
+
+    def test_valid_region_analysis(self):
+        """Test creating valid RegionAnalysis."""
+        analysis = RegionAnalysis(
+            regions=[
+                RegionOption(
+                    region_id=1,
+                    region_name="Region A",
+                    cities=[RegionCity(name="CityA", country="CountryA")],
+                    estimated_days=3,
+                    travel_note="Note A",
+                    highlights="Highlights A",
+                ),
+                RegionOption(
+                    region_id=2,
+                    region_name="Region B",
+                    cities=[RegionCity(name="CityB", country="CountryB")],
+                    estimated_days=4,
+                    travel_note="Note B",
+                    highlights="Highlights B",
+                ),
+            ],
+            analysis_note="Cities grouped by geographic proximity",
+        )
+        assert len(analysis.regions) == 2
+        assert analysis.analysis_note == "Cities grouped by geographic proximity"
+
+    def test_region_analysis_empty_regions(self):
+        """Test RegionAnalysis with no regions."""
+        analysis = RegionAnalysis(
+            regions=[],
+            analysis_note="No regions found",
+        )
+        assert analysis.regions == []
+
+    def test_region_analysis_serialization(self):
+        """Test RegionAnalysis JSON serialization round-trip."""
+        analysis = RegionAnalysis(
+            regions=[
+                RegionOption(
+                    region_id=1,
+                    region_name="Test",
+                    cities=[],
+                    estimated_days=1,
+                    travel_note="Note",
+                    highlights="Highlights",
+                )
+            ],
+            analysis_note="Test analysis",
+        )
+        json_data = analysis.model_dump()
+        restored = RegionAnalysis(**json_data)
+        assert len(restored.regions) == 1
+        assert restored.analysis_note == analysis.analysis_note

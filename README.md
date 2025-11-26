@@ -144,15 +144,24 @@ For exploration and experimentation:
 # Start Jupyter
 jupyter notebook
 
-# Open one of these notebooks:
-# - storyland_ai_demo.ipynb (original inline demo)
-# - storyland_ai_demo_modular.ipynb (modular demo with imports)
-# - sessions_memory_demo.ipynb (11 scenarios showing sessions & preferences)
+# Open the comprehensive showcase notebook:
+# - storyland_showcase.ipynb (complete feature showcase with all capabilities)
 ```
+
+**What's in the showcase notebook:**
+- Multi-agent architecture (sequential, parallel, three-phase workflow)
+- Custom tools (Google Books API, preferences)
+- Sessions & state management (InMemory + SQLite)
+- User preferences & personalization
+- Context engineering & compaction
+- Observability & structured logging
+- Agent evaluation with rubrics
+- Human-in-the-loop region selection
+- Full end-to-end demo
 
 ### Option 4: Programmatic Usage
 
-Import and use the modular components with the two-phase workflow:
+Import and use the modular components with the three-phase workflow:
 
 ```python
 from google.genai import types
@@ -161,7 +170,11 @@ from google.adk.runners import Runner
 
 from services.session_service import create_session_service
 from tools.google_books import google_books_tool
-from agents.orchestrator import create_metadata_stage, create_main_workflow
+from agents.orchestrator import (
+    create_metadata_stage,
+    create_discovery_workflow,
+    create_composition_workflow,
+)
 
 # Configure model
 model = Gemini(model="gemini-2.0-flash-lite", api_key="your-key")
@@ -171,8 +184,9 @@ session_service = create_session_service(use_database=True)
 metadata_stage = create_metadata_stage(model, google_books_tool)
 metadata_runner = Runner(agent=metadata_stage, app_name="storyland", session_service=session_service)
 
-async for event in metadata_runner.run_async(user_id="alice", session_id="session1", new_message=...):
-    pass
+async with metadata_runner:
+    async for event in metadata_runner.run_async(user_id="alice", session_id="session1", new_message=...):
+        pass
 
 # Get exact title/author from session state
 session = await session_service.get_session(app_name="storyland", user_id="alice", session_id="session1")
@@ -180,22 +194,67 @@ book_metadata = session.state.get("book_metadata", {})
 exact_title = book_metadata.get("book_title")
 exact_author = book_metadata.get("author")
 
-# Phase 2: Run main workflow with exact metadata
-main_workflow = create_main_workflow(model, book_title=exact_title, author=exact_author)
-main_runner = Runner(agent=main_workflow, app_name="storyland", session_service=session_service)
+# Phase 2: Discovery - find locations and analyze regions
+discovery_workflow = create_discovery_workflow(model, book_title=exact_title, author=exact_author)
+discovery_runner = Runner(agent=discovery_workflow, app_name="storyland", session_service=session_service)
 
-async for event in main_runner.run_async(user_id="alice", session_id="session1", new_message=...):
-    print(event)
+async with discovery_runner:
+    async for event in discovery_runner.run_async(user_id="alice", session_id="session1", new_message=...):
+        pass
+
+# Get region analysis and let user select
+session = await session_service.get_session(app_name="storyland", user_id="alice", session_id="session1")
+region_analysis = session.state.get("region_analysis", {})
+selected_regions = region_analysis.get("regions", [])[:1]  # Select first region
+
+# Phase 3: Composition - create itinerary for selected region(s)
+composition_workflow = create_composition_workflow(model)
+composition_runner = Runner(agent=composition_workflow, app_name="storyland", session_service=session_service)
+
+async with composition_runner:
+    async for event in composition_runner.run_async(user_id="alice", session_id="session1", new_message=...):
+        print(event)
 ```
 
 ### What You'll Get
 
 The system generates a structured travel plan including:
+- **Region options** - Choose which geographic region(s) to explore
 - **Cities to visit** with suggested number of days
 - **Landmarks and experiences** tied to the book's setting
 - **Author-related sites** (birthplace, museums, etc.)
 - **Practical details** (time of day, visiting tips)
 - **Thematic connections** explaining why each location matters
+
+### Human-in-the-Loop Region Selection
+
+When a book spans multiple geographic regions (e.g., different countries or distant cities), the system presents region options:
+
+```
+======================================================================
+TRAVEL REGION OPTIONS
+======================================================================
+
+Cities grouped by geographic proximity for practical travel planning.
+
+[1] Southern England
+    Cities: Bath, London
+    Duration: ~4 days
+    Travel: Train connections between cities (1-2 hours)
+    Highlights: Regency-era architecture, Jane Austen Centre
+
+[2] Peak District, England
+    Cities: Bakewell, Chatsworth
+    Duration: ~2 days
+    Travel: All accessible by car within 30 minutes
+    Highlights: Pemberley inspiration, scenic countryside
+
+Enter region number(s) separated by commas (e.g., '1,2' for multiple regions)
+Or press Enter to select all regions
+Which region(s) would you like to explore? [1/2]:
+```
+
+This prevents impractical itineraries spanning disconnected locations (e.g., mixing East Coast and West Coast USA cities).
 
 ## Features
 
@@ -314,7 +373,8 @@ graph LR
 storyland-ai/
 ├── models/              # Pydantic data models
 │   ├── book.py          # BookMetadata, BookContext, BookInfo
-│   ├── discovery.py     # CityDiscovery, LandmarkDiscovery, AuthorSites
+│   ├── discovery.py     # CityDiscovery, LandmarkDiscovery, AuthorSites,
+│   │                    # RegionCity, RegionOption, RegionAnalysis
 │   ├── itinerary.py     # TripItinerary, CityPlan, CityStop
 │   └── preferences.py   # TravelPreferences
 │
@@ -328,15 +388,14 @@ storyland-ai/
 │   ├── discovery_agents.py       # City/landmark/author discovery
 │   ├── trip_composer_agent.py    # Itinerary composition
 │   ├── reader_profile_agent.py   # Preferences-based personalization
-│   ├── orchestrator.py           # Two-phase workflow coordination
+│   ├── region_analyzer_agent.py  # Geographic region grouping (LLM-based)
+│   ├── orchestrator.py           # Three-phase workflow coordination
 │   │                             # - create_metadata_stage()
-│   │                             # - create_main_workflow(title, author)
-│   │                             # - create_workflow() (legacy)
+│   │                             # - create_discovery_workflow(title, author)
+│   │                             # - create_composition_workflow()
+│   │                             # - create_eval_workflow() (for ADK evals)
 │   └── storyland/                # ADK Web UI agent
 │       └── agent.py              # root_agent for adk web
-│
-├── plugins/             # Custom ADK plugins (optional)
-│   └── observability.py # Custom logging example (uses ADK LoggingPlugin by default)
 │
 ├── services/            # Core services
 │   ├── session_service.py   # Session management (InMemory/SQLite)
@@ -362,9 +421,9 @@ storyland-ai/
 └── .env.example         # Environment template
 ```
 
-### Multi-Agent Workflow (Two-Phase Architecture)
+### Multi-Agent Workflow (Three-Phase Architecture)
 
-The workflow uses a two-phase architecture to ensure accurate book identification:
+The workflow uses a three-phase architecture with human-in-the-loop region selection:
 
 ```mermaid
 flowchart TB
@@ -378,7 +437,7 @@ flowchart TB
         Extract[Extract exact<br/>title & author]
     end
 
-    subgraph Phase2["Phase 2: Main Workflow"]
+    subgraph Phase2["Phase 2: Discovery Workflow"]
         direction TB
 
         BC[book_context_pipeline<br/>🔍 Uses exact title/author] --> |state.book_context| RP
@@ -392,16 +451,30 @@ flowchart TB
             AP[author_pipeline<br/>✍️]
         end
 
-        PD --> |discoveries| TC
+        PD --> |discoveries| RA
+        RA[region_analyzer<br/>🌍 Group by geography]
+    end
+
+    subgraph HITL["Human-in-the-Loop"]
+        Select[User selects<br/>region(s) to explore]
+    end
+
+    subgraph Phase3["Phase 3: Composition Workflow"]
         TC[trip_composer<br/>🗺️ Personalized Itinerary]
     end
 
     Extract --> |"title, author"| BC
     State -.-> |ToolContext.state| RP
+    RA --> |region_analysis| Select
+    Select --> |selected_regions| TC
     TC --> Output[TripItinerary<br/>JSON Output]
 ```
 
-**Why two phases?** Books with common titles (e.g., "The Nightingale") can match multiple books by different authors. Phase 1 resolves the exact book, then Phase 2 uses the precise title and author for all searches.
+**Why three phases?**
+1. **Phase 1 (Metadata)**: Books with common titles (e.g., "The Nightingale") can match multiple books. Phase 1 resolves the exact book.
+2. **Phase 2 (Discovery)**: Finds all relevant locations and groups them into practical travel regions using LLM-based geographic analysis.
+3. **Human Selection**: User chooses which region(s) to explore, preventing impractical itineraries spanning distant locations.
+4. **Phase 3 (Composition)**: Creates a detailed itinerary for only the selected region(s).
 
 ### Data Flow
 
@@ -410,8 +483,10 @@ sequenceDiagram
     participant CLI as main.py
     participant SS as SessionService
     participant P1 as Phase 1: metadata_stage
-    participant P2 as Phase 2: main_workflow
-    participant RP as reader_profile_agent
+    participant P2 as Phase 2: discovery_workflow
+    participant RA as region_analyzer
+    participant User as User
+    participant P3 as Phase 3: composition_workflow
     participant TC as trip_composer
 
     CLI->>SS: create_session(state={user:preferences})
@@ -422,25 +497,34 @@ sequenceDiagram
     P1-->>SS: state["book_metadata"] = {title, author}
     CLI->>SS: get_session() → extract exact_title, exact_author
 
-    Note over CLI,P2: Phase 2: Create workflow with exact values
-    CLI->>P2: create_main_workflow(exact_title, exact_author)
+    Note over CLI,P2: Phase 2: Discovery + Region Analysis
+    CLI->>P2: create_discovery_workflow(exact_title, exact_author)
     CLI->>P2: run_async(prompt)
 
     P2->>P2: book_context_pipeline (searches: "title author setting")
-    P2->>RP: Execute
-    RP->>SS: get_user_preferences() via ToolContext.state
-    SS-->>RP: {budget: "luxury", pace: "relaxed", ...}
-    RP-->>P2: "User prefers luxury budget, relaxed pace..."
-
+    P2->>P2: reader_profile_agent
     P2->>P2: parallel_discovery (city, landmark, author)
+    P2->>RA: Analyze geographic regions
+    RA-->>SS: state["region_analysis"] = {regions: [...]}
 
-    P2->>TC: Execute with reader_profile in history
-    TC-->>P2: TripItinerary (personalized!)
+    Note over CLI,User: Human-in-the-Loop
+    CLI->>User: Display region options
+    User-->>CLI: Select region(s)
 
-    P2-->>CLI: Final response
+    Note over CLI,P3: Phase 3: Create itinerary for selected region(s)
+    CLI->>P3: create_composition_workflow()
+    CLI->>P3: run_async(prompt with selected_regions)
+
+    P3->>TC: Execute with selected_regions in prompt
+    TC-->>P3: TripItinerary (for selected region only!)
+
+    P3-->>CLI: Final response
 ```
 
-The two-phase approach ensures the `book_context_pipeline` searches for the exact book (e.g., "The Nightingale Kristin Hannah setting") rather than a generic title that could match multiple books.
+The three-phase approach ensures:
+1. Accurate book identification (Phase 1)
+2. Comprehensive location discovery with geographic grouping (Phase 2)
+3. Practical itineraries focused on user-selected regions (Phase 3)
 
 ### Two-Stage Agent Pattern
 
@@ -496,8 +580,19 @@ Search queries to use:
 - **Author Agent**: Locates author-related sites
 - All run in parallel for efficiency
 
-#### 4. Trip Composer Agent
-- Synthesizes all discoveries into coherent itinerary
+#### 4. Region Analyzer Agent
+- Analyzes discovered cities and groups them into practical travel regions
+- Uses LLM world knowledge for geographic proximity analysis
+- Rules for grouping:
+  - Same country, close proximity (~500km) → ONE region
+  - Cross-border accessible (train/short flight) → can be ONE region
+  - Large countries split into regions (USA: East/West Coast, etc.)
+  - Never combines cities requiring intercontinental flights
+- Validates with `RegionAnalysis` Pydantic model
+- Saves to `state["region_analysis"]`
+
+#### 5. Trip Composer Agent
+- Synthesizes discoveries into coherent itinerary for **selected region(s) only**
 - Groups by city, suggests timing
 - **Uses user preferences** for personalization:
   - Budget level (budget/moderate/luxury)
@@ -507,7 +602,7 @@ Search queries to use:
   - Dietary restrictions
 - Validates with `TripItinerary` Pydantic model
 
-#### 5. Reader Profile Agent
+#### 6. Reader Profile Agent
 - Uses `get_preferences_tool` to access `user:preferences` from session state
 - Tool reads from `ToolContext.state` (ADK's mechanism for state access)
 - Summarizes preferences for trip composer
@@ -672,16 +767,17 @@ Run unit tests locally without any API calls:
 .venv/bin/pytest tests/unit/test_models.py -v
 
 # Run specific test class
-.venv/bin/pytest tests/unit/test_agents.py::TestCreateWorkflow -v
+.venv/bin/pytest tests/unit/test_agents.py::TestEvalWorkflow -v
 ```
 
-**Test coverage:**
+**Test coverage (125 tests total):**
 | Module | Tests | Description |
 |--------|-------|-------------|
-| `test_models.py` | 32 | Pydantic model validation |
-| `test_tools.py` | 17 | Google Books, preferences tools |
-| `test_agents.py` | 33 | Agent factory functions (incl. two-phase workflow) |
-| `test_services.py` | 18 | Session service, context manager |
+| `test_models.py` | 46 | Pydantic model validation (incl. RegionAnalysis) |
+| `test_tools.py` | 16 | Google Books, preferences tools |
+| `test_agents.py` | 41 | Agent factory functions (three-phase & eval workflows) |
+| `test_services.py` | 16 | Session service, context manager |
+| `test_workflow_timeout.py` | 6 | Workflow timeout behavior |
 
 ### ADK Evaluation (CLI)
 
@@ -693,6 +789,8 @@ Run agent evaluation with rubric-based scoring:
   --config_file_path tests/evaluation/eval_config.json \
   --print_detailed_results
 ```
+
+**Note:** The eval workflow (`create_eval_workflow`) includes region analysis but auto-selects all regions since human-in-the-loop interaction is not possible in automated evaluations. The workflow still validates that region grouping works correctly.
 
 **Evaluation rubrics:**
 | Rubric | Description |
@@ -1004,8 +1102,13 @@ MAX_CONTEXT_TOKENS=30000
 # Model (optional)
 MODEL_NAME=gemini-2.0-flash-lite
 
+# Workflow execution (optional)
+WORKFLOW_TIMEOUT=300    # Max seconds for workflow (default: 300)
+AGENT_TIMEOUT=60        # Max seconds per agent (default: 60)
+
 # Logging (optional)
 LOG_LEVEL=INFO
+ENABLE_ADK_DEBUG=false  # Enable DEBUG for ADK internal logs
 ```
 
 ## Technology Stack

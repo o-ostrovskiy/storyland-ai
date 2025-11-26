@@ -22,7 +22,13 @@ from .discovery_agents import (
 )
 from .trip_composer_agent import create_trip_composer_agent
 from .reader_profile_agent import create_reader_profile_agent
-from .orchestrator import create_workflow, create_metadata_stage, create_main_workflow
+from .region_analyzer_agent import create_region_analyzer_agent
+from .orchestrator import (
+    create_metadata_stage,
+    create_discovery_workflow,
+    create_composition_workflow,
+    create_eval_workflow,
+)
 
 __all__ = [
     "create_book_metadata_pipeline",
@@ -32,7 +38,9 @@ __all__ = [
     "create_author_pipeline",
     "create_trip_composer_agent",
     "create_reader_profile_agent",
-    "create_workflow",
+    "create_region_analyzer_agent",
     "create_metadata_stage",
-    "create_main_workflow",
+    "create_discovery_workflow",
+    "create_composition_workflow",
+    "create_eval_workflow",
 ]

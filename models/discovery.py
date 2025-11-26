@@ -53,3 +53,40 @@ class AuthorSites(BaseModel):
     author_sites: List[AuthorSiteInfo] = Field(
         description="List of author-related sites"
     )
+
+
+class RegionCity(BaseModel):
+    """A city within a travel region"""
+
+    name: str = Field(description="City name")
+    country: str = Field(description="Country name")
+
+
+class RegionOption(BaseModel):
+    """A practical travel region grouping nearby cities"""
+
+    region_id: int = Field(description="Unique identifier for the region (1, 2, 3...)")
+    region_name: str = Field(
+        description="Descriptive name for the region (e.g., 'New England, USA', 'Western Europe')"
+    )
+    cities: List[RegionCity] = Field(description="Cities in this region")
+    estimated_days: int = Field(
+        description="Estimated total days to visit all cities in this region", ge=1, le=30
+    )
+    travel_note: str = Field(
+        description="How to travel between cities (e.g., 'All cities accessible by car within 2-3 hours')"
+    )
+    highlights: str = Field(
+        description="Key attractions or reasons to choose this region"
+    )
+
+
+class RegionAnalysis(BaseModel):
+    """Analysis of discovered locations grouped into practical travel regions"""
+
+    regions: List[RegionOption] = Field(
+        description="List of practical travel regions, each containing cities that can be visited together"
+    )
+    analysis_note: str = Field(
+        description="Brief explanation of why locations were grouped this way"
+    )

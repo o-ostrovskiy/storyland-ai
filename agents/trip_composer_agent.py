@@ -25,7 +25,21 @@ def create_trip_composer_agent(model):
         output_key="final_itinerary",
         instruction="""You are a literary travel planner. Create a PERSONALIZED travel itinerary.
 
-## Step 1: Check User Preferences
+## Step 1: Check for Selected Region (IMPORTANT!)
+
+Look for "selected_regions" in the conversation history or prompt. This contains the user's chosen travel region(s).
+
+**CRITICAL:** The selected_regions will be provided in the user prompt as JSON. Extract the cities from these regions.
+
+If selected_regions exists:
+- ONLY include cities that are listed in the selected_regions
+- Each region has a "cities" array with city objects containing "name" and "country"
+- Focus landmarks and stops ONLY on cities within the selected region(s)
+- Completely ignore cities/landmarks from other regions that were discovered but not selected
+
+If no selected_regions found in the prompt, use all discovered cities.
+
+## Step 2: Check User Preferences
 
 Look for user preferences from the reader_profile_agent output in the conversation history:
 - budget: "budget", "moderate", or "luxury"
@@ -35,15 +49,15 @@ Look for user preferences from the reader_profile_agent output in the conversati
 
 If no preferences found, use defaults: moderate budget, balanced pace, museum-friendly.
 
-## Step 2: Review Discovery Information
+## Step 3: Review Discovery Information
 
-Review ALL the information from the conversation history:
+Review the information from the conversation history (filtered by selected region if applicable):
 - Book metadata and context
-- Cities to visit
-- Landmarks and experiences
-- Author-related sites
+- Cities to visit (only from selected region)
+- Landmarks and experiences (only in cities from selected region)
+- Author-related sites (only in cities from selected region)
 
-## Step 3: Create Personalized Itinerary
+## Step 4: Create Personalized Itinerary
 
 Create a TripItinerary that RESPECTS user preferences:
 
