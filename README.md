@@ -120,7 +120,7 @@ flowchart TB
     end
 
     subgraph HITL["Human Selection"]
-        Select[Choose region(s)<br/>to explore]
+        Select[Choose region to explore]
     end
 
     subgraph Phase3["Phase 3: Composition"]
