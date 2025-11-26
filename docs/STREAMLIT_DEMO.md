@@ -160,10 +160,45 @@ For production use with database persistence and advanced features, see:
 - [README.md](README.md) - Complete documentation
 - [storyland_showcase.ipynb](storyland_showcase.ipynb) - Jupyter notebook demos
 
-## Demo Video/Screenshots
+## Demo Screenshots
 
-Add screenshots here showing:
-1. Initial welcome screen
-2. Book input and preferences
-3. Region selection UI
-4. Final itinerary display
+### 1. Initial Welcome Screen
+
+![StoryLand AI Welcome Screen](images/Screenshot%202025-11-25%20at%2010.33.54%20PM.png)
+
+The app opens with a clean interface where you can:
+- Enter book title and optional author in the sidebar
+- Configure travel preferences (budget, pace, museums, kids)
+- Click "Create Itinerary" to start the discovery process
+
+### 2. Region Selection UI
+
+![Region Selection Interface](images/Screenshot%202025-11-25%20at%2010.34.57%20PM.png)
+
+After discovery completes, the app displays beautiful region cards showing:
+- Cities included in each region
+- Estimated trip duration (days)
+- Travel notes and logistics
+- Key highlights for that region
+- Interactive checkboxes to select which region(s) you want to explore
+
+### 3. Preference Configuration
+
+![Travel Preferences Sidebar](images/Screenshot%202025-11-25%20at%2010.35.13%20PM.png)
+
+The sidebar offers comprehensive personalization options:
+- **Budget:** Budget, Moderate, or Luxury
+- **Travel Pace:** Relaxed, Moderate, or Fast-paced
+- **Prefer Museums:** Toggle for literary museum recommendations
+- **Traveling with Kids:** Family-friendly activity suggestions
+
+### 4. Final Itinerary Display
+
+![Complete Travel Itinerary](images/Screenshot%202025-11-25%20at%2010.35.52%20PM.png)
+
+The final itinerary provides detailed travel plans:
+- Expandable city sections with suggested days
+- Specific stops (landmarks, museums, cafes, author sites)
+- Why each location matters to the book
+- Practical timing and visit notes
+- Trip summary with literary context

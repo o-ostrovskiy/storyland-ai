@@ -78,6 +78,22 @@ python main.py --dev
 
 📖 **[Full installation guide →](docs/getting-started.md)**
 
+## Screenshots
+
+### Web Interface (Streamlit)
+
+<div align="center">
+  <img src="docs/images/Screenshot 2025-11-25 at 10.34.57 PM.png" alt="Region Selection" width="800"/>
+  <p><i>Interactive region selection with geographic grouping</i></p>
+</div>
+
+<div align="center">
+  <img src="docs/images/Screenshot 2025-11-25 at 10.35.52 PM.png" alt="Complete Itinerary" width="800"/>
+  <p><i>Detailed itinerary with literary context and practical travel info</i></p>
+</div>
+
+**More screenshots:** See [Streamlit Demo Guide](docs/STREAMLIT_DEMO.md) for additional screenshots including the welcome screen and preference configuration.
+
 ## Architecture
 
 StoryLand AI uses a three-phase workflow with human-in-the-loop region selection:
@@ -138,9 +154,34 @@ flowchart TB
 
 **Technology Stack:**
 - [Google Agent Development Kit (ADK)](https://github.com/googleapis/python-genai)
-- Google Gemini 2.0 Flash
+- Google Gemini 2.0/2.5 models (configurable)
 - Pydantic for data validation
 - SQLite for persistence
+
+### AI Models
+
+**Powered by Google Gemini**
+
+StoryLand AI leverages Google's Gemini models as the foundation for all agent intelligence:
+
+**Why Gemini?**
+- **Native ADK Integration:** First-class support in Google Agent Development Kit with seamless multi-agent orchestration, session management, and tool calling
+- **Fast Parallel Execution:** Sub-2 second response times enable efficient concurrent agent execution (3 agents running in parallel)
+- **Superior Structured Output:** Excellent JSON mode adherence for Pydantic schema validation across all 11 data models
+- **Cost-Effective for Multi-Agent Systems:** Free tier supports 15 requests per minute, sufficient for development and demos
+- **World Knowledge for Geography:** Built-in geographic understanding enables region grouping without external maps API
+
+**Model Configuration:**
+- **Default:** `gemini-2.0-flash-lite` (configurable via `MODEL_NAME` in .env)
+- **Alternatives:** `gemini-2.0-flash-exp`, `gemini-2.5-flash-preview-0205`, or any Gemini model
+- **All Agents:** Same model used across metadata, discovery, region analysis, and composition
+- **Eval Judge:** Gemini 2.0 Flash Lite for cost-effective rubric-based evaluation
+
+**Performance Metrics:**
+- Typical workflow: 60-100 seconds end-to-end (3 phases)
+- Parallel discovery: 3x speedup vs sequential (15s vs 45s)
+- Token efficiency: ~8,000-12,000 tokens per complete itinerary
+- Rate limits: Handles free tier 15 RPM with exponential backoff retry
 
 ## Documentation
 

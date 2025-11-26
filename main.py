@@ -168,26 +168,44 @@ async def create_itinerary(
     logger = get_logger("storyland.main")
     logger.info("itinerary_request", book_title=book_title, author=author)
 
-    # Configure model
+    # Configure model with retry logic
+    # WHY EXPONENTIAL BACKOFF: Gemini API free tier has 15 RPM limit. With 6+ agents
+    # making parallel Google Search calls, we can hit rate limits (429 errors).
+    # Exponential backoff (exp_base=7) with 5 attempts gives time for rate limit
+    # windows to reset: 1s → 7s → 49s delays between retries.
+    # Also handles transient server errors (500, 503, 504).
     retry_config = types.HttpRetryOptions(
-        attempts=5, exp_base=7, initial_delay=1, http_status_codes=[429, 500, 503, 504]
+        attempts=5,           # Retry up to 5 times before failing
+        exp_base=7,           # Aggressive exponential backoff for rate limits
+        initial_delay=1,      # Start with 1 second delay
+        http_status_codes=[429, 500, 503, 504]  # Rate limit + server errors
     )
     model = Gemini(
         model=config.model_name, api_key=config.google_api_key, retry_options=retry_config
     )
 
     # Create services
+    # WHY SESSION SERVICE: ADK's Runner requires a session_service to persist state
+    # across workflow phases. We support two backends:
+    # - InMemorySessionService: Fast, for demos/dev (no persistence)
+    # - DatabaseSessionService: SQLite, for production (survives restarts)
+    # Session state stores: book_metadata, discoveries, selected_regions, preferences
     session_service = create_session_service(
         connection_string=config.database_url, use_database=use_database or config.use_database
     )
     context_manager = ContextManager(max_events=config.session_max_events)
 
     # Build initial state
+    # WHY INITIAL STATE: Seed session with user input and preferences. These are
+    # available to all agents via session.state dict. The reader_profile_agent uses
+    # get_preferences_tool to read "user:preferences" from state.
     initial_state = {"book_title": book_title, "author": author or ""}
     if preferences:
         initial_state["user:preferences"] = preferences
 
     # Create session
+    # WHY UUID: Each CLI invocation gets unique session_id for isolation. In production,
+    # sessions could be reused to maintain conversation history across multiple books.
     session_id = str(uuid.uuid4())
     await session_service.create_session(
         app_name="storyland",
@@ -198,6 +216,9 @@ async def create_itinerary(
     logger.info("session_created", session_id=session_id[:8])
 
     # Determine workflow timeout
+    # WHY TIMEOUT: Workflows can hang on rate limits or slow Google Search queries.
+    # Default 300s (5 min) is generous for 3 phases. Users can override with --timeout.
+    # Without timeout, a stuck workflow would run indefinitely.
     workflow_timeout = timeout if timeout is not None else config.workflow_timeout
     logger.info(
         "workflow_starting",
@@ -217,9 +238,13 @@ async def create_itinerary(
     print(f"{'='*70}\n")
 
     final_response = None
-    event_count = 0
+    event_count = 0  # Track events for timeout error reporting
 
     try:
+        # WHY ASYNCIO.TIMEOUT: Wraps all 3 workflow phases in a single timeout context.
+        # If total execution exceeds workflow_timeout seconds, raises TimeoutError with
+        # diagnostic info (how many events processed before timeout).
+        # This is a safety mechanism - workflows should complete in <2 minutes typically.
         async with asyncio.timeout(workflow_timeout):
             # Phase 1: Extract book metadata
             logger.info("phase_1_start", phase="metadata_extraction")
@@ -317,7 +342,11 @@ Find cities, landmarks, and author-related sites, then group them into practical
                 raise WorkflowTimeoutError(error_msg)
 
             # Store selected regions in session state for trip_composer to access
-            # Note: State changes are automatically persisted by DatabaseSessionService
+            # WHY MANUAL STATE UPDATE: Phase 3 (composition) is a separate Runner instance.
+            # It needs selected_regions in session.state to create itinerary for only those
+            # regions. We fetch session, mutate state dict, and DatabaseSessionService auto-
+            # persists the change. InMemorySessionService just keeps it in memory.
+            # This is how we pass data between workflow phases (cross-Runner communication).
             session = await session_service.get_session(
                 app_name="storyland", user_id=user_id, session_id=session_id
             )
@@ -363,6 +392,11 @@ Include ALL cities from the selected regions in your itinerary."""
                         logger.info("workflow_complete", total_events=event_count)
 
     except asyncio.TimeoutError:
+        # WHY CUSTOM ERROR: Convert Python's asyncio.TimeoutError to domain-specific
+        # WorkflowTimeoutError with diagnostic context (event_count, book_title).
+        # This helps users understand WHERE the timeout occurred (which phase) and
+        # provides actionable guidance (increase timeout or simplify request).
+        # event_count shows progress: 5 events = stuck early, 50 events = stuck late.
         logger.error(
             "workflow_timeout",
             book_title=book_title,

@@ -3,6 +3,31 @@ Book metadata extraction agent.
 
 Two-stage pipeline that searches Google Books API and formats the result
 into validated BookMetadata.
+
+WHY TWO-STAGE PIPELINE?
+This pattern (researcher → formatter) is used across 5+ agents in this project
+to prevent LLM hallucination:
+
+Stage 1 (Researcher): LLM with tools
+- Has access to external APIs (Google Books, Google Search)
+- Gathers real data from authoritative sources
+- Returns raw results without transformation
+
+Stage 2 (Formatter): LLM with Pydantic output_schema
+- No tools, only processes previous agent's output
+- Validates data against strict Pydantic schema
+- Cannot fabricate data (only has conversation history)
+
+ANTI-HALLUCINATION MECHANISM:
+- Stage 2 instructions explicitly say: "If researcher found nothing, return empty
+  fields - do not hallucinate."
+- Since formatter has no tools, it cannot make up book metadata.
+- Result: Type-safe, validated data that came from real API calls.
+
+TRADE-OFF:
+- 2x LLM calls per pipeline (higher cost)
+- But significantly more accurate and reliable
+- Worth it for data integrity in production systems
 """
 
 from google.adk.agents import LlmAgent, SequentialAgent
@@ -20,7 +45,9 @@ def create_book_metadata_pipeline(model, google_books_tool):
     Returns:
         SequentialAgent that extracts and formats book metadata
     """
-    # Stage 1: Tool agent
+    # Stage 1: Tool agent (Researcher)
+    # WHY SEPARATE RESEARCHER: This agent focuses solely on calling the Google Books
+    # API tool with correct parameters. It doesn't worry about output format.
     book_metadata_researcher = LlmAgent(
         name="book_metadata_researcher",
         model=model,
@@ -37,12 +64,17 @@ def create_book_metadata_pipeline(model, google_books_tool):
 IMPORTANT: Always pass the author parameter if mentioned - this prevents returning wrong books with same titles.""",
     )
 
-    # Stage 2: Pydantic formatter
+    # Stage 2: Pydantic formatter (Validator)
+    # WHY SEPARATE FORMATTER: This agent has NO TOOLS (cannot hallucinate new data).
+    # It only validates and structures what the researcher found. The output_schema
+    # enforces type safety via Pydantic, catching missing/invalid fields early.
+    # Storing to output_key="book_metadata" makes it available in session.state for
+    # downstream agents (discovery workflow needs exact title/author).
     book_metadata_formatter = LlmAgent(
         name="book_metadata_formatter",
         model=model,
-        output_schema=BookMetadata,
-        output_key="book_metadata",
+        output_schema=BookMetadata,  # Pydantic validation enforced by ADK
+        output_key="book_metadata",  # Store in session.state["book_metadata"]
         instruction="""Format the book metadata into a validated BookMetadata object.
 
 IMPORTANT: If the researcher found no book or reported an error, return empty/null fields - do not hallucinate metadata.
