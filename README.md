@@ -82,10 +82,10 @@ python main.py --dev
 
 ### Web Interface (Streamlit)
 
-![Region Selection](docs/images/Screenshot%202025-11-25%20at%2010.34.57%20PM.png)
+![Region Selection](docs/images/region%20selection.png)
 *Interactive region selection with geographic grouping*
 
-![Complete Itinerary](docs/images/Screenshot%202025-11-25%20at%2010.35.52%20PM.png)
+![Complete Itinerary](docs/images/trip%20iternary.png)
 *Detailed itinerary with literary context and practical travel info*
 
 **More screenshots:** See [Streamlit Demo Guide](docs/STREAMLIT_DEMO.md) for additional screenshots including the welcome screen and preference configuration.

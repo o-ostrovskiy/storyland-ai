@@ -164,7 +164,7 @@ For production use with database persistence and advanced features, see:
 
 ### 1. Initial Welcome Screen
 
-![StoryLand AI Welcome Screen](images/Screenshot%202025-11-25%20at%2010.33.54%20PM.png)
+![StoryLand AI Welcome Screen](images/welcome.png)
 
 The app opens with a clean interface where you can:
 - Enter book title and optional author in the sidebar
@@ -173,7 +173,7 @@ The app opens with a clean interface where you can:
 
 ### 2. Region Selection UI
 
-![Region Selection Interface](images/Screenshot%202025-11-25%20at%2010.34.57%20PM.png)
+![Region Selection Interface](images/region%20selection.png)
 
 After discovery completes, the app displays beautiful region cards showing:
 - Cities included in each region
@@ -182,9 +182,9 @@ After discovery completes, the app displays beautiful region cards showing:
 - Key highlights for that region
 - Interactive checkboxes to select which region(s) you want to explore
 
-### 3. Preference Configuration
+### 3. Locations Preview
 
-![Travel Preferences Sidebar](images/Screenshot%202025-11-25%20at%2010.35.13%20PM.png)
+![Locations Preview](images/locations%20preview.png)
 
 The sidebar offers comprehensive personalization options:
 - **Budget:** Budget, Moderate, or Luxury
@@ -194,7 +194,7 @@ The sidebar offers comprehensive personalization options:
 
 ### 4. Final Itinerary Display
 
-![Complete Travel Itinerary](images/Screenshot%202025-11-25%20at%2010.35.52%20PM.png)
+![Complete Travel Itinerary](images/trip%20iternary.png)
 
 The final itinerary provides detailed travel plans:
 - Expandable city sections with suggested days
