@@ -16,6 +16,7 @@ import subprocess
 import sys
 from typing import Optional, List
 
+from async_timeout import timeout
 from google.genai import types
 from google.adk.models.google_llm import Gemini
 from google.adk.runners import Runner
@@ -241,11 +242,11 @@ async def create_itinerary(
     event_count = 0  # Track events for timeout error reporting
 
     try:
-        # WHY ASYNCIO.TIMEOUT: Wraps all 3 workflow phases in a single timeout context.
+        # WHY TIMEOUT: Wraps all 3 workflow phases in a single timeout context.
         # If total execution exceeds workflow_timeout seconds, raises TimeoutError with
         # diagnostic info (how many events processed before timeout).
         # This is a safety mechanism - workflows should complete in <2 minutes typically.
-        async with asyncio.timeout(workflow_timeout):
+        async with timeout(workflow_timeout):
             # Phase 1: Extract book metadata
             logger.info("phase_1_start", phase="metadata_extraction")
             print("Phase 1: Extracting book metadata...")
