@@ -20,6 +20,7 @@ from google.adk.plugins.logging_plugin import LoggingPlugin
 
 from common.config import load_config
 from common.logging import configure_logging, get_logger
+from common.langfuse_init import initialize_langfuse
 from services.session_service import create_session_service
 from tools.google_books import google_books_tool
 from agents.orchestrator import (
@@ -264,6 +265,13 @@ async def run_workflow(
     # Configure logging
     configure_logging(level="INFO", enable_adk_debug=False)
     logger = get_logger("storyland.streamlit")
+
+    # Initialize Langfuse tracing if configured
+    initialize_langfuse(
+        secret_key=config.langfuse_secret_key,
+        public_key=config.langfuse_public_key,
+        host=config.langfuse_host,
+    )
 
     # Configure model
     retry_config = types.HttpRetryOptions(
