@@ -23,6 +23,7 @@ from google.adk.runners import Runner
 
 from common.config import load_config
 from common.logging import configure_logging, get_logger
+from common.langfuse_init import initialize_langfuse
 from services.session_service import create_session_service
 from services.context_manager import ContextManager
 from tools.google_books import google_books_tool
@@ -135,7 +136,7 @@ async def create_itinerary(
     use_database: bool = False,
     preferences: Optional[dict] = None,
     verbose: bool = False,
-    timeout: Optional[int] = None,
+    timeout_seconds: Optional[int] = None,
 ):
     """
     Create a literary travel itinerary for a book.
@@ -152,7 +153,7 @@ async def create_itinerary(
         use_database: If True, use SQLite for session persistence
         preferences: Optional user preferences for personalization
         verbose: Enable DEBUG logging
-        timeout: Maximum seconds for workflow execution (overrides config)
+        timeout_seconds: Maximum seconds for workflow execution (overrides config)
 
     Returns:
         TripItinerary dict with the complete travel plan, or None on failure
@@ -165,6 +166,13 @@ async def create_itinerary(
     # Configure logging
     log_level = "DEBUG" if verbose else config.log_level
     configure_logging(level=log_level, enable_adk_debug=verbose or config.enable_adk_debug)
+
+    # Initialize Langfuse tracing if configured
+    initialize_langfuse(
+        secret_key=config.langfuse_secret_key,
+        public_key=config.langfuse_public_key,
+        host=config.langfuse_host,
+    )
 
     logger = get_logger("storyland.main")
     logger.info("itinerary_request", book_title=book_title, author=author)
@@ -220,7 +228,7 @@ async def create_itinerary(
     # WHY TIMEOUT: Workflows can hang on rate limits or slow Google Search queries.
     # Default 300s (5 min) is generous for 3 phases. Users can override with --timeout.
     # Without timeout, a stuck workflow would run indefinitely.
-    workflow_timeout = timeout if timeout is not None else config.workflow_timeout
+    workflow_timeout = timeout_seconds if timeout_seconds is not None else config.workflow_timeout
     logger.info(
         "workflow_starting",
         book_title=book_title,
@@ -572,7 +580,7 @@ Examples:
             use_database=args.database,
             preferences=preferences if preferences else None,
             verbose=args.verbose,
-            timeout=args.timeout,
+            timeout_seconds=args.timeout,
         )
         display_itinerary(result)
     except WorkflowTimeoutError as e:
