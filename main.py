@@ -23,6 +23,8 @@ from google.adk.runners import Runner
 
 from common.config import load_config
 from common.logging import configure_logging, get_logger
+from common.langfuse_init import initialize_langfuse, is_enabled
+from langfuse import Langfuse
 from services.session_service import create_session_service
 from services.context_manager import ContextManager
 from tools.google_books import google_books_tool
@@ -136,7 +138,7 @@ async def create_itinerary(
     use_database: bool = False,
     preferences: Optional[dict] = None,
     verbose: bool = False,
-    timeout: Optional[int] = None,
+    timeout_seconds: Optional[int] = None,
 ):
     """
     Create a literary travel itinerary for a book.
@@ -153,7 +155,7 @@ async def create_itinerary(
         use_database: If True, use SQLite for session persistence
         preferences: Optional user preferences for personalization
         verbose: Enable DEBUG logging
-        timeout: Maximum seconds for workflow execution (overrides config)
+        timeout_seconds: Maximum seconds for workflow execution (overrides config)
 
     Returns:
         TripItinerary dict with the complete travel plan, or None on failure
@@ -167,8 +169,36 @@ async def create_itinerary(
     log_level = "DEBUG" if verbose else config.log_level
     configure_logging(level=log_level, enable_adk_debug=verbose or config.enable_adk_debug)
 
+    # Initialize Langfuse tracing if configured
+    langfuse_enabled = initialize_langfuse(
+        secret_key=config.langfuse_secret_key,
+        public_key=config.langfuse_public_key,
+        host=config.langfuse_host,
+    )
+
     logger = get_logger("storyland.main")
     logger.info("itinerary_request", book_title=book_title, author=author)
+
+    # Create Langfuse trace for this itinerary request
+    langfuse_client = None
+    trace = None
+    if langfuse_enabled:
+        try:
+            from langfuse import get_client
+            langfuse_client = get_client()
+            trace = langfuse_client.trace(
+                name="generate-itinerary",
+                metadata={
+                    "book": book_title,
+                    "author": author or "unknown",
+                    "user_id": user_id,
+                    "preferences": preferences or {},
+                },
+                tags=["itinerary", "adk-workflow"],
+            )
+            logger.info("langfuse_trace_created", trace_id=trace.id)
+        except Exception as e:
+            logger.warning("langfuse_trace_creation_failed", error=str(e))
 
     # Configure model with retry logic
     # WHY EXPONENTIAL BACKOFF: Gemini API free tier has 15 RPM limit. With 6+ agents
@@ -232,7 +262,7 @@ async def create_itinerary(
     # WHY TIMEOUT: Workflows can hang on rate limits or slow Google Search queries.
     # Default 300s (5 min) is generous for 3 phases. Users can override with --timeout.
     # Without timeout, a stuck workflow would run indefinitely.
-    workflow_timeout = timeout if timeout is not None else config.workflow_timeout
+    workflow_timeout = timeout_seconds if timeout_seconds is not None else config.workflow_timeout
     logger.info(
         "workflow_starting",
         book_title=book_title,
@@ -262,6 +292,12 @@ async def create_itinerary(
             # Phase 1: Extract book metadata
             logger.info("phase_1_start", phase="metadata_extraction")
             print("Phase 1: Extracting book metadata...")
+
+            # Create Langfuse span for metadata stage
+            metadata_span = None
+            if trace:
+                metadata_span = trace.span(name="metadata-stage", metadata={"phase": 1})
+
             metadata_stage = create_metadata_stage(model, google_books_tool)
             metadata_runner = Runner(
                 agent=metadata_stage,
@@ -296,9 +332,28 @@ async def create_itinerary(
             )
             print(f"\nFound: \"{exact_title}\" by {exact_author}")
 
+            # Update Langfuse span with results
+            if metadata_span:
+                metadata_span.end(
+                    output={
+                        "book_title": exact_title,
+                        "author": exact_author,
+                        "metadata": book_metadata,
+                    }
+                )
+
             # Phase 2: Discovery - find locations and analyze regions
             logger.info("phase_2_start", phase="location_discovery")
             print("\nPhase 2: Discovering locations and analyzing travel regions...")
+
+            # Create Langfuse span for discovery stage
+            discovery_span = None
+            if trace:
+                discovery_span = trace.span(
+                    name="discovery-stage",
+                    metadata={"phase": 2, "book_title": exact_title, "author": exact_author}
+                )
+
             discovery_workflow = create_discovery_workflow(
                 model, book_title=exact_title, author=exact_author
             )
@@ -334,6 +389,15 @@ Find cities, landmarks, and author-related sites, then group them into practical
                 "regions_discovered",
                 num_regions=len(region_analysis.get("regions", []))
             )
+
+            # Update Langfuse span with results
+            if discovery_span:
+                discovery_span.end(
+                    output={
+                        "num_regions": len(region_analysis.get("regions", [])),
+                        "regions": region_analysis.get("regions", []),
+                    }
+                )
 
             # Display region options and get user selection
             display_region_options(region_analysis)
@@ -375,6 +439,18 @@ Find cities, landmarks, and author-related sites, then group them into practical
             logger.info("phase_3_start", phase="itinerary_composition", region_count=len(selected_regions))
             print(f"\nPhase 3: Creating itinerary for {region_name}...")
 
+            # Create Langfuse span for composition stage
+            composition_span = None
+            if trace:
+                composition_span = trace.span(
+                    name="composition-stage",
+                    metadata={
+                        "phase": 3,
+                        "region_count": len(selected_regions),
+                        "selected_regions": [r.get("region_name") for r in selected_regions],
+                    }
+                )
+
             composition_workflow = create_composition_workflow(model)
             composition_runner = Runner(
                 agent=composition_workflow,
@@ -404,6 +480,15 @@ Include ALL cities from the selected regions in your itinerary."""
                         final_response = event
                         logger.info("workflow_complete", total_events=event_count)
 
+            # Update Langfuse span with results
+            if composition_span:
+                composition_span.end(
+                    output={
+                        "itinerary_created": final_response is not None,
+                        "total_events": event_count,
+                    }
+                )
+
     except asyncio.TimeoutError:
         # WHY CUSTOM ERROR: Convert Python's asyncio.TimeoutError to domain-specific
         # WorkflowTimeoutError with diagnostic context (event_count, book_title).
@@ -416,11 +501,31 @@ Include ALL cities from the selected regions in your itinerary."""
             timeout_seconds=workflow_timeout,
             events_processed=event_count
         )
+
+        # Update Langfuse trace with error information
+        if trace:
+            trace.update(
+                output={"error": "timeout", "events_processed": event_count},
+                metadata={
+                    "timeout_seconds": workflow_timeout,
+                    "error_type": "WorkflowTimeoutError",
+                },
+                tags=["itinerary", "adk-workflow", "error", "timeout"],
+            )
+
         raise WorkflowTimeoutError(
             f"Workflow exceeded {workflow_timeout}s timeout. "
             f"Processed {event_count} events before timeout. "
             "Consider increasing WORKFLOW_TIMEOUT or simplifying the request."
         )
+    except Exception as e:
+        # Update Langfuse trace with error information for any unexpected errors
+        if trace:
+            trace.update(
+                output={"error": str(e), "error_type": type(e).__name__},
+                tags=["itinerary", "adk-workflow", "error"],
+            )
+        raise
 
     # Extract result
     result_data = None
@@ -461,6 +566,28 @@ Include ALL cities from the selected regions in your itinerary."""
 
         # Flush Langfuse events
         await langfuse_plugin.flush()
+    # Update Langfuse trace with final results and token usage
+    if trace:
+        trace.update(
+            output={
+                "itinerary_created": result_data is not None,
+                "total_events": event_count,
+                "num_cities": len(result_data.get("cities", [])) if result_data else 0,
+            },
+            metadata={
+                "book": book_title,
+                "author": author or "unknown",
+                "exact_title": exact_title if 'exact_title' in locals() else book_title,
+                "exact_author": exact_author if 'exact_author' in locals() else author,
+                "user_id": user_id,
+                "preferences": preferences or {},
+                "token_usage": {
+                    "estimated_tokens": stats['estimated_tokens'],
+                    "num_events": stats['num_events'],
+                },
+            },
+            tags=["itinerary", "adk-workflow", "completed"],
+        )
 
     return result_data
 
@@ -601,7 +728,7 @@ Examples:
             use_database=args.database,
             preferences=preferences if preferences else None,
             verbose=args.verbose,
-            timeout=args.timeout,
+            timeout_seconds=args.timeout,
         )
         display_itinerary(result)
     except WorkflowTimeoutError as e:

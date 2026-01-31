@@ -8,6 +8,14 @@ import json
 import requests
 from typing import List, Optional
 
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+    after_log,
+)
 from google.adk.tools import FunctionTool
 from models.book import BookInfo, BookMetadata
 from common.logging import get_logger
@@ -15,6 +23,13 @@ from common.logging import get_logger
 logger = get_logger(__name__)
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((requests.exceptions.RequestException, requests.exceptions.Timeout)),
+    before_sleep=before_sleep_log(logger, "warning"),
+    after=after_log(logger, "info"),
+)
 def search_books(
     title: str, author: Optional[str] = None, max_results: int = 5
 ) -> List[BookInfo]:
@@ -28,6 +43,18 @@ def search_books(
 
     Returns:
         List of BookInfo objects
+
+    Raises:
+        requests.exceptions.HTTPError: For rate limiting (429) or other HTTP errors
+        requests.exceptions.Timeout: For timeout errors
+        requests.exceptions.RequestException: For other request errors
+
+    Note:
+        This function implements exponential backoff retry logic:
+        - Retries up to 3 times
+        - Wait times: 2s, 4s, 8s (exponential backoff)
+        - Retries on RequestException and Timeout
+        - Logs retry attempts to Langfuse via structlog
     """
     logger.info("google_books_search", title=title, author=author)
 
@@ -46,8 +73,26 @@ def search_books(
         params = {"q": query, "maxResults": max_results, "printType": "books"}
 
         logger.debug("google_books_query", query=query, url=url)
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
+
+        try:
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            # Handle rate limiting specifically
+            if e.response.status_code == 429:
+                logger.warning(
+                    "google_books_rate_limited",
+                    status_code=429,
+                    message="Rate limit exceeded, will retry with backoff"
+                )
+            raise
+        except requests.exceptions.Timeout as e:
+            logger.warning(
+                "google_books_timeout",
+                timeout=10,
+                message="Request timed out, will retry"
+            )
+            raise
 
         data = response.json()
         items = data.get("items", [])
@@ -97,6 +142,14 @@ def search_books(
 
         return results
 
+    except requests.exceptions.RequestException as e:
+        logger.error(
+            "google_books_search_failed",
+            error=str(e),
+            error_type=type(e).__name__,
+            message="All retry attempts exhausted"
+        )
+        raise
     except Exception as e:
         logger.error("google_books_search_failed", error=str(e), error_type=type(e).__name__)
         raise
