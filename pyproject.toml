@@ -28,6 +28,7 @@ dependencies = [
     "async-timeout>=4.0.0",
     "langfuse>=2.0.0",
     "openinference-instrumentation-google-adk>=0.1.0",
+    "aiosqlite>=0.19.0",
 ]
 
 [project.optional-dependencies]
