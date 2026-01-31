@@ -37,7 +37,7 @@ class TestCreateSessionService:
     def test_create_database_service(self, tmp_path):
         """Test use_database=True creates DatabaseSessionService."""
         db_path = tmp_path / "test.db"
-        connection_string = f"sqlite:///{db_path}"
+        connection_string = f"sqlite+aiosqlite:///{db_path}"
 
         service = create_session_service(
             connection_string=connection_string,
@@ -55,7 +55,7 @@ class TestCreateSessionService:
     def test_create_session_service_ignores_connection_string_when_not_database(self):
         """Test connection_string is ignored when use_database=False."""
         service = create_session_service(
-            connection_string="sqlite:///should_be_ignored.db",
+            connection_string="sqlite+aiosqlite:///should_be_ignored.db",
             use_database=False
         )
 
@@ -92,7 +92,7 @@ class TestCreateSessionServiceFromEnv:
 
     @patch.dict(os.environ, {
         'USE_DATABASE': 'true',
-        'DATABASE_URL': 'sqlite:///custom_test.db'
+        'DATABASE_URL': 'sqlite+aiosqlite:///custom_test.db'
     })
     def test_from_env_with_custom_database_url(self):
         """Test uses DATABASE_URL from environment."""

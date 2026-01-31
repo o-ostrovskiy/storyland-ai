@@ -38,7 +38,7 @@
 
    # Optional - Enable database persistence
    USE_DATABASE=false
-   DATABASE_URL=sqlite:///storyland_sessions.db
+   DATABASE_URL=sqlite+aiosqlite:///storyland_sessions.db
    ```
 
 ## Quick Start
