@@ -54,6 +54,12 @@ pip install -e ".[dev]"
 # Configure API key
 cp .env.example .env
 # Edit .env and add your GOOGLE_API_KEY
+
+# Optional: Configure Langfuse for LLM observability
+# Add your Langfuse credentials to .env:
+# - LANGFUSE_SECRET_KEY
+# - LANGFUSE_PUBLIC_KEY
+# - LANGFUSE_HOST
 ```
 
 ### Run

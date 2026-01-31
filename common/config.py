@@ -27,6 +27,9 @@ class Config:
     agent_timeout: int
     log_level: str
     enable_adk_debug: bool
+    langfuse_secret_key: Optional[str]
+    langfuse_public_key: Optional[str]
+    langfuse_host: Optional[str]
 
 
 def _require_env(key: str) -> str:
@@ -66,6 +69,9 @@ def load_config() -> Config:
 
     Optional:
         - DATABASE_URL: Database connection string
+        - LANGFUSE_SECRET_KEY: Langfuse secret key
+        - LANGFUSE_PUBLIC_KEY: Langfuse public key
+        - LANGFUSE_HOST: Langfuse host URL
 
     Returns:
         Config object
@@ -84,6 +90,9 @@ def load_config() -> Config:
         agent_timeout=_require_env_int("AGENT_TIMEOUT"),
         log_level=_require_env("LOG_LEVEL").upper(),
         enable_adk_debug=_require_env_bool("ENABLE_ADK_DEBUG"),
+        langfuse_secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+        langfuse_public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+        langfuse_host=os.getenv("LANGFUSE_HOST"),
     )
 
 
