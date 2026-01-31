@@ -10,7 +10,7 @@ GOOGLE_API_KEY=your-google-ai-api-key-here
 
 # Database (optional)
 USE_DATABASE=false
-DATABASE_URL=sqlite:///storyland_sessions.db
+DATABASE_URL=sqlite+aiosqlite:///storyland_sessions.db
 
 # Session (optional)
 SESSION_MAX_EVENTS=20
@@ -43,7 +43,7 @@ ENABLE_ADK_DEBUG=false  # Enable DEBUG for ADK internal logs
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `USE_DATABASE` | Enable SQLite persistence | `false` |
-| `DATABASE_URL` | SQLite database path | `sqlite:///storyland_sessions.db` |
+| `DATABASE_URL` | SQLite database path | `sqlite+aiosqlite:///storyland_sessions.db` |
 
 ### Session Settings
 

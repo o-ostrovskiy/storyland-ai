@@ -236,7 +236,7 @@ print(state.get('user:preferences'))
 
 - Default: `storyland_sessions.db` in current directory
 - Configured via: `DATABASE_URL` environment variable
-- Format: `sqlite:///path/to/database.db`
+- Format: `sqlite+aiosqlite:///path/to/database.db`
 
 ## Backup & Maintenance
 
