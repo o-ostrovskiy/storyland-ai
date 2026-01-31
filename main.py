@@ -32,6 +32,7 @@ from agents.orchestrator import (
     create_composition_workflow,
 )
 from google.adk.plugins.logging_plugin import LoggingPlugin
+from plugins.langfuse_plugin import LangfusePlugin
 
 
 class WorkflowTimeoutError(Exception):
@@ -196,6 +197,17 @@ async def create_itinerary(
     )
     context_manager = ContextManager(max_events=config.session_max_events)
 
+    # Initialize Langfuse plugin for token tracking
+    langfuse_plugin = LangfusePlugin(
+        secret_key=config.langfuse_secret_key,
+        public_key=config.langfuse_public_key,
+        host=config.langfuse_host,
+    )
+    if langfuse_plugin.enabled:
+        logger.info("langfuse_enabled", host=config.langfuse_host)
+    else:
+        logger.info("langfuse_disabled", reason="credentials_not_configured")
+
     # Build initial state
     # WHY INITIAL STATE: Seed session with user input and preferences. These are
     # available to all agents via session.state dict. The reader_profile_agent uses
@@ -255,7 +267,7 @@ async def create_itinerary(
                 agent=metadata_stage,
                 app_name="storyland",
                 session_service=session_service,
-                plugins=[LoggingPlugin()],
+                plugins=[LoggingPlugin(), langfuse_plugin],
             )
 
             metadata_prompt = f"""Find book metadata for "{book_title}" by {author or 'unknown author'}."""
@@ -294,7 +306,7 @@ async def create_itinerary(
                 agent=discovery_workflow,
                 app_name="storyland",
                 session_service=session_service,
-                plugins=[LoggingPlugin()],
+                plugins=[LoggingPlugin(), langfuse_plugin],
             )
 
             discovery_prompt = f"""Discover travel locations for "{exact_title}" by {exact_author}.
@@ -368,7 +380,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
                 agent=composition_workflow,
                 app_name="storyland",
                 session_service=session_service,
-                plugins=[LoggingPlugin()],
+                plugins=[LoggingPlugin(), langfuse_plugin],
             )
 
             composition_prompt = f"""Create a travel itinerary for "{exact_title}" by {exact_author}.
@@ -432,6 +444,23 @@ Include ALL cities from the selected regions in your itinerary."""
     stats = context_manager.get_context_stats(session.events)
     logger.info("context_stats", num_events=stats['num_events'], estimated_tokens=stats['estimated_tokens'])
     print(f"\n📊 Context: {stats['num_events']} events, ~{stats['estimated_tokens']} tokens")
+
+    # Display token usage from Langfuse
+    if langfuse_plugin.enabled:
+        token_stats = langfuse_plugin.get_session_stats()
+        logger.info(
+            "token_usage",
+            input_tokens=token_stats['input_tokens'],
+            output_tokens=token_stats['output_tokens'],
+            total_tokens=token_stats['total_tokens'],
+            cost_usd=token_stats['cost_usd']
+        )
+        print(f"💰 Token Usage: {token_stats['total_tokens']:,} tokens "
+              f"(input: {token_stats['input_tokens']:,}, output: {token_stats['output_tokens']:,})")
+        print(f"   Estimated cost: ${token_stats['cost_usd']:.6f}")
+
+        # Flush Langfuse events
+        await langfuse_plugin.flush()
 
     return result_data
 
