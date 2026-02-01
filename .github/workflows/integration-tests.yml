@@ -1,0 +1,134 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Create virtual environment
+        run: |
+          python -m venv .venv
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Create .env file for tests
+        run: |
+          echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" > .env
+          echo "USE_DATABASE=false" >> .env
+
+      - name: Run integration tests (VCR cassettes)
+        run: |
+          make test-integration
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: |
+            .pytest_cache/
+            tests/integration/cassettes/
+          retention-days: 7
+
+      - name: Comment test results on PR
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const testStatus = '${{ job.status }}';
+            const emoji = testStatus === 'success' ? '✅' : '❌';
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `${emoji} **Integration Tests ${testStatus}**\n\nTests ran using VCR cassettes (no API quota consumed).`
+            });
+
+  # Optional: Re-record cassettes (manual trigger only, uses API quota)
+  re-record-cassettes:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Create virtual environment
+        run: |
+          python -m venv .venv
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Create .env file for tests
+        run: |
+          echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" > .env
+          echo "USE_DATABASE=false" >> .env
+
+      - name: Delete old cassettes
+        run: |
+          rm -rf tests/integration/cassettes/*
+
+      - name: Re-record VCR cassettes
+        run: |
+          make test-integration-vcr-record
+
+      - name: Upload new cassettes
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcr-cassettes
+          path: tests/integration/cassettes/
+          retention-days: 30
+
+      - name: Create PR with updated cassettes
+        if: success()
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          # Check if there are changes
+          if [[ -n $(git status -s tests/integration/cassettes/) ]]; then
+            git add tests/integration/cassettes/
+            git commit -m "chore: Re-record VCR cassettes for integration tests"
+
+            # Create a new branch
+            BRANCH_NAME="update-vcr-cassettes-$(date +%Y%m%d-%H%M%S)"
+            git checkout -b "$BRANCH_NAME"
+            git push origin "$BRANCH_NAME"
+
+            # Create PR using gh CLI
+            echo "New cassettes recorded. Please create a PR manually or use gh CLI."
+          else
+            echo "No changes to cassettes."
+          fi
