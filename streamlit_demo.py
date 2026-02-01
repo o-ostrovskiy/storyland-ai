@@ -17,6 +17,7 @@ from google.genai import types
 from google.adk.models.google_llm import Gemini
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
+from plugins.langfuse_plugin import LangfusePlugin
 
 from common.config import load_config
 from common.logging import configure_logging, get_logger
@@ -286,6 +287,13 @@ async def run_workflow(
         connection_string=config.database_url, use_database=False  # Use in-memory for demo
     )
 
+    # Initialize Langfuse plugin
+    langfuse_plugin = LangfusePlugin(
+        secret_key=config.langfuse_secret_key,
+        public_key=config.langfuse_public_key,
+        host=config.langfuse_host,
+    )
+
     # Build initial state
     initial_state = {"book_title": book_title, "author": author or ""}
     if preferences:
@@ -314,7 +322,7 @@ async def run_workflow(
             agent=metadata_stage,
             app_name="storyland",
             session_service=session_service,
-            plugins=[LoggingPlugin()],
+            plugins=[LoggingPlugin(), langfuse_plugin],
         )
 
         metadata_prompt = f"""Find book metadata for "{book_title}" by {author or 'unknown author'}."""
@@ -374,7 +382,7 @@ async def run_workflow(
             agent=discovery_workflow,
             app_name="storyland",
             session_service=session_service,
-            plugins=[LoggingPlugin()],
+            plugins=[LoggingPlugin(), langfuse_plugin],
         )
 
         discovery_prompt = f"""Discover travel locations for "{exact_title}" by {exact_author}.
@@ -444,6 +452,11 @@ Find cities, landmarks, and author-related sites, then group them into practical
         # Add traces to workflow data
         workflow_data["trace_events"] = trace_events
 
+        # Add token usage stats
+        if langfuse_plugin.enabled:
+            workflow_data["token_stats"] = langfuse_plugin.get_session_stats()
+            await langfuse_plugin.flush()
+
         # Return here to let user select regions
         return workflow_data
 
@@ -476,6 +489,13 @@ async def create_itinerary_for_regions(
     # Create services
     session_service = create_session_service(
         connection_string=config.database_url, use_database=False
+    )
+
+    # Initialize Langfuse plugin
+    langfuse_plugin = LangfusePlugin(
+        secret_key=config.langfuse_secret_key,
+        public_key=config.langfuse_public_key,
+        host=config.langfuse_host,
     )
 
     # Create session with selected regions
@@ -513,7 +533,7 @@ async def create_itinerary_for_regions(
             agent=composition_workflow,
             app_name="storyland",
             session_service=session_service,
-            plugins=[LoggingPlugin()],
+            plugins=[LoggingPlugin(), langfuse_plugin],
         )
 
         composition_prompt = f"""Create a travel itinerary for "{exact_title}" by {exact_author}.
@@ -564,6 +584,13 @@ Include ALL cities from the selected regions in your itinerary."""
             )
         else:
             status_placeholder.success("✅ Itinerary created successfully!")
+
+        # Add token usage stats
+        if langfuse_plugin.enabled:
+            token_stats = langfuse_plugin.get_session_stats()
+            if result_data:
+                result_data["token_stats"] = token_stats
+            await langfuse_plugin.flush()
 
         return result_data
 
