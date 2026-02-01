@@ -13,7 +13,7 @@ The integration tests workflow requires a `GOOGLE_API_KEY` secret:
 3. Click **New repository secret**
 4. Configure the secret:
    - **Name**: `GOOGLE_API_KEY`
-   - **Secret**: Your Google Books API key (e.g., `AIzaSyA7WmtX_gsWcu9-odJmPoSVhwiB-k28t64`)
+   - **Secret**: Your Google Books API key (e.g., `your-google-books-api-key-here`)
 5. Click **Add secret**
 
 ### 2. Commit VCR Cassettes
