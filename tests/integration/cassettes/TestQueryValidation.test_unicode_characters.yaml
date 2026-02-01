@@ -16,7 +16,7 @@ interactions:
     body:
       string: "{\n  \"kind\": \"books#volumes\",\n  \"totalItems\": 1000000,\n  \"items\":
         [\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"g3KCEQAAQBAJ\",\n
-        \     \"etag\": \"S8qSS0quBQs\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/g3KCEQAAQBAJ\",\n
+        \     \"etag\": \"B4dxObMijP8\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/g3KCEQAAQBAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"One Hundred Years of Solitude\",\n
         \       \"subtitle\": \"Gabriel Garcia Marquez\",\n        \"authors\": [\n
         \         \"Gabriel Garcia Marquez\"\n        ],\n        \"publisher\": \"Penguin
@@ -56,7 +56,7 @@ interactions:
         iconic work is the perfect celebration of Marquez&#39;s extraordinary impact
         on the modern world and his phenomenal literary achievements.\"\n      }\n
         \   },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"e6fKswEACAAJ\",\n
-        \     \"etag\": \"Pr00AmsWB0s\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/e6fKswEACAAJ\",\n
+        \     \"etag\": \"jKy0Csh9hec\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/e6fKswEACAAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"Conversations with Gabriel Garc\xEDa
         M\xE1rquez\",\n        \"authors\": [\n          \"Gabriel Garc\xEDa M\xE1rquez\"\n
         \       ],\n        \"publishedDate\": \"2006\",\n        \"industryIdentifiers\":
@@ -84,7 +84,7 @@ interactions:
         Garc\xEDa M\xE1rquez&quot; starts with the years of his early phenomenal success
         and continues through his most recent, turn-of-the-century exchanges.\"\n
         \     }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"QgIHEAAAQBAJ\",\n
-        \     \"etag\": \"RZQ4khW7mgo\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/QgIHEAAAQBAJ\",\n
+        \     \"etag\": \"JPvVNreMnBQ\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/QgIHEAAAQBAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"Love in the Time of Cholera
         (Illustrated Edition)\",\n        \"authors\": [\n          \"Gabriel Garc\xEDa
         M\xE1rquez\"\n        ],\n        \"publisher\": \"Vintage\",\n        \"publishedDate\":
@@ -126,7 +126,7 @@ interactions:
         with never-before-seen color illustrations by the Chilean artist Luisa Rivera
         and an interior design created by the author&#39;s son, Gonzalo Garc\xEDa
         Barcha.\"\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\":
-        \"zz5MSJnPu5oC\",\n      \"etag\": \"hGA7LZ0tZYo\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/zz5MSJnPu5oC\",\n
+        \"zz5MSJnPu5oC\",\n      \"etag\": \"ZQsb6v/HESM\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/zz5MSJnPu5oC\",\n
         \     \"volumeInfo\": {\n        \"title\": \"Chronicle of a Death Foretold\",\n
         \       \"authors\": [\n          \"Gabriel Garc\xEDa M\xE1rquez\"\n        ],\n
         \       \"publisher\": \"Penguin Books India\",\n        \"publishedDate\":
@@ -162,7 +162,7 @@ interactions:
         chronicle moves backwards and forwards in time, through the contradictions
         of memory and moments lost in the mists of time\"\n      }\n    },\n    {\n
         \     \"kind\": \"books#volume\",\n      \"id\": \"6oUBEAAAQBAJ\",\n      \"etag\":
-        \"zoewy1rb8PQ\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/6oUBEAAAQBAJ\",\n
+        \"SCTP8gWTJvQ\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/6oUBEAAAQBAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"The Scandal of the Century\",\n
         \       \"subtitle\": \"And Other Writings\",\n        \"authors\": [\n          \"Gabriel
         Garc\xEDa M\xE1rquez\"\n        ],\n        \"publisher\": \"Vintage\",\n
@@ -212,7 +212,7 @@ interactions:
       Content-Type:
       - application/json; charset=UTF-8
       Date:
-      - Sun, 01 Feb 2026 20:52:46 GMT
+      - Sun, 01 Feb 2026 21:37:40 GMT
       Server:
       - ESF
       Transfer-Encoding:

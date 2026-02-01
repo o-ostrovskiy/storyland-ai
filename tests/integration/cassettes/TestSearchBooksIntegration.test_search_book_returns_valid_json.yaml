@@ -16,7 +16,7 @@ interactions:
     body:
       string: "{\n  \"kind\": \"books#volumes\",\n  \"totalItems\": 1000000,\n  \"items\":
         [\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"1aIFEAAAQBAJ\",\n
-        \     \"etag\": \"U8oa9I3JlIA\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/1aIFEAAAQBAJ\",\n
+        \     \"etag\": \"oJkVPcq6OUA\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/1aIFEAAAQBAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"1984 : George Orwell's 1984:
         A Dystopian Masterpiece\",\n        \"subtitle\": \"George Orwell 1984: A
         Dystopian Masterpiece by a Visionary Author by George Orwell\",\n        \"authors\":
@@ -94,7 +94,7 @@ interactions:
         skillful storytelling and his ability to capture the human spirit in the face
         of adversity make this novel a timeless masterpiece of social science fiction.\"\n
         \     }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"T0xmAQAACAAJ\",\n
-        \     \"etag\": \"6247BloZZKM\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/T0xmAQAACAAJ\",\n
+        \     \"etag\": \"WWosog7WBtI\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/T0xmAQAACAAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"1984 George Orwell - Large Print
         Edition\",\n        \"authors\": [\n          \"George Orwell\"\n        ],\n
         \       \"publishedDate\": \"2017-02-15\",\n        \"description\": \"1984
@@ -129,7 +129,7 @@ interactions:
         Many people obviously believe his version of the news because that is how
         he got elected. How this will turn out is the subject of this book.\"\n      }\n
         \   },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"tSJIEQAAQBAJ\",\n
-        \     \"etag\": \"3f5r7pILG18\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/tSJIEQAAQBAJ\",\n
+        \     \"etag\": \"Pd1hStruZ0I\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/tSJIEQAAQBAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"1984\",\n        \"authors\":
         [\n          \"George Orwell\"\n        ],\n        \"publisher\": \"Empire
         State Classics\",\n        \"publishedDate\": \"2024-07-01\",\n        \"description\":
@@ -186,7 +186,7 @@ interactions:
         can one man\u2019s defiance change anything\u2014or is he destined to become
         another cog in the machine?George Orwell\u2019s &quot;1984&quot; is a chilling
         and prophetic ...\"\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n
-        \     \"id\": \"ldnyDwAAQBAJ\",\n      \"etag\": \"pa1JN3a8wUk\",\n      \"selfLink\":
+        \     \"id\": \"ldnyDwAAQBAJ\",\n      \"etag\": \"oW8E2ZujBWM\",\n      \"selfLink\":
         \"https://www.googleapis.com/books/v1/volumes/ldnyDwAAQBAJ\",\n      \"volumeInfo\":
         {\n        \"title\": \"1984 - Orwell\",\n        \"authors\": [\n          \"George
         Orwell\"\n        ],\n        \"publisher\": \"LeBooks Editora \",\n        \"publishedDate\":
@@ -232,7 +232,7 @@ interactions:
         (and its somewhat ironic contribution to modern television content), but also
         for its insights into the power of manipulating language, history, and the
         ...\"\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\":
-        \"Jg9u0AEACAAJ\",\n      \"etag\": \"GoUAuR32V+o\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/Jg9u0AEACAAJ\",\n
+        \"Jg9u0AEACAAJ\",\n      \"etag\": \"n1V8OSaFwoM\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/Jg9u0AEACAAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"1984 GEORGE ORWELL.\",\n        \"authors\":
         [\n          \"GEORGE. FROMM ORWELL (ERICH.)\"\n        ],\n        \"publishedDate\":
         \"2020\",\n        \"industryIdentifiers\": [\n          {\n            \"type\":
@@ -262,7 +262,7 @@ interactions:
       Content-Type:
       - application/json; charset=UTF-8
       Date:
-      - Sun, 01 Feb 2026 20:52:42 GMT
+      - Sun, 01 Feb 2026 21:37:16 GMT
       Server:
       - ESF
       Transfer-Encoding:

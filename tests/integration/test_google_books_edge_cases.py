@@ -8,6 +8,7 @@ that are difficult to trigger with real API calls.
 import pytest
 import responses
 from requests.exceptions import Timeout, HTTPError, ConnectionError
+from tenacity import RetryError
 from tools.google_books import search_books, search_book
 
 
@@ -47,10 +48,14 @@ class TestNetworkErrors:
                 json={"error": {"message": "Internal server error"}},
             )
 
-            with pytest.raises(HTTPError) as exc_info:
+            with pytest.raises((RetryError, HTTPError)) as exc_info:
                 search_books("Test Book")
 
-            assert exc_info.value.response.status_code == 500
+            # Extract the actual error (either HTTPError or the cause of RetryError)
+            error = exc_info.value
+            if isinstance(error, RetryError):
+                error = error.last_attempt.exception()
+            assert error.response.status_code == 500
 
         run_test()
 
@@ -73,10 +78,14 @@ class TestNetworkErrors:
                 },
             )
 
-            with pytest.raises(HTTPError) as exc_info:
+            with pytest.raises((RetryError, HTTPError)) as exc_info:
                 search_books("Test Book")
 
-            assert exc_info.value.response.status_code == 429
+            # Extract the actual error (either HTTPError or the cause of RetryError)
+            error = exc_info.value
+            if isinstance(error, RetryError):
+                error = error.last_attempt.exception()
+            assert error.response.status_code == 429
 
         run_test()
 

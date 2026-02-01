@@ -4,9 +4,32 @@ import os
 import pytest
 from pathlib import Path
 from dotenv import load_dotenv
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 # Load environment variables from .env file
 load_dotenv()
+
+
+def normalize_query_string(url):
+    """
+    Normalize a URL by sorting its query parameters.
+    This ensures consistent query string order regardless of dict ordering.
+    """
+    parsed = urlparse(url)
+    query_params = parse_qs(parsed.query, keep_blank_values=True)
+    # Remove API key parameter
+    query_params.pop('key', None)
+    # Sort and rebuild query string
+    normalized_query = urlencode(sorted(query_params.items()), doseq=True)
+    # Rebuild URL
+    return urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path,
+        parsed.params,
+        normalized_query,
+        parsed.fragment
+    ))
 
 
 @pytest.fixture(scope="module")
@@ -15,13 +38,22 @@ def vcr_config():
     VCR configuration for integration tests.
 
     This configuration:
-    - Records API responses once, then replays them
+    - Records API responses (use --vcr-record=all to regenerate cassettes)
     - Filters sensitive data (API keys) from cassettes
-    - Matches requests on method, host, path, and query
+    - Normalizes query strings for consistent matching
     """
     # Ensure cassette directory exists
     cassette_dir = Path(__file__).parent / "cassettes"
     cassette_dir.mkdir(exist_ok=True)
+
+    def before_record_request(request):
+        """Normalize URL query parameters before recording."""
+        request.uri = normalize_query_string(request.uri)
+        return request
+
+    def before_record_response(response):
+        """Placeholder for consistency."""
+        return response
 
     return {
         "cassette_library_dir": str(cassette_dir),
@@ -30,6 +62,8 @@ def vcr_config():
         "filter_headers": ["authorization"],  # Don't record auth headers
         "filter_query_parameters": ["key"],  # Redact API key from cassettes
         "decode_compressed_response": True,
+        "before_record_request": before_record_request,
+        "before_record_response": before_record_response,
     }
 
 

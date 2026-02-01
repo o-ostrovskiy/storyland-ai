@@ -16,7 +16,7 @@ interactions:
     body:
       string: "{\n  \"kind\": \"books#volumes\",\n  \"totalItems\": 1000000,\n  \"items\":
         [\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"7erEbfDOcgkC\",\n
-        \     \"etag\": \"tdmiVYX6iLU\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/7erEbfDOcgkC\",\n
+        \     \"etag\": \"BgQwAjAZTIM\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/7erEbfDOcgkC\",\n
         \     \"volumeInfo\": {\n        \"title\": \"Good Omens\",\n        \"subtitle\":
         \"The Nice and Accurate Prophecies of Agnes Nutter, Witch\",\n        \"authors\":
         [\n          \"Neil Gaiman\",\n          \"Terry Pratchett\"\n        ],\n
@@ -58,7 +58,7 @@ interactions:
         to The Nice and Accurate Prophecies of Agnes Nutter, Witch (the world&#39;s
         only completely accurate book of prophecies, written in 1655, before she exploded),
         the world will end on a Saturday.\"\n      }\n    },\n    {\n      \"kind\":
-        \"books#volume\",\n      \"id\": \"G_iNEAAAQBAJ\",\n      \"etag\": \"fwQLV4yEX1o\",\n
+        \"books#volume\",\n      \"id\": \"G_iNEAAAQBAJ\",\n      \"etag\": \"2M8TxzIbkjQ\",\n
         \     \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/G_iNEAAAQBAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"Good Omens\",\n        \"authors\":
         [\n          \"Terry Pratchett\",\n          \"Neil Gaiman\"\n        ],\n
@@ -105,7 +105,7 @@ interactions:
         Sheen, Jon Hamm and Benedict Cumberbatch &#39;Ridiculously inventive and gloriously
         funny&#39; Guardian ____________________ What if, for once, the ...\"\n      }\n
         \   },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"A5fcwQEACAAJ\",\n
-        \     \"etag\": \"fvy4pDvtaXo\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/A5fcwQEACAAJ\",\n
+        \     \"etag\": \"lAFJeZRWjr4\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/A5fcwQEACAAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"The Illustrated Good Omens\",\n
         \       \"authors\": [\n          \"Terry Pratchett\",\n          \"Neil Gaiman\"\n
         \       ],\n        \"publisher\": \"Gollancz\",\n        \"publishedDate\":
@@ -137,7 +137,7 @@ interactions:
         a new revised text, approved by Neil Gaiman and the Pratchett Estate, which
         clears up many typos and errors from previous editions.\"\n      }\n    },\n
         \   {\n      \"kind\": \"books#volume\",\n      \"id\": \"A1SRwQEACAAJ\",\n
-        \     \"etag\": \"JpA9tt/Ez4I\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/A1SRwQEACAAJ\",\n
+        \     \"etag\": \"//WosJIPrWI\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/A1SRwQEACAAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"Good Omens\",\n        \"subtitle\":
         \"The Nice and Accurate Prophecies of Agnes Nutter, Witch ; a Novel\",\n        \"authors\":
         [\n          \"Neil Gaiman\",\n          \"Terry Pratchett\"\n        ],\n
@@ -162,7 +162,7 @@ interactions:
         \"http://play.google.com/books/reader?id=A1SRwQEACAAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
         \       \"accessViewStatus\": \"NONE\",\n        \"quoteSharingAllowed\":
         false\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\":
-        \"bTDzxwEACAAJ\",\n      \"etag\": \"gJNFJ59TDYM\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/bTDzxwEACAAJ\",\n
+        \"bTDzxwEACAAJ\",\n      \"etag\": \"PabXTemYnww\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/bTDzxwEACAAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"Good Omens\",\n        \"authors\":
         [\n          \"Neil Gaiman\",\n          \"Terry Pratchett\"\n        ],\n
         \       \"publishedDate\": \"1990\",\n        \"industryIdentifiers\": [\n
@@ -192,7 +192,7 @@ interactions:
       Content-Type:
       - application/json; charset=UTF-8
       Date:
-      - Sun, 01 Feb 2026 20:52:45 GMT
+      - Sun, 01 Feb 2026 21:37:22 GMT
       Server:
       - ESF
       Transfer-Encoding:

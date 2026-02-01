@@ -16,7 +16,7 @@ interactions:
     body:
       string: "{\n  \"kind\": \"books#volumes\",\n  \"totalItems\": 1000000,\n  \"items\":
         [\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"0klsAQAAQBAJ\",\n
-        \     \"etag\": \"8nwRwW5kpBo\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/0klsAQAAQBAJ\",\n
+        \     \"etag\": \"0FyZwAzjfiY\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/0klsAQAAQBAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"The C++ Programming Language\",\n
         \       \"authors\": [\n          \"Bjarne Stroustrup\"\n        ],\n        \"publisher\":
         \"Pearson Education\",\n        \"publishedDate\": \"2013\",\n        \"description\":
@@ -47,7 +47,7 @@ interactions:
         false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"1. Introductory
         material -- 2. Basic facilities -- 3. Abstraction mechanisms -- 4. The standard
         library.\"\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\":
-        \"EXfcAAAAQBAJ\",\n      \"etag\": \"mK8SeVTNpyE\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/EXfcAAAAQBAJ\",\n
+        \"EXfcAAAAQBAJ\",\n      \"etag\": \"biiUlu275f8\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/EXfcAAAAQBAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"A Tour of C++\",\n        \"authors\":
         [\n          \"Bjarne Stroustrup\"\n        ],\n        \"publisher\": \"Addison-Wesley\",\n
         \       \"publishedDate\": \"2013-09-16\",\n        \"description\": \"The
@@ -105,7 +105,7 @@ interactions:
         Principles and Practice Using C++ for that); nor will it be the only resource
         you\u2019ll need for C++ mastery (see Stroustrup\u2019s The C++ Programming
         ...\"\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\":
-        \"hxOpAwAAQBAJ\",\n      \"etag\": \"9oVht9kL74s\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/hxOpAwAAQBAJ\",\n
+        \"hxOpAwAAQBAJ\",\n      \"etag\": \"Q1y3v9Uj8J8\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/hxOpAwAAQBAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"Programming\",\n        \"subtitle\":
         \"Principles and Practice Using C++\",\n        \"authors\": [\n          \"Bjarne
         Stroustrup\"\n        ],\n        \"publisher\": \"Pearson Education\",\n
@@ -148,7 +148,7 @@ interactions:
         and efficient code. This book is an introduction to programming in general,
         including object-oriented programming and generic programming.\"\n      }\n
         \   },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"7op8zwEACAAJ\",\n
-        \     \"etag\": \"20MVj+YN25M\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/7op8zwEACAAJ\",\n
+        \     \"etag\": \"9BpF0vHK+JI\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/7op8zwEACAAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"The C++ Programming Language,
         4th Edition\",\n        \"authors\": [\n          \"Bjarne Stroustrup\"\n
         \       ],\n        \"publishedDate\": \"2013\",\n        \"description\":
@@ -204,7 +204,7 @@ interactions:
         open more easily when placed on a flat surface. This special binding method--noticeable
         by a small space inside the spine--also increases durability\"\n      }\n
         \   },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"_v38zwEACAAJ\",\n
-        \     \"etag\": \"VcvHHMPFtY4\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/_v38zwEACAAJ\",\n
+        \     \"etag\": \"NK1Pi44XgzQ\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/_v38zwEACAAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"The C++ Programming Language,
         Fourth Edition\",\n        \"authors\": [\n          \"Bjarne Stroustrup\"\n
         \       ],\n        \"publishedDate\": \"2013\",\n        \"description\":
@@ -266,7 +266,7 @@ interactions:
       Content-Type:
       - application/json; charset=UTF-8
       Date:
-      - Sun, 01 Feb 2026 20:52:46 GMT
+      - Sun, 01 Feb 2026 21:37:40 GMT
       Server:
       - ESF
       Transfer-Encoding:

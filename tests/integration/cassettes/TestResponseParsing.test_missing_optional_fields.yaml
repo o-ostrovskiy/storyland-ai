@@ -16,7 +16,7 @@ interactions:
     body:
       string: "{\n  \"kind\": \"books#volumes\",\n  \"totalItems\": 1000000,\n  \"items\":
         [\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"qhQAywOYz10C\",\n
-        \     \"etag\": \"LVjdr7Z+fCo\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/qhQAywOYz10C\",\n
+        \     \"etag\": \"2lJGe8RMLXI\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/qhQAywOYz10C\",\n
         \     \"volumeInfo\": {\n        \"title\": \"The Odyssey\",\n        \"authors\":
         [\n          \"Homer\"\n        ],\n        \"publisher\": \"Collector's Library\",\n
         \       \"publishedDate\": \"2004-02\",\n        \"description\": \"The Odyssey,
@@ -59,7 +59,7 @@ interactions:
         translated by T. E. Lawrence, an epic 12,000-line poem composed over 2,700
         years ago, is the first adventure story in Western literature.\"\n      }\n
         \   },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"diQmqxBEj08C\",\n
-        \     \"etag\": \"bhhxPA8aw1U\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/diQmqxBEj08C\",\n
+        \     \"etag\": \"EE9CRiiBMYE\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/diQmqxBEj08C\",\n
         \     \"volumeInfo\": {\n        \"title\": \"The Odyssey\",\n        \"authors\":
         [\n          \"Homer\"\n        ],\n        \"publishedDate\": \"1802\",\n
         \       \"industryIdentifiers\": [\n          {\n            \"type\": \"OTHER\",\n
@@ -85,7 +85,7 @@ interactions:
         \       \"webReaderLink\": \"http://play.google.com/books/reader?id=diQmqxBEj08C&hl=&as_pt=BOOKS&source=gbs_api\",\n
         \       \"accessViewStatus\": \"FULL_PUBLIC_DOMAIN\",\n        \"quoteSharingAllowed\":
         false\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\":
-        \"3bsmCwAAQBAJ\",\n      \"etag\": \"kVDzSOWGmDc\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/3bsmCwAAQBAJ\",\n
+        \"3bsmCwAAQBAJ\",\n      \"etag\": \"LPmD36+WCcw\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/3bsmCwAAQBAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"The Odyssey\",\n        \"authors\":
         [\n          \"Homer Homer\"\n        ],\n        \"publisher\": \"Xist Publishing\",\n
         \       \"publishedDate\": \"2015-04-01\",\n        \"description\": \"Homer's
@@ -137,7 +137,7 @@ interactions:
         fall of Troy. This Xist Classics edition has been professionally formatted
         for e-readers with a linked table of contents.\"\n      }\n    },\n    {\n
         \     \"kind\": \"books#volume\",\n      \"id\": \"bafQVqR6O5kC\",\n      \"etag\":
-        \"+E0FJPGVsQ0\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/bafQVqR6O5kC\",\n
+        \"5nznBGZeu4c\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/bafQVqR6O5kC\",\n
         \     \"volumeInfo\": {\n        \"title\": \"The Odyssey\",\n        \"subtitle\":
         \"The Fitzgerald Translation\",\n        \"authors\": [\n          \"Homer\"\n
         \       ],\n        \"publisher\": \"Farrar, Straus and Giroux\",\n        \"publishedDate\":
@@ -191,7 +191,7 @@ interactions:
         Fitzgerald&#39;s supple verse is ideally suited to the story of Odysseus&#39;
         long journey back to his wife and home after the Trojan War.\"\n      }\n
         \   },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"Pf2mDQAAQBAJ\",\n
-        \     \"etag\": \"yoc6z8lnP5c\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/Pf2mDQAAQBAJ\",\n
+        \     \"etag\": \"ZfE4Tvvw9wo\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/Pf2mDQAAQBAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"The Odyssey\",\n        \"subtitle\":
         \"The Odyssey: Homer's Epic Journey of Adventure, Heroism, and Homecoming\",\n
         \       \"authors\": [\n          \"Homer\"\n        ],\n        \"publisher\":
@@ -234,7 +234,7 @@ interactions:
       Content-Type:
       - application/json; charset=UTF-8
       Date:
-      - Sun, 01 Feb 2026 20:52:45 GMT
+      - Sun, 01 Feb 2026 21:37:23 GMT
       Server:
       - ESF
       Transfer-Encoding:

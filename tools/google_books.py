@@ -14,8 +14,6 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
     retry_if_exception_type,
-    before_sleep_log,
-    after_log,
 )
 from google.adk.tools import FunctionTool
 from models.book import BookInfo, BookMetadata
@@ -28,8 +26,6 @@ logger = get_logger(__name__)
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
     retry=retry_if_exception_type((requests.exceptions.RequestException, requests.exceptions.Timeout)),
-    before_sleep=before_sleep_log(logger, "warning"),
-    after=after_log(logger, "info"),
 )
 def search_books(
     title: str, author: Optional[str] = None, max_results: int = 5
@@ -79,9 +75,6 @@ def search_books(
             params["key"] = api_key
 
         logger.debug("google_books_query", query=query, url=url, has_api_key=bool(api_key))
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        logger.debug("google_books_query", query=query, url=url)
 
         try:
             response = requests.get(url, params=params, timeout=10)
@@ -102,6 +95,8 @@ def search_books(
                 message="Request timed out, will retry"
             )
             raise
+
+        logger.debug("google_books_query", query=query, url=url)
 
         data = response.json()
         items = data.get("items", [])

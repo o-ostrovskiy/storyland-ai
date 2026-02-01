@@ -16,7 +16,7 @@ interactions:
     body:
       string: "{\n  \"kind\": \"books#volumes\",\n  \"totalItems\": 1000000,\n  \"items\":
         [\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"U799AY3yfqcC\",\n
-        \     \"etag\": \"1cv+J8dp0lQ\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/U799AY3yfqcC\",\n
+        \     \"etag\": \"gBprVLXL8Bo\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/U799AY3yfqcC\",\n
         \     \"volumeInfo\": {\n        \"title\": \"The Hobbit\",\n        \"authors\":
         [\n          \"J. R. R. Tolkien\"\n        ],\n        \"publisher\": \"HarperCollins
         UK\",\n        \"publishedDate\": \"2009-04-20\",\n        \"description\":
@@ -51,7 +51,7 @@ interactions:
         is the story of how a Baggins had an adventure, and found himself doing and
         saying things altogether unexpected... \u2018A flawless masterpiece\u2019
         The Times\"\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\":
-        \"F2xu1nZOzKoC\",\n      \"etag\": \"90a195G/i60\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/F2xu1nZOzKoC\",\n
+        \"F2xu1nZOzKoC\",\n      \"etag\": \"iIEWsyQs5Tg\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/F2xu1nZOzKoC\",\n
         \     \"volumeInfo\": {\n        \"title\": \"The Hobbit\",\n        \"authors\":
         [\n          \"J. R. R. Tolkien\"\n        ],\n        \"publisher\": \"HarperCollins
         UK\",\n        \"publishedDate\": \"2008\",\n        \"description\": \"'The
@@ -86,7 +86,7 @@ interactions:
         in search of dragon-guarded gold. A reluctant partner in this perilous quest
         is Bilbo Baggins, a comfort-loving, unambitious hobbit.\"\n      }\n    },\n
         \   {\n      \"kind\": \"books#volume\",\n      \"id\": \"Fse0EAAAQBAJ\",\n
-        \     \"etag\": \"9tp+hnzFiFo\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/Fse0EAAAQBAJ\",\n
+        \     \"etag\": \"ESzMTsJdnZM\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/Fse0EAAAQBAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"The Hobbit Illustrated by the
         Author\",\n        \"subtitle\": \"Illustrated by J.R.R. Tolkien\",\n        \"authors\":
         [\n          \"J. R. R. Tolkien\"\n        ],\n        \"publisher\": \"HarperCollins\",\n
@@ -148,7 +148,7 @@ interactions:
         panoply of his art is reproduced for the first time, presenting more than
         50 illustrations to accompany Bilbo Baggins on his adventure \u2018there and
         back again ...\"\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n
-        \     \"id\": \"i_qULblbGYsC\",\n      \"etag\": \"VXXMOoBP/4o\",\n      \"selfLink\":
+        \     \"id\": \"i_qULblbGYsC\",\n      \"etag\": \"3YT4M/AwrVs\",\n      \"selfLink\":
         \"https://www.googleapis.com/books/v1/volumes/i_qULblbGYsC\",\n      \"volumeInfo\":
         {\n        \"title\": \"J.R.R. Tolkien's The Hobbit\",\n        \"subtitle\":
         \"Small Cast Version\",\n        \"authors\": [\n          \"J. R. R. Tolkien\",\n
@@ -189,7 +189,7 @@ interactions:
         Baggins, the hobbit, is a peaceful sort who lives in a cozy hole in the Shire,
         a place where adventures are uncommon - and rather unwanted.\"\n      }\n
         \   },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"Xca0EAAAQBAJ\",\n
-        \     \"etag\": \"A3NPWVK6w30\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/Xca0EAAAQBAJ\",\n
+        \     \"etag\": \"Jh5c2mvdbG0\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/Xca0EAAAQBAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"The Hobbit: Illustrated by the
         Author\",\n        \"authors\": [\n          \"J. R. R. Tolkien\"\n        ],\n
         \       \"publisher\": \"HarperCollins UK\",\n        \"publishedDate\": \"2023-09-14\",\n
@@ -229,7 +229,7 @@ interactions:
       Content-Type:
       - application/json; charset=UTF-8
       Date:
-      - Sun, 01 Feb 2026 20:52:48 GMT
+      - Sun, 01 Feb 2026 21:37:46 GMT
       Server:
       - ESF
       Transfer-Encoding:

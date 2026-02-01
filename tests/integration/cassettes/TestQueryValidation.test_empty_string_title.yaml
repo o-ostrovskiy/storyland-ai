@@ -16,7 +16,7 @@ interactions:
     body:
       string: "{\n  \"kind\": \"books#volumes\",\n  \"totalItems\": 1000000,\n  \"items\":
         [\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"iL45AQAAMAAJ\",\n
-        \     \"etag\": \"ABKl7wgk5C8\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/iL45AQAAMAAJ\",\n
+        \     \"etag\": \"CPyZChoSSao\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/iL45AQAAMAAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"Hamlet\",\n        \"authors\":
         [\n          \"William Shakespeare\"\n        ],\n        \"publisher\": \"A&C
         Black\",\n        \"publishedDate\": \"1902\",\n        \"description\": \"This
@@ -55,7 +55,7 @@ interactions:
         edition of Hamlet represents a radically new text of the best known and most
         widely discussed of all Shakespearean tragedies.\"\n      }\n    },\n    {\n
         \     \"kind\": \"books#volume\",\n      \"id\": \"zxOiZePICkcC\",\n      \"etag\":
-        \"7bbmzUziblU\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/zxOiZePICkcC\",\n
+        \"KKD0HuZi6fc\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/zxOiZePICkcC\",\n
         \     \"volumeInfo\": {\n        \"title\": \"Hamlet\",\n        \"authors\":
         [\n          \"William Shakespeare\"\n        ],\n        \"publisher\": \"Cambridge
         University Press\",\n        \"publishedDate\": \"1999-05-27\",\n        \"description\":
@@ -96,7 +96,7 @@ interactions:
         to Branagh on film, relating stage interpretations to developments in the
         theatre, in literary criticism and in society.\"\n      }\n    },\n    {\n
         \     \"kind\": \"books#volume\",\n      \"id\": \"qyFaAAAAMAAJ\",\n      \"etag\":
-        \"AxXmWNAJ3bk\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/qyFaAAAAMAAJ\",\n
+        \"OFlXcXmvgP8\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/qyFaAAAAMAAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"King Lear\",\n        \"authors\":
         [\n          \"William Shakespeare\"\n        ],\n        \"publishedDate\":
         \"1987\",\n        \"industryIdentifiers\": [\n          {\n            \"type\":
@@ -121,7 +121,7 @@ interactions:
         \"http://play.google.com/books/reader?id=qyFaAAAAMAAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
         \       \"accessViewStatus\": \"NONE\",\n        \"quoteSharingAllowed\":
         false\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\":
-        \"rSQtWrAp5PsC\",\n      \"etag\": \"JXN4agtJ5mc\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/rSQtWrAp5PsC\",\n
+        \"rSQtWrAp5PsC\",\n      \"etag\": \"oq0sqTTYew0\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/rSQtWrAp5PsC\",\n
         \     \"volumeInfo\": {\n        \"title\": \"King Lear\",\n        \"authors\":
         [\n          \"William Shakespeare\"\n        ],\n        \"publishedDate\":
         \"1860\",\n        \"industryIdentifiers\": [\n          {\n            \"type\":
@@ -149,7 +149,7 @@ interactions:
         \       },\n        \"webReaderLink\": \"http://play.google.com/books/reader?id=rSQtWrAp5PsC&hl=&as_pt=BOOKS&source=gbs_api\",\n
         \       \"accessViewStatus\": \"FULL_PUBLIC_DOMAIN\",\n        \"quoteSharingAllowed\":
         false\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\":
-        \"RGJCBAAAQBAJ\",\n      \"etag\": \"C9J1eeF8NdY\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/RGJCBAAAQBAJ\",\n
+        \"RGJCBAAAQBAJ\",\n      \"etag\": \"/mi+TJXJgIA\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/RGJCBAAAQBAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"Measure for Measure (The Unabridged
         Play) + The Classic Biography: The Life of William Shakespeare\",\n        \"authors\":
         [\n          \"William Shakespeare\",\n          \"Sidney Lee\"\n        ],\n
@@ -218,7 +218,7 @@ interactions:
       Content-Type:
       - application/json; charset=UTF-8
       Date:
-      - Sun, 01 Feb 2026 20:52:47 GMT
+      - Sun, 01 Feb 2026 21:37:41 GMT
       Server:
       - ESF
       Transfer-Encoding:

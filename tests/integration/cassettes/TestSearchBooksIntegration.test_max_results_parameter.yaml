@@ -16,7 +16,7 @@ interactions:
     body:
       string: "{\n  \"kind\": \"books#volumes\",\n  \"totalItems\": 1000000,\n  \"items\":
         [\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"aJQILlLxRmAC\",\n
-        \     \"etag\": \"VjVVigTMYSU\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/aJQILlLxRmAC\",\n
+        \     \"etag\": \"S1Y6KrzAysQ\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/aJQILlLxRmAC\",\n
         \     \"volumeInfo\": {\n        \"title\": \"Python Programming\",\n        \"subtitle\":
         \"An Introduction to Computer Science\",\n        \"authors\": [\n          \"John
         M. Zelle\"\n        ],\n        \"publisher\": \"Franklin, Beedle & Associates,
@@ -56,7 +56,7 @@ interactions:
         book is suitable for use in a university-level first course in computing (CS1),
         as well as the increasingly popular course known as CS0.\"\n      }\n    },\n
         \   {\n      \"kind\": \"books#volume\",\n      \"id\": \"mh0bU6NXrBgC\",\n
-        \     \"etag\": \"D/iC4nCWDVk\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/mh0bU6NXrBgC\",\n
+        \     \"etag\": \"yveaAXQ+Kak\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/mh0bU6NXrBgC\",\n
         \     \"volumeInfo\": {\n        \"title\": \"Core Python Programming\",\n
         \       \"authors\": [\n          \"Wesley Chun\"\n        ],\n        \"publisher\":
         \"Prentice Hall Professional\",\n        \"publishedDate\": \"2001\",\n        \"description\":
@@ -92,7 +92,7 @@ interactions:
         false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"The CD-ROM
         contains Windows and Linux Python distributions plus extensive cross-platform
         source code from the book.\"\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n
-        \     \"id\": \"g1FczgEACAAJ\",\n      \"etag\": \"3X/QPae7XS4\",\n      \"selfLink\":
+        \     \"id\": \"g1FczgEACAAJ\",\n      \"etag\": \"HIzbYz+r0UI\",\n      \"selfLink\":
         \"https://www.googleapis.com/books/v1/volumes/g1FczgEACAAJ\",\n      \"volumeInfo\":
         {\n        \"title\": \"Python Coding and Programming\",\n        \"subtitle\":
         \"Start to Learn the Hard Core of Computer Programming, Data Analysis and
@@ -159,7 +159,7 @@ interactions:
       Content-Type:
       - application/json; charset=UTF-8
       Date:
-      - Sun, 01 Feb 2026 20:52:43 GMT
+      - Sun, 01 Feb 2026 21:37:16 GMT
       Server:
       - ESF
       Transfer-Encoding:

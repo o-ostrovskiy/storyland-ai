@@ -92,6 +92,7 @@ class TestAPIKeyScenarios:
     def test_search_without_api_key(self, monkeypatch):
         """Test API call behavior without API key (may hit quota limits)."""
         from requests.exceptions import HTTPError
+        from tenacity import RetryError
 
         # Remove API key to test public quota fallback
         monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
@@ -102,9 +103,14 @@ class TestAPIKeyScenarios:
 
             # If successful, verify results
             assert isinstance(results, list)
-        except HTTPError as e:
+        except (HTTPError, RetryError) as e:
+            # Extract the actual error if wrapped in RetryError
+            error = e
+            if isinstance(error, RetryError):
+                error = error.last_attempt.exception()
+            
             # Public quota may be exhausted (429), which is expected behavior
-            if e.response.status_code == 429:
+            if isinstance(error, HTTPError) and error.response.status_code == 429:
                 pytest.skip("Public quota exhausted (expected without API key)")
             else:
                 # Other HTTP errors should still fail the test
