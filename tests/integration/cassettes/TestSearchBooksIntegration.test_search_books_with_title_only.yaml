@@ -1,0 +1,273 @@
+interactions:
+- request:
+    body: null
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      User-Agent:
+      - python-requests/2.32.5
+    method: GET
+    uri: https://www.googleapis.com/books/v1/volumes?maxResults=5&printType=books&q=intitle%3AThe+Great+Gatsby
+  response:
+    body:
+      string: "{\n  \"kind\": \"books#volumes\",\n  \"totalItems\": 1000000,\n  \"items\":
+        [\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"iXn5U2IzVH0C\",\n
+        \     \"etag\": \"nPXAIOE4I0w\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/iXn5U2IzVH0C\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"The Great Gatsby\",\n        \"subtitle\":
+        \"The Only Authorized Edition\",\n        \"authors\": [\n          \"F. Scott
+        Fitzgerald\"\n        ],\n        \"publisher\": \"Simon and Schuster\",\n
+        \       \"publishedDate\": \"2003-05-27\",\n        \"description\": \"The
+        only edition of the beloved classic that is authorized by Fitzgerald\u2019s
+        family and from his lifelong publisher. This edition is the enduring original
+        text, updated with the author\u2019s own revisions, a foreword by his granddaughter,
+        and with a new introduction by National Book Award winner Jesmyn Ward. The
+        Great Gatsby, F. Scott Fitzgerald\u2019s third book, stands as the supreme
+        achievement of his career. First published by Scribner in 1925, this quintessential
+        novel of the Jazz Age has been acclaimed by generations of readers. The story
+        of the mysteriously wealthy Jay Gatsby and his love for the beautiful Daisy
+        Buchanan is an exquisitely crafted tale of America in the 1920s.\",\n        \"industryIdentifiers\":
+        [\n          {\n            \"type\": \"ISBN_13\",\n            \"identifier\":
+        \"9780743246392\"\n          },\n          {\n            \"type\": \"ISBN_10\",\n
+        \           \"identifier\": \"074324639X\"\n          }\n        ],\n        \"readingModes\":
+        {\n          \"text\": true,\n          \"image\": false\n        },\n        \"pageCount\":
+        196,\n        \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Fiction\"\n
+        \       ],\n        \"averageRating\": 3.5,\n        \"ratingsCount\": 87,\n
+        \       \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        true,\n        \"contentVersion\": \"1.31.27.0.preview.2\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=iXn5U2IzVH0C&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=iXn5U2IzVH0C&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=iXn5U2IzVH0C&printsec=frontcover&dq=intitle:The+Great+Gatsby&hl=&as_pt=BOOKS&cd=1&source=gbs_api\",\n
+        \       \"infoLink\": \"https://play.google.com/store/books/details?id=iXn5U2IzVH0C&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://play.google.com/store/books/details?id=iXn5U2IzVH0C\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"FOR_SALE\",\n        \"isEbook\": true,\n        \"listPrice\": {\n          \"amount\":
+        9.99,\n          \"currencyCode\": \"USD\"\n        },\n        \"retailPrice\":
+        {\n          \"amount\": 9.99,\n          \"currencyCode\": \"USD\"\n        },\n
+        \       \"buyLink\": \"https://play.google.com/store/books/details?id=iXn5U2IzVH0C&rdid=book-iXn5U2IzVH0C&rdot=1&source=gbs_api\",\n
+        \       \"offers\": [\n          {\n            \"finskyOfferType\": 1,\n
+        \           \"listPrice\": {\n              \"amountInMicros\": 9990000,\n
+        \             \"currencyCode\": \"USD\"\n            },\n            \"retailPrice\":
+        {\n              \"amountInMicros\": 9990000,\n              \"currencyCode\":
+        \"USD\"\n            },\n            \"giftable\": true\n          }\n        ]\n
+        \     },\n      \"accessInfo\": {\n        \"country\": \"US\",\n        \"viewability\":
+        \"PARTIAL\",\n        \"embeddable\": true,\n        \"publicDomain\": false,\n
+        \       \"textToSpeechPermission\": \"ALLOWED_FOR_ACCESSIBILITY\",\n        \"epub\":
+        {\n          \"isAvailable\": true,\n          \"acsTokenLink\": \"http://books.google.com/books/download/The_Great_Gatsby-sample-epub.acsm?id=iXn5U2IzVH0C&format=epub&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"pdf\": {\n          \"isAvailable\": false\n        },\n
+        \       \"webReaderLink\": \"http://play.google.com/books/reader?id=iXn5U2IzVH0C&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"SAMPLE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"The Great
+        Gatsby, F. Scott Fitzgerald\u2019s third book, stands as the supreme achievement
+        of his career. First published by Scribner in 1925, this quintessential novel
+        of the Jazz Age has been acclaimed by generations of readers.\"\n      }\n
+        \   },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"HestSXO362YC\",\n
+        \     \"etag\": \"GKZ7hHoM4vU\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/HestSXO362YC\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"The Great Gatsby\",\n        \"authors\":
+        [\n          \"Francis Scott Fitzgerald\"\n        ],\n        \"publisher\":
+        \"Wordsworth Editions\",\n        \"publishedDate\": \"1993\",\n        \"description\":
+        \"A young man newly rich tries to recapture the past and win back his former
+        love, despite the fact that she has married\",\n        \"industryIdentifiers\":
+        [\n          {\n            \"type\": \"ISBN_10\",\n            \"identifier\":
+        \"185326041X\"\n          },\n          {\n            \"type\": \"ISBN_13\",\n
+        \           \"identifier\": \"9781853260414\"\n          }\n        ],\n        \"readingModes\":
+        {\n          \"text\": false,\n          \"image\": true\n        },\n        \"pageCount\":
+        148,\n        \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Fiction\"\n
+        \       ],\n        \"averageRating\": 3.5,\n        \"ratingsCount\": 87,\n
+        \       \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        false,\n        \"contentVersion\": \"1.5.5.0.preview.1\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=HestSXO362YC&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=HestSXO362YC&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=HestSXO362YC&printsec=frontcover&dq=intitle:The+Great+Gatsby&hl=&as_pt=BOOKS&cd=2&source=gbs_api\",\n
+        \       \"infoLink\": \"http://books.google.com/books?id=HestSXO362YC&dq=intitle:The+Great+Gatsby&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://books.google.com/books/about/The_Great_Gatsby.html?hl=&id=HestSXO362YC\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"NOT_FOR_SALE\",\n        \"isEbook\": false\n      },\n      \"accessInfo\":
+        {\n        \"country\": \"US\",\n        \"viewability\": \"PARTIAL\",\n        \"embeddable\":
+        true,\n        \"publicDomain\": false,\n        \"textToSpeechPermission\":
+        \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\": false\n        },\n
+        \       \"pdf\": {\n          \"isAvailable\": true,\n          \"acsTokenLink\":
+        \"http://books.google.com/books/download/The_Great_Gatsby-sample-pdf.acsm?id=HestSXO362YC&format=pdf&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"webReaderLink\": \"http://play.google.com/books/reader?id=HestSXO362YC&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"SAMPLE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"A young
+        man newly rich tries to recapture the past and win back his former love, despite
+        the fact that she has married\"\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n
+        \     \"id\": \"qcvnEAAAQBAJ\",\n      \"etag\": \"BhrQZaLNBMQ\",\n      \"selfLink\":
+        \"https://www.googleapis.com/books/v1/volumes/qcvnEAAAQBAJ\",\n      \"volumeInfo\":
+        {\n        \"title\": \"The Great Gatsby\",\n        \"authors\": [\n          \"F.
+        Scott Fitzgerald\"\n        ],\n        \"publisher\": \"E-Kitap Projesi &
+        Cheapest Books\",\n        \"publishedDate\": \"2023-12-17\",\n        \"description\":
+        \"WE ARE PRESENTING THE NEW EDITION OF \\\"THE GREAT GATSBY\\\" WITH ADDED
+        \\\"NEW ILLUSTRATIONS\\\" AND \\\"DETAILED BIOGRAPHY\\\" TO OUR READERS AS
+        AN \\\"E-KITAP PROJESI & CHEAPEST BOOKS\\\". The Great Gatsby is a 1925 novel
+        written by American author F. Scott Fitzgerald that follows a cast of characters
+        living in the fictional town of West Egg on prosperous Long Island in the
+        summer of 1922. The story primarily concerns the young and mysterious millionaire
+        Jay Gatsby and his quixotic passion and obsession for the beautiful former
+        debutante Daisy Buchanan. Considered to be Fitzgerald's magnum opus, The Great
+        Gatsby explores themes of decadence, idealism, resistance to change, social
+        upheaval, and excess, creating a portrait of the Jazz Age or the Roaring Twenties
+        that has been described as a cautionary tale regarding the American Dream.
+        Fitzgerald\u2014inspired by the parties he had attended while visiting Long
+        Island's north shore\u2014began planning the novel in 1923, desiring to produce,
+        in his words, \\\"something new\u2014something extraordinary and beautiful
+        and simple and intricately patterned.\\\" Progress was slow, with Fitzgerald
+        completing his first draft following a move to the French Riviera in 1924.
+        The Great Gatsby received mixed reviews and sold poorly; in its first year,
+        the book sold only 20,000 copies. Fitzgerald died in 1940, believing himself
+        to be a failure and his work forgotten. However, the novel experienced a revival
+        during World War II, and became a part of American high school curricula and
+        numerous stage and film adaptations in the following decades. Today, The Great
+        Gatsby is widely considered to be a literary classic and a contender for the
+        title \\\"Great American Novel\\\". In 1998 the Modern Library editorial board
+        voted it the 20th century's best American novel and second best English-language
+        novel of the same time period.\",\n        \"industryIdentifiers\": [\n          {\n
+        \           \"type\": \"ISBN_13\",\n            \"identifier\": \"9786257287289\"\n
+        \         },\n          {\n            \"type\": \"ISBN_10\",\n            \"identifier\":
+        \"6257287286\"\n          }\n        ],\n        \"readingModes\": {\n          \"text\":
+        true,\n          \"image\": true\n        },\n        \"pageCount\": 236,\n
+        \       \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Fiction\"\n
+        \       ],\n        \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        false,\n        \"contentVersion\": \"0.2.3.0.preview.3\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=qcvnEAAAQBAJ&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=qcvnEAAAQBAJ&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=qcvnEAAAQBAJ&printsec=frontcover&dq=intitle:The+Great+Gatsby&hl=&as_pt=BOOKS&cd=3&source=gbs_api\",\n
+        \       \"infoLink\": \"https://play.google.com/store/books/details?id=qcvnEAAAQBAJ&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://play.google.com/store/books/details?id=qcvnEAAAQBAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"FOR_SALE\",\n        \"isEbook\": true,\n        \"listPrice\": {\n          \"amount\":
+        3.99,\n          \"currencyCode\": \"USD\"\n        },\n        \"retailPrice\":
+        {\n          \"amount\": 3.99,\n          \"currencyCode\": \"USD\"\n        },\n
+        \       \"buyLink\": \"https://play.google.com/store/books/details?id=qcvnEAAAQBAJ&rdid=book-qcvnEAAAQBAJ&rdot=1&source=gbs_api\",\n
+        \       \"offers\": [\n          {\n            \"finskyOfferType\": 1,\n
+        \           \"listPrice\": {\n              \"amountInMicros\": 3990000,\n
+        \             \"currencyCode\": \"USD\"\n            },\n            \"retailPrice\":
+        {\n              \"amountInMicros\": 3990000,\n              \"currencyCode\":
+        \"USD\"\n            },\n            \"giftable\": true\n          }\n        ]\n
+        \     },\n      \"accessInfo\": {\n        \"country\": \"US\",\n        \"viewability\":
+        \"PARTIAL\",\n        \"embeddable\": true,\n        \"publicDomain\": false,\n
+        \       \"textToSpeechPermission\": \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\":
+        true,\n          \"acsTokenLink\": \"http://books.google.com/books/download/The_Great_Gatsby-sample-epub.acsm?id=qcvnEAAAQBAJ&format=epub&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"pdf\": {\n          \"isAvailable\": true,\n          \"acsTokenLink\":
+        \"http://books.google.com/books/download/The_Great_Gatsby-sample-pdf.acsm?id=qcvnEAAAQBAJ&format=pdf&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"webReaderLink\": \"http://play.google.com/books/reader?id=qcvnEAAAQBAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"SAMPLE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"WE ARE
+        PRESENTING THE NEW EDITION OF &quot;THE GREAT GATSBY&quot; WITH ADDED &quot;NEW
+        ILLUSTRATIONS&quot; AND &quot;DETAILED BIOGRAPHY&quot; TO OUR READERS AS AN
+        &quot;E-KITAP PROJESI &amp; CHEAPEST BOOKS&quot;.\"\n      }\n    },\n    {\n
+        \     \"kind\": \"books#volume\",\n      \"id\": \"2vwoHo3MMpwC\",\n      \"etag\":
+        \"5eS7Thiys8Y\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/2vwoHo3MMpwC\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"The Great Gatsby: The Authentic
+        Edition from Fitzgerald's Original Publisher\",\n        \"authors\": [\n
+        \         \"F. Scott Fitzgerald\"\n        ],\n        \"publisher\": \"Simon
+        and Schuster\",\n        \"publishedDate\": \"2013-05-10\",\n        \"description\":
+        \"The authentic edition from Fitzgerald\u2019s original publisher. The Great
+        Gatsby, F. Scott Fitzgerald\u2019s third book, stands as the supreme achievement
+        of his career. This exemplary novel of the Jazz Age has been acclaimed by
+        generations of readers. The story of the fabulously wealthy Jay Gatsby and
+        his love for the beautiful Daisy Buchanan, of lavish parties on Long Island
+        at a time when The New York Times noted \u201Cgin was the national drink and
+        sex the national obsession,\u201D it is an exquisitely crafted tale of America
+        in the 1920s. The Great Gatsby is one of the great classics of twentieth-century
+        literature.\",\n        \"industryIdentifiers\": [\n          {\n            \"type\":
+        \"ISBN_13\",\n            \"identifier\": \"9781476755830\"\n          },\n
+        \         {\n            \"type\": \"ISBN_10\",\n            \"identifier\":
+        \"1476755833\"\n          }\n        ],\n        \"readingModes\": {\n          \"text\":
+        true,\n          \"image\": false\n        },\n        \"pageCount\": 208,\n
+        \       \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Fiction\"\n
+        \       ],\n        \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        true,\n        \"contentVersion\": \"3.7.7.0.preview.2\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=2vwoHo3MMpwC&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=2vwoHo3MMpwC&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=2vwoHo3MMpwC&printsec=frontcover&dq=intitle:The+Great+Gatsby&hl=&as_pt=BOOKS&cd=4&source=gbs_api\",\n
+        \       \"infoLink\": \"http://books.google.com/books?id=2vwoHo3MMpwC&dq=intitle:The+Great+Gatsby&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://books.google.com/books/about/The_Great_Gatsby_The_Authentic_Edition_f.html?hl=&id=2vwoHo3MMpwC\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"NOT_FOR_SALE\",\n        \"isEbook\": false\n      },\n      \"accessInfo\":
+        {\n        \"country\": \"US\",\n        \"viewability\": \"PARTIAL\",\n        \"embeddable\":
+        true,\n        \"publicDomain\": false,\n        \"textToSpeechPermission\":
+        \"ALLOWED_FOR_ACCESSIBILITY\",\n        \"epub\": {\n          \"isAvailable\":
+        true,\n          \"acsTokenLink\": \"http://books.google.com/books/download/The_Great_Gatsby_The_Authentic_Edition_f-sample-epub.acsm?id=2vwoHo3MMpwC&format=epub&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"pdf\": {\n          \"isAvailable\": false\n        },\n
+        \       \"webReaderLink\": \"http://play.google.com/books/reader?id=2vwoHo3MMpwC&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"SAMPLE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"The Great
+        Gatsby, F. Scott Fitzgerald\u2019s third book, stands as the supreme achievement
+        of his career. This exemplary novel of the Jazz Age has been acclaimed by
+        generations of readers.\"\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n
+        \     \"id\": \"l4kYtX5FWfMC\",\n      \"etag\": \"/w6pSeGSbok\",\n      \"selfLink\":
+        \"https://www.googleapis.com/books/v1/volumes/l4kYtX5FWfMC\",\n      \"volumeInfo\":
+        {\n        \"title\": \"The Great Gatsby\",\n        \"authors\": [\n          \"F.
+        Scott Fitzgerald\"\n        ],\n        \"publisher\": \"Penguin UK\",\n        \"publishedDate\":
+        \"2000-02-22\",\n        \"description\": \"In The Great Gatsby, Fitzgerald
+        brilliantly captures both the disillusion of post-war America and the moral
+        failure of a society obsessed with wealth and status. But he does more than
+        render the essence of a particular time and place, for in chronicling Gatsby's
+        tragic pursuit of his dream, Fitzgerald re-creates the universal conflict
+        between illusion and reality.\",\n        \"industryIdentifiers\": [\n          {\n
+        \           \"type\": \"ISBN_13\",\n            \"identifier\": \"9780141182636\"\n
+        \         },\n          {\n            \"type\": \"ISBN_10\",\n            \"identifier\":
+        \"0141182636\"\n          }\n        ],\n        \"readingModes\": {\n          \"text\":
+        true,\n          \"image\": false\n        },\n        \"pageCount\": 247,\n
+        \       \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Fiction\"\n
+        \       ],\n        \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        false,\n        \"contentVersion\": \"1.9.6.0.preview.2\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=l4kYtX5FWfMC&printsec=frontcover&img=1&zoom=5&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=l4kYtX5FWfMC&printsec=frontcover&img=1&zoom=1&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=l4kYtX5FWfMC&dq=intitle:The+Great+Gatsby&hl=&as_pt=BOOKS&cd=5&source=gbs_api\",\n
+        \       \"infoLink\": \"http://books.google.com/books?id=l4kYtX5FWfMC&dq=intitle:The+Great+Gatsby&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://books.google.com/books/about/The_Great_Gatsby.html?hl=&id=l4kYtX5FWfMC\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"NOT_FOR_SALE\",\n        \"isEbook\": false\n      },\n      \"accessInfo\":
+        {\n        \"country\": \"US\",\n        \"viewability\": \"NO_PAGES\",\n
+        \       \"embeddable\": false,\n        \"publicDomain\": false,\n        \"textToSpeechPermission\":
+        \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\": true\n        },\n
+        \       \"pdf\": {\n          \"isAvailable\": true\n        },\n        \"webReaderLink\":
+        \"http://play.google.com/books/reader?id=l4kYtX5FWfMC&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"NONE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"In The
+        Great Gatsby, Fitzgerald brilliantly captures both the disillusion of post-war
+        America and the moral failure of a society obsessed with wealth and status.\"\n
+        \     }\n    }\n  ]\n}\n"
+    headers:
+      Alt-Svc:
+      - h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+      Content-Type:
+      - application/json; charset=UTF-8
+      Date:
+      - Sun, 01 Feb 2026 20:52:43 GMT
+      Server:
+      - ESF
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Origin
+      - X-Origin
+      - Referer
+      X-Content-Type-Options:
+      - nosniff
+      X-Frame-Options:
+      - SAMEORIGIN
+      X-XSS-Protection:
+      - '0'
+      content-length:
+      - '19604'
+    status:
+      code: 200
+      message: OK
+version: 1

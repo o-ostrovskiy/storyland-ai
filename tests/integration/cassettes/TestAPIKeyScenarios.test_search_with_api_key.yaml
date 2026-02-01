@@ -1,0 +1,262 @@
+interactions:
+- request:
+    body: null
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      User-Agent:
+      - python-requests/2.32.5
+    method: GET
+    uri: https://www.googleapis.com/books/v1/volumes?maxResults=5&printType=books&q=intitle%3AThe+Nightingale%2Binauthor%3AKristin+Hannah
+  response:
+    body:
+      string: "{\n  \"kind\": \"books#volumes\",\n  \"totalItems\": 1000000,\n  \"items\":
+        [\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"0QE3BAAAQBAJ\",\n
+        \     \"etag\": \"f5yeMWh1uDk\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/0QE3BAAAQBAJ\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"The Nightingale\",\n        \"subtitle\":
+        \"A Novel\",\n        \"authors\": [\n          \"Kristin Hannah\"\n        ],\n
+        \       \"publisher\": \"St. Martin's Press\",\n        \"publishedDate\":
+        \"2015-02-03\",\n        \"description\": \"A REESE'S BOOK CLUB PICK A #1
+        New York Times bestseller, Wall Street Journal Best Book of the Year, and
+        soon to be a major motion picture, this unforgettable novel of love and strength
+        in the face of war has enthralled a generation. With courage, grace, and powerful
+        insight, bestselling author Kristin Hannah captures the epic panorama of World
+        War II and illuminates an intimate part of history seldom seen: the women's
+        war. The Nightingale tells the stories of two sisters, separated by years
+        and experience, by ideals, passion and circumstance, each embarking on her
+        own dangerous path toward survival, love, and freedom in German-occupied,
+        war-torn France\u2014a heartbreakingly beautiful novel that celebrates the
+        resilience of the human spirit and the durability of women. It is a novel
+        for everyone, a novel for a lifetime. Goodreads Best Historical Novel of the
+        Year \u2022 People's Choice Favorite Fiction Winner \u2022 #1 Indie Next Selection
+        \u2022 A Buzzfeed and The Week Best Book of the Year\",\n        \"industryIdentifiers\":
+        [\n          {\n            \"type\": \"ISBN_13\",\n            \"identifier\":
+        \"9781466850606\"\n          },\n          {\n            \"type\": \"ISBN_10\",\n
+        \           \"identifier\": \"1466850604\"\n          }\n        ],\n        \"readingModes\":
+        {\n          \"text\": true,\n          \"image\": false\n        },\n        \"pageCount\":
+        497,\n        \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Fiction\"\n
+        \       ],\n        \"averageRating\": 4.5,\n        \"ratingsCount\": 7,\n
+        \       \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        true,\n        \"contentVersion\": \"3.22.23.0.preview.2\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=0QE3BAAAQBAJ&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=0QE3BAAAQBAJ&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=0QE3BAAAQBAJ&printsec=frontcover&dq=intitle:The+Nightingale%2Binauthor:Kristin+Hannah&hl=&as_pt=BOOKS&cd=1&source=gbs_api\",\n
+        \       \"infoLink\": \"https://play.google.com/store/books/details?id=0QE3BAAAQBAJ&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://play.google.com/store/books/details?id=0QE3BAAAQBAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"FOR_SALE\",\n        \"isEbook\": true,\n        \"listPrice\": {\n          \"amount\":
+        11.99,\n          \"currencyCode\": \"USD\"\n        },\n        \"retailPrice\":
+        {\n          \"amount\": 11.99,\n          \"currencyCode\": \"USD\"\n        },\n
+        \       \"buyLink\": \"https://play.google.com/store/books/details?id=0QE3BAAAQBAJ&rdid=book-0QE3BAAAQBAJ&rdot=1&source=gbs_api\",\n
+        \       \"offers\": [\n          {\n            \"finskyOfferType\": 1,\n
+        \           \"listPrice\": {\n              \"amountInMicros\": 11990000,\n
+        \             \"currencyCode\": \"USD\"\n            },\n            \"retailPrice\":
+        {\n              \"amountInMicros\": 11990000,\n              \"currencyCode\":
+        \"USD\"\n            },\n            \"giftable\": true\n          }\n        ]\n
+        \     },\n      \"accessInfo\": {\n        \"country\": \"US\",\n        \"viewability\":
+        \"PARTIAL\",\n        \"embeddable\": true,\n        \"publicDomain\": false,\n
+        \       \"textToSpeechPermission\": \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\":
+        true,\n          \"acsTokenLink\": \"http://books.google.com/books/download/The_Nightingale-sample-epub.acsm?id=0QE3BAAAQBAJ&format=epub&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"pdf\": {\n          \"isAvailable\": false\n        },\n
+        \       \"webReaderLink\": \"http://play.google.com/books/reader?id=0QE3BAAAQBAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"SAMPLE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"The Nightingale
+        tells the stories of two sisters, separated by years and experience, by ideals,
+        passion and circumstance, each embarking on her own dangerous path toward
+        survival, love, and freedom in German-occupied, war-torn France\u2014a ...\"\n
+        \     }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"3kCZjgEACAAJ\",\n
+        \     \"etag\": \"DQBpl+56PoU\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/3kCZjgEACAAJ\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"Kristin Hannah's The Nightingale\",\n
+        \       \"subtitle\": \"Summary and Analysis\",\n        \"authors\": [\n
+        \         \"Honest Reviews Staff\",\n          \"Kristin Hannah\"\n        ],\n
+        \       \"publishedDate\": \"2015-06-25\",\n        \"description\": \"A Novel
+        by Kristin Hannah | Summary & Analysis This book has two main characters,
+        although a number of other characters feature quite significantly. Time spans
+        l939 to l995 and place switches back and forth between wartime France and
+        Oregon, USA in l995. Vianne and Isabelle are two French sisters, one in her
+        late twenties and the other aged l8 years old in 1939 at the very beginning
+        of World War II in Europe. \\\"The Nightingale\\\" is both of their stories,
+        as they describe in turn how they each found out, during the course of World
+        War II, who they wanted to be, as well as who they were and what they would
+        do to survive. The two sisters have had a very up and down relationship prior
+        to l939. Julien, their father, came back from World War I a changed man, and
+        the premature death of his wife and their Maman did not help his recovery.
+        After his wife's death he deposits the two girls, l4 year old Vianne and 4
+        year old Isabelle with the housekeeper at Le Jardin, his family's anecestral
+        home in the French countryside. He returns to Paris to another family owned
+        apartment where he continues to mourns his loss alone, whilst running an intellectual
+        bookshop. He shuts the two girls out of his life. Vianne meets Antoine, her
+        one true love, marries early and is a mother by l7, ever since running Le
+        Jardin as its mistress. Isabelle is sent to boarding school at 7 and she copes
+        with her mother's loss and rejection by her father, by rebelling and being
+        thrown out of many schools. The book is also about love in all its forms:
+        the love of parents for their children, the love between sisters, the love
+        between friends and the love between two lovers. The two sisters both contribute
+        in their own way, to help fight against the oppression of the Nazis - Isabelle
+        becomes a member of the Free France resistance and Vianne helps hide Jewish
+        children in a Cathoic orphanage from the Nazis. Both of them find unexpected
+        inner strengths in order to deal with the challenges they face in order to
+        survive during World War II. They also discover people are not always black
+        and white, and unexpected goodness is found, even in wartime. Or maybe because
+        of wartime.\",\n        \"industryIdentifiers\": [\n          {\n            \"type\":
+        \"ISBN_10\",\n            \"identifier\": \"1514705850\"\n          },\n          {\n
+        \           \"type\": \"ISBN_13\",\n            \"identifier\": \"9781514705858\"\n
+        \         }\n        ],\n        \"readingModes\": {\n          \"text\":
+        false,\n          \"image\": false\n        },\n        \"pageCount\": 44,\n
+        \       \"printType\": \"BOOK\",\n        \"maturityRating\": \"NOT_MATURE\",\n
+        \       \"allowAnonLogging\": false,\n        \"contentVersion\": \"preview-1.0.0\",\n
+        \       \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=3kCZjgEACAAJ&dq=intitle:The+Nightingale%2Binauthor:Kristin+Hannah&hl=&as_pt=BOOKS&cd=2&source=gbs_api\",\n
+        \       \"infoLink\": \"http://books.google.com/books?id=3kCZjgEACAAJ&dq=intitle:The+Nightingale%2Binauthor:Kristin+Hannah&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://books.google.com/books/about/Kristin_Hannah_s_The_Nightingale.html?hl=&id=3kCZjgEACAAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"NOT_FOR_SALE\",\n        \"isEbook\": false\n      },\n      \"accessInfo\":
+        {\n        \"country\": \"US\",\n        \"viewability\": \"NO_PAGES\",\n
+        \       \"embeddable\": false,\n        \"publicDomain\": false,\n        \"textToSpeechPermission\":
+        \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\": false\n        },\n
+        \       \"pdf\": {\n          \"isAvailable\": false\n        },\n        \"webReaderLink\":
+        \"http://play.google.com/books/reader?id=3kCZjgEACAAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"NONE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"A Novel
+        by Kristin Hannah | Summary &amp; Analysis This book has two main characters,
+        although a number of other characters feature quite significantly.\"\n      }\n
+        \   },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"hr9grgEACAAJ\",\n
+        \     \"etag\": \"bJ8Qr087zAU\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/hr9grgEACAAJ\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"The Nightingale\",\n        \"authors\":
+        [\n          \"Kristin Hannah\"\n        ],\n        \"publisher\": \"Macmillan\",\n
+        \       \"publishedDate\": \"2015-02\",\n        \"description\": \"Two sisters.
+        One must be brave. One should be afraid.\",\n        \"industryIdentifiers\":
+        [\n          {\n            \"type\": \"ISBN_10\",\n            \"identifier\":
+        \"1447283058\"\n          },\n          {\n            \"type\": \"ISBN_13\",\n
+        \           \"identifier\": \"9781447283058\"\n          }\n        ],\n        \"readingModes\":
+        {\n          \"text\": false,\n          \"image\": false\n        },\n        \"pageCount\":
+        0,\n        \"printType\": \"BOOK\",\n        \"categories\": [\n          \"France\"\n
+        \       ],\n        \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        false,\n        \"contentVersion\": \"preview-1.0.0\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=hr9grgEACAAJ&printsec=frontcover&img=1&zoom=5&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=hr9grgEACAAJ&printsec=frontcover&img=1&zoom=1&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=hr9grgEACAAJ&dq=intitle:The+Nightingale%2Binauthor:Kristin+Hannah&hl=&as_pt=BOOKS&cd=3&source=gbs_api\",\n
+        \       \"infoLink\": \"http://books.google.com/books?id=hr9grgEACAAJ&dq=intitle:The+Nightingale%2Binauthor:Kristin+Hannah&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://books.google.com/books/about/The_Nightingale.html?hl=&id=hr9grgEACAAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"NOT_FOR_SALE\",\n        \"isEbook\": false\n      },\n      \"accessInfo\":
+        {\n        \"country\": \"US\",\n        \"viewability\": \"NO_PAGES\",\n
+        \       \"embeddable\": false,\n        \"publicDomain\": false,\n        \"textToSpeechPermission\":
+        \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\": false\n        },\n
+        \       \"pdf\": {\n          \"isAvailable\": false\n        },\n        \"webReaderLink\":
+        \"http://play.google.com/books/reader?id=hr9grgEACAAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"NONE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"Despite
+        their differences, sisters Viann and Isabelle have always been close.\"\n
+        \     }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"8RggEQAAQBAJ\",\n
+        \     \"etag\": \"Opo9vijFkr4\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/8RggEQAAQBAJ\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"The Nightingale Deluxe Edition\",\n
+        \       \"subtitle\": \"A Novel\",\n        \"authors\": [\n          \"Kristin
+        Hannah\"\n        ],\n        \"publisher\": \"St. Martin's Press\",\n        \"publishedDate\":
+        \"2025-02-18\",\n        \"description\": \"Limited edition hardcover jacket
+        with foil and embossing, gorgeous designed edges, a ribbon bookmark, exclusive
+        four color endpapers, and a decorative, gold foil stamp on the front case.
+        A #1 New York Times bestseller and Wall Street Journal Best Book of the Year,
+        the stunning 10th Anniversary Edition of this unforgettable novel of love
+        and strength in the face of war that has enthralled a generation. With courage,
+        grace, and powerful insight, bestselling author Kristin Hannah captures the
+        epic panorama of World War II and illuminates an intimate part of history
+        seldom seen: the women's war. The Nightingale tells the stories of two sisters,
+        separated by years and experience, by ideals, passion and circumstance, each
+        embarking on her own dangerous path toward survival, love, and freedom in
+        German-occupied, war-torn France\u2014a heartbreakingly beautiful novel that
+        celebrates the resilience of the human spirit and the durability of women.
+        It is a novel for everyone, a novel for a lifetime. Goodreads Best Historical
+        Novel of the Year \u2022 People's Choice Favorite Fiction Winner \u2022 #1
+        Indie Next Selection \u2022 A Buzzfeed and The Week Best Book of the Year\",\n
+        \       \"industryIdentifiers\": [\n          {\n            \"type\": \"ISBN_13\",\n
+        \           \"identifier\": \"9781250370112\"\n          },\n          {\n
+        \           \"type\": \"ISBN_10\",\n            \"identifier\": \"1250370116\"\n
+        \         }\n        ],\n        \"readingModes\": {\n          \"text\":
+        true,\n          \"image\": false\n        },\n        \"pageCount\": 0,\n
+        \       \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Fiction\"\n
+        \       ],\n        \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        false,\n        \"contentVersion\": \"preview-1.0.0\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=8RggEQAAQBAJ&printsec=frontcover&img=1&zoom=5&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=8RggEQAAQBAJ&printsec=frontcover&img=1&zoom=1&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=8RggEQAAQBAJ&dq=intitle:The+Nightingale%2Binauthor:Kristin+Hannah&hl=&as_pt=BOOKS&cd=4&source=gbs_api\",\n
+        \       \"infoLink\": \"http://books.google.com/books?id=8RggEQAAQBAJ&dq=intitle:The+Nightingale%2Binauthor:Kristin+Hannah&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://books.google.com/books/about/The_Nightingale_Deluxe_Edition.html?hl=&id=8RggEQAAQBAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"NOT_FOR_SALE\",\n        \"isEbook\": false\n      },\n      \"accessInfo\":
+        {\n        \"country\": \"US\",\n        \"viewability\": \"NO_PAGES\",\n
+        \       \"embeddable\": false,\n        \"publicDomain\": false,\n        \"textToSpeechPermission\":
+        \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\": false\n        },\n
+        \       \"pdf\": {\n          \"isAvailable\": false\n        },\n        \"webReaderLink\":
+        \"http://play.google.com/books/reader?id=8RggEQAAQBAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"NONE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"The Nightingale
+        tells the stories of two sisters, separated by years and experience, by ideals,
+        passion and circumstance, each embarking on her own dangerous path toward
+        survival, love, and freedom in German-occupied, war-torn France-a ...\"\n
+        \     }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"JGkb0QEACAAJ\",\n
+        \     \"etag\": \"2NSYrC+UWLc\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/JGkb0QEACAAJ\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"Kristin Hannah 11 Books Collection
+        Set (the Nightingale, the Four Winds, the Great Alone, Winter Garden, Home
+        Front, Wild and More)\",\n        \"authors\": [\n          \"Kristin Hannah\"\n
+        \       ],\n        \"publishedDate\": \"2025-01-31\",\n        \"description\":
+        \"Kristin Hannah 11 Books Collection Set The Nightingale, The Four Winds,
+        The Great Alone, Winter Garden, Home Front, Wild and more\",\n        \"industryIdentifiers\":
+        [\n          {\n            \"type\": \"ISBN_13\",\n            \"identifier\":
+        \"9798897051939\"\n          }\n        ],\n        \"readingModes\": {\n
+        \         \"text\": false,\n          \"image\": false\n        },\n        \"pageCount\":
+        0,\n        \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Fiction\"\n
+        \       ],\n        \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        false,\n        \"contentVersion\": \"preview-1.0.0\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"language\": \"en\",\n        \"previewLink\":
+        \"http://books.google.com/books?id=JGkb0QEACAAJ&dq=intitle:The+Nightingale%2Binauthor:Kristin+Hannah&hl=&as_pt=BOOKS&cd=5&source=gbs_api\",\n
+        \       \"infoLink\": \"http://books.google.com/books?id=JGkb0QEACAAJ&dq=intitle:The+Nightingale%2Binauthor:Kristin+Hannah&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://books.google.com/books/about/Kristin_Hannah_11_Books_Collection_Set_t.html?hl=&id=JGkb0QEACAAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"NOT_FOR_SALE\",\n        \"isEbook\": false\n      },\n      \"accessInfo\":
+        {\n        \"country\": \"US\",\n        \"viewability\": \"NO_PAGES\",\n
+        \       \"embeddable\": false,\n        \"publicDomain\": false,\n        \"textToSpeechPermission\":
+        \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\": false\n        },\n
+        \       \"pdf\": {\n          \"isAvailable\": false\n        },\n        \"webReaderLink\":
+        \"http://play.google.com/books/reader?id=JGkb0QEACAAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"NONE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"Kristin
+        Hannah 11 Books Collection Set The Nightingale, The Four Winds, The Great
+        Alone, Winter Garden, Home Front, Wild and more\"\n      }\n    }\n  ]\n}\n"
+    headers:
+      Alt-Svc:
+      - h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+      Content-Type:
+      - application/json; charset=UTF-8
+      Date:
+      - Sun, 01 Feb 2026 20:53:41 GMT
+      Server:
+      - ESF
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Origin
+      - X-Origin
+      - Referer
+      X-Content-Type-Options:
+      - nosniff
+      X-Frame-Options:
+      - SAMEORIGIN
+      X-XSS-Protection:
+      - '0'
+      content-length:
+      - '18210'
+    status:
+      code: 200
+      message: OK
+version: 1

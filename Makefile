@@ -16,6 +16,9 @@ help:
 	@echo "  make test          Run all unit tests"
 	@echo "  make test-cov      Run tests with coverage"
 	@echo "  make test-agents   Run agent tests only"
+	@echo "  make test-integration        Run integration tests (VCR)"
+	@echo "  make test-integration-vcr-record  Re-record VCR cassettes"
+	@echo "  make test-all      Run all tests (unit + integration)"
 	@echo "  make eval          Run ADK evaluation (single test)"
 	@echo ""
 	@echo "Running:"
@@ -64,6 +67,15 @@ test-tools:
 
 test-services:
 	.venv/bin/pytest tests/unit/test_services.py -v
+
+test-integration:
+	.venv/bin/pytest tests/integration/ -v -m integration
+
+test-integration-vcr-record:
+	.venv/bin/pytest tests/integration/ -v --vcr-record=all
+
+test-all:
+	.venv/bin/pytest tests/ -v
 
 # =============================================================================
 # ADK Evaluation

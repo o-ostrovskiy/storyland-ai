@@ -1,0 +1,60 @@
+interactions:
+- request:
+    body: null
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      User-Agent:
+      - python-requests/2.32.5
+    method: GET
+    uri: https://www.googleapis.com/books/v1/volumes?maxResults=5&printType=books&q=intitle%3AThe+Hobbit
+  response:
+    body:
+      string: "{\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"Quota exceeded
+        for quota metric 'Queries' and limit 'Queries per day' of service 'books.googleapis.com'
+        for consumer 'project_number:624717413613'.\",\n    \"errors\": [\n      {\n
+        \       \"message\": \"Quota exceeded for quota metric 'Queries' and limit
+        'Queries per day' of service 'books.googleapis.com' for consumer 'project_number:624717413613'.\",\n
+        \       \"domain\": \"global\",\n        \"reason\": \"rateLimitExceeded\"\n
+        \     }\n    ],\n    \"status\": \"RESOURCE_EXHAUSTED\",\n    \"details\":
+        [\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.ErrorInfo\",\n
+        \       \"reason\": \"RATE_LIMIT_EXCEEDED\",\n        \"domain\": \"googleapis.com\",\n
+        \       \"metadata\": {\n          \"quota_unit\": \"1/d/{project}\",\n          \"quota_location\":
+        \"global\",\n          \"quota_limit\": \"defaultPerDayPerProject\",\n          \"quota_limit_value\":
+        \"20000000\",\n          \"service\": \"books.googleapis.com\",\n          \"quota_metric\":
+        \"books.googleapis.com/default\",\n          \"consumer\": \"projects/624717413613\"\n
+        \       }\n      },\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.Help\",\n
+        \       \"links\": [\n          {\n            \"description\": \"Request
+        a higher quota limit.\",\n            \"url\": \"https://cloud.google.com/docs/quotas/help/request_increase\"\n
+        \         }\n        ]\n      }\n    ]\n  }\n}\n"
+    headers:
+      Alt-Svc:
+      - h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+      Content-Type:
+      - application/json; charset=UTF-8
+      Date:
+      - Sun, 01 Feb 2026 20:53:41 GMT
+      Server:
+      - ESF
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Origin
+      - X-Origin
+      - Referer
+      X-Content-Type-Options:
+      - nosniff
+      X-Frame-Options:
+      - SAMEORIGIN
+      X-XSS-Protection:
+      - '0'
+      content-length:
+      - '1313'
+    status:
+      code: 429
+      message: Too Many Requests
+version: 1

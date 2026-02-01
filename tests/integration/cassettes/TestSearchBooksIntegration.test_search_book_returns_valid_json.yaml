@@ -1,0 +1,285 @@
+interactions:
+- request:
+    body: null
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      User-Agent:
+      - python-requests/2.32.5
+    method: GET
+    uri: https://www.googleapis.com/books/v1/volumes?maxResults=5&printType=books&q=intitle%3A1984%2Binauthor%3AGeorge+Orwell
+  response:
+    body:
+      string: "{\n  \"kind\": \"books#volumes\",\n  \"totalItems\": 1000000,\n  \"items\":
+        [\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"1aIFEAAAQBAJ\",\n
+        \     \"etag\": \"U8oa9I3JlIA\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/1aIFEAAAQBAJ\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"1984 : George Orwell's 1984:
+        A Dystopian Masterpiece\",\n        \"subtitle\": \"George Orwell 1984: A
+        Dystopian Masterpiece by a Visionary Author by George Orwell\",\n        \"authors\":
+        [\n          \"George Orwell\"\n        ],\n        \"publisher\": \"Prabhat
+        Prakashan\",\n        \"publishedDate\": \"2021-01-01\",\n        \"description\":
+        \"George Orwell 1984: Nineteen Eighty-Four is a groundbreaking dystopian novel
+        by English author George Orwell. Published in 1949, it presents a chilling
+        portrayal of a totalitarian society where individualism is suppressed, surveillance
+        is omnipresent, and truth is manipulated for political control. Often referred
+        to simply as 1984, the book has become a timeless classic and a cautionary
+        tale about the dangers of totalitarianism and the importance of preserving
+        individual freedom. Key Aspects of George Orwell 1984: Nineteen Eighty-Four:
+        Dystopian Society: Orwell creates a haunting vision of a future society ruled
+        by a totalitarian regime known as the Party. The novel explores the complete
+        control exerted by the Party over its citizens, who are constantly monitored,
+        manipulated, and stripped of their individuality and freedom. The depiction
+        of a dystopian world serves as a stark warning about the potential consequences
+        of unchecked governmental power.Surveillance and Manipulation: One of the
+        central themes of the novel is the pervasive surveillance employed by the
+        Party through devices such as telescreens, hidden microphones, and informants.
+        The constant monitoring of its citizens ensures conformity and suppresses
+        any dissent. Orwell's portrayal of this surveillance state raises important
+        questions about privacy, freedom of thought, and the dangers of mass surveillance
+        in modern societies.Exploration of Truth and Reality: In 1984, Orwell introduces
+        the concept of doublethink, where the Party manipulates and controls reality
+        by rewriting history and altering facts. The protagonist, Winston Smith, struggles
+        to maintain his own independent thoughts and seek the truth amid a world dominated
+        by propaganda and distortion. Orwell's exploration of the nature of truth
+        and the power of language to shape perception is both thought-provoking and
+        unsettling. George Orwell 1984: Nineteen Eighty-Four continues to captivate
+        readers with its powerful portrayal of a dystopian society and its profound
+        insights into themes such as government oppression, surveillance, and the
+        manipulation of truth. Orwell's skillful storytelling and his ability to capture
+        the human spirit in the face of adversity make this novel a timeless masterpiece
+        of social science fiction. George Orwell: George Orwell, the pen name of Eric
+        Arthur Blair, was an English writer and journalist known for his dystopian
+        novels, most notably Nineteen Eighty-Four and Animal Farm. Born in 1903, Orwell's
+        works examined the dangers of totalitarianism, political oppression, and the
+        manipulation of truth. His writings, characterized by lucid prose and keen
+        social observation, exposed the dark undercurrents of power and the erosion
+        of individual freedoms. Orwell's legacy as a political visionary and his commitment
+        to defending the principles of democracy and freedom of expression continue
+        to resonate in modern society. His works serve as a warning against the abuse
+        of power and the importance of truth in the face of oppressive regimes.\",\n
+        \       \"readingModes\": {\n          \"text\": true,\n          \"image\":
+        true\n        },\n        \"pageCount\": 249,\n        \"printType\": \"BOOK\",\n
+        \       \"categories\": [\n          \"Fiction\"\n        ],\n        \"maturityRating\":
+        \"NOT_MATURE\",\n        \"allowAnonLogging\": true,\n        \"contentVersion\":
+        \"2.2.2.0.preview.3\",\n        \"panelizationSummary\": {\n          \"containsEpubBubbles\":
+        false,\n          \"containsImageBubbles\": false\n        },\n        \"imageLinks\":
+        {\n          \"smallThumbnail\": \"http://books.google.com/books/content?id=1aIFEAAAQBAJ&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=1aIFEAAAQBAJ&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=1aIFEAAAQBAJ&printsec=frontcover&dq=intitle:1984%2Binauthor:George+Orwell&hl=&as_pt=BOOKS&cd=1&source=gbs_api\",\n
+        \       \"infoLink\": \"https://play.google.com/store/books/details?id=1aIFEAAAQBAJ&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://play.google.com/store/books/details?id=1aIFEAAAQBAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"FOR_SALE\",\n        \"isEbook\": true,\n        \"listPrice\": {\n          \"amount\":
+        2.99,\n          \"currencyCode\": \"USD\"\n        },\n        \"retailPrice\":
+        {\n          \"amount\": 2.99,\n          \"currencyCode\": \"USD\"\n        },\n
+        \       \"buyLink\": \"https://play.google.com/store/books/details?id=1aIFEAAAQBAJ&rdid=book-1aIFEAAAQBAJ&rdot=1&source=gbs_api\",\n
+        \       \"offers\": [\n          {\n            \"finskyOfferType\": 1,\n
+        \           \"listPrice\": {\n              \"amountInMicros\": 2990000,\n
+        \             \"currencyCode\": \"USD\"\n            },\n            \"retailPrice\":
+        {\n              \"amountInMicros\": 2990000,\n              \"currencyCode\":
+        \"USD\"\n            },\n            \"giftable\": true\n          }\n        ]\n
+        \     },\n      \"accessInfo\": {\n        \"country\": \"US\",\n        \"viewability\":
+        \"PARTIAL\",\n        \"embeddable\": true,\n        \"publicDomain\": false,\n
+        \       \"textToSpeechPermission\": \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\":
+        true,\n          \"acsTokenLink\": \"http://books.google.com/books/download/1984_George_Orwell_s_1984_A_Dystopian_Ma-sample-epub.acsm?id=1aIFEAAAQBAJ&format=epub&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"pdf\": {\n          \"isAvailable\": true,\n          \"acsTokenLink\":
+        \"http://books.google.com/books/download/1984_George_Orwell_s_1984_A_Dystopian_Ma-sample-pdf.acsm?id=1aIFEAAAQBAJ&format=pdf&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"webReaderLink\": \"http://play.google.com/books/reader?id=1aIFEAAAQBAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"SAMPLE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"Orwell&#39;s
+        skillful storytelling and his ability to capture the human spirit in the face
+        of adversity make this novel a timeless masterpiece of social science fiction.\"\n
+        \     }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"T0xmAQAACAAJ\",\n
+        \     \"etag\": \"6247BloZZKM\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/T0xmAQAACAAJ\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"1984 George Orwell - Large Print
+        Edition\",\n        \"authors\": [\n          \"George Orwell\"\n        ],\n
+        \       \"publishedDate\": \"2017-02-15\",\n        \"description\": \"1984
+        is a dystopian novel that predicts the future, a society dominated by \\\"Fake
+        News\\\" where there is no way for the people to know what is true and what
+        is not. It has been named as one of the best English language novels of the
+        past century.\",\n        \"industryIdentifiers\": [\n          {\n            \"type\":
+        \"ISBN_10\",\n            \"identifier\": \"4871872688\"\n          },\n          {\n
+        \           \"type\": \"ISBN_13\",\n            \"identifier\": \"9784871872683\"\n
+        \         }\n        ],\n        \"readingModes\": {\n          \"text\":
+        false,\n          \"image\": false\n        },\n        \"pageCount\": 416,\n
+        \       \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Fiction\"\n
+        \       ],\n        \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        false,\n        \"contentVersion\": \"preview-1.0.0\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=T0xmAQAACAAJ&printsec=frontcover&img=1&zoom=5&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=T0xmAQAACAAJ&printsec=frontcover&img=1&zoom=1&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=T0xmAQAACAAJ&dq=intitle:1984%2Binauthor:George+Orwell&hl=&as_pt=BOOKS&cd=2&source=gbs_api\",\n
+        \       \"infoLink\": \"http://books.google.com/books?id=T0xmAQAACAAJ&dq=intitle:1984%2Binauthor:George+Orwell&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://books.google.com/books/about/1984_George_Orwell_Large_Print_Edition.html?hl=&id=T0xmAQAACAAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"NOT_FOR_SALE\",\n        \"isEbook\": false\n      },\n      \"accessInfo\":
+        {\n        \"country\": \"US\",\n        \"viewability\": \"NO_PAGES\",\n
+        \       \"embeddable\": false,\n        \"publicDomain\": false,\n        \"textToSpeechPermission\":
+        \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\": false\n        },\n
+        \       \"pdf\": {\n          \"isAvailable\": false\n        },\n        \"webReaderLink\":
+        \"http://play.google.com/books/reader?id=T0xmAQAACAAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"NONE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"He talks
+        constantly on TV today about &quot;Fake News&quot; and &quot;Alternate Facts&quot;.
+        Many people obviously believe his version of the news because that is how
+        he got elected. How this will turn out is the subject of this book.\"\n      }\n
+        \   },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"tSJIEQAAQBAJ\",\n
+        \     \"etag\": \"3f5r7pILG18\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/tSJIEQAAQBAJ\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"1984\",\n        \"authors\":
+        [\n          \"George Orwell\"\n        ],\n        \"publisher\": \"Empire
+        State Classics\",\n        \"publishedDate\": \"2024-07-01\",\n        \"description\":
+        \"\\\"Big Brother is Watching You.\\\" In a world where truth is dictated
+        by the Party, freedom is slavery, and war is peace, Winston Smith dares to
+        think for himself. But in the totalitarian state of Oceania, even a single
+        thought can be a crime. Every move is monitored, every word recorded, and
+        every dissent crushed. As Winston begins to question the reality imposed upon
+        him, he embarks on a dangerous journey of rebellion and self-discovery. But
+        in a society where love is forbidden, history is rewritten, and the past is
+        erased, can one man\u2019s defiance change anything\u2014or is he destined
+        to become another cog in the machine? George Orwell\u2019s \\\"1984\\\" is
+        a chilling and prophetic masterpiece that explores the dangers of unchecked
+        power, the erosion of truth, and the resilience of the human spirit. A haunting
+        vision of the future that feels more relevant than ever, this timeless classic
+        will leave you questioning the world around you\u2014and the world within.
+        \\\"Orwell\u2019s novel is a warning, a mirror, and a profound meditation
+        on freedom. Once you enter the world of \\\"1984\\\", you\u2019ll never see
+        freedom the same way again.\\\"\",\n        \"industryIdentifiers\": [\n          {\n
+        \           \"type\": \"ISBN_13\",\n            \"identifier\": \"9781998382934\"\n
+        \         },\n          {\n            \"type\": \"ISBN_10\",\n            \"identifier\":
+        \"1998382931\"\n          }\n        ],\n        \"readingModes\": {\n          \"text\":
+        true,\n          \"image\": true\n        },\n        \"pageCount\": 362,\n
+        \       \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Fiction\"\n
+        \       ],\n        \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        true,\n        \"contentVersion\": \"0.1.2.0.preview.3\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=tSJIEQAAQBAJ&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=tSJIEQAAQBAJ&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=tSJIEQAAQBAJ&printsec=frontcover&dq=intitle:1984%2Binauthor:George+Orwell&hl=&as_pt=BOOKS&cd=3&source=gbs_api\",\n
+        \       \"infoLink\": \"https://play.google.com/store/books/details?id=tSJIEQAAQBAJ&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://play.google.com/store/books/details?id=tSJIEQAAQBAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"FOR_SALE\",\n        \"isEbook\": true,\n        \"listPrice\": {\n          \"amount\":
+        3.99,\n          \"currencyCode\": \"USD\"\n        },\n        \"retailPrice\":
+        {\n          \"amount\": 3.99,\n          \"currencyCode\": \"USD\"\n        },\n
+        \       \"buyLink\": \"https://play.google.com/store/books/details?id=tSJIEQAAQBAJ&rdid=book-tSJIEQAAQBAJ&rdot=1&source=gbs_api\",\n
+        \       \"offers\": [\n          {\n            \"finskyOfferType\": 1,\n
+        \           \"listPrice\": {\n              \"amountInMicros\": 3990000,\n
+        \             \"currencyCode\": \"USD\"\n            },\n            \"retailPrice\":
+        {\n              \"amountInMicros\": 3990000,\n              \"currencyCode\":
+        \"USD\"\n            },\n            \"giftable\": true\n          }\n        ]\n
+        \     },\n      \"accessInfo\": {\n        \"country\": \"US\",\n        \"viewability\":
+        \"PARTIAL\",\n        \"embeddable\": true,\n        \"publicDomain\": false,\n
+        \       \"textToSpeechPermission\": \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\":
+        true,\n          \"acsTokenLink\": \"http://books.google.com/books/download/1984-sample-epub.acsm?id=tSJIEQAAQBAJ&format=epub&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"pdf\": {\n          \"isAvailable\": true,\n          \"acsTokenLink\":
+        \"http://books.google.com/books/download/1984-sample-pdf.acsm?id=tSJIEQAAQBAJ&format=pdf&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"webReaderLink\": \"http://play.google.com/books/reader?id=tSJIEQAAQBAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"SAMPLE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"But in
+        a society where love is forbidden, history is rewritten, and the past is erased,
+        can one man\u2019s defiance change anything\u2014or is he destined to become
+        another cog in the machine?George Orwell\u2019s &quot;1984&quot; is a chilling
+        and prophetic ...\"\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n
+        \     \"id\": \"ldnyDwAAQBAJ\",\n      \"etag\": \"pa1JN3a8wUk\",\n      \"selfLink\":
+        \"https://www.googleapis.com/books/v1/volumes/ldnyDwAAQBAJ\",\n      \"volumeInfo\":
+        {\n        \"title\": \"1984 - Orwell\",\n        \"authors\": [\n          \"George
+        Orwell\"\n        ],\n        \"publisher\": \"LeBooks Editora \",\n        \"publishedDate\":
+        \"2020-07-23\",\n        \"description\": \"1984 or Nineteen Eighty-Four:
+        A Novel, is a dystopian novel by English novelist George Orwell. It was published
+        on 8 June 1949. 1984 is one of George Orwell's most powerful politically charged
+        novels, a beautifully crafted warning against the dangers of a totalitarian
+        society, and one of the most famous novels in the dystopian genre. Winston
+        Smith is a low-ranking member of the ruling party in London whose every move
+        is monitored by telescreens. Everywhere Winston goes, the party's omniscient
+        leader, Big Brother, watches him. This is an important novel not only for
+        its stark warning against abusive authority (and its somewhat ironic contribution
+        to modern television content), but also for its insights into the power of
+        manipulating language, history, and the psychology of fear and control. These
+        issues are perhaps even more pertinent today than when Orwell penned his novel.\",\n
+        \       \"industryIdentifiers\": [\n          {\n            \"type\": \"ISBN_13\",\n
+        \           \"identifier\": \"9786587921075\"\n          },\n          {\n
+        \           \"type\": \"ISBN_10\",\n            \"identifier\": \"6587921078\"\n
+        \         }\n        ],\n        \"readingModes\": {\n          \"text\":
+        true,\n          \"image\": true\n        },\n        \"pageCount\": 395,\n
+        \       \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Fiction\"\n
+        \       ],\n        \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        true,\n        \"contentVersion\": \"1.12.13.0.preview.3\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=ldnyDwAAQBAJ&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=ldnyDwAAQBAJ&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=ldnyDwAAQBAJ&printsec=frontcover&dq=intitle:1984%2Binauthor:George+Orwell&hl=&as_pt=BOOKS&cd=4&source=gbs_api\",\n
+        \       \"infoLink\": \"http://books.google.com/books?id=ldnyDwAAQBAJ&dq=intitle:1984%2Binauthor:George+Orwell&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://books.google.com/books/about/1984_Orwell.html?hl=&id=ldnyDwAAQBAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"NOT_FOR_SALE\",\n        \"isEbook\": false\n      },\n      \"accessInfo\":
+        {\n        \"country\": \"US\",\n        \"viewability\": \"PARTIAL\",\n        \"embeddable\":
+        true,\n        \"publicDomain\": false,\n        \"textToSpeechPermission\":
+        \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\": true,\n          \"acsTokenLink\":
+        \"http://books.google.com/books/download/1984_Orwell-sample-epub.acsm?id=ldnyDwAAQBAJ&format=epub&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"pdf\": {\n          \"isAvailable\": true,\n          \"acsTokenLink\":
+        \"http://books.google.com/books/download/1984_Orwell-sample-pdf.acsm?id=ldnyDwAAQBAJ&format=pdf&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"webReaderLink\": \"http://play.google.com/books/reader?id=ldnyDwAAQBAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"SAMPLE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"This
+        is an important novel not only for its stark warning against abusive authority
+        (and its somewhat ironic contribution to modern television content), but also
+        for its insights into the power of manipulating language, history, and the
+        ...\"\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\":
+        \"Jg9u0AEACAAJ\",\n      \"etag\": \"GoUAuR32V+o\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/Jg9u0AEACAAJ\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"1984 GEORGE ORWELL.\",\n        \"authors\":
+        [\n          \"GEORGE. FROMM ORWELL (ERICH.)\"\n        ],\n        \"publishedDate\":
+        \"2020\",\n        \"industryIdentifiers\": [\n          {\n            \"type\":
+        \"ISBN_10\",\n            \"identifier\": \"9389647746\"\n          },\n          {\n
+        \           \"type\": \"ISBN_13\",\n            \"identifier\": \"9789389647747\"\n
+        \         }\n        ],\n        \"readingModes\": {\n          \"text\":
+        false,\n          \"image\": false\n        },\n        \"pageCount\": 0,\n
+        \       \"printType\": \"BOOK\",\n        \"maturityRating\": \"NOT_MATURE\",\n
+        \       \"allowAnonLogging\": false,\n        \"contentVersion\": \"preview-1.0.0\",\n
+        \       \"panelizationSummary\": {\n          \"containsEpubBubbles\": false,\n
+        \         \"containsImageBubbles\": false\n        },\n        \"language\":
+        \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=Jg9u0AEACAAJ&dq=intitle:1984%2Binauthor:George+Orwell&hl=&as_pt=BOOKS&cd=5&source=gbs_api\",\n
+        \       \"infoLink\": \"http://books.google.com/books?id=Jg9u0AEACAAJ&dq=intitle:1984%2Binauthor:George+Orwell&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://books.google.com/books/about/1984_GEORGE_ORWELL.html?hl=&id=Jg9u0AEACAAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"NOT_FOR_SALE\",\n        \"isEbook\": false\n      },\n      \"accessInfo\":
+        {\n        \"country\": \"US\",\n        \"viewability\": \"NO_PAGES\",\n
+        \       \"embeddable\": false,\n        \"publicDomain\": false,\n        \"textToSpeechPermission\":
+        \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\": false\n        },\n
+        \       \"pdf\": {\n          \"isAvailable\": false\n        },\n        \"webReaderLink\":
+        \"http://play.google.com/books/reader?id=Jg9u0AEACAAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"NONE\",\n        \"quoteSharingAllowed\":
+        false\n      }\n    }\n  ]\n}\n"
+    headers:
+      Alt-Svc:
+      - h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+      Content-Type:
+      - application/json; charset=UTF-8
+      Date:
+      - Sun, 01 Feb 2026 20:52:42 GMT
+      Server:
+      - ESF
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Origin
+      - X-Origin
+      - Referer
+      X-Content-Type-Options:
+      - nosniff
+      X-Frame-Options:
+      - SAMEORIGIN
+      X-XSS-Protection:
+      - '0'
+      content-length:
+      - '20575'
+    status:
+      code: 200
+      message: OK
+version: 1

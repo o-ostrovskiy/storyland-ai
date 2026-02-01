@@ -1,0 +1,300 @@
+interactions:
+- request:
+    body: null
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      User-Agent:
+      - python-requests/2.32.5
+    method: GET
+    uri: https://www.googleapis.com/books/v1/volumes?maxResults=5&printType=books&q=intitle%3APride+and+Prejudice%2Binauthor%3AJane+Austen
+  response:
+    body:
+      string: "{\n  \"kind\": \"books#volumes\",\n  \"totalItems\": 1000000,\n  \"items\":
+        [\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"s1gVAAAAYAAJ\",\n
+        \     \"etag\": \"jNrJzzJyYUQ\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/s1gVAAAAYAAJ\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"Pride and Prejudice\",\n        \"authors\":
+        [\n          \"Jane Austen\"\n        ],\n        \"publishedDate\": \"1918\",\n
+        \       \"description\": \"Austen\u2019s most celebrated novel tells the story
+        of Elizabeth Bennet, a bright, lively young woman with four sisters, and a
+        mother determined to marry them to wealthy men. At a party near the Bennets\u2019
+        home in the English countryside, Elizabeth meets the wealthy, proud Fitzwilliam
+        Darcy. Elizabeth initially finds Darcy haughty and intolerable, but circumstances
+        continue to unite the pair. Mr. Darcy finds himself captivated by Elizabeth\u2019s
+        wit and candor, while her reservations about his character slowly vanish.
+        The story is as much a social critique as it is a love story, and the prose
+        crackles with Austen\u2019s wry wit.\",\n        \"industryIdentifiers\":
+        [\n          {\n            \"type\": \"OTHER\",\n            \"identifier\":
+        \"HARVARD:32044086796588\"\n          }\n        ],\n        \"readingModes\":
+        {\n          \"text\": true,\n          \"image\": true\n        },\n        \"pageCount\":
+        448,\n        \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Courtship\"\n
+        \       ],\n        \"averageRating\": 4,\n        \"ratingsCount\": 367,\n
+        \       \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        false,\n        \"contentVersion\": \"1.5.13.0.full.3\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=s1gVAAAAYAAJ&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=s1gVAAAAYAAJ&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=s1gVAAAAYAAJ&printsec=frontcover&dq=intitle:Pride+and+Prejudice%2Binauthor:Jane+Austen&hl=&as_pt=BOOKS&cd=1&source=gbs_api\",\n
+        \       \"infoLink\": \"https://play.google.com/store/books/details?id=s1gVAAAAYAAJ&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://play.google.com/store/books/details?id=s1gVAAAAYAAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"FREE\",\n        \"isEbook\": true,\n        \"buyLink\": \"https://play.google.com/store/books/details?id=s1gVAAAAYAAJ&rdid=book-s1gVAAAAYAAJ&rdot=1&source=gbs_api\"\n
+        \     },\n      \"accessInfo\": {\n        \"country\": \"US\",\n        \"viewability\":
+        \"ALL_PAGES\",\n        \"embeddable\": true,\n        \"publicDomain\": true,\n
+        \       \"textToSpeechPermission\": \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\":
+        true,\n          \"downloadLink\": \"http://books.google.com/books/download/Pride_and_Prejudice.epub?id=s1gVAAAAYAAJ&hl=&output=epub&source=gbs_api\"\n
+        \       },\n        \"pdf\": {\n          \"isAvailable\": true,\n          \"downloadLink\":
+        \"http://books.google.com/books/download/Pride_and_Prejudice.pdf?id=s1gVAAAAYAAJ&hl=&output=pdf&sig=ACfU3U3dQw5JDWdbVgk2VRHyDjVMT4oIaA&source=gbs_api\"\n
+        \       },\n        \"webReaderLink\": \"http://play.google.com/books/reader?id=s1gVAAAAYAAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"FULL_PUBLIC_DOMAIN\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"Mr. Darcy
+        finds himself captivated by Elizabeth\u2019s wit and candor, while her reservations
+        about his character slowly vanish. The story is as much a social critique
+        as it is a love story, and the prose crackles with Austen\u2019s wry wit.\"\n
+        \     }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"ydULEQAAQBAJ\",\n
+        \     \"etag\": \"oXTfACoWBhk\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/ydULEQAAQBAJ\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"Pride and Prejudice\",\n        \"subtitle\":
+        \"Jane Austen\",\n        \"authors\": [\n          \"Jane Austen\"\n        ],\n
+        \       \"publisher\": \"Artaro\",\n        \"publishedDate\": \"2024-06-04\",\n
+        \       \"description\": \"On the verdant plains of 18th-century England,
+        in the heart of the Hertfordshire countryside, a timeless story of passion,
+        pride and prejudice unfolds. Elizabeth Bennet, a lively, intelligent young
+        woman, is the second of five sisters in a family of modest means. Her sharp
+        mind and independent spirit set her apart in a society where propriety and
+        matrimonial alliances are central concerns.When she crosses paths with Mr.
+        Darcy, an aristocrat as wealthy as he is arrogant, Elizabeth is immediately
+        struck by his coldness and pride. However, as her encounters and misunderstandings
+        progress, she discovers that beyond first impressions lies a man far more
+        complex and vulnerable than she could have imagined.Jane Austen's masterpiece
+        \\\"Pride and Prejudice\\\" is a subtle and poignant exploration of social
+        dynamics and human relationships. Through brilliant dialogue and incisive
+        narration, Austen paints a fascinating picture of the struggle between social
+        classes and the barriers of love. It's a story where true love triumphs over
+        prejudice, and pride is transformed into humility.Immerse yourself in the
+        rich, captivating world of a classic that has lost none of its relevance or
+        charm. A must-read for anyone wishing to understand the power of love and
+        the strength of personal conviction.\",\n        \"industryIdentifiers\":
+        [\n          {\n            \"type\": \"ISBN_13\",\n            \"identifier\":
+        \"9783989956025\"\n          },\n          {\n            \"type\": \"ISBN_10\",\n
+        \           \"identifier\": \"3989956027\"\n          }\n        ],\n        \"readingModes\":
+        {\n          \"text\": true,\n          \"image\": true\n        },\n        \"pageCount\":
+        442,\n        \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Fiction\"\n
+        \       ],\n        \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        true,\n        \"contentVersion\": \"0.1.1.0.preview.3\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=ydULEQAAQBAJ&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=ydULEQAAQBAJ&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=ydULEQAAQBAJ&printsec=frontcover&dq=intitle:Pride+and+Prejudice%2Binauthor:Jane+Austen&hl=&as_pt=BOOKS&cd=2&source=gbs_api\",\n
+        \       \"infoLink\": \"https://play.google.com/store/books/details?id=ydULEQAAQBAJ&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://play.google.com/store/books/details?id=ydULEQAAQBAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"FOR_SALE\",\n        \"isEbook\": true,\n        \"listPrice\": {\n          \"amount\":
+        1.99,\n          \"currencyCode\": \"USD\"\n        },\n        \"retailPrice\":
+        {\n          \"amount\": 1.99,\n          \"currencyCode\": \"USD\"\n        },\n
+        \       \"buyLink\": \"https://play.google.com/store/books/details?id=ydULEQAAQBAJ&rdid=book-ydULEQAAQBAJ&rdot=1&source=gbs_api\",\n
+        \       \"offers\": [\n          {\n            \"finskyOfferType\": 1,\n
+        \           \"listPrice\": {\n              \"amountInMicros\": 1990000,\n
+        \             \"currencyCode\": \"USD\"\n            },\n            \"retailPrice\":
+        {\n              \"amountInMicros\": 1990000,\n              \"currencyCode\":
+        \"USD\"\n            },\n            \"giftable\": true\n          }\n        ]\n
+        \     },\n      \"accessInfo\": {\n        \"country\": \"US\",\n        \"viewability\":
+        \"PARTIAL\",\n        \"embeddable\": true,\n        \"publicDomain\": false,\n
+        \       \"textToSpeechPermission\": \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\":
+        true,\n          \"acsTokenLink\": \"http://books.google.com/books/download/Pride_and_Prejudice-sample-epub.acsm?id=ydULEQAAQBAJ&format=epub&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"pdf\": {\n          \"isAvailable\": true,\n          \"acsTokenLink\":
+        \"http://books.google.com/books/download/Pride_and_Prejudice-sample-pdf.acsm?id=ydULEQAAQBAJ&format=pdf&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"webReaderLink\": \"http://play.google.com/books/reader?id=ydULEQAAQBAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"SAMPLE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"However,
+        as her encounters and misunderstandings progress, she discovers that beyond
+        first impressions lies a man far more complex and vulnerable than she could
+        have imagined.Jane Austen&#39;s masterpiece &quot;Pride and Prejudice&quot;
+        is a subtle and ...\"\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n
+        \     \"id\": \"FylCUanlGhAC\",\n      \"etag\": \"03T7LBtLPUo\",\n      \"selfLink\":
+        \"https://www.googleapis.com/books/v1/volumes/FylCUanlGhAC\",\n      \"volumeInfo\":
+        {\n        \"title\": \"The Condensed Pride and Prejudice (Jane Austen's Classic
+        Novel)\",\n        \"authors\": [\n          \"Jane. Austen\"\n        ],\n
+        \       \"publisher\": \"BookCaps Study Guides\",\n        \"publishedDate\":
+        \"2011\",\n        \"description\": \"Pride and Prejudice is one of the greatest
+        romances ever wrote. If you've always wanted to read the classic, but just
+        don't have the time, this abridged version can help. At just 15,000 (100's
+        of pages shorter than the original) words long, this version of the classic
+        novel will let you read Austen's classic in just hours, and provide you with
+        an excellent overview of the entire novel. The story follows the main character
+        Elizabeth Bennet as she deals with issues of manners, upbringing, morality,
+        education and marriage in the society of the landed gentry of early 19th-century
+        England. Elizabeth is the second of five daughters of a country gentleman,
+        living near the fictional town of Meryton in Hertfordshire, near London. BookCaps'
+        is a leader in eBook study guides; the BookCaps abridged classic series is
+        intended to give readers a chance to read classic novels in hours instead
+        of days. BookCaps is not trying to replace these classic novels\u2014its intention
+        is to provide an introduction to readers, so they can read and appreciate
+        the novel in its entirely when they have free time.\",\n        \"industryIdentifiers\":
+        [\n          {\n            \"type\": \"ISBN_13\",\n            \"identifier\":
+        \"9781610427968\"\n          },\n          {\n            \"type\": \"ISBN_10\",\n
+        \           \"identifier\": \"1610427963\"\n          }\n        ],\n        \"readingModes\":
+        {\n          \"text\": true,\n          \"image\": true\n        },\n        \"pageCount\":
+        69,\n        \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Biography
+        & Autobiography\"\n        ],\n        \"maturityRating\": \"NOT_MATURE\",\n
+        \       \"allowAnonLogging\": true,\n        \"contentVersion\": \"0.2.2.0.preview.3\",\n
+        \       \"panelizationSummary\": {\n          \"containsEpubBubbles\": false,\n
+        \         \"containsImageBubbles\": false\n        },\n        \"imageLinks\":
+        {\n          \"smallThumbnail\": \"http://books.google.com/books/content?id=FylCUanlGhAC&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=FylCUanlGhAC&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=FylCUanlGhAC&printsec=frontcover&dq=intitle:Pride+and+Prejudice%2Binauthor:Jane+Austen&hl=&as_pt=BOOKS&cd=3&source=gbs_api\",\n
+        \       \"infoLink\": \"https://play.google.com/store/books/details?id=FylCUanlGhAC&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://play.google.com/store/books/details?id=FylCUanlGhAC\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"FOR_SALE\",\n        \"isEbook\": true,\n        \"listPrice\": {\n          \"amount\":
+        3.97,\n          \"currencyCode\": \"USD\"\n        },\n        \"retailPrice\":
+        {\n          \"amount\": 3.97,\n          \"currencyCode\": \"USD\"\n        },\n
+        \       \"buyLink\": \"https://play.google.com/store/books/details?id=FylCUanlGhAC&rdid=book-FylCUanlGhAC&rdot=1&source=gbs_api\",\n
+        \       \"offers\": [\n          {\n            \"finskyOfferType\": 1,\n
+        \           \"listPrice\": {\n              \"amountInMicros\": 3970000,\n
+        \             \"currencyCode\": \"USD\"\n            },\n            \"retailPrice\":
+        {\n              \"amountInMicros\": 3970000,\n              \"currencyCode\":
+        \"USD\"\n            },\n            \"giftable\": true\n          }\n        ]\n
+        \     },\n      \"accessInfo\": {\n        \"country\": \"US\",\n        \"viewability\":
+        \"PARTIAL\",\n        \"embeddable\": true,\n        \"publicDomain\": false,\n
+        \       \"textToSpeechPermission\": \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\":
+        true,\n          \"acsTokenLink\": \"http://books.google.com/books/download/The_Condensed_Pride_and_Prejudice_Jane_A-sample-epub.acsm?id=FylCUanlGhAC&format=epub&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"pdf\": {\n          \"isAvailable\": true,\n          \"acsTokenLink\":
+        \"http://books.google.com/books/download/The_Condensed_Pride_and_Prejudice_Jane_A-sample-pdf.acsm?id=FylCUanlGhAC&format=pdf&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"webReaderLink\": \"http://play.google.com/books/reader?id=FylCUanlGhAC&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"SAMPLE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"The story
+        follows the main character Elizabeth Bennet as she deals with issues of manners,
+        upbringing, morality, education and marriage in the society of the landed
+        gentry of early 19th-century England.\"\n      }\n    },\n    {\n      \"kind\":
+        \"books#volume\",\n      \"id\": \"nfdvDwAAQBAJ\",\n      \"etag\": \"NhUoWgNqEws\",\n
+        \     \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/nfdvDwAAQBAJ\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"Pride and Prejudice\",\n        \"authors\":
+        [\n          \"Jane Austen\"\n        ],\n        \"publisher\": \"Bantam
+        Classics\",\n        \"publishedDate\": \"1983-12-01\",\n        \"description\":
+        \"Nominated as one of America\u2019s best-loved novels by PBS\u2019s The Great
+        American Read \u201CIt is a truth universally acknowledged, that a single
+        man in possession of a good fortune must be in want of a wife.\u201D So begins
+        Pride and Prejudice, Jane Austen\u2019s witty comedy of manners\u2014one of
+        the most popular novels of all time\u2014that features splendidly civilized
+        sparring between the proud Mr. Darcy and the prejudiced Elizabeth Bennet as
+        they play out their spirited courtship in a series of eighteenth-century drawing-room
+        intrigues. Renowned literary critic and historian George Saintsbury in 1894
+        declared it the \u201Cmost perfect, the most characteristic, the most eminently
+        quintessential of its author\u2019s works,\u201D and Eudora Welty in the twentieth
+        century described it as \u201Cirresistible and as nearly flawless as any fiction
+        could be.\u201D\",\n        \"industryIdentifiers\": [\n          {\n            \"type\":
+        \"ISBN_13\",\n            \"identifier\": \"9780553213102\"\n          },\n
+        \         {\n            \"type\": \"ISBN_10\",\n            \"identifier\":
+        \"0553213105\"\n          }\n        ],\n        \"readingModes\": {\n          \"text\":
+        false,\n          \"image\": false\n        },\n        \"pageCount\": 342,\n
+        \       \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Fiction\"\n
+        \       ],\n        \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        false,\n        \"contentVersion\": \"0.3.2.0.preview.0\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=nfdvDwAAQBAJ&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=nfdvDwAAQBAJ&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=nfdvDwAAQBAJ&printsec=frontcover&dq=intitle:Pride+and+Prejudice%2Binauthor:Jane+Austen&hl=&as_pt=BOOKS&cd=4&source=gbs_api\",\n
+        \       \"infoLink\": \"http://books.google.com/books?id=nfdvDwAAQBAJ&dq=intitle:Pride+and+Prejudice%2Binauthor:Jane+Austen&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://books.google.com/books/about/Pride_and_Prejudice.html?hl=&id=nfdvDwAAQBAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"NOT_FOR_SALE\",\n        \"isEbook\": false\n      },\n      \"accessInfo\":
+        {\n        \"country\": \"US\",\n        \"viewability\": \"PARTIAL\",\n        \"embeddable\":
+        true,\n        \"publicDomain\": false,\n        \"textToSpeechPermission\":
+        \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\": false\n        },\n
+        \       \"pdf\": {\n          \"isAvailable\": false\n        },\n        \"webReaderLink\":
+        \"http://play.google.com/books/reader?id=nfdvDwAAQBAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"SAMPLE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"Nominated
+        as one of America\u2019s best-loved novels by PBS\u2019s The Great American
+        Read \u201CIt is a truth universally acknowledged, that a single man in possession
+        of a good fortune must be in want of a wife.\u201D So begins Pride and Prejudice,
+        ...\"\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\":
+        \"QuoSDAEACAAJ\",\n      \"etag\": \"lQeaSQ6/HTc\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/QuoSDAEACAAJ\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"Pride and Prejudice\",\n        \"subtitle\":
+        \"By Jane Austen : Illustrated\",\n        \"authors\": [\n          \"Jane
+        Jane Austen\"\n        ],\n        \"publishedDate\": \"2016-05-13\",\n        \"description\":
+        \"Why buy our paperbacks? Standard Font size of 10 for all books High Quality
+        Paper Fulfilled by Amazon Expedited shipping 30 Days Money Back Guarantee
+        BEWARE of Low-quality sellers Don't buy cheap paperbacks just to save a few
+        dollars. Most of them use low-quality papers & binding. Their pages fall off
+        easily. Some of them even use very small font size of 6 or less to increase
+        their profit margin. It makes their books completely unreadable. How is this
+        book unique? Unabridged (100% Original content) Font adjustments & biography
+        included Illustrated About Pride and Prejudice by Jane Austen Pride and Prejudice
+        is a novel of manners by Jane Austen, first published in 1813. The story follows
+        the main character, Elizabeth Bennet, as she deals with issues of manners,
+        upbringing, morality, education, and marriage in the society of the landed
+        gentry of the British Regency. Elizabeth is the second of five daughters of
+        a country gentleman, Mr. Bennet living in Longbourn. Page 2 of a letter from
+        Jane Austen to her sister Cassandra (11 June 1799) in which she first mentions
+        Pride and Prejudice, using its working title First Impressions. Set in England
+        in the early 19th century, Pride and Prejudice tells the story of Mr and Mrs
+        Bennet's five unmarried daughters after the rich and eligible Mr Bingley and
+        his status-conscious friend, Mr Darcy, have moved into their neighbourhood.
+        While Bingley takes an immediate liking to the eldest Bennet daughter, Jane,
+        Darcy has difficulty adapting to local society and repeatedly clashes with
+        the second-eldest Bennet daughter, Elizabeth. Pride and Prejudice retains
+        a fascination for modern readers, continuing near the top of lists of \\\"most
+        loved books.\\\" It has become one of the most popular novels in English literature,
+        selling over 20 million copies, and receives considerable attention from literary
+        scholars. Modern interest in the book has resulted in a number of dramatic
+        adaptations and an abundance of novels and stories imitating Austen's memorable
+        characters or themes.\",\n        \"industryIdentifiers\": [\n          {\n
+        \           \"type\": \"ISBN_10\",\n            \"identifier\": \"1533097518\"\n
+        \         },\n          {\n            \"type\": \"ISBN_13\",\n            \"identifier\":
+        \"9781533097514\"\n          }\n        ],\n        \"readingModes\": {\n
+        \         \"text\": false,\n          \"image\": false\n        },\n        \"pageCount\":
+        304,\n        \"printType\": \"BOOK\",\n        \"maturityRating\": \"NOT_MATURE\",\n
+        \       \"allowAnonLogging\": false,\n        \"contentVersion\": \"preview-1.0.0\",\n
+        \       \"panelizationSummary\": {\n          \"containsEpubBubbles\": false,\n
+        \         \"containsImageBubbles\": false\n        },\n        \"language\":
+        \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=QuoSDAEACAAJ&dq=intitle:Pride+and+Prejudice%2Binauthor:Jane+Austen&hl=&as_pt=BOOKS&cd=5&source=gbs_api\",\n
+        \       \"infoLink\": \"http://books.google.com/books?id=QuoSDAEACAAJ&dq=intitle:Pride+and+Prejudice%2Binauthor:Jane+Austen&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://books.google.com/books/about/Pride_and_Prejudice.html?hl=&id=QuoSDAEACAAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"NOT_FOR_SALE\",\n        \"isEbook\": false\n      },\n      \"accessInfo\":
+        {\n        \"country\": \"US\",\n        \"viewability\": \"NO_PAGES\",\n
+        \       \"embeddable\": false,\n        \"publicDomain\": false,\n        \"textToSpeechPermission\":
+        \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\": false\n        },\n
+        \       \"pdf\": {\n          \"isAvailable\": false\n        },\n        \"webReaderLink\":
+        \"http://play.google.com/books/reader?id=QuoSDAEACAAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"NONE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"How is
+        this book unique? Unabridged (100% Original content) Font adjustments &amp;
+        biography included Illustrated About Pride and Prejudice by Jane Austen Pride
+        and Prejudice is a novel of manners by Jane Austen, first published in 1813.\"\n
+        \     }\n    }\n  ]\n}\n"
+    headers:
+      Alt-Svc:
+      - h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+      Content-Type:
+      - application/json; charset=UTF-8
+      Date:
+      - Sun, 01 Feb 2026 20:52:34 GMT
+      Server:
+      - ESF
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Origin
+      - X-Origin
+      - Referer
+      X-Content-Type-Options:
+      - nosniff
+      X-Frame-Options:
+      - SAMEORIGIN
+      X-XSS-Protection:
+      - '0'
+      content-length:
+      - '21887'
+    status:
+      code: 200
+      message: OK
+version: 1
