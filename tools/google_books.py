@@ -5,6 +5,7 @@ Provides search functionality for books using the Google Books API.
 """
 
 import json
+import os
 import requests
 from typing import List, Optional
 
@@ -45,7 +46,12 @@ def search_books(
         url = "https://www.googleapis.com/books/v1/volumes"
         params = {"q": query, "maxResults": max_results, "printType": "books"}
 
-        logger.debug("google_books_query", query=query, url=url)
+        # Add API key if available
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if api_key:
+            params["key"] = api_key
+
+        logger.debug("google_books_query", query=query, url=url, has_api_key=bool(api_key))
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
 
