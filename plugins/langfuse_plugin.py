@@ -18,6 +18,9 @@ from google.adk.runners.events import (
     ToolStartEvent,
     ToolCompleteEvent,
 )
+from common.logging import get_logger
+
+logger = get_logger(__name__)
 
 try:
     from langfuse import Langfuse
@@ -108,7 +111,7 @@ class LangfusePlugin(Plugin):
                 )
                 self.enabled = True
             except Exception as e:
-                print(f"⚠️  Langfuse initialization failed: {e}")
+                logger.warning("langfuse_init_failed", error=str(e), error_type=type(e).__name__)
                 self.enabled = False
         else:
             self.enabled = False
@@ -140,7 +143,12 @@ class LangfusePlugin(Plugin):
         except Exception as e:
             # Don't break the workflow if observability fails
             # Log error with context for debugging
-            print(f"⚠️  Langfuse event handling error: {e}")
+            logger.warning(
+                "langfuse_event_error",
+                error=str(e),
+                error_type=type(e).__name__,
+                event_type=type(event).__name__ if event else "unknown"
+            )
 
             # Try to log the error to Langfuse if possible
             try:
@@ -340,4 +348,4 @@ class LangfusePlugin(Plugin):
             try:
                 await asyncio.to_thread(self.client.flush)
             except Exception as e:
-                print(f"⚠️  Langfuse flush error: {e}")
+                logger.warning("langfuse_flush_error", error=str(e), error_type=type(e).__name__)
