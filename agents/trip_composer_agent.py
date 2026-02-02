@@ -95,5 +95,15 @@ Create a TripItinerary that RESPECTS user preferences:
 
 4. Write a summary_text: 3-4 sentences capturing the essence of the journey, mentioning how it's tailored to their preferences.
 
-Make it inspiring, actionable, and personalized.""",
+Make it inspiring, actionable, and personalized.
+
+## ERROR HANDLING & GRACEFUL DEGRADATION
+
+- If discovery data is limited (few cities/landmarks), work with what's available
+- If selected regions have limited landmarks, suggest general atmospheric locations
+- If user preferences are missing, use sensible defaults
+- If only 1-2 cities are available, create a focused itinerary for those cities
+- Clearly note in the overview if data was limited
+- Prioritize quality over quantity - a good 2-day itinerary is better than a poor 5-day one
+- If certain types of stops are missing (e.g., no museums found), supplement with other relevant sites""",
     )

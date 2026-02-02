@@ -18,18 +18,27 @@ def get_user_preferences(tool_context: ToolContext) -> str:
     Returns:
         JSON string with user preferences, or empty object if none set.
     """
-    preferences = tool_context.state.get("user:preferences", {})
+    try:
+        preferences = tool_context.state.get("user:preferences", {})
 
-    if preferences:
-        return json.dumps({
-            "found": True,
-            "preferences": preferences
-        })
-    else:
+        if preferences:
+            return json.dumps({
+                "found": True,
+                "preferences": preferences
+            })
+        else:
+            return json.dumps({
+                "found": False,
+                "preferences": {},
+                "message": "No user preferences found. Using defaults."
+            })
+    except Exception as e:
+        # Graceful degradation: return defaults on error
         return json.dumps({
             "found": False,
             "preferences": {},
-            "message": "No user preferences found. Using defaults."
+            "error": f"Error reading preferences: {str(e)}",
+            "message": "Using default preferences due to error."
         })
 
 

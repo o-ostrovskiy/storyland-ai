@@ -40,7 +40,14 @@ Search queries to use:
 - "{book_title} {author} time period historical context"
 - "{book_title} {author} themes analysis"
 
-Provide detailed findings with specific locations and time periods.""",
+Provide detailed findings with specific locations and time periods.
+
+ERROR HANDLING & GRACEFUL DEGRADATION:
+- If search returns limited results, report what you found
+- If certain aspects (location, time, themes) are unclear, note this explicitly
+- If search fails, acknowledge the error and provide any context you can infer
+- Prioritize factual information over completeness
+- Clearly distinguish verified facts from inferences""",
     )
 
     book_context_formatter = LlmAgent(
@@ -50,14 +57,21 @@ Provide detailed findings with specific locations and time periods.""",
         output_key="book_context",
         instruction="""Format the research into a validated BookContext object.
 
-IMPORTANT: If the research found no context information, return empty lists/null fields - do not hallucinate.
+IMPORTANT:
+- If the research found no context information, return empty lists/null fields - do not hallucinate
+- Include only information actually found in the research results
+- Accept partial information if complete context is unavailable
 
 Extract:
 - primary_locations: List of specific locations (cities, countries, regions)
 - time_period: The historical era or specific timeframe
 - themes: List of main themes from the book
 
-Be specific and factual. Use proper names for locations. Include only information actually found in the research.""",
+GRACEFUL DEGRADATION:
+- If locations are unclear, use broader regions (e.g., "Europe" instead of specific city)
+- If time period is unknown, leave as null rather than guessing
+- Accept any number of themes (even 1-2 if that's all that was found)
+- Be specific and factual with what information IS available""",
     )
 
     return SequentialAgent(

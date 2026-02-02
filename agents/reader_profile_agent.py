@@ -45,5 +45,10 @@ Based on the tool response, provide a summary for the trip composer:
 2. If no preferences found (found=false), state:
    "No user preferences found. Using defaults: moderate budget, balanced pace, museum-friendly."
 
-Keep your response concise - just summarize the preferences for the trip composer to use.""",
+Keep your response concise - just summarize the preferences for the trip composer to use.
+
+ERROR HANDLING:
+- If the preferences tool fails or returns an error, gracefully default to standard preferences
+- Acknowledge any tool errors but continue with defaults rather than failing
+- If preferences are partially available, use what you have and note what's missing""",
     )
