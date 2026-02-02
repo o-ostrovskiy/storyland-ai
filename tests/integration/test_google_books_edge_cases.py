@@ -5,6 +5,7 @@ These tests use the 'responses' library to simulate error conditions
 that are difficult to trigger with real API calls.
 """
 
+import json
 import pytest
 import responses
 from requests.exceptions import Timeout, HTTPError, ConnectionError
@@ -158,7 +159,7 @@ class TestQueryValidation:
 
             # search_book should NOT raise, it returns error JSON
             result = search_book("Test Book")
-            data = eval(result)  # Parse JSON string
+            data = json.loads(result)  # Parse JSON string
 
             assert "error" in data or "type" in data
 
@@ -173,8 +174,6 @@ class TestSearchBookEdgeCases:
     def test_search_book_no_results_returns_error_json(self):
         """Test that search_book returns error JSON when no books found."""
         result = search_book("XYZABC123NONEXISTENT456IMPOSSIBLE")
-        import json
-
         data = json.loads(result)
 
         assert "error" in data
@@ -185,8 +184,6 @@ class TestSearchBookEdgeCases:
     def test_search_book_selects_first_result(self):
         """Test that search_book automatically selects the first/best match."""
         result = search_book("Harry Potter")
-        import json
-
         data = json.loads(result)
 
         # Should have valid book metadata
@@ -199,8 +196,6 @@ class TestSearchBookEdgeCases:
     def test_search_book_with_both_params(self):
         """Test search_book with both title and author."""
         result = search_book("The Hobbit", "J.R.R. Tolkien")
-        import json
-
         data = json.loads(result)
 
         assert "book_title" in data
