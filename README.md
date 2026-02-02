@@ -170,6 +170,7 @@ StoryLand AI uses Google Gemini models (default: `gemini-2.5-flash-lite`) for al
 - **[CLI Usage](docs/cli-usage.md)** - Command-line options and examples
 - **[Observability](docs/observability.md)** - Logging and debugging
 - **[Langfuse Integration](docs/langfuse-integration.md)** - Token usage tracking and cost monitoring
+- **[Langfuse Evaluation](docs/langfuse-evaluation.md)** - Automated evaluation pipeline and quality tracking
 - **[Testing](docs/testing.md)** - Unit tests and evaluation framework
 - **[Development](docs/development.md)** - Project structure and development guide
 - **[Configuration](docs/configuration.md)** - Environment variables reference
