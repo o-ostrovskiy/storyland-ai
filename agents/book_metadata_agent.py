@@ -57,9 +57,16 @@ def create_book_metadata_pipeline(model, google_books_tool):
 1. Use the search_book tool with BOTH title AND author parameters when available
    - If user provides "The Great Gatsby by F. Scott Fitzgerald", use title="The Great Gatsby" and author="F. Scott Fitzgerald"
    - If user only provides a title, use just the title parameter
-2. If the tool returns an error, report it clearly and explain what went wrong
-3. If no results found, acknowledge this and suggest the user verify the title/author
-4. Return ALL the information from successful results - do not summarize
+2. ERROR HANDLING:
+   - If the tool returns an error, report it clearly with the error type and message
+   - If you encounter rate limiting (429), inform the user to wait a few minutes
+   - If you get network errors, suggest checking connectivity
+   - If no results found, acknowledge this and suggest verifying the title/author spelling
+3. Return ALL the information from successful results - do not summarize
+
+GRACEFUL DEGRADATION:
+- If the search fails completely, return what information you have from the user's input
+- Clearly indicate when information is missing or unverified
 
 IMPORTANT: Always pass the author parameter if mentioned - this prevents returning wrong books with same titles.""",
     )

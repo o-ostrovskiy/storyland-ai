@@ -181,9 +181,11 @@ def search_book(title: str, author: str = "") -> str:
 
         if not books:
             logger.warning("search_book_no_results", title=title, author=author)
-            return json.dumps(
-                {"error": "No books found", "query": {"title": title, "author": author}}
-            )
+            return json.dumps({
+                "error": "No books found matching your search",
+                "query": {"title": title, "author": author},
+                "suggestion": "Please verify the book title and author spelling, or try with just the title"
+            })
 
         # Select the first/best match
         selected = books[0]
@@ -204,9 +206,25 @@ def search_book(title: str, author: str = "") -> str:
         # Return Pydantic-validated JSON
         return book_metadata.model_dump_json()
 
+    except requests.exceptions.RequestException as e:
+        # Network/API errors - provide user-friendly message
+        logger.error("search_book_failed", error=str(e), error_type=type(e).__name__)
+        error_msg = "Failed to connect to Google Books API"
+        if "429" in str(e):
+            error_msg = "Rate limit exceeded - please try again in a few minutes"
+        elif "timeout" in str(e).lower():
+            error_msg = "Request timed out - please check your internet connection"
+        return json.dumps({
+            "error": error_msg,
+            "type": type(e).__name__,
+            "details": str(e)
+        })
     except Exception as e:
         logger.error("search_book_failed", error=str(e), error_type=type(e).__name__)
-        return json.dumps({"error": str(e), "type": type(e).__name__})
+        return json.dumps({
+            "error": f"Unexpected error while searching for book: {str(e)}",
+            "type": type(e).__name__
+        })
 
 
 # Create FunctionTool

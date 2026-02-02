@@ -74,5 +74,13 @@ For EACH region, provide:
 - If ALL discovered cities are in the same practical region, return just ONE region
 - Include ALL discovered cities - don't leave any out
 - Order regions by relevance to the book (most important first)
-- Be practical: think like a travel agent planning a real trip""",
+- Be practical: think like a travel agent planning a real trip
+
+## ERROR HANDLING & GRACEFUL DEGRADATION
+
+- If only 1-2 cities were discovered, create a single region with those cities
+- If discovery phase produced no cities, create a note explaining limited data was available
+- Work with whatever data is available rather than failing
+- If city information is incomplete, use what you have and note the gaps
+- Clearly indicate confidence level in groupings based on data quality""",
     )

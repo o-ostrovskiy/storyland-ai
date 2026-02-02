@@ -139,7 +139,22 @@ class LangfusePlugin(Plugin):
                 await self._handle_tool_complete(event)
         except Exception as e:
             # Don't break the workflow if observability fails
+            # Log error with context for debugging
             print(f"⚠️  Langfuse event handling error: {e}")
+
+            # Try to log the error to Langfuse if possible
+            try:
+                if self._current_trace:
+                    self._current_trace.update(
+                        metadata={
+                            "langfuse_plugin_error": str(e),
+                            "error_type": type(e).__name__,
+                            "event_type": type(event).__name__ if event else "unknown",
+                        }
+                    )
+            except Exception:
+                # Silently fail if we can't even log the error
+                pass
 
     async def _handle_agent_start(self, event: AgentStartEvent) -> None:
         """Track agent execution start."""
