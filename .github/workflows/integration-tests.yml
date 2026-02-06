@@ -39,6 +39,9 @@ jobs:
         run: |
           echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" > .env
           echo "USE_DATABASE=false" >> .env
+          echo "LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}" >> .env
+          echo "LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}" >> .env
+          echo "LANGFUSE_HOST=${{ secrets.LANGFUSE_HOST }}" >> .env
 
       - name: Run integration tests (VCR cassettes)
         run: |
@@ -67,7 +70,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `${emoji} **Integration Tests ${testStatus}**\n\nTests ran using VCR cassettes (no API quota consumed).`
+              body: `${emoji} **Integration Tests ${testStatus}**\n\nTests ran using VCR cassettes (no API quota consumed).\nIncludes Langfuse integration checks (tests skip gracefully if credentials not configured).`
             });
 
   # Optional: Re-record cassettes (manual trigger only, uses API quota)
@@ -102,6 +105,9 @@ jobs:
         run: |
           echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" > .env
           echo "USE_DATABASE=false" >> .env
+          echo "LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}" >> .env
+          echo "LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}" >> .env
+          echo "LANGFUSE_HOST=${{ secrets.LANGFUSE_HOST }}" >> .env
 
       - name: Delete old cassettes
         run: |
