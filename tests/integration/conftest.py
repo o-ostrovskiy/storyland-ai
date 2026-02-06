@@ -59,7 +59,7 @@ def vcr_config():
         "cassette_library_dir": str(cassette_dir),
         "record_mode": "once",  # Record once, replay thereafter
         "match_on": ["method", "scheme", "host", "port", "path", "query"],
-        "filter_headers": ["authorization"],  # Don't record auth headers
+        "filter_headers": ["authorization", "x-goog-api-key"],  # Don't record auth headers
         "filter_query_parameters": ["key"],  # Redact API key from cassettes
         "decode_compressed_response": True,
         "before_record_request": before_record_request,
