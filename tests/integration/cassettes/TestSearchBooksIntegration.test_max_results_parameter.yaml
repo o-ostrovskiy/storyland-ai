@@ -1,0 +1,182 @@
+interactions:
+- request:
+    body: null
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      User-Agent:
+      - python-requests/2.32.5
+    method: GET
+    uri: https://www.googleapis.com/books/v1/volumes?maxResults=3&printType=books&q=intitle%3APython+Programming
+  response:
+    body:
+      string: "{\n  \"kind\": \"books#volumes\",\n  \"totalItems\": 1000000,\n  \"items\":
+        [\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"aJQILlLxRmAC\",\n
+        \     \"etag\": \"S1Y6KrzAysQ\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/aJQILlLxRmAC\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"Python Programming\",\n        \"subtitle\":
+        \"An Introduction to Computer Science\",\n        \"authors\": [\n          \"John
+        M. Zelle\"\n        ],\n        \"publisher\": \"Franklin, Beedle & Associates,
+        Inc.\",\n        \"publishedDate\": \"2004\",\n        \"description\": \"This
+        book is suitable for use in a university-level first course in computing (CS1),
+        as well as the increasingly popular course known as CS0. It is difficult for
+        many students to master basic concepts in computer science and programming.
+        A large portion of the confusion can be blamed on the complexity of the tools
+        and materials that are traditionally used to teach CS1 and CS2. This textbook
+        was written with a single overarching goal: to present the core concepts of
+        computer science as simply as possible without being simplistic.\",\n        \"industryIdentifiers\":
+        [\n          {\n            \"type\": \"ISBN_13\",\n            \"identifier\":
+        \"9781887902991\"\n          },\n          {\n            \"type\": \"ISBN_10\",\n
+        \           \"identifier\": \"1887902996\"\n          }\n        ],\n        \"readingModes\":
+        {\n          \"text\": false,\n          \"image\": true\n        },\n        \"pageCount\":
+        533,\n        \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Computers\"\n
+        \       ],\n        \"averageRating\": 4,\n        \"ratingsCount\": 18,\n
+        \       \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        false,\n        \"contentVersion\": \"1.3.3.0.preview.1\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=aJQILlLxRmAC&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=aJQILlLxRmAC&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=aJQILlLxRmAC&printsec=frontcover&dq=intitle:Python+Programming&hl=&as_pt=BOOKS&cd=1&source=gbs_api\",\n
+        \       \"infoLink\": \"http://books.google.com/books?id=aJQILlLxRmAC&dq=intitle:Python+Programming&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://books.google.com/books/about/Python_Programming.html?hl=&id=aJQILlLxRmAC\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"NOT_FOR_SALE\",\n        \"isEbook\": false\n      },\n      \"accessInfo\":
+        {\n        \"country\": \"US\",\n        \"viewability\": \"PARTIAL\",\n        \"embeddable\":
+        true,\n        \"publicDomain\": false,\n        \"textToSpeechPermission\":
+        \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\": false\n        },\n
+        \       \"pdf\": {\n          \"isAvailable\": true,\n          \"acsTokenLink\":
+        \"http://books.google.com/books/download/Python_Programming-sample-pdf.acsm?id=aJQILlLxRmAC&format=pdf&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"webReaderLink\": \"http://play.google.com/books/reader?id=aJQILlLxRmAC&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"SAMPLE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"This
+        book is suitable for use in a university-level first course in computing (CS1),
+        as well as the increasingly popular course known as CS0.\"\n      }\n    },\n
+        \   {\n      \"kind\": \"books#volume\",\n      \"id\": \"mh0bU6NXrBgC\",\n
+        \     \"etag\": \"yveaAXQ+Kak\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/mh0bU6NXrBgC\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"Core Python Programming\",\n
+        \       \"authors\": [\n          \"Wesley Chun\"\n        ],\n        \"publisher\":
+        \"Prentice Hall Professional\",\n        \"publishedDate\": \"2001\",\n        \"description\":
+        \"Experts and novices alike will be able to find information about every command
+        they'll need to use Linux. This complete, practical desk reference is organized
+        by function, with a road map-style alphabetical reference for quick access
+        of information about all aspects of running and administering the program.
+        The CD-ROM contains Windows and Linux Python distributions plus extensive
+        cross-platform source code from the book.\",\n        \"industryIdentifiers\":
+        [\n          {\n            \"type\": \"ISBN_13\",\n            \"identifier\":
+        \"9780130260369\"\n          },\n          {\n            \"type\": \"ISBN_10\",\n
+        \           \"identifier\": \"0130260363\"\n          }\n        ],\n        \"readingModes\":
+        {\n          \"text\": false,\n          \"image\": true\n        },\n        \"pageCount\":
+        805,\n        \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Computers\"\n
+        \       ],\n        \"averageRating\": 3.5,\n        \"ratingsCount\": 13,\n
+        \       \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        false,\n        \"contentVersion\": \"0.4.3.0.preview.1\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=mh0bU6NXrBgC&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=mh0bU6NXrBgC&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=mh0bU6NXrBgC&printsec=frontcover&dq=intitle:Python+Programming&hl=&as_pt=BOOKS&cd=2&source=gbs_api\",\n
+        \       \"infoLink\": \"http://books.google.com/books?id=mh0bU6NXrBgC&dq=intitle:Python+Programming&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://books.google.com/books/about/Core_Python_Programming.html?hl=&id=mh0bU6NXrBgC\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"NOT_FOR_SALE\",\n        \"isEbook\": false\n      },\n      \"accessInfo\":
+        {\n        \"country\": \"US\",\n        \"viewability\": \"PARTIAL\",\n        \"embeddable\":
+        true,\n        \"publicDomain\": false,\n        \"textToSpeechPermission\":
+        \"ALLOWED_FOR_ACCESSIBILITY\",\n        \"epub\": {\n          \"isAvailable\":
+        false\n        },\n        \"pdf\": {\n          \"isAvailable\": false\n
+        \       },\n        \"webReaderLink\": \"http://play.google.com/books/reader?id=mh0bU6NXrBgC&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"SAMPLE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"The CD-ROM
+        contains Windows and Linux Python distributions plus extensive cross-platform
+        source code from the book.\"\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n
+        \     \"id\": \"g1FczgEACAAJ\",\n      \"etag\": \"HIzbYz+r0UI\",\n      \"selfLink\":
+        \"https://www.googleapis.com/books/v1/volumes/g1FczgEACAAJ\",\n      \"volumeInfo\":
+        {\n        \"title\": \"Python Coding and Programming\",\n        \"subtitle\":
+        \"Start to Learn the Hard Core of Computer Programming, Data Analysis and
+        Coding Project in Python\",\n        \"authors\": [\n          \"Michael Learn\"\n
+        \       ],\n        \"publisher\": \"Michael Learn\",\n        \"publishedDate\":
+        \"2021-03-22\",\n        \"description\": \"55 % discount for bookstores !
+        Now At $34.99 instead of $ 54.23 $ Your customers will never stop reading
+        this guide !!! UPDATE CHAPTERES 10 AND 11 Would you like to learn the hard
+        core of Python coding? You are the type of genius the great eBook in the next
+        few lines is dedicated to, check it out. Learning the complex processes of
+        Python Programming is a tough task most people don't want to try. Even Computer,
+        Engineering, Tech and related fields do not want to, to even imagine the interest
+        of a non-tech related fan. Why? It is for the same reason, it is complicated!
+        It has different stages that can be easily mixed up. But isn't there a way
+        you can learn the hardcore easily whether you are or not in the tech fields?
+        The eBook after the next few lines can find you the answers. Python is a top
+        class programming application. So, it is actually meant for top class programmers.
+        It contains complex programs that everyone mixes up and confuse in the nearest
+        minute. It can be very frustrating too. That's why you know many people who
+        learnt the basics of python programming and stopped halfway. But if you are
+        good at it, it can offer you the most thrilling experience you will ever have.
+        Coding with python can become your only profession and as well, the most exciting
+        thing on earth. It is full of amazing drills and challenges. If is fun and
+        sort of crazy. Python coding has a way of helping people develop their creativity
+        too. As complicated as it seems, this program can be well understood by everyone,
+        if they find the right books and practice like a pro. Coding with a Program
+        like Python is a hotcake in the 21st century, but if you don't get the right
+        resources, you don't bag it. You must begin by learning the basics of the
+        computer language. Then, go on to learn the hard core and become the invisible
+        programmer of the century. A lot of resources aren't available to help you
+        achieve that, but whatever you use must be from an expert. What else do you
+        stand to learn? The meaning of Python Coding and Programming. The python programming
+        language and how to read the code. How to read errors and troubleshoot your
+        own code. Coding Mechanism Hacking Buy it Now and let your customers get addicted
+        to this amazing book !!!\",\n        \"industryIdentifiers\": [\n          {\n
+        \           \"type\": \"ISBN_10\",\n            \"identifier\": \"1802261125\"\n
+        \         },\n          {\n            \"type\": \"ISBN_13\",\n            \"identifier\":
+        \"9781802261127\"\n          }\n        ],\n        \"readingModes\": {\n
+        \         \"text\": false,\n          \"image\": false\n        },\n        \"pageCount\":
+        222,\n        \"printType\": \"BOOK\",\n        \"maturityRating\": \"NOT_MATURE\",\n
+        \       \"allowAnonLogging\": false,\n        \"contentVersion\": \"preview-1.0.0\",\n
+        \       \"panelizationSummary\": {\n          \"containsEpubBubbles\": false,\n
+        \         \"containsImageBubbles\": false\n        },\n        \"imageLinks\":
+        {\n          \"smallThumbnail\": \"http://books.google.com/books/content?id=g1FczgEACAAJ&printsec=frontcover&img=1&zoom=5&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=g1FczgEACAAJ&printsec=frontcover&img=1&zoom=1&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=g1FczgEACAAJ&dq=intitle:Python+Programming&hl=&as_pt=BOOKS&cd=3&source=gbs_api\",\n
+        \       \"infoLink\": \"http://books.google.com/books?id=g1FczgEACAAJ&dq=intitle:Python+Programming&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://books.google.com/books/about/Python_Coding_and_Programming.html?hl=&id=g1FczgEACAAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"NOT_FOR_SALE\",\n        \"isEbook\": false\n      },\n      \"accessInfo\":
+        {\n        \"country\": \"US\",\n        \"viewability\": \"NO_PAGES\",\n
+        \       \"embeddable\": false,\n        \"publicDomain\": false,\n        \"textToSpeechPermission\":
+        \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\": false\n        },\n
+        \       \"pdf\": {\n          \"isAvailable\": false\n        },\n        \"webReaderLink\":
+        \"http://play.google.com/books/reader?id=g1FczgEACAAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"NONE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"55 %
+        discount for bookstores ! Now At $34.99 instead of $ 54.23 $ Your customers
+        will never stop reading this guide !!! UPDATE CHAPTERES 10 AND 11 Would you
+        like to learn the hard core of Python coding?\"\n      }\n    }\n  ]\n}\n"
+    headers:
+      Alt-Svc:
+      - h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+      Content-Type:
+      - application/json; charset=UTF-8
+      Date:
+      - Sun, 01 Feb 2026 21:37:16 GMT
+      Server:
+      - ESF
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Origin
+      - X-Origin
+      - Referer
+      X-Content-Type-Options:
+      - nosniff
+      X-Frame-Options:
+      - SAMEORIGIN
+      X-XSS-Protection:
+      - '0'
+      content-length:
+      - '11700'
+    status:
+      code: 200
+      message: OK
+version: 1

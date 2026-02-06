@@ -136,7 +136,7 @@ class TestSearchBook:
 
         data = json.loads(result)
         assert "error" in data
-        assert data['error'] == "No books found"
+        assert data['error'] == "No books found matching your search"
 
     @patch('tools.google_books.search_books')
     def test_search_book_exception(self, mock_search):

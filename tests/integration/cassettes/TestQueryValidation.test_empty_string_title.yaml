@@ -1,0 +1,241 @@
+interactions:
+- request:
+    body: null
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      User-Agent:
+      - python-requests/2.32.5
+    method: GET
+    uri: https://www.googleapis.com/books/v1/volumes?maxResults=5&printType=books&q=inauthor%3AShakespeare
+  response:
+    body:
+      string: "{\n  \"kind\": \"books#volumes\",\n  \"totalItems\": 1000000,\n  \"items\":
+        [\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"iL45AQAAMAAJ\",\n
+        \     \"etag\": \"CPyZChoSSao\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/iL45AQAAMAAJ\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"Hamlet\",\n        \"authors\":
+        [\n          \"William Shakespeare\"\n        ],\n        \"publisher\": \"A&C
+        Black\",\n        \"publishedDate\": \"1902\",\n        \"description\": \"This
+        edition of Hamlet represents a radically new text of the best known and most
+        widely discussed of all Shakespearean tragedies. Arguing that the text currently
+        accepted is not, in fact, the most authoritative version of the play, this
+        new edition turns to the First Folio of 1623--Shakespeare's \\\"fair copy\\\"--that
+        has been preserved for us in the Second Quarto. Introducing fresh theatrical
+        momentum, this revision provides, as Shakespeare intended, a better, more
+        practical acting script.\",\n        \"industryIdentifiers\": [\n          {\n
+        \           \"type\": \"OTHER\",\n            \"identifier\": \"UOM:39015082150650\"\n
+        \         }\n        ],\n        \"readingModes\": {\n          \"text\":
+        false,\n          \"image\": true\n        },\n        \"pageCount\": 220,\n
+        \       \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Drama\"\n
+        \       ],\n        \"averageRating\": 3,\n        \"ratingsCount\": 2,\n
+        \       \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        false,\n        \"contentVersion\": \"0.6.7.0.full.1\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=iL45AQAAMAAJ&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=iL45AQAAMAAJ&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=iL45AQAAMAAJ&printsec=frontcover&dq=inauthor:Shakespeare&hl=&as_pt=BOOKS&cd=1&source=gbs_api\",\n
+        \       \"infoLink\": \"https://play.google.com/store/books/details?id=iL45AQAAMAAJ&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://play.google.com/store/books/details?id=iL45AQAAMAAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"FREE\",\n        \"isEbook\": true,\n        \"buyLink\": \"https://play.google.com/store/books/details?id=iL45AQAAMAAJ&rdid=book-iL45AQAAMAAJ&rdot=1&source=gbs_api\"\n
+        \     },\n      \"accessInfo\": {\n        \"country\": \"US\",\n        \"viewability\":
+        \"ALL_PAGES\",\n        \"embeddable\": true,\n        \"publicDomain\": true,\n
+        \       \"textToSpeechPermission\": \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\":
+        false,\n          \"downloadLink\": \"http://books.google.com/books/download/Hamlet.epub?id=iL45AQAAMAAJ&hl=&output=epub&source=gbs_api\"\n
+        \       },\n        \"pdf\": {\n          \"isAvailable\": true,\n          \"downloadLink\":
+        \"http://books.google.com/books/download/Hamlet.pdf?id=iL45AQAAMAAJ&hl=&output=pdf&sig=ACfU3U3qHdKk6dFZttOeyKwRBx7Ak9YtZw&source=gbs_api\"\n
+        \       },\n        \"webReaderLink\": \"http://play.google.com/books/reader?id=iL45AQAAMAAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"FULL_PUBLIC_DOMAIN\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"This
+        edition of Hamlet represents a radically new text of the best known and most
+        widely discussed of all Shakespearean tragedies.\"\n      }\n    },\n    {\n
+        \     \"kind\": \"books#volume\",\n      \"id\": \"zxOiZePICkcC\",\n      \"etag\":
+        \"KKD0HuZi6fc\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/zxOiZePICkcC\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"Hamlet\",\n        \"authors\":
+        [\n          \"William Shakespeare\"\n        ],\n        \"publisher\": \"Cambridge
+        University Press\",\n        \"publishedDate\": \"1999-05-27\",\n        \"description\":
+        \"This edition tells the story of Hamlet in production, from Burbage at the
+        Globe to Branagh on film, relating stage interpretations to developments in
+        the theatre, in literary criticism and in society. The detailed stage history
+        records an ongoing process of discovery, as successive performers have found
+        what it is in the play that will speak most powerfully to the audiences of
+        their own times. The introduction focuses not only on star Hamlets, but on
+        whole productions of the play including supporting players and, in this century,
+        direction and design.\",\n        \"industryIdentifiers\": [\n          {\n
+        \           \"type\": \"ISBN_10\",\n            \"identifier\": \"0521646359\"\n
+        \         },\n          {\n            \"type\": \"ISBN_13\",\n            \"identifier\":
+        \"9780521646352\"\n          }\n        ],\n        \"readingModes\": {\n
+        \         \"text\": false,\n          \"image\": true\n        },\n        \"pageCount\":
+        324,\n        \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Drama\"\n
+        \       ],\n        \"averageRating\": 3,\n        \"ratingsCount\": 5,\n
+        \       \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        false,\n        \"contentVersion\": \"1.4.6.0.preview.1\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=zxOiZePICkcC&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=zxOiZePICkcC&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=zxOiZePICkcC&printsec=frontcover&dq=inauthor:Shakespeare&hl=&as_pt=BOOKS&cd=2&source=gbs_api\",\n
+        \       \"infoLink\": \"http://books.google.com/books?id=zxOiZePICkcC&dq=inauthor:Shakespeare&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://books.google.com/books/about/Hamlet.html?hl=&id=zxOiZePICkcC\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"NOT_FOR_SALE\",\n        \"isEbook\": false\n      },\n      \"accessInfo\":
+        {\n        \"country\": \"US\",\n        \"viewability\": \"PARTIAL\",\n        \"embeddable\":
+        true,\n        \"publicDomain\": false,\n        \"textToSpeechPermission\":
+        \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\": false\n        },\n
+        \       \"pdf\": {\n          \"isAvailable\": true,\n          \"acsTokenLink\":
+        \"http://books.google.com/books/download/Hamlet-sample-pdf.acsm?id=zxOiZePICkcC&format=pdf&output=acs4_fulfillment_token&dl_type=sample&source=gbs_api\"\n
+        \       },\n        \"webReaderLink\": \"http://play.google.com/books/reader?id=zxOiZePICkcC&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"SAMPLE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"This
+        edition tells the story of Hamlet in production, from Burbage at the Globe
+        to Branagh on film, relating stage interpretations to developments in the
+        theatre, in literary criticism and in society.\"\n      }\n    },\n    {\n
+        \     \"kind\": \"books#volume\",\n      \"id\": \"qyFaAAAAMAAJ\",\n      \"etag\":
+        \"OFlXcXmvgP8\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/qyFaAAAAMAAJ\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"King Lear\",\n        \"authors\":
+        [\n          \"William Shakespeare\"\n        ],\n        \"publishedDate\":
+        \"1987\",\n        \"industryIdentifiers\": [\n          {\n            \"type\":
+        \"OTHER\",\n            \"identifier\": \"UOM:39015013308864\"\n          }\n
+        \       ],\n        \"readingModes\": {\n          \"text\": false,\n          \"image\":
+        false\n        },\n        \"pageCount\": 280,\n        \"printType\": \"BOOK\",\n
+        \       \"categories\": [\n          \"Drama\"\n        ],\n        \"maturityRating\":
+        \"NOT_MATURE\",\n        \"allowAnonLogging\": false,\n        \"contentVersion\":
+        \"0.5.2.0.preview.0\",\n        \"panelizationSummary\": {\n          \"containsEpubBubbles\":
+        false,\n          \"containsImageBubbles\": false\n        },\n        \"imageLinks\":
+        {\n          \"smallThumbnail\": \"http://books.google.com/books/content?id=qyFaAAAAMAAJ&printsec=frontcover&img=1&zoom=5&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=qyFaAAAAMAAJ&printsec=frontcover&img=1&zoom=1&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=qyFaAAAAMAAJ&dq=inauthor:Shakespeare&hl=&as_pt=BOOKS&cd=3&source=gbs_api\",\n
+        \       \"infoLink\": \"http://books.google.com/books?id=qyFaAAAAMAAJ&dq=inauthor:Shakespeare&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://books.google.com/books/about/King_Lear.html?hl=&id=qyFaAAAAMAAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"NOT_FOR_SALE\",\n        \"isEbook\": false\n      },\n      \"accessInfo\":
+        {\n        \"country\": \"US\",\n        \"viewability\": \"NO_PAGES\",\n
+        \       \"embeddable\": false,\n        \"publicDomain\": false,\n        \"textToSpeechPermission\":
+        \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\": false\n        },\n
+        \       \"pdf\": {\n          \"isAvailable\": false\n        },\n        \"webReaderLink\":
+        \"http://play.google.com/books/reader?id=qyFaAAAAMAAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"NONE\",\n        \"quoteSharingAllowed\":
+        false\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\":
+        \"rSQtWrAp5PsC\",\n      \"etag\": \"oq0sqTTYew0\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/rSQtWrAp5PsC\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"King Lear\",\n        \"authors\":
+        [\n          \"William Shakespeare\"\n        ],\n        \"publishedDate\":
+        \"1860\",\n        \"industryIdentifiers\": [\n          {\n            \"type\":
+        \"OTHER\",\n            \"identifier\": \"HARVARD:32044012637575\"\n          }\n
+        \       ],\n        \"readingModes\": {\n          \"text\": true,\n          \"image\":
+        true\n        },\n        \"pageCount\": 84,\n        \"printType\": \"BOOK\",\n
+        \       \"categories\": [\n          \"Drama\"\n        ],\n        \"averageRating\":
+        5,\n        \"ratingsCount\": 2,\n        \"maturityRating\": \"NOT_MATURE\",\n
+        \       \"allowAnonLogging\": false,\n        \"contentVersion\": \"1.10.13.0.full.3\",\n
+        \       \"panelizationSummary\": {\n          \"containsEpubBubbles\": false,\n
+        \         \"containsImageBubbles\": false\n        },\n        \"imageLinks\":
+        {\n          \"smallThumbnail\": \"http://books.google.com/books/content?id=rSQtWrAp5PsC&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=rSQtWrAp5PsC&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=rSQtWrAp5PsC&printsec=frontcover&dq=inauthor:Shakespeare&hl=&as_pt=BOOKS&cd=4&source=gbs_api\",\n
+        \       \"infoLink\": \"https://play.google.com/store/books/details?id=rSQtWrAp5PsC&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://play.google.com/store/books/details?id=rSQtWrAp5PsC\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"FREE\",\n        \"isEbook\": true,\n        \"buyLink\": \"https://play.google.com/store/books/details?id=rSQtWrAp5PsC&rdid=book-rSQtWrAp5PsC&rdot=1&source=gbs_api\"\n
+        \     },\n      \"accessInfo\": {\n        \"country\": \"US\",\n        \"viewability\":
+        \"ALL_PAGES\",\n        \"embeddable\": true,\n        \"publicDomain\": true,\n
+        \       \"textToSpeechPermission\": \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\":
+        true,\n          \"downloadLink\": \"http://books.google.com/books/download/King_Lear.epub?id=rSQtWrAp5PsC&hl=&output=epub&source=gbs_api\"\n
+        \       },\n        \"pdf\": {\n          \"isAvailable\": true,\n          \"downloadLink\":
+        \"http://books.google.com/books/download/King_Lear.pdf?id=rSQtWrAp5PsC&hl=&output=pdf&sig=ACfU3U0elocFGfjmb6tgDIlOmAznl9r0zA&source=gbs_api\"\n
+        \       },\n        \"webReaderLink\": \"http://play.google.com/books/reader?id=rSQtWrAp5PsC&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"FULL_PUBLIC_DOMAIN\",\n        \"quoteSharingAllowed\":
+        false\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\":
+        \"RGJCBAAAQBAJ\",\n      \"etag\": \"/mi+TJXJgIA\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/RGJCBAAAQBAJ\",\n
+        \     \"volumeInfo\": {\n        \"title\": \"Measure for Measure (The Unabridged
+        Play) + The Classic Biography: The Life of William Shakespeare\",\n        \"authors\":
+        [\n          \"William Shakespeare\",\n          \"Sidney Lee\"\n        ],\n
+        \       \"publisher\": \"e-artnow\",\n        \"publishedDate\": \"2014-02-27\",\n
+        \       \"description\": \"This carefully crafted ebook: \u201CMeasure for
+        Measure (The Unabridged Play) + The Classic Biography: The Life of William
+        Shakespeare\u201D is formatted for your eReader with a functional and detailed
+        table of contents. Measure for Measure is a play by William Shakespeare, believed
+        to have been written in 1603 or 1604 and originally published in 1623. Generally
+        considered one of Shakespeare's problem plays, the work examines the ideas
+        of sin and justice. Duke Vincentio turns Vienna's rule over to the corrupt
+        Angelo, who sentences Claudio to death for having impregnated a woman before
+        marriage. His sister Isabella, a novice nun, pleads for her brother's life,
+        only to be told that he will be spared if she agrees to relinquish her virginity
+        to Angelo. Life of William Shakespeare is a biography of William Shakespeare
+        by the eminent critic Sidney Lee. This book was one of the first major biographies
+        of the Bard of Avon. It was published in 1898, based on the article contributed
+        to the Dictionary of National Biography. William Shakespeare (1564 \u2013
+        1616) was an English poet and playwright, widely regarded as the greatest
+        writer in the English language and the world's pre-eminent dramatist. He is
+        often called England's national poet and the \\\"Bard of Avon\\\". His extant
+        works, including some collaborations, consist of about 38 plays, 154 sonnets,
+        two long narrative poems, and a few other verses, the authorship of some of
+        which is uncertain. Sir Sidney Lee (1859 \u2013 1926) was an English biographer
+        and critic. He was a lifelong scholar and enthusiast of Shakespeare. His article
+        on Shakespeare in the fifty-first volume of the Dictionary of National Biography
+        formed the basis of his Life of William Shakespeare. This full-length life
+        is often credited as the first modern biography of the poet.\",\n        \"industryIdentifiers\":
+        [\n          {\n            \"type\": \"ISBN_13\",\n            \"identifier\":
+        \"9788026805045\"\n          },\n          {\n            \"type\": \"ISBN_10\",\n
+        \           \"identifier\": \"8026805046\"\n          }\n        ],\n        \"readingModes\":
+        {\n          \"text\": true,\n          \"image\": true\n        },\n        \"pageCount\":
+        594,\n        \"printType\": \"BOOK\",\n        \"categories\": [\n          \"Drama\"\n
+        \       ],\n        \"maturityRating\": \"NOT_MATURE\",\n        \"allowAnonLogging\":
+        false,\n        \"contentVersion\": \"1.2.2.0.preview.3\",\n        \"panelizationSummary\":
+        {\n          \"containsEpubBubbles\": false,\n          \"containsImageBubbles\":
+        false\n        },\n        \"imageLinks\": {\n          \"smallThumbnail\":
+        \"http://books.google.com/books/content?id=RGJCBAAAQBAJ&printsec=frontcover&img=1&zoom=5&edge=curl&source=gbs_api\",\n
+        \         \"thumbnail\": \"http://books.google.com/books/content?id=RGJCBAAAQBAJ&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"\n
+        \       },\n        \"language\": \"en\",\n        \"previewLink\": \"http://books.google.com/books?id=RGJCBAAAQBAJ&printsec=frontcover&dq=inauthor:Shakespeare&hl=&as_pt=BOOKS&cd=5&source=gbs_api\",\n
+        \       \"infoLink\": \"https://play.google.com/store/books/details?id=RGJCBAAAQBAJ&source=gbs_api\",\n
+        \       \"canonicalVolumeLink\": \"https://play.google.com/store/books/details?id=RGJCBAAAQBAJ\"\n
+        \     },\n      \"saleInfo\": {\n        \"country\": \"US\",\n        \"saleability\":
+        \"FOR_SALE\",\n        \"isEbook\": true,\n        \"listPrice\": {\n          \"amount\":
+        1.99,\n          \"currencyCode\": \"USD\"\n        },\n        \"retailPrice\":
+        {\n          \"amount\": 1.99,\n          \"currencyCode\": \"USD\"\n        },\n
+        \       \"buyLink\": \"https://play.google.com/store/books/details?id=RGJCBAAAQBAJ&rdid=book-RGJCBAAAQBAJ&rdot=1&source=gbs_api\",\n
+        \       \"offers\": [\n          {\n            \"finskyOfferType\": 1,\n
+        \           \"listPrice\": {\n              \"amountInMicros\": 1990000,\n
+        \             \"currencyCode\": \"USD\"\n            },\n            \"retailPrice\":
+        {\n              \"amountInMicros\": 1990000,\n              \"currencyCode\":
+        \"USD\"\n            },\n            \"giftable\": true\n          }\n        ]\n
+        \     },\n      \"accessInfo\": {\n        \"country\": \"US\",\n        \"viewability\":
+        \"PARTIAL\",\n        \"embeddable\": true,\n        \"publicDomain\": false,\n
+        \       \"textToSpeechPermission\": \"ALLOWED\",\n        \"epub\": {\n          \"isAvailable\":
+        true\n        },\n        \"pdf\": {\n          \"isAvailable\": true\n        },\n
+        \       \"webReaderLink\": \"http://play.google.com/books/reader?id=RGJCBAAAQBAJ&hl=&as_pt=BOOKS&source=gbs_api\",\n
+        \       \"accessViewStatus\": \"SAMPLE\",\n        \"quoteSharingAllowed\":
+        false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"Life
+        of William Shakespeare is a biography of William Shakespeare by the eminent
+        critic Sidney Lee. This book was one of the first major biographies of the
+        Bard of Avon.\"\n      }\n    }\n  ]\n}\n"
+    headers:
+      Alt-Svc:
+      - h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+      Content-Type:
+      - application/json; charset=UTF-8
+      Date:
+      - Sun, 01 Feb 2026 21:37:41 GMT
+      Server:
+      - ESF
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Origin
+      - X-Origin
+      - Referer
+      X-Content-Type-Options:
+      - nosniff
+      X-Frame-Options:
+      - SAMEORIGIN
+      X-XSS-Protection:
+      - '0'
+      content-length:
+      - '17084'
+    status:
+      code: 200
+      message: OK
+version: 1

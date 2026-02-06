@@ -5,6 +5,7 @@ Provides search functionality for books using the Google Books API.
 """
 
 import json
+import os
 import requests
 from typing import List, Optional
 
@@ -13,8 +14,6 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
     retry_if_exception_type,
-    before_sleep_log,
-    after_log,
 )
 from google.adk.tools import FunctionTool
 from models.book import BookInfo, BookMetadata
@@ -27,8 +26,6 @@ logger = get_logger(__name__)
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
     retry=retry_if_exception_type((requests.exceptions.RequestException, requests.exceptions.Timeout)),
-    before_sleep=before_sleep_log(logger, "warning"),
-    after=after_log(logger, "info"),
 )
 def search_books(
     title: str, author: Optional[str] = None, max_results: int = 5
@@ -72,7 +69,12 @@ def search_books(
         url = "https://www.googleapis.com/books/v1/volumes"
         params = {"q": query, "maxResults": max_results, "printType": "books"}
 
-        logger.debug("google_books_query", query=query, url=url)
+        # Add API key if available
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if api_key:
+            params["key"] = api_key
+
+        logger.debug("google_books_query", query=query, url=url, has_api_key=bool(api_key))
 
         try:
             response = requests.get(url, params=params, timeout=10)
@@ -93,6 +95,8 @@ def search_books(
                 message="Request timed out, will retry"
             )
             raise
+
+        logger.debug("google_books_query", query=query, url=url)
 
         data = response.json()
         items = data.get("items", [])
@@ -177,9 +181,11 @@ def search_book(title: str, author: str = "") -> str:
 
         if not books:
             logger.warning("search_book_no_results", title=title, author=author)
-            return json.dumps(
-                {"error": "No books found", "query": {"title": title, "author": author}}
-            )
+            return json.dumps({
+                "error": "No books found matching your search",
+                "query": {"title": title, "author": author},
+                "suggestion": "Please verify the book title and author spelling, or try with just the title"
+            })
 
         # Select the first/best match
         selected = books[0]
@@ -200,9 +206,25 @@ def search_book(title: str, author: str = "") -> str:
         # Return Pydantic-validated JSON
         return book_metadata.model_dump_json()
 
+    except requests.exceptions.RequestException as e:
+        # Network/API errors - provide user-friendly message
+        logger.error("search_book_failed", error=str(e), error_type=type(e).__name__)
+        error_msg = "Failed to connect to Google Books API"
+        if "429" in str(e):
+            error_msg = "Rate limit exceeded - please try again in a few minutes"
+        elif "timeout" in str(e).lower():
+            error_msg = "Request timed out - please check your internet connection"
+        return json.dumps({
+            "error": error_msg,
+            "type": type(e).__name__,
+            "details": str(e)
+        })
     except Exception as e:
         logger.error("search_book_failed", error=str(e), error_type=type(e).__name__)
-        return json.dumps({"error": str(e), "type": type(e).__name__})
+        return json.dumps({
+            "error": f"Unexpected error while searching for book: {str(e)}",
+            "type": type(e).__name__
+        })
 
 
 # Create FunctionTool

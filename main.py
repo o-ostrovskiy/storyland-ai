@@ -298,49 +298,91 @@ async def create_itinerary(
             if trace:
                 metadata_span = trace.span(name="metadata-stage", metadata={"phase": 1})
 
-            metadata_stage = create_metadata_stage(model, google_books_tool)
-            metadata_runner = Runner(
-                agent=metadata_stage,
-                app_name="storyland",
-                session_service=session_service,
-                plugins=[LoggingPlugin(), langfuse_plugin],
-            )
-
-            metadata_prompt = f"""Find book metadata for "{book_title}" by {author or 'unknown author'}."""
-            metadata_message = types.Content(role="user", parts=[types.Part(text=metadata_prompt)])
-
-            async with metadata_runner:
-                async for event in metadata_runner.run_async(
-                    user_id=user_id, session_id=session_id, new_message=metadata_message
-                ):
-                    event_count += 1
-                    if event.author:
-                        logger.debug("agent_event", event_count=event_count, author=event.author)
-
-            # Get metadata from session state
-            session = await session_service.get_session(
-                app_name="storyland", user_id=user_id, session_id=session_id
-            )
-            book_metadata = session.state.get("book_metadata", {})
-            exact_title = book_metadata.get("book_title", book_title)
-            exact_author = book_metadata.get("author", author or "Unknown")
-
-            logger.info(
-                "metadata_extracted",
-                exact_title=exact_title,
-                exact_author=exact_author
-            )
-            print(f"\nFound: \"{exact_title}\" by {exact_author}")
-
-            # Update Langfuse span with results
-            if metadata_span:
-                metadata_span.end(
-                    output={
-                        "book_title": exact_title,
-                        "author": exact_author,
-                        "metadata": book_metadata,
-                    }
+            try:
+                metadata_stage = create_metadata_stage(model, google_books_tool)
+                metadata_runner = Runner(
+                    agent=metadata_stage,
+                    app_name="storyland",
+                    session_service=session_service,
+                    plugins=[LoggingPlugin(), langfuse_plugin],
                 )
+
+                metadata_prompt = f"""Find book metadata for "{book_title}" by {author or 'unknown author'}."""
+                metadata_message = types.Content(role="user", parts=[types.Part(text=metadata_prompt)])
+
+                async with metadata_runner:
+                    async for event in metadata_runner.run_async(
+                        user_id=user_id, session_id=session_id, new_message=metadata_message
+                    ):
+                        event_count += 1
+                        if event.author:
+                            logger.debug("agent_event", event_count=event_count, author=event.author)
+            except Exception as e:
+                logger.error(
+                    "metadata_extraction_failed",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    book_title=book_title,
+                    author=author
+                )
+                if metadata_span:
+                    metadata_span.end(output={"error": str(e), "error_type": type(e).__name__})
+
+                # Graceful degradation: Use provided title/author if metadata extraction fails
+                print(f"\n⚠️  Could not verify book metadata from Google Books API: {str(e)}")
+                print(f"   Proceeding with provided title: \"{book_title}\"")
+
+                # Continue with user-provided information
+                exact_title = book_title
+                exact_author = author or "Unknown"
+
+                # Store basic metadata in session for downstream agents
+                session = await session_service.get_session(
+                    app_name="storyland", user_id=user_id, session_id=session_id
+                )
+                session.state["book_metadata"] = {
+                    "book_title": exact_title,
+                    "author": exact_author,
+                    "description": None,
+                    "published_date": None,
+                    "categories": [],
+                    "image_url": None,
+                }
+
+                if trace and metadata_span:
+                    metadata_span.update(
+                        output={
+                            "fallback_used": True,
+                            "book_title": exact_title,
+                            "author": exact_author,
+                        }
+                    )
+
+            if 'exact_title' not in locals():
+                # Get metadata from session state (only if not already set by fallback)
+                session = await session_service.get_session(
+                    app_name="storyland", user_id=user_id, session_id=session_id
+                )
+                book_metadata = session.state.get("book_metadata", {})
+                exact_title = book_metadata.get("book_title", book_title)
+                exact_author = book_metadata.get("author", author or "Unknown")
+
+                logger.info(
+                    "metadata_extracted",
+                    exact_title=exact_title,
+                    exact_author=exact_author
+                )
+                print(f"\nFound: \"{exact_title}\" by {exact_author}")
+
+                # Update Langfuse span with results
+                if metadata_span:
+                    metadata_span.end(
+                        output={
+                            "book_title": exact_title,
+                            "author": exact_author,
+                            "metadata": book_metadata,
+                        }
+                    )
 
             # Phase 2: Discovery - find locations and analyze regions
             logger.info("phase_2_start", phase="location_discovery")
@@ -354,30 +396,58 @@ async def create_itinerary(
                     metadata={"phase": 2, "book_title": exact_title, "author": exact_author}
                 )
 
-            discovery_workflow = create_discovery_workflow(
-                model, book_title=exact_title, author=exact_author
-            )
-            discovery_runner = Runner(
-                agent=discovery_workflow,
-                app_name="storyland",
-                session_service=session_service,
-                plugins=[LoggingPlugin(), langfuse_plugin],
-            )
+            try:
+                discovery_workflow = create_discovery_workflow(
+                    model, book_title=exact_title, author=exact_author
+                )
+                discovery_runner = Runner(
+                    agent=discovery_workflow,
+                    app_name="storyland",
+                    session_service=session_service,
+                    plugins=[LoggingPlugin(), langfuse_plugin],
+                )
 
-            discovery_prompt = f"""Discover travel locations for "{exact_title}" by {exact_author}.
+                discovery_prompt = f"""Discover travel locations for "{exact_title}" by {exact_author}.
 
 Find cities, landmarks, and author-related sites, then group them into practical travel regions."""
-            discovery_message = types.Content(
-                role="user", parts=[types.Part(text=discovery_prompt)]
-            )
+                discovery_message = types.Content(
+                    role="user", parts=[types.Part(text=discovery_prompt)]
+                )
 
-            async with discovery_runner:
-                async for event in discovery_runner.run_async(
-                    user_id=user_id, session_id=session_id, new_message=discovery_message
-                ):
-                    event_count += 1
-                    if event.author:
-                        logger.debug("agent_event", event_count=event_count, author=event.author)
+                async with discovery_runner:
+                    async for event in discovery_runner.run_async(
+                        user_id=user_id, session_id=session_id, new_message=discovery_message
+                    ):
+                        event_count += 1
+                        if event.author:
+                            logger.debug("agent_event", event_count=event_count, author=event.author)
+            except Exception as e:
+                logger.error(
+                    "discovery_failed",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    book_title=exact_title,
+                    author=exact_author
+                )
+                if discovery_span:
+                    discovery_span.end(output={"error": str(e), "error_type": type(e).__name__})
+
+                # User-friendly error message
+                print(f"\n❌ Error during location discovery: {str(e)}")
+                print("   Unable to find travel locations for this book.")
+                print("   This may be due to:")
+                print("     - Limited information available online about this book")
+                print("     - API rate limits (try again in a few minutes)")
+                print("     - Network connectivity issues")
+
+                # Log to Langfuse for debugging
+                if trace:
+                    trace.update(
+                        output={"error": "discovery_failed", "phase": 2},
+                        tags=["itinerary", "adk-workflow", "error", "discovery_failed"],
+                    )
+
+                raise
 
             # Get region analysis from session state
             session = await session_service.get_session(
@@ -451,43 +521,67 @@ Find cities, landmarks, and author-related sites, then group them into practical
                     }
                 )
 
-            composition_workflow = create_composition_workflow(model)
-            composition_runner = Runner(
-                agent=composition_workflow,
-                app_name="storyland",
-                session_service=session_service,
-                plugins=[LoggingPlugin(), langfuse_plugin],
-            )
+            try:
+                composition_workflow = create_composition_workflow(model)
+                composition_runner = Runner(
+                    agent=composition_workflow,
+                    app_name="storyland",
+                    session_service=session_service,
+                    plugins=[LoggingPlugin(), langfuse_plugin],
+                )
 
-            composition_prompt = f"""Create a travel itinerary for "{exact_title}" by {exact_author}.
+                composition_prompt = f"""Create a travel itinerary for "{exact_title}" by {exact_author}.
 
 Use ONLY the cities from the selected region(s): {json.dumps(selected_regions)}
 
 Create a personalized itinerary based on user preferences and the selected region(s).
 Include ALL cities from the selected regions in your itinerary."""
-            composition_message = types.Content(
-                role="user", parts=[types.Part(text=composition_prompt)]
-            )
-
-            async with composition_runner:
-                async for event in composition_runner.run_async(
-                    user_id=user_id, session_id=session_id, new_message=composition_message
-                ):
-                    event_count += 1
-                    if event.author:
-                        logger.debug("agent_event", event_count=event_count, author=event.author)
-                    if event.is_final_response():
-                        final_response = event
-                        logger.info("workflow_complete", total_events=event_count)
-
-            # Update Langfuse span with results
-            if composition_span:
-                composition_span.end(
-                    output={
-                        "itinerary_created": final_response is not None,
-                        "total_events": event_count,
-                    }
+                composition_message = types.Content(
+                    role="user", parts=[types.Part(text=composition_prompt)]
                 )
+
+                async with composition_runner:
+                    async for event in composition_runner.run_async(
+                        user_id=user_id, session_id=session_id, new_message=composition_message
+                    ):
+                        event_count += 1
+                        if event.author:
+                            logger.debug("agent_event", event_count=event_count, author=event.author)
+                        if event.is_final_response():
+                            final_response = event
+                            logger.info("workflow_complete", total_events=event_count)
+
+                # Update Langfuse span with results
+                if composition_span:
+                    composition_span.end(
+                        output={
+                            "itinerary_created": final_response is not None,
+                            "total_events": event_count,
+                        }
+                    )
+            except Exception as e:
+                logger.error(
+                    "composition_failed",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    region_count=len(selected_regions)
+                )
+                if composition_span:
+                    composition_span.end(output={"error": str(e), "error_type": type(e).__name__})
+
+                # User-friendly error message
+                print(f"\n❌ Error creating itinerary: {str(e)}")
+                print("   Unable to generate the final travel itinerary.")
+                print("   The discovery data may be incomplete or the AI model encountered an issue.")
+
+                # Log to Langfuse for debugging
+                if trace:
+                    trace.update(
+                        output={"error": "composition_failed", "phase": 3},
+                        tags=["itinerary", "adk-workflow", "error", "composition_failed"],
+                    )
+
+                raise
 
     except asyncio.TimeoutError:
         # WHY CUSTOM ERROR: Convert Python's asyncio.TimeoutError to domain-specific

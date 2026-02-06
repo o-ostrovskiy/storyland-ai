@@ -9,6 +9,9 @@ import os
 from typing import Optional
 
 from google.adk.sessions import InMemorySessionService, DatabaseSessionService
+from common.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def create_session_service(
@@ -51,11 +54,11 @@ def create_session_service(
             # Default to SQLite with async driver in the current directory
             connection_string = "sqlite+aiosqlite:///storyland_sessions.db"
 
-        print(f"Using DatabaseSessionService with: {connection_string}")
+        logger.info("session_service_created", type="database", connection_string=connection_string)
         return DatabaseSessionService(db_url=connection_string)
     else:
         # Development: In-memory session service
-        print("Using InMemorySessionService (not persistent)")
+        logger.info("session_service_created", type="in_memory", persistent=False)
         return InMemorySessionService()
 
 
