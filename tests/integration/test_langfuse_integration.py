@@ -18,7 +18,6 @@ from google.genai import types
 
 from plugins.langfuse_plugin import LangfusePlugin
 from common.langfuse_init import initialize_langfuse, is_enabled
-from common.config import load_config
 from services.session_service import create_session_service
 
 
@@ -96,13 +95,12 @@ class TestLangfusePluginIntegration:
     @pytest.mark.asyncio
     async def test_workflow_execution_with_plugin(self, simple_agent, session_service):
         """Test that workflows run successfully with Langfuse plugin (enabled or disabled)."""
-        config = load_config()
-
-        # Create plugin (will auto-disable if credentials missing or package unavailable)
+        # Read Langfuse credentials directly from environment
+        # (avoids requiring all config variables like SESSION_MAX_EVENTS)
         plugin = LangfusePlugin(
-            secret_key=config.langfuse_secret_key,
-            public_key=config.langfuse_public_key,
-            host=config.langfuse_host,
+            secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+            public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+            host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
         )
 
         # Create runner with plugin
@@ -257,14 +255,11 @@ class TestLangfuseWithRealWorkflow:
         from agents import create_book_metadata_pipeline
         from tools.google_books import google_books_tool
 
-        # Load config
-        config = load_config()
-
         # Create plugin (will auto-disable if credentials missing or package unavailable)
         plugin = LangfusePlugin(
-            secret_key=config.langfuse_secret_key,
-            public_key=config.langfuse_public_key,
-            host=config.langfuse_host,
+            secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+            public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+            host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
         )
 
         # Create metadata pipeline
@@ -324,12 +319,11 @@ class TestLangfuseWithRealWorkflow:
     @pytest.mark.asyncio
     async def test_multiple_agents_with_langfuse(self):
         """Test that Langfuse correctly tracks multiple nested agents."""
-        config = load_config()
-
+        # Create plugin (will auto-disable if credentials missing or package unavailable)
         plugin = LangfusePlugin(
-            secret_key=config.langfuse_secret_key,
-            public_key=config.langfuse_public_key,
-            host=config.langfuse_host,
+            secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+            public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+            host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
         )
 
         # Create nested agents
