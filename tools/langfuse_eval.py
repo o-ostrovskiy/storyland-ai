@@ -10,10 +10,13 @@ import json
 from typing import Optional, Dict, List, Any
 from datetime import datetime
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 try:
     from langfuse import Langfuse
-    from langfuse.client import DatasetItemClient, DatasetClient
     LANGFUSE_AVAILABLE = True
 except ImportError:
     LANGFUSE_AVAILABLE = False
