@@ -8,16 +8,15 @@ import asyncio
 from typing import Any, Optional
 from dataclasses import dataclass
 
-from google.adk.plugins import Plugin
-from google.adk.runners.events import (
-    Event,
-    AgentStartEvent,
-    AgentCompleteEvent,
-    ModelRequestEvent,
-    ModelResponseEvent,
-    ToolStartEvent,
-    ToolCompleteEvent,
-)
+from google.adk.plugins import BasePlugin
+from google.adk.runners import InvocationContext
+from google.genai import types
+from google.adk.agents.base_agent import BaseAgent
+from google.adk.agents.callback_context import CallbackContext
+from google.adk.tools.base_tool import BaseTool
+from google.adk.tools.tool_context import ToolContext
+from google.adk.models.llm_request import LlmRequest
+from google.adk.models.llm_response import LlmResponse
 from common.logging import get_logger
 
 logger = get_logger(__name__)
@@ -51,11 +50,11 @@ class TokenUsage:
         return input_cost + output_cost
 
 
-class LangfusePlugin(Plugin):
+class LangfusePlugin(BasePlugin):
     """
     Langfuse observability plugin for tracking token usage and costs.
 
-    Integrates with Google ADK's event system to capture:
+    Integrates with Google ADK's callback system to capture:
     - Token usage per model call (input/output)
     - Cost calculation based on Gemini pricing
     - Agent execution traces
@@ -91,14 +90,17 @@ class LangfusePlugin(Plugin):
             host: Langfuse host URL (from env LANGFUSE_HOST)
             enabled: Enable/disable plugin (auto-disabled if credentials missing)
         """
+        super().__init__(name="langfuse_plugin")
         self.enabled = enabled and LANGFUSE_AVAILABLE
         self.client: Optional[Langfuse] = None
         self._token_usage = TokenUsage()
         self._current_trace = None
         self._current_generation = None
         self._agent_stack = []  # Track nested agent calls
+        self._current_span = None
 
         if not LANGFUSE_AVAILABLE:
+            logger.info("langfuse_unavailable", reason="package_not_installed")
             return
 
         # Only initialize if all credentials provided
@@ -110,163 +112,163 @@ class LangfusePlugin(Plugin):
                     host=host,
                 )
                 self.enabled = True
+                logger.info("langfuse_plugin_initialized", host=host)
             except Exception as e:
                 logger.warning("langfuse_init_failed", error=str(e), error_type=type(e).__name__)
                 self.enabled = False
         else:
+            logger.info("langfuse_disabled", reason="missing_credentials")
             self.enabled = False
 
-    async def on_event(self, event: Event) -> None:
-        """
-        Handle ADK events and track in Langfuse.
-
-        Args:
-            event: ADK event (agent start/complete, model request/response, etc.)
-        """
+    async def on_user_message_callback(
+        self,
+        *,
+        invocation_context: InvocationContext,
+        user_message: types.Content,
+    ) -> Optional[types.Content]:
+        """Log user message and create trace."""
         if not self.enabled or not self.client:
-            return
+            return None
 
         try:
-            # Handle different event types
-            if isinstance(event, AgentStartEvent):
-                await self._handle_agent_start(event)
-            elif isinstance(event, AgentCompleteEvent):
-                await self._handle_agent_complete(event)
-            elif isinstance(event, ModelRequestEvent):
-                await self._handle_model_request(event)
-            elif isinstance(event, ModelResponseEvent):
-                await self._handle_model_response(event)
-            elif isinstance(event, ToolStartEvent):
-                await self._handle_tool_start(event)
-            elif isinstance(event, ToolCompleteEvent):
-                await self._handle_tool_complete(event)
-        except Exception as e:
-            # Don't break the workflow if observability fails
-            # Log error with context for debugging
-            logger.warning(
-                "langfuse_event_error",
-                error=str(e),
-                error_type=type(e).__name__,
-                event_type=type(event).__name__ if event else "unknown"
-            )
-
-            # Try to log the error to Langfuse if possible
-            try:
-                if self._current_trace:
-                    self._current_trace.update(
-                        metadata={
-                            "langfuse_plugin_error": str(e),
-                            "error_type": type(e).__name__,
-                            "event_type": type(event).__name__ if event else "unknown",
-                        }
-                    )
-            except Exception:
-                # Silently fail if we can't even log the error
-                pass
-
-    async def _handle_agent_start(self, event: AgentStartEvent) -> None:
-        """Track agent execution start."""
-        agent_name = getattr(event, 'agent_name', 'unknown_agent')
-
-        # Create trace for top-level agent, span for nested agents
-        if not self._agent_stack:
+            # Create a new trace for this invocation
+            agent_name = getattr(invocation_context.agent, 'name', 'unknown_agent')
             self._current_trace = self.client.trace(
-                name=agent_name,
+                name=f"{agent_name}_invocation",
                 metadata={
-                    "invocation_id": getattr(event, 'invocation_id', None),
+                    "invocation_id": invocation_context.invocation_id,
+                    "session_id": invocation_context.session.id if invocation_context.session else None,
+                    "user_id": invocation_context.user_id,
                     "agent_type": "google_adk",
                 },
+                input=str(user_message),
             )
-        else:
-            # Nested agent - create span
-            if self._current_trace:
-                self.client.span(
-                    trace_id=self._current_trace.id,
-                    name=agent_name,
-                    metadata={"invocation_id": getattr(event, 'invocation_id', None)},
-                )
+            logger.debug("langfuse_trace_created", trace_id=self._current_trace.id)
+        except Exception as e:
+            logger.warning("langfuse_trace_error", error=str(e), error_type=type(e).__name__)
 
-        self._agent_stack.append(agent_name)
+        return None
 
-    async def _handle_agent_complete(self, event: AgentCompleteEvent) -> None:
-        """Track agent execution completion."""
-        if self._agent_stack:
-            self._agent_stack.pop()
+    async def before_agent_callback(
+        self, *, agent: BaseAgent, callback_context: CallbackContext
+    ) -> Optional[types.Content]:
+        """Track agent execution start."""
+        if not self.enabled or not self.client or not self._current_trace:
+            return None
 
-        # Finalize trace when top-level agent completes
-        if not self._agent_stack and self._current_trace:
-            self._current_trace.update(
-                output={"status": "completed"},
+        try:
+            agent_name = getattr(agent, 'name', 'unknown_agent')
+
+            # Create span for agent
+            span = self.client.span(
+                trace_id=self._current_trace.id,
+                name=agent_name,
                 metadata={
-                    "total_input_tokens": self._token_usage.input_tokens,
-                    "total_output_tokens": self._token_usage.output_tokens,
-                    "total_cost_usd": self._token_usage.cost_usd,
+                    "agent_type": type(agent).__name__,
+                    "callback_context": str(callback_context),
                 },
             )
-            self._current_trace = None
+            self._agent_stack.append((agent_name, span))
+            logger.debug("langfuse_agent_start", agent=agent_name)
+        except Exception as e:
+            logger.warning("langfuse_agent_start_error", error=str(e), error_type=type(e).__name__)
 
-    async def _handle_model_request(self, event: ModelRequestEvent) -> None:
+        return None
+
+    async def after_agent_callback(
+        self, *, agent: BaseAgent, callback_context: CallbackContext
+    ) -> Optional[types.Content]:
+        """Track agent execution completion."""
+        if not self.enabled or not self.client:
+            return None
+
+        try:
+            if self._agent_stack:
+                agent_name, span = self._agent_stack.pop()
+                logger.debug("langfuse_agent_complete", agent=agent_name)
+        except Exception as e:
+            logger.warning("langfuse_agent_complete_error", error=str(e), error_type=type(e).__name__)
+
+        return None
+
+    async def before_model_callback(
+        self, *, callback_context: CallbackContext, llm_request: LlmRequest
+    ) -> Optional[LlmResponse]:
         """Track model request (LLM call start)."""
-        if not self._current_trace:
-            return
+        if not self.enabled or not self.client or not self._current_trace:
+            return None
 
-        # Extract prompt from event
-        prompt = getattr(event, 'request', None)
-        model_name = getattr(event, 'model', 'gemini-2.0-flash-lite')
+        try:
+            model_name = getattr(llm_request, 'model', 'unknown_model')
 
-        # Create generation tracking
-        self._current_generation = self.client.generation(
-            trace_id=self._current_trace.id,
-            name=f"{model_name}_call",
-            model=model_name,
-            input=prompt,
-            metadata={
-                "agent": self._agent_stack[-1] if self._agent_stack else "unknown",
-            },
-        )
+            # Create generation tracking
+            self._current_generation = self.client.generation(
+                trace_id=self._current_trace.id,
+                name=f"{model_name}_call",
+                model=model_name,
+                input=str(llm_request),
+                metadata={
+                    "agent": self._agent_stack[-1][0] if self._agent_stack else "unknown",
+                },
+            )
+            logger.debug("langfuse_model_request", model=model_name)
+        except Exception as e:
+            logger.warning("langfuse_model_request_error", error=str(e), error_type=type(e).__name__)
 
-    async def _handle_model_response(self, event: ModelResponseEvent) -> None:
+        return None
+
+    async def after_model_callback(
+        self, *, callback_context: CallbackContext, llm_response: LlmResponse
+    ) -> Optional[LlmResponse]:
         """
         Track model response and extract token usage.
 
         This is where we capture actual token counts from Gemini API.
         """
-        if not self._current_generation:
-            return
+        if not self.enabled or not self.client or not self._current_generation:
+            return None
 
-        # Extract response content
-        response = getattr(event, 'response', None)
+        try:
+            # Extract token usage from response
+            usage = self._extract_token_usage(llm_response)
 
-        # Extract token usage from Gemini response
-        usage = self._extract_token_usage(response)
+            if usage:
+                # Update running totals
+                self._token_usage.input_tokens += usage.input_tokens
+                self._token_usage.output_tokens += usage.output_tokens
+                self._token_usage.total_tokens += usage.total_tokens
 
-        if usage:
-            # Update running totals
-            self._token_usage.input_tokens += usage.input_tokens
-            self._token_usage.output_tokens += usage.output_tokens
-            self._token_usage.total_tokens += usage.total_tokens
-
-            # Update generation with token usage and cost
-            self._current_generation.update(
-                output=response,
-                usage={
-                    "input": usage.input_tokens,
-                    "output": usage.output_tokens,
-                    "total": usage.total_tokens,
-                    "unit": "TOKENS",
-                },
-                metadata={
-                    "cost_usd": usage.cost_usd,
-                    "model_pricing": {
-                        "input_per_1m": 0.075,
-                        "output_per_1m": 0.30,
+                # Update generation with token usage and cost
+                self._current_generation.update(
+                    output=str(llm_response),
+                    usage={
+                        "input": usage.input_tokens,
+                        "output": usage.output_tokens,
+                        "total": usage.total_tokens,
+                        "unit": "TOKENS",
                     },
-                },
-            )
+                    metadata={
+                        "cost_usd": usage.cost_usd,
+                        "model_pricing": {
+                            "input_per_1m": 0.075,
+                            "output_per_1m": 0.30,
+                        },
+                    },
+                )
+                logger.debug(
+                    "langfuse_model_response",
+                    input_tokens=usage.input_tokens,
+                    output_tokens=usage.output_tokens,
+                    cost_usd=usage.cost_usd,
+                )
 
-        self._current_generation = None
+            self._current_generation = None
+        except Exception as e:
+            logger.warning("langfuse_model_response_error", error=str(e), error_type=type(e).__name__)
 
-    def _extract_token_usage(self, response: Any) -> Optional[TokenUsage]:
+        return None
+
+    def _extract_token_usage(self, response: LlmResponse) -> Optional[TokenUsage]:
         """
         Extract token counts from Gemini API response.
 
@@ -301,28 +303,87 @@ class LangfusePlugin(Plugin):
                 )
 
             return None
-        except Exception:
+        except Exception as e:
+            logger.debug("token_usage_extraction_failed", error=str(e))
             return None
 
-    async def _handle_tool_start(self, event: ToolStartEvent) -> None:
+    async def before_tool_callback(
+        self,
+        *,
+        tool: BaseTool,
+        tool_args: dict[str, Any],
+        tool_context: ToolContext,
+    ) -> Optional[dict]:
         """Track tool execution start."""
-        if not self._current_trace:
+        if not self.enabled or not self.client or not self._current_trace:
+            return None
+
+        try:
+            tool_name = getattr(tool, 'name', 'unknown_tool')
+            self._current_span = self.client.span(
+                trace_id=self._current_trace.id,
+                name=f"tool_{tool_name}",
+                metadata={
+                    "tool_type": "adk_tool",
+                    "tool_name": tool_name,
+                    "tool_args": str(tool_args),
+                },
+            )
+            logger.debug("langfuse_tool_start", tool=tool_name)
+        except Exception as e:
+            logger.warning("langfuse_tool_start_error", error=str(e), error_type=type(e).__name__)
+
+        return None
+
+    async def after_tool_callback(
+        self,
+        *,
+        tool: BaseTool,
+        tool_args: dict[str, Any],
+        tool_context: ToolContext,
+        result: dict,
+    ) -> Optional[dict]:
+        """Track tool execution completion."""
+        if not self.enabled or not self.client or not self._current_span:
+            return None
+
+        try:
+            tool_name = getattr(tool, 'name', 'unknown_tool')
+            self._current_span.update(
+                output=str(result),
+            )
+            self._current_span = None
+            logger.debug("langfuse_tool_complete", tool=tool_name)
+        except Exception as e:
+            logger.warning("langfuse_tool_complete_error", error=str(e), error_type=type(e).__name__)
+
+        return None
+
+    async def after_run_callback(
+        self, *, invocation_context: InvocationContext
+    ) -> None:
+        """Finalize trace when invocation completes."""
+        if not self.enabled or not self.client or not self._current_trace:
             return
 
-        tool_name = getattr(event, 'tool_name', 'unknown_tool')
-        self.client.span(
-            trace_id=self._current_trace.id,
-            name=f"tool_{tool_name}",
-            metadata={
-                "tool_type": "adk_tool",
-                "tool_name": tool_name,
-            },
-        )
-
-    async def _handle_tool_complete(self, event: ToolCompleteEvent) -> None:
-        """Track tool execution completion."""
-        # Tool completion is tracked via span end
-        pass
+        try:
+            self._current_trace.update(
+                output={"status": "completed"},
+                metadata={
+                    "total_input_tokens": self._token_usage.input_tokens,
+                    "total_output_tokens": self._token_usage.output_tokens,
+                    "total_cost_usd": self._token_usage.cost_usd,
+                },
+            )
+            logger.info(
+                "langfuse_invocation_complete",
+                input_tokens=self._token_usage.input_tokens,
+                output_tokens=self._token_usage.output_tokens,
+                cost_usd=self._token_usage.cost_usd,
+            )
+            self._current_trace = None
+        except Exception as e:
+            logger.warning("langfuse_finalize_error", error=str(e), error_type=type(e).__name__)
 
     def get_session_stats(self) -> dict[str, Any]:
         """
@@ -347,5 +408,10 @@ class LangfusePlugin(Plugin):
         if self.client:
             try:
                 await asyncio.to_thread(self.client.flush)
+                logger.debug("langfuse_flushed")
             except Exception as e:
                 logger.warning("langfuse_flush_error", error=str(e), error_type=type(e).__name__)
+
+    async def close(self) -> None:
+        """Close plugin and flush events."""
+        await self.flush()

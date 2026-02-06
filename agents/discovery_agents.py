@@ -122,7 +122,7 @@ ERROR HANDLING & GRACEFUL DEGRADATION:
 - If certain cities have no specific landmarks, suggest general atmospheric locations
 - If search fails, fall back to well-known locations mentioned in the book itself
 - Report partial results rather than failing completely
-- Clearly indicate confidence level: "mentioned in book" vs "related to setting" vs "suggested for atmosphere"""",
+- Clearly indicate confidence level: "mentioned in book" vs "related to setting" vs "suggested for atmosphere""",
     )
 
     landmark_formatter = LlmAgent(

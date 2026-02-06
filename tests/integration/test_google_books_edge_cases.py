@@ -177,7 +177,7 @@ class TestSearchBookEdgeCases:
         data = json.loads(result)
 
         assert "error" in data
-        assert data["error"] == "No books found"
+        assert data["error"] == "No books found matching your search"
 
     @pytest.mark.integration
     @pytest.mark.vcr()
