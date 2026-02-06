@@ -251,7 +251,10 @@ class TestLangfuseWithRealWorkflow:
     @pytest.mark.vcr()
     @pytest.mark.asyncio
     async def test_book_metadata_workflow_with_langfuse(self):
-        """Test book metadata extraction workflow with Langfuse tracking."""
+        """Test book metadata extraction workflow with Langfuse tracking.
+
+        Note: This test makes real Gemini API calls and may hit rate limits in CI.
+        """
         from agents import create_book_metadata_pipeline
         from tools.google_books import google_books_tool
 
@@ -312,13 +315,21 @@ class TestLangfuseWithRealWorkflow:
 
             await plugin.flush()
 
+        except Exception as e:
+            # Skip test if we hit API rate limits (common in CI)
+            if "RESOURCE_EXHAUSTED" in str(e) or "429" in str(e):
+                pytest.skip(f"Gemini API rate limit hit (expected in CI): {e}")
+            raise
         finally:
             await plugin.close()
 
     @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_multiple_agents_with_langfuse(self):
-        """Test that Langfuse correctly tracks multiple nested agents."""
+        """Test that Langfuse correctly tracks multiple nested agents.
+
+        Note: This test makes real Gemini API calls and may hit rate limits in CI.
+        """
         # Create plugin (will auto-disable if credentials missing or package unavailable)
         plugin = LangfusePlugin(
             secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
@@ -390,5 +401,10 @@ class TestLangfuseWithRealWorkflow:
 
             await plugin.flush()
 
+        except Exception as e:
+            # Skip test if we hit API rate limits (common in CI)
+            if "RESOURCE_EXHAUSTED" in str(e) or "429" in str(e):
+                pytest.skip(f"Gemini API rate limit hit (expected in CI): {e}")
+            raise
         finally:
             await plugin.close()
