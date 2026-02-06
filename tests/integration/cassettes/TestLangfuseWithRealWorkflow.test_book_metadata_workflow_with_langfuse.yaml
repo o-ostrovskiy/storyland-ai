@@ -33,35 +33,33 @@ interactions:
       - google-genai-sdk/1.60.0 gl-python/3.12.6 google-adk/1.23.0 gl-python/3.12.6
       x-goog-api-client:
       - google-genai-sdk/1.60.0 gl-python/3.12.6 google-adk/1.23.0 gl-python/3.12.6
-      x-goog-api-key:
-      - AIzaSyAaoS2G5WYp0aFSOyUCU-OI5LhVt-FJVcw
     method: post
     uri: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent
   response:
     body:
       string: "{\n  \"candidates\": [\n    {\n      \"content\": {\n        \"parts\":
         [\n          {\n            \"functionCall\": {\n              \"name\": \"search_book\",\n
-        \             \"args\": {\n                \"title\": \"1984\",\n                \"author\":
-        \"George Orwell\"\n              }\n            }\n          }\n        ],\n
-        \       \"role\": \"model\"\n      },\n      \"finishReason\": \"STOP\",\n
-        \     \"avgLogprobs\": -0.0014899058098142798\n    }\n  ],\n  \"usageMetadata\":
+        \             \"args\": {\n                \"author\": \"George Orwell\",\n
+        \               \"title\": \"1984\"\n              }\n            }\n          }\n
+        \       ],\n        \"role\": \"model\"\n      },\n      \"finishReason\":
+        \"STOP\",\n      \"avgLogprobs\": -0.0014899058098142798\n    }\n  ],\n  \"usageMetadata\":
         {\n    \"promptTokenCount\": 368,\n    \"candidatesTokenCount\": 11,\n    \"totalTokenCount\":
         379,\n    \"promptTokensDetails\": [\n      {\n        \"modality\": \"TEXT\",\n
         \       \"tokenCount\": 368\n      }\n    ],\n    \"candidatesTokensDetails\":
         [\n      {\n        \"modality\": \"TEXT\",\n        \"tokenCount\": 11\n
         \     }\n    ]\n  },\n  \"modelVersion\": \"gemini-2.0-flash-lite\",\n  \"responseId\":
-        \"Bl6GaZGIDdfP_uMPoMLd6Qk\"\n}\n"
+        \"c2uGacWNJJ-8_uMPwsCv8Qs\"\n}\n"
     headers:
       Alt-Svc:
       - h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
       Content-Type:
       - application/json; charset=UTF-8
       Date:
-      - Fri, 06 Feb 2026 21:32:55 GMT
+      - Fri, 06 Feb 2026 22:30:11 GMT
       Server:
       - scaffolding on HTTPServer2
       Server-Timing:
-      - gfet4t7; dur=1328
+      - gfet4t7; dur=462
       Transfer-Encoding:
       - chunked
       Vary:
@@ -96,7 +94,7 @@ interactions:
     body:
       string: "{\n  \"kind\": \"books#volumes\",\n  \"totalItems\": 1000000,\n  \"items\":
         [\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"1aIFEAAAQBAJ\",\n
-        \     \"etag\": \"HSGFeRK60Os\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/1aIFEAAAQBAJ\",\n
+        \     \"etag\": \"QbCDX8I7PbU\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/1aIFEAAAQBAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"1984 : George Orwell's 1984:
         A Dystopian Masterpiece\",\n        \"subtitle\": \"George Orwell 1984: A
         Dystopian Masterpiece by a Visionary Author by George Orwell\",\n        \"authors\":
@@ -174,7 +172,7 @@ interactions:
         skillful storytelling and his ability to capture the human spirit in the face
         of adversity make this novel a timeless masterpiece of social science fiction.\"\n
         \     }\n    },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"T0xmAQAACAAJ\",\n
-        \     \"etag\": \"CiPLc7Xaun8\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/T0xmAQAACAAJ\",\n
+        \     \"etag\": \"rJZVJjlX6ww\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/T0xmAQAACAAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"1984 George Orwell - Large Print
         Edition\",\n        \"authors\": [\n          \"George Orwell\"\n        ],\n
         \       \"publishedDate\": \"2017-02-15\",\n        \"description\": \"1984
@@ -209,7 +207,7 @@ interactions:
         Many people obviously believe his version of the news because that is how
         he got elected. How this will turn out is the subject of this book.\"\n      }\n
         \   },\n    {\n      \"kind\": \"books#volume\",\n      \"id\": \"tSJIEQAAQBAJ\",\n
-        \     \"etag\": \"PZhIysZYRTI\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/tSJIEQAAQBAJ\",\n
+        \     \"etag\": \"DMu3ux8Jam0\",\n      \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/tSJIEQAAQBAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"1984\",\n        \"authors\":
         [\n          \"George Orwell\"\n        ],\n        \"publisher\": \"Empire
         State Classics\",\n        \"publishedDate\": \"2024-07-01\",\n        \"description\":
@@ -266,7 +264,7 @@ interactions:
         can one man\u2019s defiance change anything\u2014or is he destined to become
         another cog in the machine?George Orwell\u2019s &quot;1984&quot; is a chilling
         and prophetic ...\"\n      }\n    },\n    {\n      \"kind\": \"books#volume\",\n
-        \     \"id\": \"RCGpHZQZuDoC\",\n      \"etag\": \"e+Vr0CP0Hlo\",\n      \"selfLink\":
+        \     \"id\": \"RCGpHZQZuDoC\",\n      \"etag\": \"qymE9N9bKFk\",\n      \"selfLink\":
         \"https://www.googleapis.com/books/v1/volumes/RCGpHZQZuDoC\",\n      \"volumeInfo\":
         {\n        \"title\": \"1984\",\n        \"subtitle\": \"A Novel\",\n        \"authors\":
         [\n          \"George Orwell\"\n        ],\n        \"publisher\": \"New York,
@@ -299,7 +297,7 @@ interactions:
         false\n      },\n      \"searchInfo\": {\n        \"textSnippet\": \"The classic
         science fiction story of a society in which &quot;Big Brother&quot; is always
         watching everyone&#39;s actions.\"\n      }\n    },\n    {\n      \"kind\":
-        \"books#volume\",\n      \"id\": \"zPa5zgEACAAJ\",\n      \"etag\": \"QlQbY2m6jNg\",\n
+        \"books#volume\",\n      \"id\": \"zPa5zgEACAAJ\",\n      \"etag\": \"Py9bGaY7D2g\",\n
         \     \"selfLink\": \"https://www.googleapis.com/books/v1/volumes/zPa5zgEACAAJ\",\n
         \     \"volumeInfo\": {\n        \"title\": \"1984\",\n        \"subtitle\":
         \"George Orwell - the Classic Dystopian, Political Fiction Novel\",\n        \"authors\":
@@ -338,7 +336,7 @@ interactions:
       Content-Type:
       - application/json; charset=UTF-8
       Date:
-      - Fri, 06 Feb 2026 21:32:56 GMT
+      - Fri, 06 Feb 2026 22:30:12 GMT
       Server:
       - ESF
       Transfer-Encoding:
@@ -360,28 +358,28 @@ interactions:
       message: OK
 - request:
     body: '{"contents": [{"parts": [{"text": "Find book metadata for ''1984'' by George
-      Orwell"}], "role": "user"}, {"parts": [{"functionCall": {"args": {"title": "1984",
-      "author": "George Orwell"}, "name": "search_book"}}], "role": "model"}, {"parts":
-      [{"functionResponse": {"name": "search_book", "response": {"result": "{\"book_title\":\"1984
-      : George Orwell''s 1984: A Dystopian Masterpiece\",\"author\":\"George Orwell\",\"description\":\"George
-      Orwell 1984: Nineteen Eighty-Four is a groundbreaking dystopian novel by English
-      author George Orwell. Published in 1949, it presents a chilling portrayal of
-      a totalitarian society where individualism is suppressed, surveillance is omnipresent,
-      and truth is manipulated for political control. Often referred to simply as
-      1984, the book has become a timeless classic and a cautionary tale about the
-      dangers of totalitarianism and the importance of preserving individual freedom.
-      Key Aspects of George Orwell 1984: Nineteen Eighty-Four: Dystopian Society:
-      Orwell creates a haunting vision of a future society ruled by a totalitarian
-      regime known as the Party. The novel explores the complete control exerted by
-      the Party over its citizens, who are constantly monitored, manipulated, and
-      stripped of their individuality and freedom. The depiction of a dystopian world
-      serves as a stark warning about the potential consequences of unchecked governmental
-      power.Surveillance and Manipulation: One of the central themes of the novel
-      is the pervasive surveillance employed by the Party through devices such as
-      telescreens, hidden microphones, and informants. The constant monitoring of
-      its citizens ensures conformity and suppresses any dissent. Orwell''s portrayal
-      of this surveillance state raises important questions about privacy, freedom
-      of thought, and the dangers of mass surveillance in modern societies.Exploration
+      Orwell"}], "role": "user"}, {"parts": [{"functionCall": {"args": {"author":
+      "George Orwell", "title": "1984"}, "name": "search_book"}}], "role": "model"},
+      {"parts": [{"functionResponse": {"name": "search_book", "response": {"result":
+      "{\"book_title\":\"1984 : George Orwell''s 1984: A Dystopian Masterpiece\",\"author\":\"George
+      Orwell\",\"description\":\"George Orwell 1984: Nineteen Eighty-Four is a groundbreaking
+      dystopian novel by English author George Orwell. Published in 1949, it presents
+      a chilling portrayal of a totalitarian society where individualism is suppressed,
+      surveillance is omnipresent, and truth is manipulated for political control.
+      Often referred to simply as 1984, the book has become a timeless classic and
+      a cautionary tale about the dangers of totalitarianism and the importance of
+      preserving individual freedom. Key Aspects of George Orwell 1984: Nineteen Eighty-Four:
+      Dystopian Society: Orwell creates a haunting vision of a future society ruled
+      by a totalitarian regime known as the Party. The novel explores the complete
+      control exerted by the Party over its citizens, who are constantly monitored,
+      manipulated, and stripped of their individuality and freedom. The depiction
+      of a dystopian world serves as a stark warning about the potential consequences
+      of unchecked governmental power.Surveillance and Manipulation: One of the central
+      themes of the novel is the pervasive surveillance employed by the Party through
+      devices such as telescreens, hidden microphones, and informants. The constant
+      monitoring of its citizens ensures conformity and suppresses any dissent. Orwell''s
+      portrayal of this surveillance state raises important questions about privacy,
+      freedom of thought, and the dangers of mass surveillance in modern societies.Exploration
       of Truth and Reality: In 1984, Orwell introduces the concept of doublethink,
       where the Party manipulates and controls reality by rewriting history and altering
       facts. The protagonist, Winston Smith, struggles to maintain his own independent
@@ -435,26 +433,76 @@ interactions:
       - google-genai-sdk/1.60.0 gl-python/3.12.6 google-adk/1.23.0 gl-python/3.12.6
       x-goog-api-client:
       - google-genai-sdk/1.60.0 gl-python/3.12.6 google-adk/1.23.0 gl-python/3.12.6
-      x-goog-api-key:
-      - AIzaSyAaoS2G5WYp0aFSOyUCU-OI5LhVt-FJVcw
     method: post
     uri: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent
   response:
     body:
-      string: "{\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"Resource
-        exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429
-        for more details.\",\n    \"status\": \"RESOURCE_EXHAUSTED\"\n  }\n}\n"
+      string: "{\n  \"candidates\": [\n    {\n      \"content\": {\n        \"parts\":
+        [\n          {\n            \"text\": \"Here is the book metadata for '1984'
+        by George Orwell:\\n\\n*   **Title**: 1984 : George Orwell's 1984: A Dystopian
+        Masterpiece\\n*   **Author**: George Orwell\\n*   **Description**: George
+        Orwell 1984: Nineteen Eighty-Four is a groundbreaking dystopian novel by English
+        author George Orwell. Published in 1949, it presents a chilling portrayal
+        of a totalitarian society where individualism is suppressed, surveillance
+        is omnipresent, and truth is manipulated for political control. Often referred
+        to simply as 1984, the book has become a timeless classic and a cautionary
+        tale about the dangers of totalitarianism and the importance of preserving
+        individual freedom. Key Aspects of George Orwell 1984: Nineteen Eighty-Four:
+        Dystopian Society: Orwell creates a haunting vision of a future society ruled
+        by a totalitarian regime known as the Party. The novel explores the complete
+        control exerted by the Party over its citizens, who are constantly monitored,
+        manipulated, and stripped of their individuality and freedom. The depiction
+        of a dystopian world serves as a stark warning about the potential consequences
+        of unchecked governmental power.Surveillance and Manipulation: One of the
+        central themes of the novel is the pervasive surveillance employed by the
+        Party through devices such as telescreens, hidden microphones, and informants.
+        The constant monitoring of its citizens ensures conformity and suppresses
+        any dissent. Orwell's portrayal of this surveillance state raises important
+        questions about privacy, freedom of thought, and the dangers of mass surveillance
+        in modern societies.Exploration of Truth and Reality: In 1984, Orwell introduces
+        the concept of doublethink, where the Party manipulates and controls reality
+        by rewriting history and altering facts. The protagonist, Winston Smith, struggles
+        to maintain his own independent thoughts and seek the truth amid a world dominated
+        by propaganda and distortion. Orwell's exploration of the nature of truth
+        and the power of language to shape perception is both thought-provoking and
+        unsettling. George Orwell 1984: Nineteen Eighty-Four continues to captivate
+        readers with its powerful portrayal of a dystopian society and its profound
+        insights into themes such as government oppression, surveillance, and the
+        manipulation of truth. Orwell's skillful storytelling and his ability to capture
+        the human spirit in the face of adversity make this novel a timeless masterpiece
+        of social science fiction. George Orwell: George Orwell, the pen name of Eric
+        Arthur Blair, was an English writer and journalist known for his dystopian
+        novels, most notably Nineteen Eighty-Four and Animal Farm. Born in 1903, Orwell's
+        works examined the dangers of totalitarianism, political oppression, and the
+        manipulation of truth. His writings, characterized by lucid prose and keen
+        social observation, exposed the dark undercurrents of power and the erosion
+        of individual freedoms. Orwell's legacy as a political visionary and his commitment
+        to defending the principles of democracy and freedom of expression continue
+        to resonate in modern society. His works serve as a warning against the abuse
+        of power and the importance of truth in the face of oppressive regimes.\\n*
+        \  **Published Date**: 2021-01-01\\n*   **Categories**: Fiction\\n*   **Image
+        URL**: [https://books.google.com/books/content?id=1aIFEAAAQBAJ&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs\\\\_api](https://books.google.com/books/content?id=1aIFEAAAQBAJ&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api)\"\n
+        \         }\n        ],\n        \"role\": \"model\"\n      },\n      \"finishReason\":
+        \"STOP\",\n      \"citationMetadata\": {\n        \"citationSources\": [\n
+        \         {\n            \"startIndex\": 175,\n            \"endIndex\": 3193\n
+        \         }\n        ]\n      },\n      \"avgLogprobs\": -0.0063747730255126955\n
+        \   }\n  ],\n  \"usageMetadata\": {\n    \"promptTokenCount\": 1053,\n    \"candidatesTokenCount\":
+        750,\n    \"totalTokenCount\": 1803,\n    \"promptTokensDetails\": [\n      {\n
+        \       \"modality\": \"TEXT\",\n        \"tokenCount\": 1053\n      }\n    ],\n
+        \   \"candidatesTokensDetails\": [\n      {\n        \"modality\": \"TEXT\",\n
+        \       \"tokenCount\": 750\n      }\n    ]\n  },\n  \"modelVersion\": \"gemini-2.0-flash-lite\",\n
+        \ \"responseId\": \"dGuGafvxKu_XjMcPkpDPgQc\"\n}\n"
     headers:
       Alt-Svc:
       - h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
       Content-Type:
       - application/json; charset=UTF-8
       Date:
-      - Fri, 06 Feb 2026 21:32:56 GMT
+      - Fri, 06 Feb 2026 22:30:16 GMT
       Server:
       - scaffolding on HTTPServer2
       Server-Timing:
-      - gfet4t7; dur=479
+      - gfet4t7; dur=4362
       Transfer-Encoding:
       - chunked
       Vary:
@@ -468,8 +516,212 @@ interactions:
       X-XSS-Protection:
       - '0'
       content-length:
-      - '238'
+      - '4340'
     status:
-      code: 429
-      message: Too Many Requests
+      code: 200
+      message: OK
+- request:
+    body: '{"contents": [{"parts": [{"text": "Find book metadata for ''1984'' by George
+      Orwell"}], "role": "user"}, {"parts": [{"text": "For context:"}, {"text": "[book_metadata_researcher]
+      called tool `search_book` with parameters: {''author'': ''George Orwell'', ''title'':
+      ''1984''}"}], "role": "user"}, {"parts": [{"text": "For context:"}, {"text":
+      "[book_metadata_researcher] `search_book` tool returned result: {''result'':
+      ''{\"book_title\":\"1984 : George Orwell\\''s 1984: A Dystopian Masterpiece\",\"author\":\"George
+      Orwell\",\"description\":\"George Orwell 1984: Nineteen Eighty-Four is a groundbreaking
+      dystopian novel by English author George Orwell. Published in 1949, it presents
+      a chilling portrayal of a totalitarian society where individualism is suppressed,
+      surveillance is omnipresent, and truth is manipulated for political control.
+      Often referred to simply as 1984, the book has become a timeless classic and
+      a cautionary tale about the dangers of totalitarianism and the importance of
+      preserving individual freedom. Key Aspects of George Orwell 1984: Nineteen Eighty-Four:
+      Dystopian Society: Orwell creates a haunting vision of a future society ruled
+      by a totalitarian regime known as the Party. The novel explores the complete
+      control exerted by the Party over its citizens, who are constantly monitored,
+      manipulated, and stripped of their individuality and freedom. The depiction
+      of a dystopian world serves as a stark warning about the potential consequences
+      of unchecked governmental power.Surveillance and Manipulation: One of the central
+      themes of the novel is the pervasive surveillance employed by the Party through
+      devices such as telescreens, hidden microphones, and informants. The constant
+      monitoring of its citizens ensures conformity and suppresses any dissent. Orwell\\''s
+      portrayal of this surveillance state raises important questions about privacy,
+      freedom of thought, and the dangers of mass surveillance in modern societies.Exploration
+      of Truth and Reality: In 1984, Orwell introduces the concept of doublethink,
+      where the Party manipulates and controls reality by rewriting history and altering
+      facts. The protagonist, Winston Smith, struggles to maintain his own independent
+      thoughts and seek the truth amid a world dominated by propaganda and distortion.
+      Orwell\\''s exploration of the nature of truth and the power of language to
+      shape perception is both thought-provoking and unsettling. George Orwell 1984:
+      Nineteen Eighty-Four continues to captivate readers with its powerful portrayal
+      of a dystopian society and its profound insights into themes such as government
+      oppression, surveillance, and the manipulation of truth. Orwell\\''s skillful
+      storytelling and his ability to capture the human spirit in the face of adversity
+      make this novel a timeless masterpiece of social science fiction. George Orwell:
+      George Orwell, the pen name of Eric Arthur Blair, was an English writer and
+      journalist known for his dystopian novels, most notably Nineteen Eighty-Four
+      and Animal Farm. Born in 1903, Orwell\\''s works examined the dangers of totalitarianism,
+      political oppression, and the manipulation of truth. His writings, characterized
+      by lucid prose and keen social observation, exposed the dark undercurrents of
+      power and the erosion of individual freedoms. Orwell\\''s legacy as a political
+      visionary and his commitment to defending the principles of democracy and freedom
+      of expression continue to resonate in modern society. His works serve as a warning
+      against the abuse of power and the importance of truth in the face of oppressive
+      regimes.\",\"published_date\":\"2021-01-01\",\"categories\":[\"Fiction\"],\"image_url\":\"https://books.google.com/books/content?id=1aIFEAAAQBAJ&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\"}''}"}],
+      "role": "user"}, {"parts": [{"text": "For context:"}, {"text": "[book_metadata_researcher]
+      said: Here is the book metadata for ''1984'' by George Orwell:\n\n*   **Title**:
+      1984 : George Orwell''s 1984: A Dystopian Masterpiece\n*   **Author**: George
+      Orwell\n*   **Description**: George Orwell 1984: Nineteen Eighty-Four is a groundbreaking
+      dystopian novel by English author George Orwell. Published in 1949, it presents
+      a chilling portrayal of a totalitarian society where individualism is suppressed,
+      surveillance is omnipresent, and truth is manipulated for political control.
+      Often referred to simply as 1984, the book has become a timeless classic and
+      a cautionary tale about the dangers of totalitarianism and the importance of
+      preserving individual freedom. Key Aspects of George Orwell 1984: Nineteen Eighty-Four:
+      Dystopian Society: Orwell creates a haunting vision of a future society ruled
+      by a totalitarian regime known as the Party. The novel explores the complete
+      control exerted by the Party over its citizens, who are constantly monitored,
+      manipulated, and stripped of their individuality and freedom. The depiction
+      of a dystopian world serves as a stark warning about the potential consequences
+      of unchecked governmental power.Surveillance and Manipulation: One of the central
+      themes of the novel is the pervasive surveillance employed by the Party through
+      devices such as telescreens, hidden microphones, and informants. The constant
+      monitoring of its citizens ensures conformity and suppresses any dissent. Orwell''s
+      portrayal of this surveillance state raises important questions about privacy,
+      freedom of thought, and the dangers of mass surveillance in modern societies.Exploration
+      of Truth and Reality: In 1984, Orwell introduces the concept of doublethink,
+      where the Party manipulates and controls reality by rewriting history and altering
+      facts. The protagonist, Winston Smith, struggles to maintain his own independent
+      thoughts and seek the truth amid a world dominated by propaganda and distortion.
+      Orwell''s exploration of the nature of truth and the power of language to shape
+      perception is both thought-provoking and unsettling. George Orwell 1984: Nineteen
+      Eighty-Four continues to captivate readers with its powerful portrayal of a
+      dystopian society and its profound insights into themes such as government oppression,
+      surveillance, and the manipulation of truth. Orwell''s skillful storytelling
+      and his ability to capture the human spirit in the face of adversity make this
+      novel a timeless masterpiece of social science fiction. George Orwell: George
+      Orwell, the pen name of Eric Arthur Blair, was an English writer and journalist
+      known for his dystopian novels, most notably Nineteen Eighty-Four and Animal
+      Farm. Born in 1903, Orwell''s works examined the dangers of totalitarianism,
+      political oppression, and the manipulation of truth. His writings, characterized
+      by lucid prose and keen social observation, exposed the dark undercurrents of
+      power and the erosion of individual freedoms. Orwell''s legacy as a political
+      visionary and his commitment to defending the principles of democracy and freedom
+      of expression continue to resonate in modern society. His works serve as a warning
+      against the abuse of power and the importance of truth in the face of oppressive
+      regimes.\n*   **Published Date**: 2021-01-01\n*   **Categories**: Fiction\n*   **Image
+      URL**: [https://books.google.com/books/content?id=1aIFEAAAQBAJ&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs\\_api](https://books.google.com/books/content?id=1aIFEAAAQBAJ&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api)"}],
+      "role": "user"}], "systemInstruction": {"parts": [{"text": "Format the book
+      metadata into a validated BookMetadata object.\n\nIMPORTANT: If the researcher
+      found no book or reported an error, return empty/null fields - do not hallucinate
+      metadata.\n\nExtract from the previous response:\n- book_title: The full book
+      title\n- author: Primary author name\n- description: Book synopsis/description\n-
+      published_date: Publication date\n- categories: List of genres/categories\n-
+      image_url: Cover image URL\n\nReturn a properly structured BookMetadata object.
+      Include only data actually found in the research.\n\nYou are an agent. Your
+      internal name is \"book_metadata_formatter\"."}], "role": "user"}, "generationConfig":
+      {"responseMimeType": "application/json", "responseSchema": {"description": "Book
+      metadata from Google Books API", "properties": {"book_title": {"description":
+      "Full book title", "title": "Book Title", "type": "STRING"}, "author": {"description":
+      "Primary author name", "title": "Author", "type": "STRING"}, "description":
+      {"description": "Book description/synopsis", "nullable": true, "title": "Description",
+      "type": "STRING"}, "published_date": {"description": "Publication date", "nullable":
+      true, "title": "Published Date", "type": "STRING"}, "categories": {"description":
+      "Book categories/genres", "items": {"type": "STRING"}, "title": "Categories",
+      "type": "ARRAY"}, "image_url": {"description": "Book cover image URL", "nullable":
+      true, "title": "Image Url", "type": "STRING"}}, "property_ordering": ["book_title",
+      "author", "description", "published_date", "categories", "image_url"], "required":
+      ["book_title", "author"], "title": "BookMetadata", "type": "OBJECT"}}}'
+    headers:
+      Content-Type:
+      - application/json
+      user-agent:
+      - google-genai-sdk/1.60.0 gl-python/3.12.6 google-adk/1.23.0 gl-python/3.12.6
+      x-goog-api-client:
+      - google-genai-sdk/1.60.0 gl-python/3.12.6 google-adk/1.23.0 gl-python/3.12.6
+    method: post
+    uri: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent
+  response:
+    body:
+      string: "{\n  \"candidates\": [\n    {\n      \"content\": {\n        \"parts\":
+        [\n          {\n            \"text\": \"{\\n  \\\"book_title\\\": \\\"1984
+        : George Orwell's 1984: A Dystopian Masterpiece\\\",\\n  \\\"author\\\": \\\"George
+        Orwell\\\",\\n  \\\"description\\\": \\\"George Orwell 1984: Nineteen Eighty-Four
+        is a groundbreaking dystopian novel by English author George Orwell. Published
+        in 1949, it presents a chilling portrayal of a totalitarian society where
+        individualism is suppressed, surveillance is omnipresent, and truth is manipulated
+        for political control. Often referred to simply as 1984, the book has become
+        a timeless classic and a cautionary tale about the dangers of totalitarianism
+        and the importance of preserving individual freedom. Key Aspects of George
+        Orwell 1984: Nineteen Eighty-Four: Dystopian Society: Orwell creates a haunting
+        vision of a future society ruled by a totalitarian regime known as the Party.
+        The novel explores the complete control exerted by the Party over its citizens,
+        who are constantly monitored, manipulated, and stripped of their individuality
+        and freedom. The depiction of a dystopian world serves as a stark warning
+        about the potential consequences of unchecked governmental power.Surveillance
+        and Manipulation: One of the central themes of the novel is the pervasive
+        surveillance employed by the Party through devices such as telescreens, hidden
+        microphones, and informants. The constant monitoring of its citizens ensures
+        conformity and suppresses any dissent. Orwell's portrayal of this surveillance
+        state raises important questions about privacy, freedom of thought, and the
+        dangers of mass surveillance in modern societies.Exploration of Truth and
+        Reality: In 1984, Orwell introduces the concept of doublethink, where the
+        Party manipulates and controls reality by rewriting history and altering facts.
+        The protagonist, Winston Smith, struggles to maintain his own independent
+        thoughts and seek the truth amid a world dominated by propaganda and distortion.
+        Orwell's exploration of the nature of truth and the power of language to shape
+        perception is both thought-provoking and unsettling. George Orwell 1984: Nineteen
+        Eighty-Four continues to captivate readers with its powerful portrayal of
+        a dystopian society and its profound insights into themes such as government
+        oppression, surveillance, and the manipulation of truth. Orwell's skillful
+        storytelling and his ability to capture the human spirit in the face of adversity
+        make this novel a timeless masterpiece of social science fiction. George Orwell:
+        George Orwell, the pen name of Eric Arthur Blair, was an English writer and
+        journalist known for his dystopian novels, most notably Nineteen Eighty-Four
+        and Animal Farm. Born in 1903, Orwell's works examined the dangers of totalitarianism,
+        political oppression, and the manipulation of truth. His writings, characterized
+        by lucid prose and keen social observation, exposed the dark undercurrents
+        of power and the erosion of individual freedoms. Orwell's legacy as a political
+        visionary and his commitment to defending the principles of democracy and
+        freedom of expression continue to resonate in modern society. His works serve
+        as a warning against the abuse of power and the importance of truth in the
+        face of oppressive regimes.\\\",\\n  \\\"published_date\\\": \\\"2021-01-01\\\",\\n
+        \ \\\"categories\\\": [\\n    \\\"Fiction\\\"\\n  ],\\n  \\\"image_url\\\":
+        \\\"https://books.google.com/books/content?id=1aIFEAAAQBAJ&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api\\\"\\n}\"\n
+        \         }\n        ],\n        \"role\": \"model\"\n      },\n      \"finishReason\":
+        \"STOP\",\n      \"citationMetadata\": {\n        \"citationSources\": [\n
+        \         {\n            \"startIndex\": 121,\n            \"endIndex\": 3139\n
+        \         }\n        ]\n      },\n      \"avgLogprobs\": -6.8156662119416982e-07\n
+        \   }\n  ],\n  \"usageMetadata\": {\n    \"promptTokenCount\": 1716,\n    \"candidatesTokenCount\":
+        701,\n    \"totalTokenCount\": 2417,\n    \"promptTokensDetails\": [\n      {\n
+        \       \"modality\": \"TEXT\",\n        \"tokenCount\": 1716\n      }\n    ],\n
+        \   \"candidatesTokensDetails\": [\n      {\n        \"modality\": \"TEXT\",\n
+        \       \"tokenCount\": 701\n      }\n    ]\n  },\n  \"modelVersion\": \"gemini-2.0-flash-lite\",\n
+        \ \"responseId\": \"eWuGabnBCs72jrEPm_XK-AM\"\n}\n"
+    headers:
+      Alt-Svc:
+      - h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+      Content-Type:
+      - application/json; charset=UTF-8
+      Date:
+      - Fri, 06 Feb 2026 22:30:21 GMT
+      Server:
+      - scaffolding on HTTPServer2
+      Server-Timing:
+      - gfet4t7; dur=4177
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Origin
+      - X-Origin
+      - Referer
+      X-Content-Type-Options:
+      - nosniff
+      X-Frame-Options:
+      - SAMEORIGIN
+      X-XSS-Protection:
+      - '0'
+      content-length:
+      - '4205'
+    status:
+      code: 200
+      message: OK
 version: 1

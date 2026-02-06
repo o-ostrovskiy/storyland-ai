@@ -53,6 +53,45 @@ make test-cov
 - Handle errors gracefully with proper error messages
 - Validate input data using Pydantic models
 
+## Security Guidelines
+
+**CRITICAL: Never expose API keys or credentials in code or test cassettes.**
+
+### API Key Protection
+
+1. **Environment Variables Only**: All API keys MUST be stored in `.env` files, never hardcoded
+2. **VCR Cassette Security**: When working with VCR cassettes for integration tests:
+   - **ALWAYS** verify that `tests/integration/conftest.py` filters sensitive headers:
+     ```python
+     "filter_headers": ["authorization", "x-goog-api-key"]
+     "filter_query_parameters": ["key"]
+     ```
+   - **ALWAYS** audit cassette files before committing to ensure no API keys are present
+   - Run this check: `grep -r "AIza\|x-goog-api-key" tests/integration/cassettes/`
+   - Expected result: No matches found
+
+3. **Adding New API Integrations**: When adding new external APIs:
+   - Identify all authentication headers/parameters
+   - Add them to VCR's `filter_headers` and `filter_query_parameters`
+   - Regenerate affected cassettes with `--vcr-record=all`
+   - Verify no credentials in cassettes before committing
+
+4. **Before Every Commit**:
+   - Check `.env` is in `.gitignore`
+   - Audit any modified cassettes for API keys
+   - Never commit files containing real credentials
+
+### VCR Configuration Details
+
+The VCR configuration in `tests/integration/conftest.py` currently filters:
+- **Headers**: `authorization`, `x-goog-api-key` (Google GenAI API)
+- **Query Parameters**: `key` (Google Books API)
+
+If VCR cassettes stop working (tests make real API calls instead of using cassettes), check:
+1. API key in cassette doesn't match current `.env` → regenerate cassette
+2. New authentication headers not filtered → add to `filter_headers`
+3. VCR not intercepting HTTP client → verify httpcore/httpx support
+
 ## Common Maintenance Tasks
 
 1. **Import Errors**: Check Google ADK version compatibility (currently v1.23.0)
