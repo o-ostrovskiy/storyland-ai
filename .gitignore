@@ -125,6 +125,12 @@ eval/results/
 eval/outputs/
 *.eval.json
 
+# Langfuse evaluation pipeline generated files
+evaluation/results/
+evaluation/langfuse_datasets.json
+evaluation/metrics.json
+# Note: evaluation/trend_report.md is tracked in git to show evaluation trends over time
+
 # Logs
 logs/
 *.log

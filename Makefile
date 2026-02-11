@@ -1,7 +1,7 @@
 # StoryLand AI - Makefile
 # Common commands for development and demo
 
-.PHONY: help install test test-cov lint run run-dev eval clean db-reset
+.PHONY: help install install-dev test test-cov test-agents test-models test-tools test-services test-integration test-integration-vcr-record test-all eval eval-setup eval-run eval-summary eval-report eval-export run run-1984 run-gatsby run-nightingale run-luxury run-family run-verbose run-db run-dev db-reset db-show db-users clean check-env notebook lab
 
 # Default target
 help:
@@ -20,6 +20,12 @@ help:
 	@echo "  make test-integration-vcr-record  Re-record VCR cassettes"
 	@echo "  make test-all      Run all tests (unit + integration)"
 	@echo "  make eval          Run ADK evaluation (single test)"
+	@echo ""
+	@echo "Evaluation (Langfuse):"
+	@echo "  make eval-setup    Create Langfuse datasets from evalsets"
+	@echo "  make eval-run      Run scheduled evaluations"
+	@echo "  make eval-report   Generate evaluation trend report"
+	@echo "  make eval-summary  Show evaluation summary"
 	@echo ""
 	@echo "Running:"
 	@echo "  make run           Run demo (Pride and Prejudice)"
@@ -85,6 +91,28 @@ eval:
 	.venv/bin/adk eval agents/storyland single_test \
 		--config_file_path tests/evaluation/eval_config.json \
 		--print_detailed_results
+
+# =============================================================================
+# Langfuse Evaluation Pipeline
+# =============================================================================
+
+eval-setup:
+	.venv/bin/python tools/langfuse_eval.py --create-datasets --evalset-dir agents/storyland
+	@echo "✅ Langfuse datasets created. View at your Langfuse dashboard."
+
+eval-run:
+	.venv/bin/python tools/run_scheduled_eval.py --output-dir evaluation/results --max-cases 10
+
+eval-summary:
+	.venv/bin/python tools/eval_dashboard.py --action summary --days 7
+
+eval-report:
+	.venv/bin/python tools/eval_dashboard.py --action report --days 30
+	@echo "✅ Trend report generated at evaluation/trend_report.md"
+
+eval-export:
+	.venv/bin/python tools/eval_dashboard.py --action export --days 30
+	@echo "✅ Metrics exported to evaluation/metrics.json"
 
 # =============================================================================
 # Running
