@@ -1,7 +1,7 @@
 # StoryLand AI - Makefile
 # Common commands for development and demo
 
-.PHONY: help install test test-cov lint run run-dev eval clean db-reset eval-langfuse
+.PHONY: help install install-dev test test-cov test-agents test-models test-tools test-services test-integration test-integration-vcr-record test-all eval eval-setup eval-run eval-summary eval-report eval-export run run-1984 run-gatsby run-nightingale run-luxury run-family run-verbose run-db run-dev db-reset db-show db-users clean check-env notebook lab
 
 # Default target
 help:
