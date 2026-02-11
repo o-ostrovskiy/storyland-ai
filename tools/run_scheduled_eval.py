@@ -92,7 +92,8 @@ async def run_evaluation_on_dataset(
         }
 
     total_cases = len(items)
-    evaluated_cases = 0
+    evaluated_cases = 0  # Real workflow evaluations only
+    placeholder_cases = 0  # Placeholder executions (not real evals)
     failed_cases = 0
     case_results = []
 
@@ -145,38 +146,34 @@ async def run_evaluation_on_dataset(
                 )
 
                 # Score the trace based on evaluation result
-                # NOTE: Placeholder evaluations are scored as 0 to avoid polluting metrics
-                # Real workflow execution (issue #95) will produce actual quality scores
-                if result.get("status") == "evaluated":
-                    # Check if this is a real evaluation or placeholder
-                    is_placeholder = "placeholder" in result.get("note", "").lower()
+                # Only real workflow evaluations are scored
+                case_status = result.get("status", "unknown")
 
-                    if is_placeholder:
-                        # Don't score placeholders - prevents false positive metrics
-                        logger.info(
-                            "placeholder_evaluation_not_scored",
-                            item_id=item.id,
-                            note="Workflow execution not implemented (see issue #95)",
-                        )
-                    else:
-                        # Real evaluation - score it (LLM-as-judge in issue #96)
-                        root_span.score_trace(
-                            name="evaluation_status",
-                            value=1.0,
-                            comment="Evaluation completed - implement LLM scoring (see issue #96)",
-                        )
+                if case_status == "evaluated":
+                    # Real evaluation - score it (LLM-as-judge in issue #96)
+                    root_span.score_trace(
+                        name="evaluation_status",
+                        value=1.0,
+                        comment="Evaluation completed - implement LLM scoring (see issue #96)",
+                    )
+                elif case_status == "placeholder":
+                    # Placeholder - don't score to avoid polluting metrics
+                    logger.info(
+                        "placeholder_execution",
+                        item_id=item.id,
+                        note="Workflow execution not implemented (see issue #95)",
+                    )
 
             # Track result status
-            case_status = result.get("status", "unknown")
-
             case_results.append({
                 "item_id": item.id,
                 "status": case_status,
                 "run_name": run_name,
             })
 
-            # Only count actually evaluated cases, not skipped ones
+            # Count by status type
             if case_status == "evaluated":
+                # Real workflow evaluation
                 evaluated_cases += 1
                 logger.info(
                     "case_evaluated",
@@ -184,7 +181,15 @@ async def run_evaluation_on_dataset(
                     item_id=item.id,
                     run_name=run_name,
                 )
-            else:
+            elif case_status == "placeholder":
+                # Placeholder execution (not a real eval)
+                placeholder_cases += 1
+                logger.info(
+                    "placeholder_counted",
+                    dataset_name=dataset_name,
+                    item_id=item.id,
+                )
+            elif case_status == "skipped":
                 logger.info(
                     "case_skipped",
                     dataset_name=dataset_name,
@@ -213,7 +218,8 @@ async def run_evaluation_on_dataset(
         "dataset_name": dataset_name,
         "timestamp": datetime.now().isoformat(),
         "total_cases": total_cases,
-        "evaluated_cases": evaluated_cases,
+        "evaluated_cases": evaluated_cases,  # Real evaluations only
+        "placeholder_cases": placeholder_cases,  # Placeholders (not real)
         "failed_cases": failed_cases,
         "case_results": case_results,
     }
@@ -222,6 +228,7 @@ async def run_evaluation_on_dataset(
         "evaluation_complete",
         dataset=dataset_name,
         evaluated=evaluated_cases,
+        placeholders=placeholder_cases,
         failed=failed_cases,
         total=total_cases,
         message=f"View results at {config.langfuse_host}",
@@ -269,11 +276,12 @@ async def _run_evaluation_case(
         # For automated evaluation, we would run a simplified workflow here
         # This is a placeholder - actual implementation would call the agent
         # See issue #95 for workflow execution implementation
-        logger.info("would_evaluate", input_text=text)
+        logger.info("placeholder_execution", input_text=text)
 
         # Placeholder result - in a real implementation, this would run the agent
+        # Status is "placeholder" not "evaluated" to avoid counting as real evaluation
         result = {
-            "status": "evaluated",
+            "status": "placeholder",
             "input": text,
             "note": (
                 "This is a placeholder evaluation. Full workflow implementation "
@@ -440,6 +448,7 @@ def main():
     print("=" * 60)
 
     total_evaluated = 0
+    total_placeholders = 0
     total_failed_datasets = 0
     total_skipped = 0
     total_datasets = len(results)
@@ -447,12 +456,22 @@ def main():
     for result in results:
         print(f"\nDataset: {result.get('dataset_name', 'unknown')}")
         print(f"Timestamp: {result.get('timestamp', 'N/A')}")
-        print(f"Evaluated: {result.get('evaluated_cases', 0)} cases")
 
         evaluated = result.get('evaluated_cases', 0)
+        placeholders = result.get('placeholder_cases', 0)
         total_cases = result.get('total_cases', 0)
         failed_cases = result.get('failed_cases', 0)
+
+        # Show breakdown of evaluation types
+        if evaluated > 0:
+            print(f"Real evaluations: {evaluated} cases")
+        if placeholders > 0:
+            print(f"Placeholder runs: {placeholders} cases (workflow not implemented)")
+        if evaluated == 0 and placeholders == 0 and total_cases > 0:
+            print(f"Evaluated: 0 cases")
+
         total_evaluated += evaluated
+        total_placeholders += placeholders
 
         # Check if this dataset failed
         # Failure = explicit error OR (has cases but all failed)
@@ -472,7 +491,7 @@ def main():
             print("INFO: Dataset is empty (no test cases)")
 
     print("\n" + "=" * 60)
-    print(f"Total: {total_evaluated} cases evaluated across {total_datasets} dataset(s)")
+    print(f"Total: {total_evaluated} real evaluation(s), {total_placeholders} placeholder(s)")
     if total_skipped > 0:
         print(f"Empty datasets: {total_skipped}")
     print(f"Failed datasets: {total_failed_datasets}")
@@ -499,7 +518,14 @@ def main():
         print("\n⚠️  WARNING: No datasets to evaluate (all empty)")
         # Exit 0 - not an error, just nothing to do
     else:
-        print("\n✅ All evaluations completed successfully")
+        # Success - but distinguish real evals from placeholders
+        if total_evaluated > 0:
+            print("\n✅ All evaluations completed successfully")
+        elif total_placeholders > 0:
+            print("\n⚠️  Placeholder runs completed (no real workflow evaluation)")
+            print("   Implement issues #95, #96, #97 for actual quality evaluation")
+        else:
+            print("\n✅ Execution completed (no cases to evaluate)")
 
 
 if __name__ == '__main__':
