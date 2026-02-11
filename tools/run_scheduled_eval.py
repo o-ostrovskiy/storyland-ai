@@ -107,6 +107,14 @@ async def run_evaluation_on_dataset(
     # Limit to max_cases
     items_to_evaluate = items[:max_cases]
 
+    # Create run name for this evaluation batch
+    run_name = f"eval_run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_metadata = {
+        "dataset_name": dataset_name,
+        "evaluation_type": "scheduled",
+        "max_cases": max_cases,
+    }
+
     # Evaluate each dataset item
     for item in items_to_evaluate:
         try:
@@ -120,33 +128,37 @@ async def run_evaluation_on_dataset(
                 item_id=item.id,
             )
 
-            # Create a Langfuse trace for this evaluation run
-            trace = langfuse.trace(
-                name=f"eval_{dataset_name}",
-                metadata={
-                    "dataset_name": dataset_name,
-                    "dataset_item_id": item.id,
-                    "evaluation_run": datetime.now().isoformat(),
-                },
-            )
+            # Create a Langfuse run for this dataset item
+            # Using the context manager pattern from Langfuse SDK
+            with item.run(
+                run_name=run_name,
+                run_description=f"Scheduled evaluation of {dataset_name}",
+                run_metadata=run_metadata,
+            ) as root_span:
+                # Run the StoryLand workflow
+                # Note: This is a simplified evaluation - full workflow requires human interaction
+                # For automated evaluation, we would need to mock region selection
+                result = await _run_evaluation_case(
+                    input_data=input_data,
+                    expected_output=expected_output,
+                    config=config,
+                    root_span=root_span,
+                )
 
-            # Run the StoryLand workflow
-            # Note: This is a simplified evaluation - full workflow requires human interaction
-            # For automated evaluation, we would need to mock region selection
-            result = await _run_evaluation_case(
-                input_data=input_data,
-                expected_output=expected_output,
-                config=config,
-                trace=trace,
-            )
-
-            # Link the trace to the dataset item for tracking
-            item.link(trace, f"eval_run_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+                # Score the trace if evaluation produced a result
+                if result.get("status") == "evaluated":
+                    # Placeholder score - real implementation would use LLM-as-judge
+                    # See issue #96 for LLM-based scoring implementation
+                    root_span.score_trace(
+                        name="evaluation_status",
+                        value=1.0,
+                        comment="Placeholder - workflow execution needed (see issue #95)",
+                    )
 
             case_results.append({
                 "item_id": item.id,
                 "status": "success",
-                "trace_id": trace.id,
+                "run_name": run_name,
             })
 
             evaluated_cases += 1
@@ -155,7 +167,7 @@ async def run_evaluation_on_dataset(
                 "case_evaluated",
                 dataset_name=dataset_name,
                 item_id=item.id,
-                trace_id=trace.id,
+                run_name=run_name,
             )
 
         except Exception as e:
@@ -200,7 +212,7 @@ async def _run_evaluation_case(
     input_data: Dict[str, Any],
     expected_output: Any,
     config: Any,
-    trace: Any,
+    root_span: Any,
 ) -> Dict[str, Any]:
     """
     Run evaluation for a single test case.
@@ -213,37 +225,28 @@ async def _run_evaluation_case(
     1. Mock region selection with a deterministic choice
     2. Run the full metadata -> discovery -> composition workflow
     3. Compare output against expected_output
+    4. Score using LLM-as-judge (see issue #96)
 
     Args:
         input_data: Input from dataset item
         expected_output: Expected output (if available)
         config: Application configuration
-        trace: Langfuse trace for logging
+        root_span: Langfuse root span (from item.run() context manager)
 
     Returns:
         Evaluation result
     """
-    # Create a generation span in the trace
-    generation = trace.generation(
-        name="evaluation_run",
-        input=input_data,
-        metadata={"expected_output": expected_output},
-    )
-
     try:
         # Extract the book query from input
         text = input_data.get('text') or input_data.get('starting_prompt', '')
 
         if not text:
             logger.warning("no_input_text", input_data=input_data)
-            generation.end(
-                output={"error": "No input text found"},
-                metadata={"status": "skipped"},
-            )
             return {"status": "skipped", "reason": "No input text"}
 
         # For automated evaluation, we would run a simplified workflow here
         # This is a placeholder - actual implementation would call the agent
+        # See issue #95 for workflow execution implementation
         logger.info("would_evaluate", input_text=text)
 
         # Placeholder result - in a real implementation, this would run the agent
@@ -252,23 +255,16 @@ async def _run_evaluation_case(
             "input": text,
             "note": (
                 "This is a placeholder evaluation. Full workflow implementation "
-                "requires mocking human interaction for region selection."
+                "requires mocking human interaction for region selection. "
+                "See GitHub issues #95 (workflow execution), #96 (LLM scoring), "
+                "#97 (automated region selection)."
             ),
         }
-
-        generation.end(
-            output=result,
-            metadata={"status": "success"},
-        )
 
         return result
 
     except Exception as e:
         logger.error("evaluation_case_error", error=str(e))
-        generation.end(
-            output={"error": str(e)},
-            metadata={"status": "failed"},
-        )
         raise
 
 
