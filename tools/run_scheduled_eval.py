@@ -166,20 +166,31 @@ async def run_evaluation_on_dataset(
                             comment="Evaluation completed - implement LLM scoring (see issue #96)",
                         )
 
+            # Track result status
+            case_status = result.get("status", "unknown")
+
             case_results.append({
                 "item_id": item.id,
-                "status": "success",
+                "status": case_status,
                 "run_name": run_name,
             })
 
-            evaluated_cases += 1
-
-            logger.info(
-                "case_evaluated",
-                dataset_name=dataset_name,
-                item_id=item.id,
-                run_name=run_name,
-            )
+            # Only count actually evaluated cases, not skipped ones
+            if case_status == "evaluated":
+                evaluated_cases += 1
+                logger.info(
+                    "case_evaluated",
+                    dataset_name=dataset_name,
+                    item_id=item.id,
+                    run_name=run_name,
+                )
+            else:
+                logger.info(
+                    "case_skipped",
+                    dataset_name=dataset_name,
+                    item_id=item.id,
+                    reason=result.get("reason", "unknown"),
+                )
 
         except Exception as e:
             logger.error(
@@ -305,7 +316,14 @@ async def run_all_evaluations(
             "langfuse_not_configured",
             message="Set LANGFUSE_SECRET_KEY and LANGFUSE_PUBLIC_KEY to run evaluations",
         )
-        return []
+        # Return error result instead of empty list to distinguish from legitimate empty results
+        return [{
+            "dataset_name": "config_error",
+            "error": "Langfuse credentials not configured. Set LANGFUSE_SECRET_KEY and LANGFUSE_PUBLIC_KEY.",
+            "timestamp": datetime.now().isoformat(),
+            "total_cases": 0,
+            "evaluated_cases": 0,
+        }]
 
     # Determine which datasets to evaluate
     if dataset_names:
@@ -423,6 +441,7 @@ def main():
 
     total_evaluated = 0
     total_failed_datasets = 0
+    total_skipped = 0
     total_datasets = len(results)
 
     for result in results:
@@ -431,27 +450,54 @@ def main():
         print(f"Evaluated: {result.get('evaluated_cases', 0)} cases")
 
         evaluated = result.get('evaluated_cases', 0)
+        total_cases = result.get('total_cases', 0)
+        failed_cases = result.get('failed_cases', 0)
         total_evaluated += evaluated
 
         # Check if this dataset failed
-        if 'error' in result or evaluated == 0:
+        # Failure = explicit error OR (has cases but all failed)
+        # Empty dataset (total_cases == 0) is NOT a failure
+        has_error = 'error' in result
+        has_failures = total_cases > 0 and failed_cases == total_cases
+
+        if has_error or has_failures:
             total_failed_datasets += 1
-            if 'error' in result:
+            if has_error:
                 print(f"ERROR: {result['error']}")
+            elif has_failures:
+                print(f"ERROR: All {failed_cases} case(s) failed evaluation")
+        elif total_cases == 0:
+            # Empty dataset - informational, not an error
+            total_skipped += 1
+            print("INFO: Dataset is empty (no test cases)")
 
     print("\n" + "=" * 60)
     print(f"Total: {total_evaluated} cases evaluated across {total_datasets} dataset(s)")
+    if total_skipped > 0:
+        print(f"Empty datasets: {total_skipped}")
     print(f"Failed datasets: {total_failed_datasets}")
     print("=" * 60)
 
     # Exit with error code if all evaluations failed
     # This ensures GitHub Actions workflow correctly reports failure
-    if total_datasets > 0 and total_failed_datasets == total_datasets:
+    # Note: Empty datasets don't count as failures
+    actual_datasets = total_datasets - total_skipped
+
+    if actual_datasets == 0 and total_failed_datasets > 0:
+        # No actual datasets to evaluate, but config/setup errors exist
+        print("\n❌ ERROR: Configuration or setup error - cannot run evaluations")
+        sys.exit(1)
+    elif actual_datasets > 0 and total_failed_datasets == actual_datasets:
+        # All non-empty datasets failed
         print("\n❌ ERROR: All dataset evaluations failed")
         sys.exit(1)
     elif total_failed_datasets > 0:
         print(f"\n⚠️  WARNING: {total_failed_datasets}/{total_datasets} dataset(s) failed")
         # Still exit 0 if some succeeded - partial success
+    elif actual_datasets == 0:
+        # Only empty datasets
+        print("\n⚠️  WARNING: No datasets to evaluate (all empty)")
+        # Exit 0 - not an error, just nothing to do
     else:
         print("\n✅ All evaluations completed successfully")
 
