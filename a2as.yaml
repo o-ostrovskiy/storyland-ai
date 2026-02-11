@@ -1,0 +1,686 @@
+manifest:
+  version: "0.1.3"
+  schema: https://a2as.org/cert/schema
+  subject:
+    name: o-ostrovskiy/storyland-ai
+    source: https://github.com/o-ostrovskiy/storyland-ai
+    branch: main
+    commit: "110e0642"
+    scope: [agents/book_context_agent.py, agents/book_metadata_agent.py, agents/discovery_agents.py, agents/orchestrator.py,
+      agents/reader_profile_agent.py, agents/region_analyzer_agent.py, agents/storyland/__init__.py, agents/storyland/agent.py,
+      agents/trip_composer_agent.py, main.py, models/book.py, models/discovery.py, plugins/langfuse_plugin.py, tools/__init__.py,
+      tools/google_books.py, tools/preferences.py]
+  issued:
+    by: A2AS.org
+    at: '2026-02-11T16:41:09Z'
+    url: https://a2as.org/certified/agents/o-ostrovskiy/storyland-ai
+  signatures:
+    digest: sha256:YDNyzvEx-lrq30P3BmmhGf_xjZjHt-wsVqNQSgxe8nA
+    key: ed25519:8U-TeVw_PQ4Yxh2EH7Gij_Xi66yPM9P7xvVWPog4xdw
+    sig: ed25519:vWVkQqcCeh7CjmjwEdCP8HmdHxIYGX_C965o72h9KAHpLVDs3K25i0mQUn4P9AC3ZFaCmQjgN4rg7AeW7v6gBw
+
+agents:
+  author_formatter:
+    type: instance
+    models: [model]
+    params:
+      name: author_formatter
+      output_schema: AuthorSites
+      output_key: author_sites
+      instruction: [Format the author sites into validated AuthorSites., 'IMPORTANT:', '- If the research found no author
+          sites, return an empty list - do not hallucinate', '- Include only sites actually mentioned in the research results',
+        '- Accept partial results if the author has limited public sites', 'For each site found, create an AuthorSiteInfo
+          with:', '- name: Exact name of the site', '- type: Type of site (e.g., "museum", "birthplace", "statue", "house")',
+        '- city: City where it''s located', 'GRACEFUL DEGRADATION:', '- Accept any number of results (0-3+ sites depending
+          on author prominence)', '- For contemporary or private authors, an empty list is acceptable', '- Validate that each
+          site has a name, type, and city', Return AuthorSites with a list of author_sites.]
+      function: create_author_pipeline
+  author_pipeline:
+    type: instance
+    params:
+      name: author_pipeline
+      function: create_author_pipeline
+      sub_agents: [author_researcher, author_formatter]
+  author_researcher:
+    type: instance
+    models: [model]
+    tools: [google_search_tool]
+    params:
+      name: author_researcher
+      instruction: [You are an author biography specialist. Find places connected to the author., 'Based on the author from
+          the conversation history, use google_search to find:', '1. AUTHOR''S HOMETOWN: Where was the author born or raised?',
+        '2. AUTHOR MUSEUMS: Are there museums or houses dedicated to the author?', '3. WRITING LOCATIONS: Where did the author
+          write this book?', '4. MEMORIALS: Statues, plaques, or commemorative sites', 'Search queries to try:', '- "[author
+          name] birthplace"', '- "[author name] museum"', '- "[author name] house"', '- "[author name] hometown"', '- "where
+          did [author name] write [book title]"', 'For EACH site, provide:', '- Exact name', '- Type (museum, birthplace,
+          statue, etc.)', '- Which city it''s in', 'GOAL: Find at least 2-3 author-related sites.', 'ERROR HANDLING & GRACEFUL
+          DEGRADATION:', '- If author information is limited, report what you can find (even if less than 3 sites)', '- For
+          contemporary or obscure authors, it''s OK to find fewer sites', '- If search fails, acknowledge this and explain
+          that author sites may not be publicly available', '- Return partial results rather than no results', '- Clearly
+          indicate which information is verified vs. inferred']
+      function: create_author_pipeline
+  book_context_formatter:
+    type: instance
+    models: [model]
+    params:
+      name: book_context_formatter
+      output_schema: BookContext
+      output_key: book_context
+      instruction: [Format the research into a validated BookContext object., 'IMPORTANT:', '- If the research found no context
+          information, return empty lists/null fields - do not hallucinate', '- Include only information actually found in
+          the research results', '- Accept partial information if complete context is unavailable', 'Extract:', '- primary_locations:
+          List of specific locations (cities, countries, regions)', '- time_period: The historical era or specific timeframe',
+        '- themes: List of main themes from the book', 'GRACEFUL DEGRADATION:', '- If locations are unclear, use broader regions
+          (e.g., "Europe" instead of specific city)', '- If time period is unknown, leave as null rather than guessing', '-
+          Accept any number of themes (even 1-2 if that''s all that was found)', '- Be specific and factual with what information
+          IS available']
+      function: create_book_context_pipeline
+  book_context_pipeline:
+    type: instance
+    params:
+      name: book_context_pipeline
+      function: create_book_context_pipeline
+      sub_agents: [book_context_researcher, book_context_formatter]
+  book_context_researcher:
+    type: instance
+    models: [model]
+    tools: [google_search_tool]
+    params:
+      name: book_context_researcher
+      instruction: [You are a literary research specialist. Research the book's setting and themes., 'BOOK: "{book_title}"
+          by {author}', 'Use google_search to find:', '1. PRIMARY LOCATIONS: Where does the story take place? (cities, countries,
+          regions)', '2. TIME PERIOD: When does it take place? (specific year, era, or historical period)', '3. MAIN THEMES:
+          What are the central themes? (war, love, survival, etc.)', 'Search queries to use:', '- "{book_title} {author} setting
+          location"', '- "{book_title} {author} time period historical context"', '- "{book_title} {author} themes analysis"',
+        Provide detailed findings with specific locations and time periods., 'ERROR HANDLING & GRACEFUL DEGRADATION:', '-
+          If search returns limited results, report what you found', '- If certain aspects (location, time, themes) are unclear,
+          note this explicitly', '- If search fails, acknowledge the error and provide any context you can infer', '- Prioritize
+          factual information over completeness', '- Clearly distinguish verified facts from inferences']
+      function: create_book_context_pipeline
+  book_metadata_formatter:
+    type: instance
+    models: [model]
+    params:
+      name: book_metadata_formatter
+      output_schema: BookMetadata
+      output_key: book_metadata
+      instruction: [Format the book metadata into a validated BookMetadata object., 'IMPORTANT: If the researcher found no
+          book or reported an error, return empty/null fields - do not hallucinate metadata.', 'Extract from the previous
+          response:', '- book_title: The full book title', '- author: Primary author name', '- description: Book synopsis/description',
+        '- published_date: Publication date', '- categories: List of genres/categories', '- image_url: Cover image URL', Return
+          a properly structured BookMetadata object. Include only data actually found in the research.]
+      function: create_book_metadata_pipeline
+  book_metadata_pipeline:
+    type: instance
+    params:
+      name: book_metadata_pipeline
+      function: create_book_metadata_pipeline
+      sub_agents: [book_metadata_researcher, book_metadata_formatter]
+  book_metadata_researcher:
+    type: instance
+    models: [model]
+    tools: [google_books_tool]
+    params:
+      name: book_metadata_researcher
+      instruction: [You are a book metadata specialist. Extract complete book information., 1. Use the search_book tool with
+          BOTH title AND author parameters when available, '- If user provides "The Great Gatsby by F. Scott Fitzgerald",
+          use title="The Great Gatsby" and author="F. Scott Fitzgerald"', '- If user only provides a title, use just the title
+          parameter', '2. ERROR HANDLING:', '- If the tool returns an error, report it clearly with the error type and message',
+        '- If you encounter rate limiting (429), inform the user to wait a few minutes', '- If you get network errors, suggest
+          checking connectivity', '- If no results found, acknowledge this and suggest verifying the title/author spelling',
+        3. Return ALL the information from successful results - do not summarize, 'GRACEFUL DEGRADATION:', '- If the search
+          fails completely, return what information you have from the user''s input', '- Clearly indicate when information
+          is missing or unverified', 'IMPORTANT: Always pass the author parameter if mentioned - this prevents returning wrong
+          books with same titles.']
+      function: create_book_metadata_pipeline
+  city_formatter:
+    type: instance
+    models: [model]
+    params:
+      name: city_formatter
+      output_schema: CityDiscovery
+      output_key: city_discovery
+      instruction: [Format the cities into validated CityDiscovery., 'IMPORTANT:', '- If the research found no cities, return
+          an empty list - do not hallucinate', '- Include only cities actually mentioned in the research results', '- If the
+          researcher encountered errors but found partial results, include those partial results', 'For each city found, create
+          a CityInfo with:', '- name: City name only (e.g., "Paris", not "Paris, France")', '- country: Country name (e.g.,
+          "France")', '- relevance: One sentence explaining the connection to the book', 'GRACEFUL DEGRADATION:', '- Accept
+          partial results (1-2 cities) if that''s all that was found', '- Validate that each city has at minimum a name and
+          country', '- Skip cities with insufficient information rather than guessing', Return CityDiscovery with a list of
+          cities.]
+      function: create_city_pipeline
+  city_pipeline:
+    type: instance
+    params:
+      name: city_pipeline
+      function: create_city_pipeline
+      sub_agents: [city_researcher, city_formatter]
+  city_researcher:
+    type: instance
+    models: [model]
+    tools: [google_search_tool]
+    params:
+      name: city_researcher
+      instruction: [You are a literary travel specialist. Find real cities readers can visit., 'Based on the book''s setting
+          from the conversation history, use google_search to find:', '1. SETTING CITIES: Actual cities where the story takes
+          place', '2. FILMING LOCATIONS: If adapted to film, where was it filmed?', '3. AUTHOR''S CITIES: Where did the author
+          live or get inspiration?', 'Search queries to try:', '- "[book title] real locations to visit"', '- "[book title]
+          filming locations"', '- "[book title] [author name] inspiration places"', '- "[setting location] literary tourism"',
+        'For EACH city found, explain:', '- What is the city name and country?', '- How does it relate to the book? (setting,
+          filming, author connection)', 'GOAL: Find at least 2-3 cities.', 'ERROR HANDLING & GRACEFUL DEGRADATION:', '- If
+          search returns limited results, report what you found (even if less than 3 cities)', '- If search fails completely,
+          explain the error clearly and suggest alternatives', '- If rate limited, inform the user to retry later', '- Always
+          return SOME results if any information is available, rather than failing completely', '- Clearly distinguish between
+          verified facts and educated guesses based on the book''s content']
+      function: create_city_pipeline
+  composition_workflow:
+    type: instance
+    params:
+      name: composition_workflow
+      function: create_composition_workflow
+      sub_agents: [trip_composer]
+  discovery_workflow:
+    type: instance
+    params:
+      name: discovery_workflow
+      function: create_discovery_workflow
+      sub_agents: [sub_agents]
+  landmark_formatter:
+    type: instance
+    models: [model]
+    params:
+      name: landmark_formatter
+      output_schema: LandmarkDiscovery
+      output_key: landmark_discovery
+      instruction: [Format the landmarks into validated LandmarkDiscovery., 'IMPORTANT:', '- If the research found no landmarks,
+          return an empty list - do not hallucinate', '- Include only landmarks actually mentioned in the research results',
+        '- Accept partial results if searches encountered issues', 'For each landmark found, create a LandmarkInfo with:',
+        '- name: Exact name of the landmark or place', '- city: City where it''s located', '- connection: One sentence explaining
+          how it relates to the book', 'GRACEFUL DEGRADATION:', '- Accept any number of results (even 1-2 landmarks if that''s
+          all that was found)', '- Validate that each landmark has a name, city, and connection', '- Skip landmarks with insufficient
+          information', Return LandmarkDiscovery with a list of landmarks.]
+      function: create_landmark_pipeline
+  landmark_pipeline:
+    type: instance
+    params:
+      name: landmark_pipeline
+      function: create_landmark_pipeline
+      sub_agents: [landmark_researcher, landmark_formatter]
+  landmark_researcher:
+    type: instance
+    models: [model]
+    tools: [google_search_tool]
+    params:
+      name: landmark_researcher
+      instruction: [You are a landmark research specialist. Find specific places to visit., 'Based on the book and cities
+          from the conversation history, use google_search to find:', '1. MENTIONED LANDMARKS: Specific buildings, museums,
+          or places mentioned in the book', '2. THEMED EXPERIENCES: Literary walks, museum exhibits, or tours related to the
+          book', '3. ATMOSPHERIC LOCATIONS: Places that capture the book''s setting or mood', 'Search queries to try:', '-
+          "[book title] landmarks mentioned"', '- "[city name] [book title] tour"', '- "[book title] museum exhibit"', '-
+          "[setting] places from [book title]"', 'For EACH landmark, provide:', '- Exact name of the place', '- Which city
+          it''s in', '- Specific connection to the book (Was it mentioned? Does it relate to a scene?)', 'GOAL: Find at least
+          3-5 landmarks across the cities.', 'ERROR HANDLING & GRACEFUL DEGRADATION:', '- If search finds fewer landmarks,
+          report what you discovered (quality over quantity)', '- If certain cities have no specific landmarks, suggest general
+          atmospheric locations', '- If search fails, fall back to well-known locations mentioned in the book itself', '-
+          Report partial results rather than failing completely', '- Clearly indicate confidence level: "mentioned in book"
+          vs "related to setting" vs "suggested for atmosphere']
+      function: create_landmark_pipeline
+  metadata_stage:
+    type: instance
+    params:
+      name: metadata_stage
+      function: create_metadata_stage
+      sub_agents: [book_metadata_pipeline]
+  parallel_discovery.0:
+    type: instance
+    params:
+      name: parallel_discovery
+      function: create_discovery_workflow
+      sub_agents: [city_pipeline, landmark_pipeline, author_pipeline]
+      instance: parallel_discovery
+  parallel_discovery.1:
+    type: instance
+    params:
+      name: parallel_discovery
+      function: create_eval_workflow
+      instance: parallel_discovery
+      sub_agents: [city_pipeline, landmark_pipeline, author_pipeline]
+  reader_profile:
+    type: instance
+    models: [model]
+    tools: [get_preferences_tool]
+    params:
+      name: reader_profile_agent
+      output_key: reader_profile
+      instruction: [You are a reader profile specialist focused on personalization., 'FIRST, call the get_user_preferences
+          tool to retrieve user preferences from session state.', 'The preferences may include:', '- budget: "budget", "moderate",
+          or "luxury"', '- preferred_pace: "relaxed", "moderate", or "fast-paced"', '- prefers_museums: true/false', '- travels_with_kids:
+          true/false', '- favorite_genres: list of genres', 'Based on the tool response, provide a summary for the trip composer:',
+        '1. If preferences exist (found=true), summarize them clearly:', '"User prefers [budget] budget, [pace] pace, [does/doesn''t]
+          like museums..."', '2. If no preferences found (found=false), state:', '"No user preferences found. Using defaults:
+          moderate budget, balanced pace, museum-friendly."', Keep your response concise - just summarize the preferences
+          for the trip composer to use., 'ERROR HANDLING:', '- If the preferences tool fails or returns an error, gracefully
+          default to standard preferences', '- Acknowledge any tool errors but continue with defaults rather than failing',
+        '- If preferences are partially available, use what you have and note what''s missing']
+      function: create_reader_profile_agent
+  region_analyzer:
+    type: instance
+    models: [model]
+    params:
+      name: region_analyzer
+      output_schema: RegionAnalysis
+      output_key: region_analysis
+      instruction: [You are a travel logistics expert. Analyze discovered cities and group them into PRACTICAL TRAVEL REGIONS.,
+        '## Your Task', 'Review the discovered cities, landmarks, and author sites from the conversation history.', Group
+          all locations into regions that can realistically be visited together in one trip., '## Rules for Geographic Grouping',
+        '1. **Same country, close proximity**: Cities within ~500km of each other in the same country = ONE region', '2. **Cross-border
+          accessible**: Cities easily connected by train or short flight (e.g., Paris + Brussels, London + Edinburgh) = can
+          be ONE region', '3. **Large countries must be split**:', '- USA: Split into East Coast, West Coast, Midwest, South,
+          etc.', '- China: Split into regions (Beijing area, Shanghai area, etc.)', '- Russia: Split by major areas', '4.
+          **Never combine**: Cities requiring intercontinental flights or 6+ hour flights', '5. **Consider travel time**:
+          If driving/train between cities takes more than 4-5 hours, consider splitting', '## Examples of Good Groupings',
+        '- "New England, USA": Boston, Providence, Portland (all drivable)', '- "UK & Ireland": London, Edinburgh, Dublin
+          (short flights/trains)', '- "Western Europe": Paris, Amsterdam, Brussels (high-speed rail)', '- "California, USA":
+          Los Angeles, San Francisco, San Diego', '- "Japan Kansai": Kyoto, Osaka, Nara (all within 1 hour)', '## Examples
+          of BAD Groupings (NEVER do this)', '- New York + Los Angeles (opposite coasts)', '- London + Tokyo (different continents)',
+        '- Sydney + Beijing (intercontinental)', '## Output Requirements', 'For EACH region, provide:', '1. **region_id**:
+          Sequential number (1, 2, 3...)', '2. **region_name**: Clear geographic name (e.g., "Northeast USA", "Southern England")',
+        '3. **cities**: All cities in this region with their countries', '4. **estimated_days**: Total days needed (sum of
+          reasonable time per city)', '5. **travel_note**: How to travel between cities (car, train, short flight)', '6. **highlights**:
+          Key book-related attractions in this region', '## Important', '- If ALL discovered cities are in the same practical
+          region, return just ONE region', '- Include ALL discovered cities - don''t leave any out', '- Order regions by relevance
+          to the book (most important first)', '- Be practical: think like a travel agent planning a real trip', '## ERROR
+          HANDLING & GRACEFUL DEGRADATION', '- If only 1-2 cities were discovered, create a single region with those cities',
+        '- If discovery phase produced no cities, create a note explaining limited data was available', '- Work with whatever
+          data is available rather than failing', '- If city information is incomplete, use what you have and note the gaps',
+        '- Clearly indicate confidence level in groupings based on data quality']
+      function: create_region_analyzer_agent
+  root_agent:
+    type: instance
+    params:
+      name: eval_workflow
+      function: create_eval_workflow
+      sub_agents: [sub_agents]
+  trip_composer:
+    type: instance
+    models: [model]
+    params:
+      name: trip_composer
+      output_schema: TripItinerary
+      output_key: final_itinerary
+      instruction: [You are a literary travel planner. Create a PERSONALIZED travel itinerary., '## Step 1: Check for Selected
+          Region (IMPORTANT!)', Look for "selected_regions" in the conversation history or prompt. This contains the user's
+          chosen travel region(s)., '**CRITICAL:** The selected_regions will be provided in the user prompt as JSON. Extract
+          the cities from these regions.', 'If selected_regions exists:', '- ONLY include cities that are listed in the selected_regions',
+        '- Each region has a "cities" array with city objects containing "name" and "country"', '- Focus landmarks and stops
+          ONLY on cities within the selected region(s)', '- Completely ignore cities/landmarks from other regions that were
+          discovered but not selected', 'If no selected_regions found in the prompt, use all discovered cities.', '## Step
+          2: Check User Preferences', 'Look for user preferences from the reader_profile_agent output in the conversation
+          history:', '- budget: "budget", "moderate", or "luxury"', '- preferred_pace: "relaxed", "moderate", or "fast-paced"',
+        '- prefers_museums: true/false', '- travels_with_kids: true/false', 'If no preferences found, use defaults: moderate
+          budget, balanced pace, museum-friendly.', '## Step 3: Review Discovery Information', 'Review the information from
+          the conversation history (filtered by selected region if applicable):', '- Book metadata and context', '- Cities
+          to visit (only from selected region)', '- Landmarks and experiences (only in cities from selected region)', '- Author-related
+          sites (only in cities from selected region)', '## Step 4: Create Personalized Itinerary', 'Create a TripItinerary
+          that RESPECTS user preferences:', '**Budget considerations:**', '- "budget": Free museums, affordable cafes, walking
+          tours, public transport', '- "moderate": Mix of paid/free attractions, mid-range restaurants', '- "luxury": Premium
+          experiences, fine dining, private tours, exclusive access', '**Pace considerations:**', '- "relaxed": 2-3 stops
+          per day max, longer breaks, leisurely meals', '- "moderate": 3-4 stops per day, balanced schedule', '- "fast-paced":
+          5+ stops per day, efficient routing, packed schedule', '**Other preferences:**', '- If prefers_museums=true: Prioritize
+          museum visits, literary archives', '- If prefers_museums=false: Focus on outdoor sites, cafes, walking tours', '-
+          If travels_with_kids=true: Include family-friendly activities, avoid long queues', '## Output Structure', '1. GROUP
+          by city: Organize all stops by the city they''re in', '2. For EACH city, create a CityPlan with:', '- name: City
+          name', '- country: Country name', '- days_suggested: 1-3 days (adjusted for pace preference)', '- overview: 2-3
+          sentences about what to expect in this city', '- stops: 3-7 places to visit (adjusted for preferences)', '3. For
+          EACH stop, create a CityStop with:', '- name: Exact name of the place', '- type: "museum", "landmark", "cafe", "bookstore",
+          "monument", etc.', '- reason: 1-2 sentences explaining WHY this matters for the book', '- time_of_day: "morning",
+          "afternoon", "evening", or "full_day"', '- notes: Practical tip (include budget-appropriate suggestions)', '4. Write
+          a summary_text: 3-4 sentences capturing the essence of the journey, mentioning how it''s tailored to their preferences.',
+        'Make it inspiring, actionable, and personalized.', '## ERROR HANDLING & GRACEFUL DEGRADATION', '- If discovery data
+          is limited (few cities/landmarks), work with what''s available', '- If selected regions have limited landmarks,
+          suggest general atmospheric locations', '- If user preferences are missing, use sensible defaults', '- If only 1-2
+          cities are available, create a focused itinerary for those cities', '- Clearly note in the overview if data was
+          limited', '- Prioritize quality over quantity - a good 2-day itinerary is better than a poor 5-day one', '- If certain
+          types of stops are missing (e.g., no museums found), supplement with other relevant sites']
+      function: create_trip_composer_agent
+
+models:
+  model:
+    type: literal
+    agents: [city_researcher, city_formatter, landmark_researcher, landmark_formatter, author_researcher, author_formatter,
+      region_analyzer, trip_composer, book_context_researcher, book_context_formatter, book_metadata_researcher, book_metadata_formatter,
+      reader_profile]
+
+tools:
+  get_preferences_tool:
+    type: function
+    agents: [reader_profile]
+  google_books_tool:
+    type: function
+    agents: [book_metadata_researcher]
+  google_search_tool:
+    type: function
+    agents: [city_researcher, landmark_researcher, author_researcher, book_context_researcher]
+
+teams:
+  author_pipeline:
+    type: sequential
+    agents: [author_pipeline, author_researcher, author_formatter]
+  book_context_pipeline:
+    type: sequential
+    agents: [book_context_pipeline, book_context_researcher, book_context_formatter]
+  book_metadata_pipeline:
+    type: sequential
+    agents: [book_metadata_pipeline, book_metadata_researcher, book_metadata_formatter]
+  city_pipeline:
+    type: sequential
+    agents: [city_pipeline, city_researcher, city_formatter]
+  composition_workflow:
+    type: sequential
+    agents: [composition_workflow, trip_composer]
+  discovery_workflow:
+    type: sequential
+    agents: [discovery_workflow, sub_agents]
+  landmark_pipeline:
+    type: sequential
+    agents: [landmark_pipeline, landmark_researcher, landmark_formatter]
+  metadata_stage:
+    type: sequential
+    agents: [metadata_stage, book_metadata_pipeline]
+  parallel_discovery:
+    type: parallel
+    agents: [parallel_discovery, city_pipeline, landmark_pipeline, author_pipeline]
+  parallel_discovery.1:
+    type: parallel
+    agents: [parallel_discovery.1, city_pipeline, landmark_pipeline, author_pipeline]
+  root_agent:
+    type: sequential
+    agents: [root_agent, sub_agents]
+
+imports:
+  Any: typing.Any
+  argparse: argparse
+  asyncio: asyncio
+  AuthorSites: models.discovery.AuthorSites
+  BaseAgent: google.adk.agents.base_agent.BaseAgent
+  BaseModel: pydantic.BaseModel
+  BasePlugin: google.adk.plugins.BasePlugin
+  BaseTool: google.adk.tools.base_tool.BaseTool
+  BookContext: models.book.BookContext
+  BookInfo: models.book.BookInfo
+  BookMetadata: models.book.BookMetadata
+  CallbackContext: google.adk.agents.callback_context.CallbackContext
+  CityDiscovery: models.discovery.CityDiscovery
+  configure_logging: common.logging.configure_logging
+  ContextManager: services.context_manager.ContextManager
+  create_author_pipeline: discovery_agents.create_author_pipeline
+  create_book_context_pipeline: book_context_agent.create_book_context_pipeline
+  create_book_metadata_pipeline: book_metadata_agent.create_book_metadata_pipeline
+  create_city_pipeline: discovery_agents.create_city_pipeline
+  create_composition_workflow: orchestrator.create_composition_workflow
+  create_discovery_workflow: orchestrator.create_discovery_workflow
+  create_eval_workflow: orchestrator.create_eval_workflow
+  create_landmark_pipeline: discovery_agents.create_landmark_pipeline
+  create_metadata_stage: orchestrator.create_metadata_stage
+  create_reader_profile_agent: reader_profile_agent.create_reader_profile_agent
+  create_region_analyzer_agent: region_analyzer_agent.create_region_analyzer_agent
+  create_session_service: services.session_service.create_session_service
+  create_trip_composer_agent: trip_composer_agent.create_trip_composer_agent
+  dataclass: dataclasses.dataclass
+  Field: pydantic.Field
+  FunctionTool: google.adk.tools.FunctionTool
+  Gemini: google.adk.models.google_llm.Gemini
+  get_client: langfuse.get_client
+  get_logger: common.logging.get_logger
+  get_preferences_tool: tools.preferences.get_preferences_tool
+  get_user_preferences: preferences.get_user_preferences
+  google_books_tool: tools.google_books.google_books_tool
+  google_search: google.adk.tools.google_search
+  initialize_langfuse: common.langfuse_init.initialize_langfuse
+  InvocationContext: google.adk.runners.InvocationContext
+  is_enabled: common.langfuse_init.is_enabled
+  json: json
+  LandmarkDiscovery: models.discovery.LandmarkDiscovery
+  Langfuse: langfuse.Langfuse
+  langfuse_context: langfuse.decorators.langfuse_context
+  LangfusePlugin: plugins.langfuse_plugin.LangfusePlugin
+  List: typing.List
+  LlmAgent: google.adk.agents.LlmAgent
+  LlmRequest: google.adk.models.llm_request.LlmRequest
+  LlmResponse: google.adk.models.llm_response.LlmResponse
+  load_config: common.config.load_config
+  load_dotenv: dotenv.load_dotenv
+  LoggingPlugin: google.adk.plugins.logging_plugin.LoggingPlugin
+  Optional: typing.Optional
+  os: os
+  ParallelAgent: google.adk.agents.ParallelAgent
+  RegionAnalysis: models.discovery.RegionAnalysis
+  requests: requests
+  retry: tenacity.retry
+  retry_if_exception_type: tenacity.retry_if_exception_type
+  root_agent: agent.root_agent
+  Runner: google.adk.runners.Runner
+  search_book: google_books.search_book
+  SequentialAgent: google.adk.agents.SequentialAgent
+  stop_after_attempt: tenacity.stop_after_attempt
+  subprocess: subprocess
+  sys: sys
+  timeout: async_timeout.timeout
+  ToolContext: google.adk.tools.tool_context.ToolContext
+  TripItinerary: models.itinerary.TripItinerary
+  types: google.genai.types
+  uuid: uuid
+  wait_exponential: tenacity.wait_exponential
+
+functions:
+  __init__:
+    type: sync
+    module: plugins.langfuse_plugin
+    args: [self, secret_key, public_key, host, enabled]
+  _extract_token_usage:
+    type: sync
+    module: plugins.langfuse_plugin
+    args: [self, response]
+    params:
+      returns: Optional[TokenUsage]
+  after_agent_callback:
+    type: async
+    module: plugins.langfuse_plugin
+    args: [self]
+    params:
+      returns: Optional[types.Content]
+  after_model_callback:
+    type: async
+    module: plugins.langfuse_plugin
+    args: [self]
+    params:
+      returns: Optional[LlmResponse]
+  after_run_callback:
+    type: async
+    module: plugins.langfuse_plugin
+    args: [self]
+    params:
+      returns: None
+  after_tool_callback:
+    type: async
+    module: plugins.langfuse_plugin
+    args: [self]
+    params:
+      returns: Optional[dict]
+  before_agent_callback:
+    type: async
+    module: plugins.langfuse_plugin
+    args: [self]
+    params:
+      returns: Optional[types.Content]
+  before_model_callback:
+    type: async
+    module: plugins.langfuse_plugin
+    args: [self]
+    params:
+      returns: Optional[LlmResponse]
+  before_tool_callback:
+    type: async
+    module: plugins.langfuse_plugin
+    args: [self]
+    params:
+      returns: Optional[dict]
+  close:
+    type: async
+    module: plugins.langfuse_plugin
+    args: [self]
+    params:
+      returns: None
+  cost_usd:
+    type: sync
+    module: plugins.langfuse_plugin
+    args: [self]
+    params:
+      returns: float
+  create_author_pipeline:
+    type: sync
+    module: agents.discovery_agents
+    args: [model, google_search_tool]
+  create_book_context_pipeline:
+    type: sync
+    module: agents.book_context_agent
+    args: [model, google_search_tool, book_title, author]
+  create_book_metadata_pipeline:
+    type: sync
+    module: agents.book_metadata_agent
+    args: [model, google_books_tool]
+  create_city_pipeline:
+    type: sync
+    module: agents.discovery_agents
+    args: [model, google_search_tool]
+  create_composition_workflow:
+    type: sync
+    module: agents.orchestrator
+    args: [model]
+  create_discovery_workflow:
+    type: sync
+    module: agents.orchestrator
+    args: [model, book_title, author]
+  create_eval_workflow:
+    type: sync
+    module: agents.orchestrator
+    args: [model, google_books_tool]
+  create_itinerary:
+    type: async
+    module: main
+    args: [book_title, author, user_id, use_database, preferences, verbose, timeout_seconds]
+  create_landmark_pipeline:
+    type: sync
+    module: agents.discovery_agents
+    args: [model, google_search_tool]
+  create_metadata_stage:
+    type: sync
+    module: agents.orchestrator
+    args: [model, google_books_tool]
+  create_reader_profile_agent:
+    type: sync
+    module: agents.reader_profile_agent
+    args: [model]
+  create_region_analyzer_agent:
+    type: sync
+    module: agents.region_analyzer_agent
+    args: [model]
+  create_trip_composer_agent:
+    type: sync
+    module: agents.trip_composer_agent
+    args: [model]
+  display_itinerary:
+    type: sync
+    module: main
+    args: [result_data]
+  display_region_options:
+    type: sync
+    module: main
+    args: [region_analysis]
+    params:
+      returns: None
+  flush:
+    type: async
+    module: plugins.langfuse_plugin
+    args: [self]
+    params:
+      returns: None
+  get_region_selection:
+    type: sync
+    module: main
+    args: [region_analysis]
+    params:
+      returns: List[dict]
+  get_session_stats:
+    type: sync
+    module: plugins.langfuse_plugin
+    args: [self]
+    params:
+      returns: dict
+  get_user_preferences:
+    type: sync
+    module: tools.preferences
+    args: [tool_context]
+    params:
+      returns: str
+  launch_adk_web:
+    type: sync
+    module: main
+  main:
+    type: async
+    module: main
+  on_user_message_callback:
+    type: async
+    module: plugins.langfuse_plugin
+    args: [self]
+    params:
+      returns: Optional[types.Content]
+  reset_stats:
+    type: sync
+    module: plugins.langfuse_plugin
+    args: [self]
+    params:
+      returns: None
+  search_book:
+    type: sync
+    module: tools.google_books
+    args: [title, author]
+    params:
+      returns: str
+  search_books:
+    type: sync
+    module: tools.google_books
+    args: [title, author, max_results]
+    params:
+      returns: List[BookInfo]
+
+variables:
+  GOOGLE_API_KEY:
+    type: env
+    params:
+      caller: [os.getenv]
+      path: [tools.google_books, agents.storyland.agent]
+  MODEL_NAME:
+    type: env
+    params:
+      caller: [os.getenv]
+      path: [agents.storyland.agent]
+
+processes:
+  .venv/bin/adk:
+    type: shell
+    actions: [exec]
+    args: [[web, --log_level, DEBUG, agents/]]
+    params:
+      caller: [subprocess.run]
+      shell: ["False"]
+
+networks:
+  www.googleapis.com:
+    type: api
+    actions: [GET]
+    urls: [/books/v1/volumes]
+    protocols: [https]
+    ports: ["443"]
+    params:
+      caller: [search_books]
