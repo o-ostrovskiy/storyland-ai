@@ -1,0 +1,542 @@
+{
+  "dataset_id": "books_v1",
+  "name": "Book Evaluation Dataset v1",
+  "description": "Initial evaluation dataset with 10 diverse book queries for testing StoryLand AI quality metrics",
+  "version": "1.0",
+  "created_at": "2026-02-11",
+  "queries": [
+    {
+      "id": "query_001",
+      "book": {
+        "title": "Pride and Prejudice",
+        "author": "Jane Austen",
+        "genre": "Classic Romance",
+        "year": 1813
+      },
+      "query": "Create a literary travel itinerary for Pride and Prejudice by Jane Austen",
+      "user_preferences": {
+        "budget": "moderate",
+        "pace": "relaxed",
+        "duration_days": 5,
+        "interests": ["historic estates", "countryside"]
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "Bath",
+            "country": "England",
+            "description": "Georgian city where Jane Austen lived and set parts of Persuasion and Northanger Abbey",
+            "must_visit": ["The Jane Austen Centre", "Royal Crescent", "Pump Room"]
+          },
+          {
+            "city": "Derbyshire",
+            "country": "England",
+            "description": "Inspiration for Mr. Darcy's Pemberley estate",
+            "must_visit": ["Chatsworth House", "Haddon Hall", "Peak District"]
+          },
+          {
+            "city": "Hampshire",
+            "country": "England",
+            "description": "Jane Austen's birthplace and home",
+            "must_visit": ["Jane Austen's House Museum in Chawton", "Winchester Cathedral"]
+          }
+        ],
+        "themes": ["Regency England", "Country estates", "Social customs"],
+        "duration": "5-7 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must include locations directly connected to Jane Austen's life and the novel's settings",
+        "preference_adherence": "Should reflect moderate budget and relaxed pace",
+        "completeness": "Must include at least 3 cities with specific landmarks",
+        "actionability": "Should provide specific places to visit with brief descriptions",
+        "geographical_accuracy": "All locations must be real and in England",
+        "engagement": "Should evoke the Regency era atmosphere"
+      }
+    },
+    {
+      "id": "query_002",
+      "book": {
+        "title": "1984",
+        "author": "George Orwell",
+        "genre": "Dystopian Fiction",
+        "year": 1949
+      },
+      "query": "I'd like a travel itinerary based on 1984 by George Orwell. Include places from his life and the book's themes.",
+      "user_preferences": {
+        "budget": "budget",
+        "pace": "moderate",
+        "duration_days": 4,
+        "interests": ["history", "political sites"]
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "London",
+            "country": "England",
+            "description": "Setting of 1984 and Orwell's home city",
+            "must_visit": ["Senate House (Ministry of Truth inspiration)", "Canonbury Square (Orwell's flat)", "BBC Broadcasting House"]
+          },
+          {
+            "city": "Barcelona",
+            "country": "Spain",
+            "description": "Where Orwell fought in the Spanish Civil War",
+            "must_visit": ["POUM Memorial", "Las Ramblas", "Plaça de Catalunya"]
+          }
+        ],
+        "themes": ["Totalitarianism", "Surveillance", "War experience"],
+        "duration": "4-5 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must connect to both the novel's themes and Orwell's political experiences",
+        "preference_adherence": "Should provide budget-friendly options",
+        "completeness": "Must include both London settings and biographical locations",
+        "actionability": "Should provide specific addresses and visiting tips",
+        "geographical_accuracy": "Accurate locations in London and Spain",
+        "engagement": "Should convey the political and historical significance"
+      }
+    },
+    {
+      "id": "query_003",
+      "book": {
+        "title": "The Great Gatsby",
+        "author": "F. Scott Fitzgerald",
+        "genre": "American Classic",
+        "year": 1925
+      },
+      "query": "Plan a luxurious trip based on The Great Gatsby. I want the full Jazz Age experience.",
+      "user_preferences": {
+        "budget": "luxury",
+        "pace": "relaxed",
+        "duration_days": 6,
+        "interests": ["art deco", "luxury hotels", "fine dining"]
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "New York City",
+            "country": "USA",
+            "description": "Heart of the Jazz Age and Gatsby's glamorous world",
+            "must_visit": ["Plaza Hotel", "Queensboro Bridge", "Times Square speakeasies", "Long Island"]
+          },
+          {
+            "city": "Gold Coast (Long Island)",
+            "country": "USA",
+            "description": "Inspiration for East and West Egg",
+            "must_visit": ["Oheka Castle", "Sands Point Preserve", "Great Neck"]
+          }
+        ],
+        "themes": ["Jazz Age", "Wealth and excess", "American Dream"],
+        "duration": "5-7 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must feature 1920s Jazz Age locations and Gatsby settings",
+        "preference_adherence": "Must include luxury accommodations and upscale experiences",
+        "completeness": "Should cover Manhattan and Long Island with specific venues",
+        "actionability": "Should suggest specific luxury hotels and restaurants",
+        "geographical_accuracy": "Accurate NYC and Long Island geography",
+        "engagement": "Should capture the glamour and tragedy of the Jazz Age"
+      }
+    },
+    {
+      "id": "query_004",
+      "book": {
+        "title": "Les Misérables",
+        "author": "Victor Hugo",
+        "genre": "Historical Fiction",
+        "year": 1862
+      },
+      "query": "Create an itinerary for Les Misérables. I'm traveling with family and need accessible locations.",
+      "user_preferences": {
+        "budget": "moderate",
+        "pace": "relaxed",
+        "duration_days": 7,
+        "interests": ["history", "museums", "family-friendly"],
+        "accessibility": "wheelchair accessible"
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "Paris",
+            "country": "France",
+            "description": "Primary setting of Les Misérables",
+            "must_visit": ["Notre-Dame Cathedral", "Panthéon", "Musée Carnavalet", "Latin Quarter"]
+          },
+          {
+            "city": "Montreuil-sur-Mer",
+            "country": "France",
+            "description": "Where Jean Valjean became a factory owner and mayor",
+            "must_visit": ["Town square", "Historical museum"]
+          }
+        ],
+        "themes": ["French Revolution", "Social justice", "Redemption"],
+        "duration": "6-8 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must include key Paris locations from the novel",
+        "preference_adherence": "Must ensure all locations are wheelchair accessible and family-friendly",
+        "completeness": "Should provide comprehensive Paris coverage plus northern France",
+        "actionability": "Must include accessibility information for each location",
+        "geographical_accuracy": "Accurate Paris districts and northern French towns",
+        "engagement": "Should convey the historical and emotional weight of the story"
+      }
+    },
+    {
+      "id": "query_005",
+      "book": {
+        "title": "War and Peace",
+        "author": "Leo Tolstoy",
+        "genre": "Historical Fiction",
+        "year": 1869
+      },
+      "query": "I want to visit locations from War and Peace. I'm interested in both Russian and French settings.",
+      "user_preferences": {
+        "budget": "moderate",
+        "pace": "moderate",
+        "duration_days": 10,
+        "interests": ["history", "architecture", "battlefields"]
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "Moscow",
+            "country": "Russia",
+            "description": "Central setting for the Rostov family",
+            "must_visit": ["Kremlin", "Arbat Street", "Tolstoy House Museum"]
+          },
+          {
+            "city": "Saint Petersburg",
+            "country": "Russia",
+            "description": "High society scenes and Bolkonsky estates",
+            "must_visit": ["Winter Palace", "Nevsky Prospect", "Russian Museum"]
+          },
+          {
+            "city": "Austerlitz",
+            "country": "Czech Republic",
+            "description": "Site of the famous battle",
+            "must_visit": ["Battle of Austerlitz Memorial", "Peace Monument"]
+          }
+        ],
+        "themes": ["Napoleonic Wars", "Russian aristocracy", "Historical battles"],
+        "duration": "10-12 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must include both Russian estates and European battle sites",
+        "preference_adherence": "Should balance Russian and international locations",
+        "completeness": "Must cover Moscow, St. Petersburg, and at least one battle location",
+        "actionability": "Should provide historical context for each site",
+        "geographical_accuracy": "Accurate locations across Russia and Central Europe",
+        "engagement": "Should convey the epic scope of the novel"
+      }
+    },
+    {
+      "id": "query_006",
+      "book": {
+        "title": "The Da Vinci Code",
+        "author": "Dan Brown",
+        "genre": "Mystery Thriller",
+        "year": 2003
+      },
+      "query": "I'm on a tight budget but want to see the Da Vinci Code locations in Paris and London.",
+      "user_preferences": {
+        "budget": "budget",
+        "pace": "fast",
+        "duration_days": 5,
+        "interests": ["art", "mystery", "churches"]
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "Paris",
+            "country": "France",
+            "description": "Where the mystery begins",
+            "must_visit": ["Louvre Museum", "Saint-Sulpice Church", "Château Villette"]
+          },
+          {
+            "city": "London",
+            "country": "England",
+            "description": "Home to Westminster Abbey and Temple Church",
+            "must_visit": ["Westminster Abbey", "Temple Church", "King's College"]
+          }
+        ],
+        "themes": ["Art history", "Religious mystery", "Conspiracy"],
+        "duration": "4-5 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must include key mystery locations from the novel",
+        "preference_adherence": "Must provide budget alternatives like free museums days",
+        "completeness": "Should cover Paris and London with specific churches and museums",
+        "actionability": "Should include money-saving tips and free visiting times",
+        "geographical_accuracy": "Accurate Paris and London locations",
+        "engagement": "Should maintain the mystery and intrigue of the novel"
+      }
+    },
+    {
+      "id": "query_007",
+      "book": {
+        "title": "Harry Potter Series",
+        "author": "J.K. Rowling",
+        "genre": "Fantasy",
+        "year": 1997
+      },
+      "query": "Plan a magical Harry Potter trip for my family with kids. We need kid-friendly activities.",
+      "user_preferences": {
+        "budget": "moderate",
+        "pace": "relaxed",
+        "duration_days": 6,
+        "interests": ["film locations", "interactive experiences", "museums"],
+        "family": "traveling with children ages 8-12"
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "London",
+            "country": "England",
+            "description": "Magical London locations",
+            "must_visit": ["Warner Bros. Studio Tour", "Platform 9¾ at King's Cross", "Leadenhall Market", "London Zoo"]
+          },
+          {
+            "city": "Oxford",
+            "country": "England",
+            "description": "Hogwarts filming locations",
+            "must_visit": ["Christ Church College", "Bodleian Library", "New College"]
+          },
+          {
+            "city": "Edinburgh",
+            "country": "Scotland",
+            "description": "Where J.K. Rowling wrote Harry Potter",
+            "must_visit": ["The Elephant House café", "Greyfriars Kirkyard", "Edinburgh Castle"]
+          }
+        ],
+        "themes": ["Magic and wizardry", "Film locations", "Author's inspiration"],
+        "duration": "6-8 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must include both film locations and Rowling's writing locations",
+        "preference_adherence": "Must be child-friendly with interactive experiences",
+        "completeness": "Should cover London, Oxford, and Scotland",
+        "actionability": "Should include ticket booking info and kid-friendly logistics",
+        "geographical_accuracy": "Accurate UK locations",
+        "engagement": "Should capture the magical atmosphere for children"
+      }
+    },
+    {
+      "id": "query_008",
+      "book": {
+        "title": "The Girl with the Dragon Tattoo",
+        "author": "Stieg Larsson",
+        "genre": "Crime Thriller",
+        "year": 2005
+      },
+      "query": "Create a Millennium trilogy tour of Sweden. I love museums and want a fast-paced itinerary.",
+      "user_preferences": {
+        "budget": "moderate",
+        "pace": "fast",
+        "duration_days": 5,
+        "interests": ["museums", "crime fiction", "nordic culture"]
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "Stockholm",
+            "country": "Sweden",
+            "description": "Primary setting of the trilogy",
+            "must_visit": ["Södermalm district", "Millennium Tour walking route", "City Museum", "Gamla Stan"]
+          },
+          {
+            "city": "Hedestad (Gävle)",
+            "country": "Sweden",
+            "description": "Inspiration for the fictional Hedestad",
+            "must_visit": ["Old town", "Railway museum"]
+          }
+        ],
+        "themes": ["Nordic noir", "Investigative journalism", "Swedish society"],
+        "duration": "4-5 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must include Stockholm's Södermalm and key trilogy locations",
+        "preference_adherence": "Should be fast-paced with efficient routing and museum focus",
+        "completeness": "Should cover Stockholm thoroughly with day trips",
+        "actionability": "Should provide specific walking routes and museum hours",
+        "geographical_accuracy": "Accurate Swedish locations",
+        "engagement": "Should convey the dark, atmospheric tone of Nordic noir"
+      }
+    },
+    {
+      "id": "query_009",
+      "book": {
+        "title": "A Tale of Two Cities",
+        "author": "Charles Dickens",
+        "genre": "Historical Fiction",
+        "year": 1859
+      },
+      "query": "I want to visit both London and Paris locations from A Tale of Two Cities.",
+      "user_preferences": {
+        "budget": "moderate",
+        "pace": "moderate",
+        "duration_days": 7,
+        "interests": ["history", "literature", "revolution"]
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "London",
+            "country": "England",
+            "description": "Home of Jarvis Lorry and the Manettes",
+            "must_visit": ["Tellson's Bank location (Temple Bar)", "Soho Square", "The Old Bailey"]
+          },
+          {
+            "city": "Paris",
+            "country": "France",
+            "description": "Revolutionary Paris and Bastille",
+            "must_visit": ["Place de la Bastille", "Place de la Concorde", "Conciergerie", "Carnavalet Museum"]
+          }
+        ],
+        "themes": ["French Revolution", "Resurrection", "Sacrifice"],
+        "duration": "6-8 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must include both cities with Revolutionary War connections",
+        "preference_adherence": "Should balance time between London and Paris",
+        "completeness": "Must include historical sites from both French Revolution and Victorian London",
+        "actionability": "Should provide historical context for each location",
+        "geographical_accuracy": "Accurate London and Paris locations",
+        "engagement": "Should capture the revolutionary atmosphere and emotional depth"
+      }
+    },
+    {
+      "id": "query_010",
+      "book": {
+        "title": "The Alchemist",
+        "author": "Paulo Coelho",
+        "genre": "Philosophical Fiction",
+        "year": 1988
+      },
+      "query": "Plan a spiritual journey following The Alchemist's path from Spain to Egypt.",
+      "user_preferences": {
+        "budget": "moderate",
+        "pace": "relaxed",
+        "duration_days": 14,
+        "interests": ["spiritual sites", "desert", "local culture"]
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "Tarifa",
+            "country": "Spain",
+            "description": "Santiago's starting point in Andalusia",
+            "must_visit": ["Tarifa beaches", "Andalusian villages", "Strait of Gibraltar"]
+          },
+          {
+            "city": "Tangier",
+            "country": "Morocco",
+            "description": "Where Santiago meets the crystal merchant",
+            "must_visit": ["Medina", "Grand Socco", "Hercules Caves"]
+          },
+          {
+            "city": "Fayoum Oasis",
+            "country": "Egypt",
+            "description": "Desert oasis where Santiago meets Fatima",
+            "must_visit": ["Desert camps", "Ancient ruins", "Natural springs"]
+          },
+          {
+            "city": "Giza",
+            "country": "Egypt",
+            "description": "Location of Santiago's treasure and the Pyramids",
+            "must_visit": ["Great Pyramids", "Sphinx", "Egyptian Museum"]
+          }
+        ],
+        "themes": ["Personal Legend", "Spiritual journey", "Desert wisdom"],
+        "duration": "12-14 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must follow Santiago's journey from Spain through Morocco to Egypt",
+        "preference_adherence": "Should include spiritual and contemplative experiences",
+        "completeness": "Must cover all major stops in the journey with desert experiences",
+        "actionability": "Should provide practical desert travel tips and cultural guidance",
+        "geographical_accuracy": "Accurate locations across Spain, Morocco, and Egypt",
+        "engagement": "Should evoke the philosophical and spiritual themes of the book"
+      }
+    }
+  ],
+  "scoring_functions": [
+    {
+      "name": "book_relevance",
+      "description": "Evaluates if itinerary locations are connected to the book's settings, themes, or author",
+      "scale": "1-5",
+      "criteria": {
+        "5": "All locations strongly connected to book",
+        "4": "Most locations clearly relevant",
+        "3": "Some locations relevant, some generic",
+        "2": "Few relevant locations",
+        "1": "No clear connection to book"
+      }
+    },
+    {
+      "name": "preference_adherence",
+      "description": "Evaluates if recommendations respect user preferences (budget, pace, accessibility)",
+      "scale": "1-5",
+      "criteria": {
+        "5": "Perfectly aligned with all preferences",
+        "4": "Respects most preferences well",
+        "3": "Acknowledges some preferences",
+        "2": "Ignores most preferences",
+        "1": "No consideration of preferences"
+      }
+    },
+    {
+      "name": "completeness",
+      "description": "Evaluates if itinerary includes comprehensive details (cities, landmarks, author sites)",
+      "scale": "1-5",
+      "criteria": {
+        "5": "Comprehensive with all components",
+        "4": "Good coverage of main elements",
+        "3": "Basic itinerary, missing some details",
+        "2": "Minimal information",
+        "1": "Incomplete or vague response"
+      }
+    },
+    {
+      "name": "actionability",
+      "description": "Evaluates if itinerary is practical with specific places and logistics",
+      "scale": "1-5",
+      "criteria": {
+        "5": "Highly detailed and actionable",
+        "4": "Good practical details",
+        "3": "Some actionable information",
+        "2": "Vague suggestions",
+        "1": "No practical details"
+      }
+    },
+    {
+      "name": "geographical_accuracy",
+      "description": "Evaluates accuracy of locations and geographical information",
+      "scale": "1-5",
+      "criteria": {
+        "5": "All locations accurate and real",
+        "4": "Minor geographical details off",
+        "3": "Some questionable locations",
+        "2": "Multiple inaccuracies",
+        "1": "Fictional or incorrect locations"
+      }
+    },
+    {
+      "name": "engagement",
+      "description": "Evaluates if descriptions are engaging and evoke the spirit of the book",
+      "scale": "1-5",
+      "criteria": {
+        "5": "Highly engaging, captures book's spirit",
+        "4": "Good descriptions, engaging tone",
+        "3": "Adequate but generic descriptions",
+        "2": "Dry or uninspiring",
+        "1": "No literary connection in writing"
+      }
+    }
+  ],
+  "usage_notes": [
+    "This dataset provides expected outputs and quality criteria for evaluation",
+    "Each query includes user preferences to test preference adherence",
+    "Books span multiple genres, time periods, and geographical regions",
+    "Expected outputs can be used as gold standard for evaluation",
+    "Quality criteria provide guidance for manual or automated scoring"
+  ]
+}
