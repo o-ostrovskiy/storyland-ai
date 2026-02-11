@@ -18,7 +18,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from common.logging import get_logger
 from common.config import load_config
-from tools.langfuse_eval import LangfuseEvalPipeline
 
 try:
     from langfuse import Langfuse
@@ -145,15 +144,27 @@ async def run_evaluation_on_dataset(
                     root_span=root_span,
                 )
 
-                # Score the trace if evaluation produced a result
+                # Score the trace based on evaluation result
+                # NOTE: Placeholder evaluations are scored as 0 to avoid polluting metrics
+                # Real workflow execution (issue #95) will produce actual quality scores
                 if result.get("status") == "evaluated":
-                    # Placeholder score - real implementation would use LLM-as-judge
-                    # See issue #96 for LLM-based scoring implementation
-                    root_span.score_trace(
-                        name="evaluation_status",
-                        value=1.0,
-                        comment="Placeholder - workflow execution needed (see issue #95)",
-                    )
+                    # Check if this is a real evaluation or placeholder
+                    is_placeholder = "placeholder" in result.get("note", "").lower()
+
+                    if is_placeholder:
+                        # Don't score placeholders - prevents false positive metrics
+                        logger.info(
+                            "placeholder_evaluation_not_scored",
+                            item_id=item.id,
+                            note="Workflow execution not implemented (see issue #95)",
+                        )
+                    else:
+                        # Real evaluation - score it (LLM-as-judge in issue #96)
+                        root_span.score_trace(
+                            name="evaluation_status",
+                            value=1.0,
+                            comment="Evaluation completed - implement LLM scoring (see issue #96)",
+                        )
 
             case_results.append({
                 "item_id": item.id,
@@ -409,12 +420,40 @@ def main():
     print("\n" + "=" * 60)
     print("Evaluation Summary")
     print("=" * 60)
+
+    total_evaluated = 0
+    total_failed_datasets = 0
+    total_datasets = len(results)
+
     for result in results:
         print(f"\nDataset: {result.get('dataset_name', 'unknown')}")
         print(f"Timestamp: {result.get('timestamp', 'N/A')}")
         print(f"Evaluated: {result.get('evaluated_cases', 0)} cases")
 
+        evaluated = result.get('evaluated_cases', 0)
+        total_evaluated += evaluated
+
+        # Check if this dataset failed
+        if 'error' in result or evaluated == 0:
+            total_failed_datasets += 1
+            if 'error' in result:
+                print(f"ERROR: {result['error']}")
+
     print("\n" + "=" * 60)
+    print(f"Total: {total_evaluated} cases evaluated across {total_datasets} dataset(s)")
+    print(f"Failed datasets: {total_failed_datasets}")
+    print("=" * 60)
+
+    # Exit with error code if all evaluations failed
+    # This ensures GitHub Actions workflow correctly reports failure
+    if total_datasets > 0 and total_failed_datasets == total_datasets:
+        print("\n❌ ERROR: All dataset evaluations failed")
+        sys.exit(1)
+    elif total_failed_datasets > 0:
+        print(f"\n⚠️  WARNING: {total_failed_datasets}/{total_datasets} dataset(s) failed")
+        # Still exit 0 if some succeeded - partial success
+    else:
+        print("\n✅ All evaluations completed successfully")
 
 
 if __name__ == '__main__':
