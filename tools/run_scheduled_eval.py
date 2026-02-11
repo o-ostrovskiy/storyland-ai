@@ -16,8 +16,21 @@ from typing import Dict, Any, List, Optional
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from common.logging import get_logger
+from common.logging import get_logger, configure_logging
 from common.config import load_config
+from services.session_service import create_session_service
+from tools.google_books import google_books_tool
+from agents.orchestrator import (
+    create_metadata_stage,
+    create_discovery_workflow,
+    create_composition_workflow,
+)
+from google.adk.models.google_llm import Gemini
+from google.adk.runners import Runner
+from google.adk.plugins.logging_plugin import LoggingPlugin
+from plugins.langfuse_plugin import LangfusePlugin
+from google.genai import types
+import uuid
 
 try:
     from langfuse import Langfuse
@@ -26,6 +39,39 @@ except ImportError:
     LANGFUSE_AVAILABLE = False
 
 logger = get_logger("storyland.scheduled_eval")
+
+
+def select_first_region(region_analysis: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Automated region selection for evaluation mode - Issue #97.
+
+    Selects the first region from the analysis for deterministic evaluation.
+    This replaces the human-in-the-loop region selection needed for automation.
+
+    Args:
+        region_analysis: Region analysis dict from discovery workflow
+
+    Returns:
+        List containing the first region, or empty list if no regions
+    """
+    regions = region_analysis.get("regions", [])
+
+    if not regions:
+        logger.warning("no_regions_found_for_selection")
+        return []
+
+    # Select first region for deterministic evaluation
+    selected = [regions[0]]
+    region_name = selected[0].get("region_name", "Unknown")
+
+    logger.info(
+        "automated_region_selected",
+        region_id=selected[0].get("region_id"),
+        region_name=region_name,
+        total_regions=len(regions),
+    )
+
+    return selected
 
 
 async def run_evaluation_on_dataset(
@@ -246,15 +292,11 @@ async def _run_evaluation_case(
     """
     Run evaluation for a single test case.
 
-    Note: This is a simplified evaluation runner. The full StoryLand workflow
-    requires human interaction for region selection, which is not feasible
-    in automated evaluations.
-
-    For proper evaluation, you would need to:
-    1. Mock region selection with a deterministic choice
-    2. Run the full metadata -> discovery -> composition workflow
-    3. Compare output against expected_output
-    4. Score using LLM-as-judge (see issue #96)
+    Executes the full StoryLand workflow:
+    1. Metadata extraction - identify book and author
+    2. Discovery - find locations and group into travel regions
+    3. Automated region selection - Issue #97 (select first region)
+    4. Composition - create itinerary for selected region
 
     Args:
         input_data: Input from dataset item
@@ -263,7 +305,7 @@ async def _run_evaluation_case(
         root_span: Langfuse root span (from item.run() context manager)
 
     Returns:
-        Evaluation result
+        Evaluation result with status "evaluated" on success
     """
     try:
         # Extract the book query from input
@@ -273,28 +315,354 @@ async def _run_evaluation_case(
             logger.warning("no_input_text", input_data=input_data)
             return {"status": "skipped", "reason": "No input text"}
 
-        # For automated evaluation, we would run a simplified workflow here
-        # This is a placeholder - actual implementation would call the agent
-        # See issue #95 for workflow execution implementation
-        logger.info("placeholder_execution", input_text=text)
+        # Parse book title and author from the text
+        # Expected format: "Create a literary travel itinerary for Pride and Prejudice"
+        # or with author: "Create a literary travel itinerary for Pride and Prejudice by Jane Austen"
+        book_title = None
+        author = None
 
-        # Placeholder result - in a real implementation, this would run the agent
-        # Status is "placeholder" not "evaluated" to avoid counting as real evaluation
+        # Simple parsing: extract book title from common patterns
+        if " by " in text:
+            # Format: "...for BOOK by AUTHOR"
+            parts = text.split(" by ")
+            if len(parts) == 2:
+                author = parts[1].strip()
+                # Extract book title from the first part
+                for_idx = parts[0].rfind(" for ")
+                if for_idx >= 0:
+                    book_title = parts[0][for_idx + 5:].strip()
+        else:
+            # Format: "...for BOOK"
+            for_idx = text.rfind(" for ")
+            if for_idx >= 0:
+                book_title = text[for_idx + 5:].strip()
+
+        if not book_title:
+            logger.warning("could_not_parse_book_title", input_text=text)
+            return {"status": "skipped", "reason": "Could not parse book title from input"}
+
+        logger.info(
+            "starting_workflow_evaluation",
+            book_title=book_title,
+            author=author or "unknown",
+        )
+
+        # Initialize model with retry config (same as main.py)
+        retry_config = types.HttpRetryOptions(
+            attempts=5,
+            exp_base=7,
+            initial_delay=1,
+            http_status_codes=[429, 500, 503, 504]
+        )
+        model = Gemini(
+            model=config.model_name,
+            api_key=config.google_api_key,
+            retry_options=retry_config
+        )
+
+        # Create session service (in-memory for evaluations)
+        session_service = create_session_service(
+            connection_string=None,
+            use_database=False  # Use in-memory for eval
+        )
+
+        # Initialize Langfuse plugin for token tracking
+        langfuse_plugin = LangfusePlugin(
+            secret_key=config.langfuse_secret_key,
+            public_key=config.langfuse_public_key,
+            host=config.langfuse_host,
+        )
+
+        # Create session with initial state
+        user_id = "eval_user"
+        session_id = str(uuid.uuid4())
+        initial_state = {
+            "book_title": book_title,
+            "author": author or "",
+        }
+
+        await session_service.create_session(
+            app_name="storyland",
+            user_id=user_id,
+            session_id=session_id,
+            state=initial_state,
+        )
+
+        logger.info("eval_session_created", session_id=session_id[:8])
+
+        # Phase 1: Extract book metadata
+        logger.info("eval_phase_1_start", phase="metadata_extraction")
+
+        # Track phase in root_span metadata
+        root_span.update(metadata={"current_phase": "metadata_extraction"})
+
+        try:
+            metadata_stage = create_metadata_stage(model, google_books_tool)
+            metadata_runner = Runner(
+                agent=metadata_stage,
+                app_name="storyland",
+                session_service=session_service,
+                plugins=[LoggingPlugin(), langfuse_plugin],
+            )
+
+            metadata_prompt = f"""Find book metadata for "{book_title}" by {author or 'unknown author'}."""
+            metadata_message = types.Content(role="user", parts=[types.Part(text=metadata_prompt)])
+
+            async with metadata_runner:
+                async for event in metadata_runner.run_async(
+                    user_id=user_id, session_id=session_id, new_message=metadata_message
+                ):
+                    pass
+
+            # Get metadata from session state
+            session = await session_service.get_session(
+                app_name="storyland", user_id=user_id, session_id=session_id
+            )
+            book_metadata = session.state.get("book_metadata", {})
+            exact_title = book_metadata.get("book_title", book_title)
+            exact_author = book_metadata.get("author", author or "Unknown")
+
+            logger.info(
+                "eval_metadata_extracted",
+                exact_title=exact_title,
+                exact_author=exact_author
+            )
+
+            # Update root_span with metadata results
+            root_span.update(
+                metadata={
+                    "phase_1_complete": True,
+                    "book_title": exact_title,
+                    "author": exact_author,
+                }
+            )
+        except Exception as e:
+            logger.warning(
+                "eval_metadata_failed_using_fallback",
+                error=str(e),
+                book_title=book_title,
+            )
+
+            # Update root_span with error info
+            root_span.update(
+                metadata={
+                    "phase_1_error": str(e),
+                    "fallback_used": True,
+                }
+            )
+
+            # Fallback to provided title/author
+            exact_title = book_title
+            exact_author = author or "Unknown"
+
+            # Store basic metadata in session
+            session = await session_service.get_session(
+                app_name="storyland", user_id=user_id, session_id=session_id
+            )
+            session.state["book_metadata"] = {
+                "book_title": exact_title,
+                "author": exact_author,
+            }
+
+        # Phase 2: Discovery - find locations and analyze regions
+        logger.info("eval_phase_2_start", phase="location_discovery")
+
+        # Update root_span for phase 2
+        root_span.update(metadata={"current_phase": "discovery"})
+
+        try:
+            discovery_workflow = create_discovery_workflow(
+                model, book_title=exact_title, author=exact_author
+            )
+            discovery_runner = Runner(
+                agent=discovery_workflow,
+                app_name="storyland",
+                session_service=session_service,
+                plugins=[LoggingPlugin(), langfuse_plugin],
+            )
+
+            discovery_prompt = f"""Discover travel locations for "{exact_title}" by {exact_author}.
+
+Find cities, landmarks, and author-related sites, then group them into practical travel regions."""
+            discovery_message = types.Content(
+                role="user", parts=[types.Part(text=discovery_prompt)]
+            )
+
+            async with discovery_runner:
+                async for event in discovery_runner.run_async(
+                    user_id=user_id, session_id=session_id, new_message=discovery_message
+                ):
+                    pass
+
+            # Get region analysis from session state
+            session = await session_service.get_session(
+                app_name="storyland", user_id=user_id, session_id=session_id
+            )
+            region_analysis = session.state.get("region_analysis", {})
+
+            logger.info(
+                "eval_regions_discovered",
+                num_regions=len(region_analysis.get("regions", []))
+            )
+
+            # Update root_span with discovery results
+            root_span.update(
+                metadata={
+                    "phase_2_complete": True,
+                    "num_regions": len(region_analysis.get("regions", [])),
+                }
+            )
+        except Exception as e:
+            logger.error(
+                "eval_discovery_failed",
+                error=str(e),
+                book_title=exact_title,
+            )
+            root_span.update(
+                metadata={
+                    "phase_2_error": str(e),
+                    "error_type": type(e).__name__,
+                }
+            )
+            raise
+
+        # Automated region selection (Issue #97)
+        logger.info("eval_region_selection", mode="automated")
+        selected_regions = select_first_region(region_analysis)
+
+        if not selected_regions:
+            error_msg = "No regions available to create an itinerary"
+            logger.error("eval_no_regions_available", book_title=exact_title)
+            return {
+                "status": "failed",
+                "reason": error_msg,
+                "book_title": exact_title,
+                "author": exact_author,
+            }
+
+        # Store selected regions in session state
+        session = await session_service.get_session(
+            app_name="storyland", user_id=user_id, session_id=session_id
+        )
+        session.state["selected_regions"] = selected_regions
+
+        logger.info("eval_selected_regions_stored", region_count=len(selected_regions))
+
+        # Phase 3: Composition - create itinerary
+        logger.info("eval_phase_3_start", phase="itinerary_composition")
+
+        # Update root_span for phase 3
+        root_span.update(
+            metadata={
+                "current_phase": "composition",
+                "region_count": len(selected_regions),
+                "selected_regions": [r.get("region_name") for r in selected_regions],
+            }
+        )
+
+        try:
+            composition_workflow = create_composition_workflow(model)
+            composition_runner = Runner(
+                agent=composition_workflow,
+                app_name="storyland",
+                session_service=session_service,
+                plugins=[LoggingPlugin(), langfuse_plugin],
+            )
+
+            composition_prompt = f"""Create a travel itinerary for "{exact_title}" by {exact_author}.
+
+Use ONLY the cities from the selected region(s): {json.dumps(selected_regions)}
+
+Create a personalized itinerary based on user preferences and the selected region(s).
+Include ALL cities from the selected regions in your itinerary."""
+            composition_message = types.Content(
+                role="user", parts=[types.Part(text=composition_prompt)]
+            )
+
+            final_response = None
+            async with composition_runner:
+                async for event in composition_runner.run_async(
+                    user_id=user_id, session_id=session_id, new_message=composition_message
+                ):
+                    if event.is_final_response():
+                        final_response = event
+
+            # Extract itinerary from response
+            itinerary_data = None
+            if final_response and final_response.content and final_response.content.parts:
+                for part in final_response.content.parts:
+                    if hasattr(part, "text") and part.text:
+                        json_start = part.text.find("{")
+                        json_end = part.text.rfind("}") + 1
+
+                        if json_start >= 0 and json_end > json_start:
+                            try:
+                                itinerary_data = json.loads(part.text[json_start:json_end])
+                                break
+                            except json.JSONDecodeError as e:
+                                logger.warning("eval_json_parse_error", error=str(e))
+
+            logger.info(
+                "eval_composition_complete",
+                itinerary_created=itinerary_data is not None,
+                num_cities=len(itinerary_data.get("cities", [])) if itinerary_data else 0,
+            )
+
+            # Update root_span with composition results
+            root_span.update(
+                metadata={
+                    "phase_3_complete": True,
+                    "itinerary_created": itinerary_data is not None,
+                    "num_cities": len(itinerary_data.get("cities", [])) if itinerary_data else 0,
+                }
+            )
+        except Exception as e:
+            logger.error(
+                "eval_composition_failed",
+                error=str(e),
+                book_title=exact_title,
+            )
+            root_span.update(
+                metadata={
+                    "phase_3_error": str(e),
+                    "error_type": type(e).__name__,
+                }
+            )
+            raise
+
+        # Get token usage stats
+        token_stats = langfuse_plugin.get_session_stats()
+        logger.info(
+            "eval_workflow_complete",
+            book_title=exact_title,
+            author=exact_author,
+            itinerary_created=itinerary_data is not None,
+            total_tokens=token_stats.get('total_tokens', 0),
+            cost_usd=token_stats.get('cost_usd', 0),
+        )
+
+        # Flush Langfuse events
+        await langfuse_plugin.flush()
+
+        # Return evaluation result
+        # Status is "evaluated" (real workflow execution, not placeholder)
+        # TODO: Implement LLM-as-judge scoring in issue #96
         result = {
-            "status": "placeholder",
+            "status": "evaluated",
+            "book_title": exact_title,
+            "author": exact_author,
             "input": text,
-            "note": (
-                "This is a placeholder evaluation. Full workflow implementation "
-                "requires mocking human interaction for region selection. "
-                "See GitHub issues #95 (workflow execution), #96 (LLM scoring), "
-                "#97 (automated region selection)."
-            ),
+            "itinerary_created": itinerary_data is not None,
+            "num_cities": len(itinerary_data.get("cities", [])) if itinerary_data else 0,
+            "num_regions": len(selected_regions),
+            "token_usage": token_stats,
+            "note": "LLM-as-judge scoring not yet implemented (see issue #96)",
         }
 
         return result
 
     except Exception as e:
-        logger.error("evaluation_case_error", error=str(e))
+        logger.error("evaluation_case_error", error=str(e), error_type=type(e).__name__)
         raise
 
 
