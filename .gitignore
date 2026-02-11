@@ -120,11 +120,6 @@ $RECYCLE.BIN/
 # ========================================
 # Project Specific
 # ========================================
-# Evaluation outputs
-eval/results/
-eval/outputs/
-*.eval.json
-
 # Langfuse evaluation pipeline generated files
 evaluation/results/
 evaluation/langfuse_datasets.json
