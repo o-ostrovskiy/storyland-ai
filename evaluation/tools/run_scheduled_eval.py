@@ -32,6 +32,9 @@ from plugins.langfuse_plugin import LangfusePlugin
 from google.genai import types
 import uuid
 
+# LLM-as-judge scorer (Issue #96)
+from evaluation.tools.llm_scorer import score_itinerary
+
 try:
     from langfuse import Langfuse
     LANGFUSE_AVAILABLE = True
@@ -210,12 +213,13 @@ async def run_evaluation_on_dataset(
                         note="Workflow execution not implemented (see issue #95)",
                     )
 
-            # Track result status
-            case_results.append({
+            # Track full result including scores
+            case_result = {
                 "item_id": item.id,
-                "status": case_status,
                 "run_name": run_name,
-            })
+                **result,  # Include all result fields (status, scores, token_usage, etc.)
+            }
+            case_results.append(case_result)
 
             # Count by status type
             if case_status == "evaluated":
@@ -644,9 +648,100 @@ Include ALL cities from the selected regions in your itinerary."""
         # Flush Langfuse events
         await langfuse_plugin.flush()
 
+        # Phase 4: LLM-as-judge scoring (Issue #96)
+        scores_data = None
+        if itinerary_data:
+            logger.info("eval_phase_4_start", phase="llm_scoring")
+
+            try:
+                # Get user preferences from session state
+                preferences = session.state.get("user:preferences", {})
+
+                # Score the itinerary using LLM-as-judge with Langfuse tracing
+                # Pass Langfuse context for execution tracing and observability
+                trace_id = langfuse_plugin._current_trace.id if (
+                    langfuse_plugin._current_trace and hasattr(langfuse_plugin._current_trace, 'id')
+                ) else None
+
+                scores = await score_itinerary(
+                    api_key=config.google_api_key,
+                    book_title=exact_title,
+                    author=exact_author,
+                    input_text=text,
+                    itinerary=itinerary_data,
+                    preferences=preferences,
+                    model_name="gemini-2.0-flash-lite",
+                    langfuse_trace_id=trace_id,
+                    langfuse_client=langfuse_plugin.client,
+                )
+
+                # Store scores in Langfuse
+                root_span.score_trace(
+                    name="book_relevance",
+                    value=scores.book_relevance,
+                    comment="LLM-as-judge: Connection to book's settings, themes, or author (1-5)",
+                )
+                root_span.score_trace(
+                    name="preference_adherence",
+                    value=scores.preference_adherence,
+                    comment="LLM-as-judge: Respect for user preferences (1-5)",
+                )
+                root_span.score_trace(
+                    name="completeness",
+                    value=scores.completeness,
+                    comment="LLM-as-judge: Comprehensive details included (1-5)",
+                )
+                root_span.score_trace(
+                    name="actionability",
+                    value=scores.actionability,
+                    comment="LLM-as-judge: Practical and actionable information (1-5)",
+                )
+                root_span.score_trace(
+                    name="geographical_accuracy",
+                    value=scores.geographical_accuracy,
+                    comment="LLM-as-judge: Accuracy of locations (1-5)",
+                )
+                root_span.score_trace(
+                    name="engagement",
+                    value=scores.engagement,
+                    comment="LLM-as-judge: Engaging descriptions that evoke book's spirit (1-5)",
+                )
+
+                # Prepare scores for local result storage
+                scores_data = {
+                    "book_relevance": scores.book_relevance,
+                    "preference_adherence": scores.preference_adherence,
+                    "completeness": scores.completeness,
+                    "actionability": scores.actionability,
+                    "geographical_accuracy": scores.geographical_accuracy,
+                    "engagement": scores.engagement,
+                    "average": round(scores.average_score(), 2),
+                    "scoring_method": "llm_judge_gemini_flash_lite",
+                    "scored_at": datetime.now().isoformat(),
+                }
+
+                logger.info(
+                    "eval_scoring_complete",
+                    book_relevance=scores.book_relevance,
+                    preference_adherence=scores.preference_adherence,
+                    completeness=scores.completeness,
+                    actionability=scores.actionability,
+                    geographical_accuracy=scores.geographical_accuracy,
+                    engagement=scores.engagement,
+                    average_score=scores_data["average"],
+                )
+
+            except Exception as e:
+                logger.warning(
+                    "eval_scoring_failed",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    book_title=exact_title,
+                )
+                # Don't fail evaluation if scoring fails - scoring is optional
+
         # Return evaluation result
         # Status is "evaluated" (real workflow execution, not placeholder)
-        # TODO: Implement LLM-as-judge scoring in issue #96
         result = {
             "status": "evaluated",
             "book_title": exact_title,
@@ -656,8 +751,11 @@ Include ALL cities from the selected regions in your itinerary."""
             "num_cities": len(itinerary_data.get("cities", [])) if itinerary_data else 0,
             "num_regions": len(selected_regions),
             "token_usage": token_stats,
-            "note": "LLM-as-judge scoring not yet implemented (see issue #96)",
         }
+
+        # Add scores if scoring succeeded
+        if scores_data:
+            result["scores"] = scores_data
 
         return result
 

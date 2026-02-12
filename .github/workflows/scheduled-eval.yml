@@ -7,11 +7,11 @@ on:
   workflow_dispatch: # Allow manual trigger
     inputs:
       datasets:
-        description: 'Datasets to evaluate (space-separated, leave empty for all)'
+        description: 'Datasets to evaluate (space-separated). Leave empty to auto-discover all datasets from evaluation/langfuse_datasets.json'
         required: false
         default: ''
       max_cases:
-        description: 'Maximum cases per dataset'
+        description: 'Maximum cases per dataset (default: 10)'
         required: false
         default: '10'
 
@@ -52,19 +52,23 @@ jobs:
 
       - name: Run scheduled evaluations
         run: |
+          # Set default parameters (used for both scheduled and manual runs)
+          DEFAULT_MAX_CASES=10
+
           # Determine datasets argument
+          # If not specified, the script will auto-discover from evaluation/langfuse_datasets.json
           DATASETS_ARG=""
           if [ -n "${{ github.event.inputs.datasets }}" ]; then
             DATASETS_ARG="--datasets ${{ github.event.inputs.datasets }}"
           fi
 
-          # Determine max cases argument
+          # Determine max cases argument with explicit default
           MAX_CASES="${{ github.event.inputs.max_cases }}"
           if [ -z "$MAX_CASES" ]; then
-            MAX_CASES="10"
+            MAX_CASES="$DEFAULT_MAX_CASES"
           fi
 
-          # Run evaluations
+          # Run evaluations with default parameters
           python evaluation/tools/run_scheduled_eval.py \
             --output-dir evaluation/results \
             --max-cases "$MAX_CASES" \

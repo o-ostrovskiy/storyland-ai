@@ -1,0 +1,111 @@
+interactions:
+- request:
+    body: '{"contents": [{"parts": [{"text": "Evaluate this travel itinerary for \"The
+      Sun Also Rises\" by Ernest Hemingway.\n\nRate each dimension on a 1-5 scale
+      based on the criteria below:\n\n**1. BOOK_RELEVANCE (1-5)**\nEvaluate if the
+      travel itinerary locations are directly connected to the book''s settings, themes,
+      characters, or author. Each suggested place should have a clear and meaningful
+      connection to the literary work.\n\nScore 1-5 where:\n5 = All locations strongly
+      connected to book\n4 = Most locations clearly relevant\n3 = Some locations relevant,
+      some generic\n2 = Few relevant locations\n1 = No clear connection to book\n\n**2.
+      PREFERENCE_ADHERENCE (1-5)**\nEvaluate if the travel recommendations respect
+      the user''s stated preferences including budget level, travel pace, accessibility
+      needs, and interest in museums. The response should acknowledge and adapt to
+      these preferences.\n\nScore 1-5 where:\n5 = Perfectly aligned with all preferences\n4
+      = Respects most preferences well\n3 = Acknowledges some preferences\n2 = Ignores
+      most preferences\n1 = No consideration of preferences\n\n**3. COMPLETENESS (1-5)**\nEvaluate
+      if the response includes a comprehensive itinerary with cities, landmarks, and
+      author-related sites. The itinerary should provide enough detail for the traveler
+      to plan their trip.\n\nScore 1-5 where:\n5 = Comprehensive with all components\n4
+      = Good coverage of main elements\n3 = Basic itinerary, missing some details\n2
+      = Minimal information\n1 = Incomplete or vague response\n\n**4. ACTIONABILITY
+      (1-5)**\nEvaluate if the itinerary is practical and actionable with specific
+      places, suggested times of day to visit, and logistical notes. The traveler
+      should be able to use this information to actually plan their trip.\n\nScore
+      1-5 where:\n5 = Highly detailed and actionable\n4 = Good practical details\n3
+      = Some actionable information\n2 = Vague suggestions\n1 = No practical details\n\n**5.
+      GEOGRAPHICAL_ACCURACY (1-5)**\nEvaluate if the locations mentioned are real
+      places that can be visited. Cities and landmarks should be correctly associated
+      with their countries. The geographical information should be accurate.\n\nScore
+      1-5 where:\n5 = All locations accurate and real\n4 = Minor geographical details
+      off\n3 = Some questionable locations\n2 = Multiple inaccuracies\n1 = Fictional
+      or incorrect locations\n\n**6. ENGAGEMENT (1-5)**\nEvaluate if the summary and
+      descriptions are engaging and evoke the spirit of the book. The language should
+      capture the literary connection and make the trip feel like a meaningful journey.\n\nScore
+      1-5 where:\n5 = Highly engaging, captures book''s spirit\n4 = Good descriptions,
+      engaging tone\n3 = Adequate but generic descriptions\n2 = Dry or uninspiring\n1
+      = No literary connection in writing\n\n---\n\n**INPUT PROMPT**:\nPlan a trip
+      based on The Sun Also Rises\n\n**USER PREFERENCES**:\nNo preferences specified\n\n**GENERATED
+      ITINERARY**:\n{\n  \"summary\": \"Generic travel itinerary\",\n  \"cities\":
+      [\n    {\n      \"city\": \"London\",\n      \"country\": \"England\",\n      \"days\":
+      1,\n      \"description\": \"Visit London\",\n      \"stops\": [\n        {\n          \"name\":
+      \"Big Ben\",\n          \"description\": \"Famous clock tower\",\n          \"time_of_day\":
+      \"afternoon\"\n        }\n      ]\n    }\n  ]\n}\n\n---\n\nProvide scores only
+      (no explanations). Use the structured output format.\n\n\nRespond with ONLY
+      a valid JSON object (no markdown, no explanation) with these exact fields:\n{\n  \"book_relevance\":
+      <integer 1-5>,\n  \"preference_adherence\": <integer 1-5>,\n  \"completeness\":
+      <integer 1-5>,\n  \"actionability\": <integer 1-5>,\n  \"geographical_accuracy\":
+      <integer 1-5>,\n  \"engagement\": <integer 1-5>\n}\n"}], "role": "user"}], "generationConfig":
+      {"temperature": 0.0}}'
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '3793'
+      Content-Type:
+      - application/json
+      Host:
+      - generativelanguage.googleapis.com
+      user-agent:
+      - google-genai-sdk/1.60.0 gl-python/3.12.6
+      x-goog-api-client:
+      - google-genai-sdk/1.60.0 gl-python/3.12.6
+    method: POST
+    uri: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent
+  response:
+    body:
+      string: "{\n  \"candidates\": [\n    {\n      \"content\": {\n        \"parts\":
+        [\n          {\n            \"text\": \"```json\\n{\\n  \\\"book_relevance\\\":
+        1,\\n  \\\"preference_adherence\\\": 5,\\n  \\\"completeness\\\": 1,\\n  \\\"actionability\\\":
+        2,\\n  \\\"geographical_accuracy\\\": 5,\\n  \\\"engagement\\\": 1\\n}\\n```\"\n
+        \         }\n        ],\n        \"role\": \"model\"\n      },\n      \"finishReason\":
+        \"STOP\",\n      \"avgLogprobs\": -0.0034786182822603168\n    }\n  ],\n  \"usageMetadata\":
+        {\n    \"promptTokenCount\": 868,\n    \"candidatesTokenCount\": 66,\n    \"totalTokenCount\":
+        934,\n    \"promptTokensDetails\": [\n      {\n        \"modality\": \"TEXT\",\n
+        \       \"tokenCount\": 868\n      }\n    ],\n    \"candidatesTokensDetails\":
+        [\n      {\n        \"modality\": \"TEXT\",\n        \"tokenCount\": 66\n
+        \     }\n    ]\n  },\n  \"modelVersion\": \"gemini-2.0-flash-lite\",\n  \"responseId\":
+        \"VkqNafCBEtbdjMcPi4KawQw\"\n}\n"
+    headers:
+      Alt-Svc:
+      - h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+      Content-Type:
+      - application/json; charset=UTF-8
+      Date:
+      - Thu, 12 Feb 2026 03:34:46 GMT
+      Server:
+      - scaffolding on HTTPServer2
+      Server-Timing:
+      - gfet4t7; dur=677
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Origin
+      - X-Origin
+      - Referer
+      X-Content-Type-Options:
+      - nosniff
+      X-Frame-Options:
+      - SAMEORIGIN
+      X-XSS-Protection:
+      - '0'
+      content-length:
+      - '835'
+    status:
+      code: 200
+      message: OK
+version: 1
