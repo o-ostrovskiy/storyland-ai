@@ -65,7 +65,7 @@ jobs:
           fi
 
           # Run evaluations
-          python tools/run_scheduled_eval.py \
+          python evaluation/tools/run_scheduled_eval.py \
             --output-dir evaluation/results \
             --max-cases "$MAX_CASES" \
             $DATASETS_ARG
@@ -73,7 +73,7 @@ jobs:
       - name: Generate evaluation report
         if: success()
         run: |
-          python tools/eval_dashboard.py --action report --days 30
+          python evaluation/tools/eval_dashboard.py --action report --days 30
 
       - name: Upload evaluation results
         if: always()

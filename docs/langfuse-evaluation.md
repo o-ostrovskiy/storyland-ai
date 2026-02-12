@@ -79,7 +79,7 @@ Convert ADK evalset files to Langfuse datasets:
 
 ```bash
 # Create datasets from all .evalset.json files
-python tools/langfuse_eval.py --create-datasets --evalset-dir evaluation
+python evaluation/tools/langfuse_eval.py --create-datasets --evalset-dir evaluation
 ```
 
 This creates Langfuse datasets from:
@@ -99,7 +99,7 @@ This creates Langfuse datasets from:
 
 ```bash
 # Run evaluations on all datasets
-python tools/run_scheduled_eval.py --output-dir evaluation/results --max-cases 10
+python evaluation/tools/run_scheduled_eval.py --output-dir evaluation/results --max-cases 10
 ```
 
 #### Automated (GitHub Actions)
@@ -124,13 +124,13 @@ Add these secrets in your repository settings:
 
 ```bash
 # Print summary of recent evaluations
-python tools/eval_dashboard.py --action summary --days 7
+python evaluation/tools/eval_dashboard.py --action summary --days 7
 
 # Generate markdown trend report
-python tools/eval_dashboard.py --action report --days 30
+python evaluation/tools/eval_dashboard.py --action report --days 30
 
 # Export metrics for external tools
-python tools/eval_dashboard.py --action export --days 30
+python evaluation/tools/eval_dashboard.py --action export --days 30
 ```
 
 #### Langfuse UI
@@ -224,7 +224,7 @@ The pipeline includes 6 quality metrics aligned with StoryLand AI's goals:
 Generate a markdown report showing evaluation trends:
 
 ```bash
-python tools/eval_dashboard.py --action report --days 30
+python evaluation/tools/eval_dashboard.py --action report --days 30
 ```
 
 Output: `evaluation/trend_report.md`
@@ -240,7 +240,7 @@ Output: `evaluation/trend_report.md`
 Export metrics for external dashboards (Grafana, Datadog, etc.):
 
 ```bash
-python tools/eval_dashboard.py --action export --days 30
+python evaluation/tools/eval_dashboard.py --action export --days 30
 ```
 
 Output: `evaluation/metrics.json`
@@ -315,7 +315,7 @@ No evaluation results found
 
 **Solution**: Run an evaluation first:
 ```bash
-python tools/run_scheduled_eval.py
+python evaluation/tools/run_scheduled_eval.py
 ```
 
 ### Dataset Not Found
@@ -326,7 +326,7 @@ Error: Dataset 'storyland_eval' not found
 
 **Solution**: Create datasets from evalsets:
 ```bash
-python tools/langfuse_eval.py --create-datasets
+python evaluation/tools/langfuse_eval.py --create-datasets
 ```
 
 ## Integration with Existing Tools
@@ -341,7 +341,7 @@ adk eval agents/storyland single_test \
   --config_file_path tests/evaluation/eval_config.json
 
 # Langfuse evaluation (tracking over time)
-python tools/run_scheduled_eval.py
+python evaluation/tools/run_scheduled_eval.py
 ```
 
 ### Token Tracking

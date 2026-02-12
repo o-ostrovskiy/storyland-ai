@@ -97,21 +97,21 @@ eval:
 # =============================================================================
 
 eval-setup:
-	.venv/bin/python tools/langfuse_eval.py --create-datasets --evalset-dir agents/storyland
+	.venv/bin/python evaluation/tools/langfuse_eval.py --create-datasets --evalset-dir evaluation
 	@echo "✅ Langfuse datasets created. View at your Langfuse dashboard."
 
 eval-run:
-	.venv/bin/python tools/run_scheduled_eval.py --output-dir evaluation/results --max-cases 10
+	.venv/bin/python evaluation/tools/run_scheduled_eval.py --output-dir evaluation/results --max-cases 10
 
 eval-summary:
-	.venv/bin/python tools/eval_dashboard.py --action summary --days 7
+	.venv/bin/python evaluation/tools/eval_dashboard.py --action summary --days 7
 
 eval-report:
-	.venv/bin/python tools/eval_dashboard.py --action report --days 30
+	.venv/bin/python evaluation/tools/eval_dashboard.py --action report --days 30
 	@echo "✅ Trend report generated at evaluation/trend_report.md"
 
 eval-export:
-	.venv/bin/python tools/eval_dashboard.py --action export --days 30
+	.venv/bin/python evaluation/tools/eval_dashboard.py --action export --days 30
 	@echo "✅ Metrics exported to evaluation/metrics.json"
 
 # =============================================================================

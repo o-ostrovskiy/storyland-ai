@@ -7,6 +7,11 @@ This directory contains automated evaluation results from the Langfuse evaluatio
 ```
 evaluation/
 ├── README.md                      # This file
+├── tools/                         # Evaluation scripts
+│   ├── run_scheduled_eval.py      # Main evaluation runner
+│   ├── eval_dashboard.py          # Dashboard and reporting
+│   ├── langfuse_eval.py           # Dataset creation pipeline
+│   └── setup_langfuse_eval.sh     # Setup script
 ├── single_test.evalset.json       # Test dataset (1 case: Pride & Prejudice)
 ├── storyland_eval.evalset.json    # Main dataset (8 diverse books)
 ├── langfuse_datasets.json         # Dataset registry (gitignored)
@@ -24,7 +29,7 @@ evaluation/
 make eval-run
 
 # Or directly
-python tools/run_scheduled_eval.py
+python evaluation/tools/run_scheduled_eval.py
 ```
 
 ### View Results

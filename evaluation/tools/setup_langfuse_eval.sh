@@ -64,7 +64,7 @@ fi
 
 echo ""
 echo "📊 Creating Langfuse datasets from evalsets..."
-python3 tools/langfuse_eval.py --create-datasets --evalset-dir agents/storyland
+python3 evaluation/tools/langfuse_eval.py --create-datasets --evalset-dir evaluation
 
 echo ""
 echo "========================================================"
