@@ -13,8 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add project root to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from common.logging import get_logger, configure_logging
 from common.config import load_config
@@ -144,6 +144,7 @@ async def run_evaluation_on_dataset(
     evaluated_cases = 0  # Real workflow evaluations only
     placeholder_cases = 0  # Placeholder executions (not real evals)
     failed_cases = 0
+    skipped_cases = 0  # Cases that couldn't be parsed or processed
     case_results = []
 
     logger.info(
@@ -170,6 +171,7 @@ async def run_evaluation_on_dataset(
             # Extract input from dataset item
             input_data = item.input
             expected_output = item.expected_output
+            item_metadata = item.metadata or {}
 
             logger.info(
                 "evaluating_case",
@@ -190,6 +192,7 @@ async def run_evaluation_on_dataset(
                 result = await _run_evaluation_case(
                     input_data=input_data,
                     expected_output=expected_output,
+                    item_metadata=item_metadata,
                     config=config,
                     root_span=root_span,
                 )
@@ -240,7 +243,8 @@ async def run_evaluation_on_dataset(
                     item_id=item.id,
                 )
             elif case_status == "skipped":
-                logger.info(
+                skipped_cases += 1
+                logger.warning(
                     "case_skipped",
                     dataset_name=dataset_name,
                     item_id=item.id,
@@ -271,6 +275,7 @@ async def run_evaluation_on_dataset(
         "evaluated_cases": evaluated_cases,  # Real evaluations only
         "placeholder_cases": placeholder_cases,  # Placeholders (not real)
         "failed_cases": failed_cases,
+        "skipped_cases": skipped_cases,  # Cases that couldn't be parsed
         "case_results": case_results,
     }
 
@@ -280,6 +285,7 @@ async def run_evaluation_on_dataset(
         evaluated=evaluated_cases,
         placeholders=placeholder_cases,
         failed=failed_cases,
+        skipped=skipped_cases,
         total=total_cases,
         message=f"View results at {config.langfuse_host}",
     )
@@ -290,6 +296,7 @@ async def run_evaluation_on_dataset(
 async def _run_evaluation_case(
     input_data: Dict[str, Any],
     expected_output: Any,
+    item_metadata: Dict[str, Any],
     config: Any,
     root_span: Any,
 ) -> Dict[str, Any]:
@@ -305,6 +312,7 @@ async def _run_evaluation_case(
     Args:
         input_data: Input from dataset item
         expected_output: Expected output (if available)
+        item_metadata: Metadata from dataset item (contains session_input with preferences)
         config: Application configuration
         root_span: Langfuse root span (from item.run() context manager)
 
@@ -320,26 +328,49 @@ async def _run_evaluation_case(
             return {"status": "skipped", "reason": "No input text"}
 
         # Parse book title and author from the text
-        # Expected format: "Create a literary travel itinerary for Pride and Prejudice"
-        # or with author: "Create a literary travel itinerary for Pride and Prejudice by Jane Austen"
+        # Supported formats:
+        # - "Create a literary travel itinerary for Pride and Prejudice"
+        # - "I'd like a travel itinerary based on The Great Gatsby"
+        # - "Plan a family trip based on Harry Potter"
+        # - "I want to visit places from The Da Vinci Code"
+        # All can optionally include " by AUTHOR"
         book_title = None
         author = None
 
-        # Simple parsing: extract book title from common patterns
+        # Extract author if present (applies to all patterns)
+        text_without_author = text
         if " by " in text:
-            # Format: "...for BOOK by AUTHOR"
-            parts = text.split(" by ")
+            parts = text.split(" by ", 1)
             if len(parts) == 2:
-                author = parts[1].strip()
-                # Extract book title from the first part
-                for_idx = parts[0].rfind(" for ")
-                if for_idx >= 0:
-                    book_title = parts[0][for_idx + 5:].strip()
-        else:
-            # Format: "...for BOOK"
-            for_idx = text.rfind(" for ")
-            if for_idx >= 0:
-                book_title = text[for_idx + 5:].strip()
+                text_without_author = parts[0]
+                # Extract author, removing any trailing punctuation/preferences
+                author_part = parts[1].strip()
+                # Stop at common sentence boundaries
+                for boundary in ['.', ',', '!', '?']:
+                    if boundary in author_part:
+                        author_part = author_part.split(boundary)[0]
+                author = author_part.strip()
+
+        # Try multiple patterns to extract book title
+        patterns = [
+            (" for ", 5),
+            (" based on ", 10),
+            (" from ", 6),
+            (" on ", 4),  # Fallback for shortened "based on"
+        ]
+
+        for pattern, offset in patterns:
+            idx = text_without_author.rfind(pattern)
+            if idx >= 0:
+                # Extract everything after the pattern until punctuation or preference indicators
+                remainder = text_without_author[idx + offset:].strip()
+                # Stop at common sentence boundaries or preference indicators
+                for boundary in ['.', ',', '!', '?', ' I ', ' We ', ' but ', ' and I', ' and we']:
+                    if boundary in remainder:
+                        remainder = remainder.split(boundary)[0].strip()
+                if remainder:
+                    book_title = remainder
+                    break
 
         if not book_title:
             logger.warning("could_not_parse_book_title", input_text=text)
@@ -378,12 +409,21 @@ async def _run_evaluation_case(
         )
 
         # Create session with initial state
-        user_id = "eval_user"
+        # Extract session_input from metadata (includes user preferences)
+        session_input = item_metadata.get("session_input", {})
+        user_id = session_input.get("user_id", "eval_user")
+
         session_id = str(uuid.uuid4())
         initial_state = {
             "book_title": book_title,
             "author": author or "",
         }
+
+        # Initialize preferences from metadata if available
+        # Note: In the current evalset, preferences are embedded in prompts, not in session_input
+        # However, we preserve this for future evalsets that may include structured preferences
+        if "preferences" in session_input:
+            initial_state["user:preferences"] = session_input["preferences"]
 
         await session_service.create_session(
             app_name="storyland",
@@ -927,12 +967,15 @@ def main():
         placeholders = result.get('placeholder_cases', 0)
         total_cases = result.get('total_cases', 0)
         failed_cases = result.get('failed_cases', 0)
+        skipped_cases = result.get('skipped_cases', 0)
 
         # Show breakdown of evaluation types
         if evaluated > 0:
             print(f"Real evaluations: {evaluated} cases")
         if placeholders > 0:
             print(f"Placeholder runs: {placeholders} cases (workflow not implemented)")
+        if skipped_cases > 0:
+            print(f"SKIPPED: {skipped_cases} case(s) could not be parsed")
         if evaluated == 0 and placeholders == 0 and total_cases > 0:
             print(f"Evaluated: 0 cases")
 
@@ -940,17 +983,21 @@ def main():
         total_placeholders += placeholders
 
         # Check if this dataset failed
-        # Failure = explicit error OR (has cases but all failed)
+        # Failure = explicit error OR (has cases but all failed/skipped)
         # Empty dataset (total_cases == 0) is NOT a failure
+        # Skipped cases ARE failures (parsing/processing errors)
         has_error = 'error' in result
         has_failures = total_cases > 0 and failed_cases == total_cases
+        has_skipped = skipped_cases > 0
 
-        if has_error or has_failures:
+        if has_error or has_failures or has_skipped:
             total_failed_datasets += 1
             if has_error:
                 print(f"ERROR: {result['error']}")
             elif has_failures:
                 print(f"ERROR: All {failed_cases} case(s) failed evaluation")
+            elif has_skipped:
+                print(f"ERROR: {skipped_cases} case(s) skipped due to parsing failures")
         elif total_cases == 0:
             # Empty dataset - informational, not an error
             total_skipped += 1

@@ -117,27 +117,16 @@ jobs:
               labels: ['evaluation', 'automation', 'bug']
             });
 
-      - name: Comment evaluation summary
-        if: success() && github.event_name == 'workflow_dispatch'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-
-            // Try to read the trend report
-            let reportContent = 'Evaluation completed successfully. Check artifacts for detailed results.';
-            if (fs.existsSync('evaluation/trend_report.md')) {
-              reportContent = fs.readFileSync('evaluation/trend_report.md', 'utf8');
-              // Limit to first 2000 characters for comment
-              if (reportContent.length > 2000) {
-                reportContent = reportContent.substring(0, 2000) + '\n\n...(truncated)';
-              }
-            }
-
-            github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: '✅ Scheduled Evaluation Completed',
-              body: `Scheduled evaluation completed on ${new Date().toISOString()}.\n\n**Results:**\n\n${reportContent}\n\n**Full Report:** See artifacts in [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`,
-              labels: ['evaluation', 'automation']
-            });
+      - name: Display evaluation summary
+        if: success()
+        run: |
+          echo "✅ Evaluation completed successfully"
+          echo ""
+          echo "📊 Results available in:"
+          echo "  - Artifacts: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          if [ -f "evaluation/trend_report.md" ]; then
+            echo "  - Trend report: evaluation/trend_report.md (committed)"
+            echo ""
+            echo "📈 Summary:"
+            head -n 20 evaluation/trend_report.md
+          fi
