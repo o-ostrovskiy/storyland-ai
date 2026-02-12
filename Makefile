@@ -84,16 +84,7 @@ test-all:
 	.venv/bin/pytest tests/ -v
 
 # =============================================================================
-# ADK Evaluation
-# =============================================================================
-
-eval:
-	.venv/bin/adk eval agents/storyland single_test \
-		--config_file_path tests/evaluation/eval_config.json \
-		--print_detailed_results
-
-# =============================================================================
-# Langfuse Evaluation Pipeline
+# Evaluation Pipeline
 # =============================================================================
 
 eval-setup:

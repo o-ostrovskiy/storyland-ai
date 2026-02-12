@@ -126,6 +126,9 @@ evaluation/langfuse_datasets.json
 evaluation/metrics.json
 # Note: evaluation/trend_report.md is tracked in git to show evaluation trends over time
 
+# ADK generated files
+.adk/
+
 # Logs
 logs/
 *.log

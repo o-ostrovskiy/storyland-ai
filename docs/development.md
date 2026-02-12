@@ -45,8 +45,8 @@ storyland-ai/
 │   │   ├── test_tools.py     # Tool function tests
 │   │   ├── test_agents.py    # Agent factory tests
 │   │   └── test_services.py  # Service tests
-│   └── evaluation/      # ADK evaluation config
-│       └── eval_config.json  # Rubric definitions
+│   └── integration/     # Integration tests (VCR cassettes)
+│       └── test_main_workflow.py
 │
 ├── main.py              # CLI entry point
 ├── *.ipynb              # Demo notebooks
