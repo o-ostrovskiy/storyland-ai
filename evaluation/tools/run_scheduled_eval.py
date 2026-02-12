@@ -329,52 +329,91 @@ async def _run_evaluation_case(
 
         # Parse book title and author from the text
         # Supported formats:
+        # Book-focused:
         # - "Create a literary travel itinerary for Pride and Prejudice"
         # - "I'd like a travel itinerary based on The Great Gatsby"
         # - "Plan a family trip based on Harry Potter"
         # - "I want to visit places from The Da Vinci Code"
+        # Author-focused:
+        # - "I'm interested in visiting places connected to Ernest Hemingway's life and works"
+        # - "I've read all of Agatha Christie's novels. Plan a trip..."
         # All can optionally include " by AUTHOR"
         book_title = None
         author = None
 
-        # Extract author if present (applies to all patterns)
-        text_without_author = text
-        if " by " in text:
-            parts = text.split(" by ", 1)
-            if len(parts) == 2:
-                text_without_author = parts[0]
-                # Extract author, removing any trailing punctuation/preferences
-                author_part = parts[1].strip()
-                # Stop at common sentence boundaries
-                for boundary in ['.', ',', '!', '?']:
-                    if boundary in author_part:
-                        author_part = author_part.split(boundary)[0]
-                author = author_part.strip()
+        # First, try to detect author-focused prompts
+        # Pattern: "connected to AUTHOR's", "AUTHOR's novels/works/books", "of AUTHOR's"
+        import re
 
-        # Try multiple patterns to extract book title
-        patterns = [
-            (" for ", 5),
-            (" based on ", 10),
-            (" from ", 6),
-            (" on ", 4),  # Fallback for shortened "based on"
+        # Look for possessive author patterns
+        author_patterns = [
+            r"connected to ([A-Z][a-z]+(?: [A-Z][a-z]+)*)'s",  # "connected to Ernest Hemingway's"
+            r"of ([A-Z][a-z]+(?: [A-Z][a-z]+)*)'s",  # "of Agatha Christie's"
+            r"all of ([A-Z][a-z]+(?: [A-Z][a-z]+)*)'s",  # "all of Agatha Christie's"
+            r"by ([A-Z][a-z]+(?: [A-Z][a-z]+)*)'s",  # "by Ernest Hemingway's"
         ]
 
-        for pattern, offset in patterns:
-            idx = text_without_author.rfind(pattern)
-            if idx >= 0:
-                # Extract everything after the pattern until punctuation or preference indicators
-                remainder = text_without_author[idx + offset:].strip()
-                # Stop at common sentence boundaries or preference indicators
-                for boundary in ['.', ',', '!', '?', ' I ', ' We ', ' but ', ' and I', ' and we']:
-                    if boundary in remainder:
-                        remainder = remainder.split(boundary)[0].strip()
-                if remainder:
-                    book_title = remainder
-                    break
+        for pattern in author_patterns:
+            match = re.search(pattern, text)
+            if match:
+                author = match.group(1)
+                # For author-focused queries, use author name as book query
+                # The metadata agent will handle this appropriately
+                book_title = f"works by {author}"
+                logger.info(
+                    "author_focused_prompt",
+                    author=author,
+                    original_text=text[:80],
+                )
+                break
+
+        # If not author-focused, try book title patterns
+        if not book_title:
+            # Extract author if present with " by " pattern
+            text_without_author = text
+            if " by " in text:
+                parts = text.split(" by ", 1)
+                if len(parts) == 2:
+                    text_without_author = parts[0]
+                    # Extract author, removing any trailing punctuation/preferences
+                    author_part = parts[1].strip()
+                    # Stop at common sentence boundaries
+                    for boundary in ['.', ',', '!', '?']:
+                        if boundary in author_part:
+                            author_part = author_part.split(boundary)[0]
+                    extracted_author = author_part.strip()
+                    # Only use if it looks like an author name (not a pronoun)
+                    if extracted_author and not extracted_author.lower() in ['her', 'his', 'their', 'my']:
+                        author = extracted_author
+
+            # Try multiple patterns to extract book title
+            patterns = [
+                (" for ", 5),
+                (" based on ", 10),
+                (" from ", 6),
+                (" on ", 4),  # Fallback for shortened "based on"
+            ]
+
+            for pattern, offset in patterns:
+                idx = text_without_author.rfind(pattern)
+                if idx >= 0:
+                    # Extract everything after the pattern until punctuation or preference indicators
+                    remainder = text_without_author[idx + offset:].strip()
+                    # Stop at common sentence boundaries or preference indicators
+                    for boundary in ['.', ',', '!', '?', ' I ', ' We ', ' but ', ' and I', ' and we']:
+                        if boundary in remainder:
+                            remainder = remainder.split(boundary)[0].strip()
+
+                    # Validate that we got a real book title, not a generic pronoun reference
+                    if remainder and remainder.lower() not in ['her books', 'his books', 'their books',
+                                                                'her novels', 'his novels', 'their novels',
+                                                                'her works', 'his works', 'their works']:
+                        book_title = remainder
+                        break
 
         if not book_title:
             logger.warning("could_not_parse_book_title", input_text=text)
-            return {"status": "skipped", "reason": "Could not parse book title from input"}
+            return {"status": "skipped", "reason": "Could not parse book title or author from input"}
 
         logger.info(
             "starting_workflow_evaluation",
@@ -420,9 +459,13 @@ async def _run_evaluation_case(
         }
 
         # Initialize preferences from metadata if available
-        # Note: In the current evalset, preferences are embedded in prompts, not in session_input
-        # However, we preserve this for future evalsets that may include structured preferences
-        if "preferences" in session_input:
+        # Session input can have state with user:preferences (proper structure)
+        # or a top-level preferences key (legacy/alternate format)
+        session_state = session_input.get("state", {})
+        if "user:preferences" in session_state:
+            initial_state["user:preferences"] = session_state["user:preferences"]
+        elif "preferences" in session_input:
+            # Fallback: legacy format with top-level preferences
             initial_state["user:preferences"] = session_input["preferences"]
 
         await session_service.create_session(
@@ -1024,8 +1067,9 @@ def main():
         print("\n❌ ERROR: All dataset evaluations failed")
         sys.exit(1)
     elif total_failed_datasets > 0:
-        print(f"\n⚠️  WARNING: {total_failed_datasets}/{total_datasets} dataset(s) failed")
-        # Still exit 0 if some succeeded - partial success
+        print(f"\n❌ ERROR: {total_failed_datasets}/{actual_datasets} dataset(s) failed")
+        # Exit with error - any dataset failure should fail CI
+        sys.exit(1)
     elif actual_datasets == 0:
         # Only empty datasets
         print("\n⚠️  WARNING: No datasets to evaluate (all empty)")
