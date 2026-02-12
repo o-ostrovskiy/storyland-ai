@@ -140,7 +140,9 @@ async def run_evaluation_on_dataset(
             "evaluated_cases": 0,
         }
 
-    total_cases = len(items)
+    # Limit to max_cases for actual evaluation
+    items_to_evaluate = items[:max_cases]
+    total_cases = len(items_to_evaluate)  # Actual attempted count, not full dataset size
     evaluated_cases = 0  # Real workflow evaluations only
     placeholder_cases = 0  # Placeholder executions (not real evals)
     failed_cases = 0
@@ -151,11 +153,9 @@ async def run_evaluation_on_dataset(
         "dataset_loaded",
         dataset_name=dataset_name,
         total_cases=total_cases,
+        total_items=len(items),
         max_cases=max_cases,
     )
-
-    # Limit to max_cases
-    items_to_evaluate = items[:max_cases]
 
     # Create run name for this evaluation batch
     run_name = f"eval_run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -346,11 +346,14 @@ async def _run_evaluation_case(
         import re
 
         # Look for possessive author patterns
+        # Enhanced regex handles: initials (J.K. Rowling), particles (de, van, von), compound names
+        author_name_pattern = r"[A-Z][A-Za-z.]+(?:\s+(?:[a-z]+\s+)?[A-Z][A-Za-z.]+)*"
         author_patterns = [
-            r"connected to ([A-Z][a-z]+(?: [A-Z][a-z]+)*)'s",  # "connected to Ernest Hemingway's"
-            r"of ([A-Z][a-z]+(?: [A-Z][a-z]+)*)'s",  # "of Agatha Christie's"
-            r"all of ([A-Z][a-z]+(?: [A-Z][a-z]+)*)'s",  # "all of Agatha Christie's"
-            r"by ([A-Z][a-z]+(?: [A-Z][a-z]+)*)'s",  # "by Ernest Hemingway's"
+            rf"connected to ({author_name_pattern})'s",  # "connected to Ernest Hemingway's"
+            rf"of ({author_name_pattern})'s",  # "of Agatha Christie's"
+            rf"all of ({author_name_pattern})'s",  # "all of J.K. Rowling's"
+            rf"by ({author_name_pattern})'s",  # "by Miguel de Cervantes's"
+            rf"from ({author_name_pattern})'s",  # "from T.S. Eliot's"
         ]
 
         for pattern in author_patterns:
