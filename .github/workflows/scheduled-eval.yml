@@ -31,6 +31,7 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
+        timeout-minutes: 5
 
       - name: Create virtual environment
         run: |
@@ -38,6 +39,7 @@ jobs:
           echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
 
       - name: Install dependencies
+        timeout-minutes: 10
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
@@ -51,6 +53,7 @@ jobs:
           echo "LANGFUSE_HOST=${{ secrets.LANGFUSE_HOST }}" >> .env
 
       - name: Run scheduled evaluations
+        timeout-minutes: 30
         run: |
           # Set default parameters (used for both scheduled and manual runs)
           DEFAULT_MAX_CASES=10
@@ -76,6 +79,7 @@ jobs:
 
       - name: Generate evaluation report
         if: success()
+        timeout-minutes: 5
         run: |
           python evaluation/tools/eval_dashboard.py --action report --days 30
 
@@ -91,6 +95,7 @@ jobs:
 
       - name: Commit updated trend report
         if: success()
+        timeout-minutes: 5
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
@@ -99,13 +104,22 @@ jobs:
           if [[ -n $(git status -s evaluation/trend_report.md) ]]; then
             git add evaluation/trend_report.md
             git commit -m "chore: Update evaluation trend report (automated)"
-            git push
+
+            # Push with error handling (branch may be protected)
+            if git push; then
+              echo "✓ Trend report committed and pushed successfully"
+            else
+              echo "⚠️  Warning: Failed to push trend report (branch may be protected)"
+              echo "Report is committed locally and available in artifacts"
+              exit 0  # Don't fail the workflow
+            fi
           else
             echo "No changes to trend report."
           fi
 
       - name: Create issue on evaluation failure
         if: failure()
+        timeout-minutes: 2
         uses: actions/github-script@v7
         with:
           script: |
@@ -113,7 +127,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: '⚠️ Scheduled Evaluation Failed',
-              body: `The scheduled evaluation workflow failed on ${new Date().toISOString()}.\n\n**Run Details:**\n- Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n- Triggered by: ${{ github.event_name }}\n\nPlease check the logs and ensure:\n1. Langfuse credentials are correctly configured\n2. Google API key is valid\n3. Datasets exist in Langfuse\n\nView results: ${{ secrets.LANGFUSE_HOST }}`,
+              body: `The scheduled evaluation workflow failed on ${new Date().toISOString()}.\n\n**Run Details:**\n- Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n- Triggered by: ${{ github.event_name }}\n\nPlease check the logs and ensure:\n1. Langfuse credentials are correctly configured\n2. Google API key is valid\n3. Datasets exist in Langfuse\n4. Evaluation parser handles all prompt formats\n\nView results: ${{ secrets.LANGFUSE_HOST }}`,
               labels: ['evaluation', 'automation', 'bug']
             });
 
