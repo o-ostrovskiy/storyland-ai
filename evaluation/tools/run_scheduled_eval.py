@@ -1029,11 +1029,11 @@ def main():
         total_placeholders += placeholders
 
         # Check if this dataset failed
-        # Failure = explicit error OR (has cases but all failed/skipped)
+        # Failure = explicit error OR any failed cases OR any skipped cases
         # Empty dataset (total_cases == 0) is NOT a failure
-        # Skipped cases ARE failures (parsing/processing errors)
+        # Any failure/skip means the dataset failed (matches "any dataset failure should fail CI")
         has_error = 'error' in result
-        has_failures = total_cases > 0 and failed_cases == total_cases
+        has_failures = failed_cases > 0
         has_skipped = skipped_cases > 0
 
         if has_error or has_failures or has_skipped:
@@ -1041,7 +1041,7 @@ def main():
             if has_error:
                 print(f"ERROR: {result['error']}")
             elif has_failures:
-                print(f"ERROR: All {failed_cases} case(s) failed evaluation")
+                print(f"ERROR: {failed_cases} case(s) failed evaluation (out of {total_cases})")
             elif has_skipped:
                 print(f"ERROR: {skipped_cases} case(s) skipped due to parsing failures")
         elif total_cases == 0:
