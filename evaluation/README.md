@@ -1,6 +1,14 @@
-# Evaluation Results
+# Evaluation Pipeline
 
-This directory contains automated evaluation results from the Langfuse evaluation pipeline.
+Automated evaluation system for StoryLand AI using Langfuse to track quality over time.
+
+## Overview
+
+The evaluation pipeline runs the complete StoryLand workflow (metadata → discovery → composition) on test datasets and tracks results in Langfuse. This enables:
+- Continuous quality monitoring
+- Regression detection before releases
+- Cost/token tracking per evaluation
+- Trend analysis over time
 
 ## Directory Structure
 
@@ -19,6 +27,32 @@ evaluation/
 ├── trend_report.md                # Generated trend report (tracked)
 └── metrics.json                   # Exported metrics (gitignored)
 ```
+
+## Setup
+
+### Prerequisites
+
+1. **Langfuse account**: Sign up at [cloud.langfuse.com](https://cloud.langfuse.com)
+2. **API credentials**: Add to `.env`:
+
+```bash
+LANGFUSE_SECRET_KEY=sk-lf-your-secret-key
+LANGFUSE_PUBLIC_KEY=pk-lf-your-public-key
+LANGFUSE_HOST=https://cloud.langfuse.com
+GOOGLE_API_KEY=your-google-api-key
+```
+
+### Initialize Datasets
+
+Create Langfuse datasets from evalset files (one-time):
+
+```bash
+make eval-setup
+```
+
+This creates two datasets in Langfuse:
+- `single_test` - 1 test case (Pride & Prejudice) for quick validation
+- `storyland_eval` - 8 diverse scenarios for comprehensive testing
 
 ## Quick Start
 
@@ -96,12 +130,41 @@ Evaluations run automatically via GitHub Actions:
 
 Manual trigger: Go to Actions tab → Scheduled Evaluation → Run workflow
 
-## Documentation
+## Quality Metrics
 
-Full documentation: [docs/langfuse-evaluation.md](../docs/langfuse-evaluation.md)
+Each evaluation is scored on 6 dimensions (1-5 scale):
 
-## Need Help?
+1. **Book Relevance** - Are locations connected to the book's settings/themes/author?
+2. **Preference Adherence** - Does itinerary respect user preferences (budget, pace, etc.)?
+3. **Completeness** - Includes cities, landmarks, and author sites?
+4. **Actionability** - Specific places with practical trip-planning details?
+5. **Geographical Accuracy** - Real locations correctly associated with countries?
+6. **Engagement** - Descriptions capture the book's spirit?
 
-- Check [troubleshooting.md](../docs/troubleshooting.md)
-- View Langfuse docs: [langfuse.com/docs](https://langfuse.com/docs)
-- Open an issue on GitHub
+**Note**: LLM-as-judge scoring is not yet implemented (see Issue #96). Currently evaluations just run the workflow and track success/failure.
+
+## Troubleshooting
+
+### "Langfuse authentication failed"
+Check credentials in `.env`:
+```bash
+python -c "from langfuse import Langfuse; print(Langfuse().auth_check())"
+```
+
+### "Dataset not found"
+Run setup to create datasets:
+```bash
+make eval-setup
+```
+
+### No evaluation results
+Run an evaluation first:
+```bash
+make eval-run
+```
+
+## Resources
+
+- [Langfuse Documentation](https://langfuse.com/docs)
+- [Langfuse Datasets Guide](https://langfuse.com/docs/datasets)
+- Token tracking: [docs/langfuse-integration.md](../docs/langfuse-integration.md)

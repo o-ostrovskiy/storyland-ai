@@ -1,8 +1,8 @@
-# Testing & Evaluation
+# Testing
 
-StoryLand AI includes comprehensive testing with pytest unit tests and ADK evaluation framework.
+StoryLand AI includes comprehensive testing with pytest for unit and integration tests.
 
-## Unit Tests (pytest)
+## Unit Tests
 
 Run unit tests locally without any API calls:
 
@@ -29,93 +29,26 @@ Run unit tests locally without any API calls:
 | `test_services.py` | 16 | Session service, context manager |
 | `test_workflow_timeout.py` | 6 | Workflow timeout behavior |
 
-## ADK Evaluation (CLI)
+## Integration Tests
 
-Run agent evaluation with rubric-based scoring:
-
-```bash
-# Run single test scenario (fast)
-.venv/bin/adk eval agents/storyland single_test \
-  --config_file_path tests/evaluation/eval_config.json \
-  --print_detailed_results
-```
-
-**Note:** The eval workflow (`create_eval_workflow`) includes region analysis but auto-selects all regions since human-in-the-loop interaction is not possible in automated evaluations. The workflow still validates that region grouping works correctly.
-
-**Evaluation rubrics:**
-| Rubric | Description |
-|--------|-------------|
-| `book_relevance` | Locations connected to book's settings, themes, characters |
-| `preference_adherence` | Respects user's budget, pace, accessibility preferences |
-| `completeness` | Comprehensive itinerary with cities, landmarks, author sites |
-| `actionability` | Practical details: times, transport, booking tips |
-| `geographical_accuracy` | Real places correctly associated with countries |
-| `engagement` | Engaging descriptions capturing literary spirit |
-
-**Configuration files:**
-- `tests/evaluation/eval_config.json` - Rubric definitions and judge model settings
-- `evaluation/single_test.evalset.json` - Test scenario for Pride and Prejudice
-
-## ADK Web UI Evaluation
-
-For interactive evaluation with visual results:
+Run integration tests with VCR cassettes (no real API calls):
 
 ```bash
-# Launch ADK Web UI
-.venv/bin/adk web agents/
+# Run all integration tests
+.venv/bin/pytest tests/integration/ -v
 
-# Open browser to http://localhost:8000
+# Run specific integration test
+.venv/bin/pytest tests/integration/test_main_workflow.py -v
 ```
 
-**Using the Eval tab:**
+Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions, eliminating the need for real API calls during testing.
 
-1. Navigate to the **Eval** tab in the Web UI
-2. Select an eval set from the dropdown (e.g., `single_test`)
-3. Click **Run Eval** to execute all test cases
-4. View results with:
-   - Pass/fail status per test case
-   - Rubric scores with rationale
-   - Agent response inspection
-   - Turn-by-turn execution trace
+## Quality Evaluation
 
-**Creating custom eval sets:**
+For automated quality evaluation and monitoring, see the [Evaluation Pipeline](../evaluation/README.md).
 
-Create `.evalset.json` files in `agents/storyland/`:
-
-```json
-{
-  "eval_set_id": "my_custom_eval",
-  "name": "My Custom Evaluation",
-  "description": "Test specific scenarios",
-  "eval_cases": [
-    {
-      "eval_id": "test_case_1",
-      "conversation": [
-        {
-          "invocation_id": "turn_1",
-          "user_content": {
-            "parts": [{"text": "Create a travel itinerary for..."}]
-          }
-        }
-      ],
-      "session_input": {
-        "app_name": "storyland",
-        "user_id": "eval_user",
-        "state": {
-          "user:preferences": {
-            "budget": "moderate",
-            "preferred_pace": "relaxed"
-          }
-        }
-      }
-    }
-  ]
-}
-```
-
-## Rate Limits
-
-The Gemini free tier has limits (15 RPM, 200 requests/day). For evaluation:
-- Use `gemini-2.5-flash-lite` for judge model (lower cost)
-- Run single tests during development
-- Run full suite when quota is available
+The evaluation system:
+- Runs complete workflows on test datasets
+- Tracks results in Langfuse
+- Generates trend reports
+- Runs weekly via GitHub Actions
