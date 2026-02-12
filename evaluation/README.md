@@ -6,10 +6,13 @@ This directory contains automated evaluation results from the Langfuse evaluatio
 
 ```
 evaluation/
-├── README.md              # This file
-├── results/               # Evaluation run results (JSON files)
-├── trend_report.md        # Generated trend report
-└── metrics.json           # Exported metrics for dashboards
+├── README.md                      # This file
+├── single_test.evalset.json       # Test dataset (1 case: Pride & Prejudice)
+├── storyland_eval.evalset.json    # Main dataset (8 diverse books)
+├── langfuse_datasets.json         # Dataset registry (gitignored)
+├── results/                       # Evaluation run results (gitignored)
+├── trend_report.md                # Generated trend report (tracked)
+└── metrics.json                   # Exported metrics (gitignored)
 ```
 
 ## Quick Start

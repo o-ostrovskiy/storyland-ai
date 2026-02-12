@@ -54,7 +54,7 @@ Run agent evaluation with rubric-based scoring:
 
 **Configuration files:**
 - `tests/evaluation/eval_config.json` - Rubric definitions and judge model settings
-- `agents/storyland/single_test.evalset.json` - Test scenario for Pride and Prejudice
+- `evaluation/single_test.evalset.json` - Test scenario for Pride and Prejudice
 
 ## ADK Web UI Evaluation
 

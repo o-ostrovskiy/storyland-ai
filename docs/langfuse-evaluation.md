@@ -79,12 +79,12 @@ Convert ADK evalset files to Langfuse datasets:
 
 ```bash
 # Create datasets from all .evalset.json files
-python tools/langfuse_eval.py --create-datasets --evalset-dir agents/storyland
+python tools/langfuse_eval.py --create-datasets --evalset-dir evaluation
 ```
 
 This creates Langfuse datasets from:
-- `agents/storyland/single_test.evalset.json` → `single_test` dataset
-- `agents/storyland/storyland_eval.evalset.json` → `storyland_eval` dataset
+- `evaluation/single_test.evalset.json` → `single_test` dataset
+- `evaluation/storyland_eval.evalset.json` → `storyland_eval` dataset
 
 ### 2. View Datasets in Langfuse
 
