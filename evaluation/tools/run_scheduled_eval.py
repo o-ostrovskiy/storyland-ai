@@ -197,19 +197,12 @@ async def run_evaluation_on_dataset(
                     root_span=root_span,
                 )
 
-                # Score the trace based on evaluation result
-                # Only real workflow evaluations are scored
+                # Log execution type for observability
+                # LLM-as-judge quality scores are added in Phase 4 (lines 765-794)
                 case_status = result.get("status", "unknown")
 
-                if case_status == "evaluated":
-                    # Real evaluation - score it (LLM-as-judge in issue #96)
-                    root_span.score_trace(
-                        name="evaluation_status",
-                        value=1.0,
-                        comment="Evaluation completed - implement LLM scoring (see issue #96)",
-                    )
-                elif case_status == "placeholder":
-                    # Placeholder - don't score to avoid polluting metrics
+                if case_status == "placeholder":
+                    # Placeholder execution - log for tracking
                     logger.info(
                         "placeholder_execution",
                         item_id=item.id,
