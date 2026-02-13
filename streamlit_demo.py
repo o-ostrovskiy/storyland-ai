@@ -342,8 +342,7 @@ async def run_workflow(
         logger.info("book_metadata_resolved",
                    title=exact_title,
                    author=exact_author,
-                   has_image=bool(book_metadata.get("image_url")),
-                   image_url=book_metadata.get("image_url", "None"))
+                   has_image=bool(book_metadata.get("image_url")))
 
         book_info_msg = f"**Book:** \"{exact_title}\" by {exact_author}"
         if published_date:
