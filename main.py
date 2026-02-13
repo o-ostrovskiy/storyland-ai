@@ -188,8 +188,11 @@ def get_book_selection(books: List[BookInfo]) -> Optional[BookInfo]:
             print(f"Please enter a number between 1 and {len(books)}")
         except ValueError:
             print(f"Please enter a number between 1 and {len(books)}")
-        except (KeyboardInterrupt, EOFError):
-            # Fallback to first result if input is not available
+        except KeyboardInterrupt:
+            print("\nSelection cancelled.")
+            return None
+        except EOFError:
+            # Non-interactive: auto-select first result
             selected = books[0]
             author_str = ", ".join(selected.authors) if selected.authors else "Unknown"
             print(f"\nAuto-selected: \"{selected.title}\" by {author_str}")
