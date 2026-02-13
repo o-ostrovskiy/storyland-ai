@@ -167,6 +167,13 @@ def get_book_selection(books: List[BookInfo]) -> Optional[BookInfo]:
         print(f"\nFound: \"{books[0].title}\" by {author_str}")
         return books[0]
 
+    # Non-interactive fallback: auto-select first result if no TTY
+    if not sys.stdin.isatty():
+        selected = books[0]
+        author_str = ", ".join(selected.authors) if selected.authors else "Unknown"
+        print(f"\nAuto-selected (non-interactive): \"{selected.title}\" by {author_str}")
+        return selected
+
     print(f"Enter a number (1-{len(books)}) to select a book:")
 
     while True:
@@ -182,8 +189,11 @@ def get_book_selection(books: List[BookInfo]) -> Optional[BookInfo]:
         except ValueError:
             print(f"Please enter a number between 1 and {len(books)}")
         except (KeyboardInterrupt, EOFError):
-            print("\nSelection cancelled.")
-            return None
+            # Fallback to first result if input is not available
+            selected = books[0]
+            author_str = ", ".join(selected.authors) if selected.authors else "Unknown"
+            print(f"\nAuto-selected: \"{selected.title}\" by {author_str}")
+            return selected
 
 
 async def create_itinerary(

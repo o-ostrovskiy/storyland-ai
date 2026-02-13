@@ -89,7 +89,7 @@ For exploration and experimentation:
 jupyter notebook
 
 # Open the comprehensive showcase notebook:
-# - storyland_showcase.ipynb (complete feature showcase with all capabilities)
+# - streamlit run streamlit_demo.py (interactive web demo)
 ```
 
 **What's in the showcase notebook:**

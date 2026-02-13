@@ -158,7 +158,7 @@ All phases use the Google Agent Development Kit (ADK) with specialized agents:
 For production use with database persistence and advanced features, see:
 - [main.py](main.py) - Full CLI with all options
 - [README.md](README.md) - Complete documentation
-- [storyland_showcase.ipynb](storyland_showcase.ipynb) - Jupyter notebook demos
+- [streamlit_demo.py](streamlit_demo.py) - Streamlit interactive demo
 
 ## Demo Screenshots
 
