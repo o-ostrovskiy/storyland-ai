@@ -23,7 +23,8 @@ from common.config import load_config
 from common.logging import configure_logging, get_logger
 from common.langfuse_init import initialize_langfuse
 from services.session_service import create_session_service
-from tools.google_books import google_books_tool
+from tools.google_books import google_books_tool, search_books_with_retry
+from models.book import BookInfo, BookMetadata
 from agents.orchestrator import (
     create_metadata_stage,
     create_discovery_workflow,
@@ -246,19 +247,29 @@ def display_itinerary_card(city_plan: dict, city_number: int) -> None:
 async def run_workflow(
     book_title: str,
     author: Optional[str],
+    book_metadata: dict,
     preferences: dict,
     progress_placeholder,
     status_placeholder,
     trace_placeholder=None
 ) -> Optional[dict]:
     """
-    Run the three-phase workflow and return the itinerary data.
+    Run the discovery workflow and return location data.
+
+    Book metadata must be pre-resolved before calling this function.
+    This runs Phase 2 (discovery) only.
 
     Args:
+        book_title: The book title
+        author: The author name
+        book_metadata: Pre-resolved book metadata dict
+        preferences: User travel preferences
+        progress_placeholder: Streamlit progress bar
+        status_placeholder: Streamlit status message
         trace_placeholder: Optional placeholder for displaying execution traces
 
     Returns:
-        Dictionary with keys: 'itinerary', 'region_analysis', 'book_metadata'
+        Dictionary with keys: 'region_analysis', 'book_metadata', discoveries
     """
     trace_events = []  # Collect trace events for display
     config = load_config()
@@ -294,8 +305,12 @@ async def run_workflow(
         host=config.langfuse_host,
     )
 
-    # Build initial state
-    initial_state = {"book_title": book_title, "author": author or ""}
+    # Build initial state with pre-resolved book metadata
+    initial_state = {
+        "book_title": book_title,
+        "author": author or "",
+        "book_metadata": book_metadata,
+    }
     if preferences:
         initial_state["user:preferences"] = preferences
 
@@ -312,61 +327,25 @@ async def run_workflow(
 
     workflow_data = {}
 
+    # Book metadata must be pre-resolved and passed in via session state
+    book_metadata = initial_state.get("book_metadata")
+    if not book_metadata:
+        raise ValueError("book_metadata must be set in initial_state before calling run_workflow")
+
     try:
-        # Phase 1: Extract book metadata
-        progress_placeholder.progress(0.1)
-        status_placeholder.info("🔍 **Phase 1:** Searching Google Books API...")
-
-        metadata_stage = create_metadata_stage(model, google_books_tool)
-        metadata_runner = Runner(
-            agent=metadata_stage,
-            app_name="storyland",
-            session_service=session_service,
-            plugins=[LoggingPlugin(), langfuse_plugin],
-        )
-
-        metadata_prompt = f"""Find book metadata for "{book_title}" by {author or 'unknown author'}."""
-        metadata_message = types.Content(role="user", parts=[types.Part(text=metadata_prompt)])
-
-        async with metadata_runner:
-            async for event in metadata_runner.run_async(
-                user_id=user_id, session_id=session_id, new_message=metadata_message
-            ):
-                # Collect trace events
-                if event.author:
-                    trace_events.append({
-                        "phase": "Phase 1",
-                        "agent": event.author,
-                        "type": "agent_event",
-                        "timestamp": str(event.create_time) if hasattr(event, 'create_time') else "N/A"
-                    })
-                    # Update trace display in real-time
-                    if trace_placeholder:
-                        trace_text = "**🔍 Live Execution Trace:**\n\n"
-                        for t in trace_events:
-                            trace_text += f"➤ [{t['phase']}] {t['agent']}\n"
-                        trace_placeholder.code(trace_text, language=None)
-
-        # Get metadata from session state
-        session = await session_service.get_session(
-            app_name="storyland", user_id=user_id, session_id=session_id
-        )
-        book_metadata = session.state.get("book_metadata", {})
         exact_title = book_metadata.get("book_title", book_title)
         exact_author = book_metadata.get("author", author or "Unknown")
         published_date = book_metadata.get("published_date", "")
 
         workflow_data["book_metadata"] = book_metadata
 
-        # Debug: Log what we got
-        logger.info("book_metadata_extracted",
+        logger.info("book_metadata_resolved",
                    title=exact_title,
                    author=exact_author,
                    has_image=bool(book_metadata.get("image_url")),
                    image_url=book_metadata.get("image_url", "None"))
 
-        # Show book found message with details
-        book_info_msg = f"✅ **Book Found:** \"{exact_title}\" by {exact_author}"
+        book_info_msg = f"**Book:** \"{exact_title}\" by {exact_author}"
         if published_date:
             book_info_msg += f" ({published_date})"
         status_placeholder.success(book_info_msg)
@@ -609,8 +588,12 @@ def main():
         st.session_state.workflow_data = None
     if 'itinerary_data' not in st.session_state:
         st.session_state.itinerary_data = None
+    if 'book_search_results' not in st.session_state:
+        st.session_state.book_search_results = None
+    if 'selected_book_metadata' not in st.session_state:
+        st.session_state.selected_book_metadata = None
     if 'current_step' not in st.session_state:
-        st.session_state.current_step = 'input'  # input, region_selection, itinerary
+        st.session_state.current_step = 'input'  # input, book_selection, region_selection, itinerary
 
     # Sidebar for inputs
     with st.sidebar:
@@ -654,6 +637,8 @@ def main():
             if st.button("🔄 Start Over", use_container_width=True):
                 st.session_state.workflow_data = None
                 st.session_state.itinerary_data = None
+                st.session_state.book_search_results = None
+                st.session_state.selected_book_metadata = None
                 st.session_state.current_step = 'input'
                 st.rerun()
 
@@ -668,18 +653,103 @@ def main():
     # Main content area
     if start_button and st.session_state.current_step == 'input':
         if not book_title:
-            st.error("❌ Please enter a book title")
+            st.error("Please enter a book title")
             return
 
-        # Create placeholders for progress and live trace
+        # Phase 1: Search Google Books directly (no LLM needed)
+        with st.spinner("Searching Google Books..."):
+            try:
+                books = search_books_with_retry(
+                    title=book_title, author=author or None
+                )
+            except Exception as e:
+                st.error(f"Could not search Google Books API: {e}")
+                return
+
+        if not books:
+            st.error(
+                f"Could not find \"{book_title}\" in Google Books. "
+                "Please check the title and author spelling and try again."
+            )
+            return
+
+        if len(books) == 1:
+            # Auto-select the only result
+            selected = books[0]
+            author_str = ", ".join(selected.authors) if selected.authors else "Unknown"
+            metadata = BookMetadata(
+                book_title=selected.title,
+                author=author_str,
+                description=selected.description,
+                published_date=selected.published_date,
+                categories=selected.categories or [],
+                image_url=selected.image_url,
+                book_found=True,
+            )
+            st.session_state.selected_book_metadata = metadata.model_dump()
+            st.session_state.current_step = 'run_discovery'
+            st.rerun()
+        else:
+            # Multiple results — let user choose
+            st.session_state.book_search_results = [b.model_dump() for b in books]
+            st.session_state.current_step = 'book_selection'
+            st.rerun()
+
+    # Book selection screen (multiple results)
+    if st.session_state.current_step == 'book_selection' and st.session_state.book_search_results:
+        st.header("Multiple Books Found")
+        st.markdown("Please select which book you meant:")
+
+        books_data = st.session_state.book_search_results
+        options = []
+        for i, b in enumerate(books_data):
+            author_str = ", ".join(b.get("authors", [])) or "Unknown"
+            date_str = f" ({b.get('published_date', '')})" if b.get("published_date") else ""
+            options.append(f"{b.get('title', '?')} by {author_str}{date_str}")
+
+        selected_idx = st.radio(
+            "Select a book:",
+            range(len(options)),
+            format_func=lambda i: options[i],
+        )
+
+        if st.button("Confirm Selection", type="primary"):
+            selected = books_data[selected_idx]
+            author_str = ", ".join(selected.get("authors", [])) or "Unknown"
+            metadata = BookMetadata(
+                book_title=selected.get("title", ""),
+                author=author_str,
+                description=selected.get("description"),
+                published_date=selected.get("published_date"),
+                categories=selected.get("categories", []),
+                image_url=selected.get("image_url"),
+                book_found=True,
+            )
+            st.session_state.selected_book_metadata = metadata.model_dump()
+            st.session_state.current_step = 'run_discovery'
+            st.rerun()
+        return
+
+    # Run discovery workflow (after book is selected)
+    if st.session_state.current_step == 'run_discovery' and st.session_state.selected_book_metadata:
+        book_metadata = st.session_state.selected_book_metadata
+        display_book_info(book_metadata, compact=True)
+
         progress_placeholder = st.progress(0)
         status_placeholder = st.empty()
-        trace_placeholder = st.empty()  # Live trace display
+        trace_placeholder = st.empty()
 
-        # Run Phase 1 & 2 (metadata + discovery)
         try:
             workflow_data = asyncio.run(
-                run_workflow(book_title, author, preferences, progress_placeholder, status_placeholder, trace_placeholder)
+                run_workflow(
+                    book_metadata.get("book_title", ""),
+                    book_metadata.get("author", ""),
+                    book_metadata,
+                    preferences,
+                    progress_placeholder,
+                    status_placeholder,
+                    trace_placeholder,
+                )
             )
 
             if workflow_data:
@@ -687,10 +757,10 @@ def main():
                 st.session_state.current_step = 'region_selection'
                 st.rerun()
             else:
-                st.error("❌ Failed to create itinerary. Please try again.")
+                st.error("Failed to discover locations. Please try again.")
                 return
         except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
+            st.error(f"Error: {str(e)}")
             st.exception(e)
             return
 

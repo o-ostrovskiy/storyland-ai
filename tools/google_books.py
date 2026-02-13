@@ -227,5 +227,36 @@ def search_book(title: str, author: str = "") -> str:
         })
 
 
+def search_books_with_retry(
+    title: str, author: Optional[str] = None, max_results: int = 5
+) -> List[BookInfo]:
+    """
+    Search Google Books with automatic title-only retry.
+
+    If searching with title+author returns no results, automatically retries
+    with title only. This handles cases where the author name is misspelled
+    or unknown.
+
+    Args:
+        title: Book title to search for
+        author: Optional author name
+        max_results: Maximum number of results
+
+    Returns:
+        List of BookInfo objects (may be empty if nothing found)
+    """
+    books = search_books(title=title, author=author, max_results=max_results)
+
+    if not books and author:
+        logger.info(
+            "search_books_retry_title_only",
+            title=title,
+            original_author=author,
+        )
+        books = search_books(title=title, author=None, max_results=max_results)
+
+    return books
+
+
 # Create FunctionTool
 google_books_tool = FunctionTool(search_book)
