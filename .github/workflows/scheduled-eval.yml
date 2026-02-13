@@ -7,11 +7,11 @@ on:
   workflow_dispatch: # Allow manual trigger
     inputs:
       datasets:
-        description: 'Datasets to evaluate (space-separated, leave empty for all)'
+        description: 'Datasets to evaluate (space-separated). Leave empty to auto-discover all datasets from evaluation/langfuse_datasets.json'
         required: false
         default: ''
       max_cases:
-        description: 'Maximum cases per dataset'
+        description: 'Maximum cases per dataset (default: 10)'
         required: false
         default: '10'
 
@@ -31,6 +31,7 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
+        timeout-minutes: 5
 
       - name: Create virtual environment
         run: |
@@ -38,6 +39,7 @@ jobs:
           echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
 
       - name: Install dependencies
+        timeout-minutes: 10
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
@@ -46,34 +48,47 @@ jobs:
         run: |
           echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" > .env
           echo "USE_DATABASE=false" >> .env
+          echo "SESSION_MAX_EVENTS=20" >> .env
+          echo "MAX_CONTEXT_TOKENS=30000" >> .env
+          echo "MODEL_NAME=gemini-2.0-flash-lite" >> .env
+          echo "WORKFLOW_TIMEOUT=300" >> .env
+          echo "AGENT_TIMEOUT=60" >> .env
+          echo "LOG_LEVEL=INFO" >> .env
+          echo "ENABLE_ADK_DEBUG=false" >> .env
           echo "LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}" >> .env
           echo "LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}" >> .env
           echo "LANGFUSE_HOST=${{ secrets.LANGFUSE_HOST }}" >> .env
 
       - name: Run scheduled evaluations
+        timeout-minutes: 30
         run: |
+          # Set default parameters (used for both scheduled and manual runs)
+          DEFAULT_MAX_CASES=10
+
           # Determine datasets argument
+          # If not specified, the script will auto-discover from evaluation/langfuse_datasets.json
           DATASETS_ARG=""
           if [ -n "${{ github.event.inputs.datasets }}" ]; then
             DATASETS_ARG="--datasets ${{ github.event.inputs.datasets }}"
           fi
 
-          # Determine max cases argument
+          # Determine max cases argument with explicit default
           MAX_CASES="${{ github.event.inputs.max_cases }}"
           if [ -z "$MAX_CASES" ]; then
-            MAX_CASES="10"
+            MAX_CASES="$DEFAULT_MAX_CASES"
           fi
 
-          # Run evaluations
-          python tools/run_scheduled_eval.py \
+          # Run evaluations with default parameters
+          python evaluation/tools/run_scheduled_eval.py \
             --output-dir evaluation/results \
             --max-cases "$MAX_CASES" \
             $DATASETS_ARG
 
       - name: Generate evaluation report
         if: success()
+        timeout-minutes: 5
         run: |
-          python tools/eval_dashboard.py --action report --days 30
+          python evaluation/tools/eval_dashboard.py --action report --days 30
 
       - name: Upload evaluation results
         if: always()
@@ -87,6 +102,7 @@ jobs:
 
       - name: Commit updated trend report
         if: success()
+        timeout-minutes: 5
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
@@ -95,13 +111,22 @@ jobs:
           if [[ -n $(git status -s evaluation/trend_report.md) ]]; then
             git add evaluation/trend_report.md
             git commit -m "chore: Update evaluation trend report (automated)"
-            git push
+
+            # Push with error handling (branch may be protected)
+            if git push; then
+              echo "✓ Trend report committed and pushed successfully"
+            else
+              echo "⚠️  Warning: Failed to push trend report (branch may be protected)"
+              echo "Report is committed locally and available in artifacts"
+              exit 0  # Don't fail the workflow
+            fi
           else
             echo "No changes to trend report."
           fi
 
       - name: Create issue on evaluation failure
         if: failure()
+        timeout-minutes: 2
         uses: actions/github-script@v7
         with:
           script: |
@@ -109,31 +134,20 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: '⚠️ Scheduled Evaluation Failed',
-              body: `The scheduled evaluation workflow failed on ${new Date().toISOString()}.\n\n**Run Details:**\n- Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n- Triggered by: ${{ github.event_name }}\n\nPlease check the logs and ensure:\n1. Langfuse credentials are correctly configured\n2. Google API key is valid\n3. Datasets exist in Langfuse\n\nView results: ${{ secrets.LANGFUSE_HOST }}`,
+              body: `The scheduled evaluation workflow failed on ${new Date().toISOString()}.\n\n**Run Details:**\n- Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n- Triggered by: ${{ github.event_name }}\n\nPlease check the logs and ensure:\n1. Langfuse credentials are correctly configured\n2. Google API key is valid\n3. Datasets exist in Langfuse\n4. Evaluation parser handles all prompt formats\n\nView results: ${{ secrets.LANGFUSE_HOST }}`,
               labels: ['evaluation', 'automation', 'bug']
             });
 
-      - name: Comment evaluation summary
-        if: success() && github.event_name == 'workflow_dispatch'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-
-            // Try to read the trend report
-            let reportContent = 'Evaluation completed successfully. Check artifacts for detailed results.';
-            if (fs.existsSync('evaluation/trend_report.md')) {
-              reportContent = fs.readFileSync('evaluation/trend_report.md', 'utf8');
-              // Limit to first 2000 characters for comment
-              if (reportContent.length > 2000) {
-                reportContent = reportContent.substring(0, 2000) + '\n\n...(truncated)';
-              }
-            }
-
-            github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: '✅ Scheduled Evaluation Completed',
-              body: `Scheduled evaluation completed on ${new Date().toISOString()}.\n\n**Results:**\n\n${reportContent}\n\n**Full Report:** See artifacts in [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`,
-              labels: ['evaluation', 'automation']
-            });
+      - name: Display evaluation summary
+        if: success()
+        run: |
+          echo "✅ Evaluation completed successfully"
+          echo ""
+          echo "📊 Results available in:"
+          echo "  - Artifacts: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          if [ -f "evaluation/trend_report.md" ]; then
+            echo "  - Trend report: evaluation/trend_report.md (committed)"
+            echo ""
+            echo "📈 Summary:"
+            head -n 20 evaluation/trend_report.md
+          fi

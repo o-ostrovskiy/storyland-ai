@@ -64,7 +64,7 @@ fi
 
 echo ""
 echo "📊 Creating Langfuse datasets from evalsets..."
-python3 tools/langfuse_eval.py --create-datasets --evalset-dir agents/storyland
+python3 evaluation/tools/langfuse_eval.py --create-datasets --evalset-dir evaluation
 
 echo ""
 echo "========================================================"
@@ -87,5 +87,5 @@ echo "4. Set up automated evaluations:"
 echo "   Add GitHub secrets and enable the workflow in:"
 echo "   .github/workflows/scheduled-eval.yml"
 echo ""
-echo "📖 Full documentation: docs/langfuse-evaluation.md"
+echo "📖 Full documentation: evaluation/README.md"
 echo ""

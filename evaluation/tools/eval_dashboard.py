@@ -105,7 +105,7 @@ class EvalDashboard:
                 "",
                 "To run evaluations:",
                 "```bash",
-                "python tools/run_scheduled_eval.py",
+                "python evaluation/tools/run_scheduled_eval.py",
                 "```",
             ])
         else:
@@ -233,7 +233,7 @@ class EvalDashboard:
         else:
             print("\nNo evaluation results found.")
             print("\nRun evaluations with:")
-            print("  python tools/run_scheduled_eval.py")
+            print("  python evaluation/tools/run_scheduled_eval.py")
 
         print("=" * 60 + "\n")
 
