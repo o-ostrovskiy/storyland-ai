@@ -24,6 +24,10 @@ class BookMetadata(BaseModel):
     image_url: Optional[str] = Field(
         default=None, description="Book cover image URL"
     )
+    book_found: bool = Field(
+        default=True,
+        description="Whether the book was found via Google Books API. False when search returned no results.",
+    )
 
 
 class BookContext(BaseModel):

@@ -180,7 +180,6 @@ StoryLand AI uses Google Gemini models (default: `gemini-2.5-flash-lite`) for al
 
 - **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Complete database reference
 - **[sessions_memory_demo.ipynb](sessions_memory_demo.ipynb)** - Session and preference demos
-- **[storyland_showcase.ipynb](storyland_showcase.ipynb)** - Full feature showcase
 
 ## Why StoryLand AI?
 

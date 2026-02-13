@@ -132,7 +132,7 @@ Each stop explains significance, notes admission fees (moderate budget), and sug
 
 **Testing**: 125 unit tests (pytest) plus ADK evaluation framework with custom rubrics (book relevance, preference adherence, completeness, actionability, geographical accuracy, engagement).
 
-**Development Tools**: CLI (`python main.py`), Jupyter notebooks (`storyland_showcase.ipynb`), ADK Web UI (`adk web agents/`), Makefile.
+**Development Tools**: CLI (`python main.py`), Streamlit demo (`streamlit run streamlit_demo.py`), ADK Web UI (`adk web agents/`), Makefile.
 
 **Infrastructure**: Serverless—runs locally, requires only free Google AI Studio API key, SQLite storage (no external database).
 

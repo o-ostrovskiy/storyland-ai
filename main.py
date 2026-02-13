@@ -27,7 +27,8 @@ from common.langfuse_init import initialize_langfuse, is_enabled
 from langfuse import Langfuse
 from services.session_service import create_session_service
 from services.context_manager import ContextManager
-from tools.google_books import google_books_tool
+from tools.google_books import google_books_tool, search_books_with_retry
+from models.book import BookInfo, BookMetadata
 from agents.orchestrator import (
     create_metadata_stage,
     create_discovery_workflow,
@@ -129,6 +130,73 @@ def get_region_selection(region_analysis: dict) -> List[dict]:
         except (KeyboardInterrupt, EOFError):
             print("\nSelection cancelled.")
             return []
+
+
+def display_book_options(books: List[BookInfo]) -> None:
+    """Display book search results to the user."""
+    print(f"\n{'='*70}")
+    print("MULTIPLE BOOKS FOUND")
+    print(f"{'='*70}\n")
+
+    for i, book in enumerate(books, 1):
+        author_str = ", ".join(book.authors) if book.authors else "Unknown"
+        date_str = f" ({book.published_date})" if book.published_date else ""
+        print(f"[{i}] {book.title} by {author_str}{date_str}")
+        if book.description:
+            # Show first 120 chars of description
+            desc = book.description[:120] + "..." if len(book.description) > 120 else book.description
+            print(f"    {desc}")
+        print()
+
+
+def get_book_selection(books: List[BookInfo]) -> Optional[BookInfo]:
+    """
+    Get user's book selection from search results.
+
+    Args:
+        books: List of BookInfo results from Google Books API
+
+    Returns:
+        Selected BookInfo, or None if cancelled
+    """
+    if not books:
+        return None
+
+    if len(books) == 1:
+        author_str = ", ".join(books[0].authors) if books[0].authors else "Unknown"
+        print(f"\nFound: \"{books[0].title}\" by {author_str}")
+        return books[0]
+
+    # Non-interactive fallback: auto-select first result if no TTY
+    if not sys.stdin.isatty():
+        selected = books[0]
+        author_str = ", ".join(selected.authors) if selected.authors else "Unknown"
+        print(f"\nAuto-selected (non-interactive): \"{selected.title}\" by {author_str}")
+        return selected
+
+    print(f"Enter a number (1-{len(books)}) to select a book:")
+
+    while True:
+        try:
+            choice = input(f"Which book? [1-{len(books)}]: ")
+            idx = int(choice.strip()) - 1
+            if 0 <= idx < len(books):
+                selected = books[idx]
+                author_str = ", ".join(selected.authors) if selected.authors else "Unknown"
+                print(f"\nSelected: \"{selected.title}\" by {author_str}")
+                return selected
+            print(f"Please enter a number between 1 and {len(books)}")
+        except ValueError:
+            print(f"Please enter a number between 1 and {len(books)}")
+        except KeyboardInterrupt:
+            print("\nSelection cancelled.")
+            return None
+        except EOFError:
+            # Non-interactive: auto-select first result
+            selected = books[0]
+            author_str = ", ".join(selected.authors) if selected.authors else "Unknown"
+            print(f"\nAuto-selected: \"{selected.title}\" by {author_str}")
+            return selected
 
 
 async def create_itinerary(
@@ -289,100 +357,75 @@ async def create_itinerary(
         # diagnostic info (how many events processed before timeout).
         # This is a safety mechanism - workflows should complete in <2 minutes typically.
         async with timeout(workflow_timeout):
-            # Phase 1: Extract book metadata
-            logger.info("phase_1_start", phase="metadata_extraction")
-            print("Phase 1: Extracting book metadata...")
+            # Phase 1: Search for book via Google Books API (direct call, no LLM)
+            logger.info("phase_1_start", phase="book_search")
+            print("Phase 1: Searching for book...")
 
-            # Create Langfuse span for metadata stage
             metadata_span = None
             if trace:
                 metadata_span = trace.span(name="metadata-stage", metadata={"phase": 1})
 
             try:
-                metadata_stage = create_metadata_stage(model, google_books_tool)
-                metadata_runner = Runner(
-                    agent=metadata_stage,
-                    app_name="storyland",
-                    session_service=session_service,
-                    plugins=[LoggingPlugin(), langfuse_plugin],
+                books = search_books_with_retry(
+                    title=book_title, author=author or None
                 )
-
-                metadata_prompt = f"""Find book metadata for "{book_title}" by {author or 'unknown author'}."""
-                metadata_message = types.Content(role="user", parts=[types.Part(text=metadata_prompt)])
-
-                async with metadata_runner:
-                    async for event in metadata_runner.run_async(
-                        user_id=user_id, session_id=session_id, new_message=metadata_message
-                    ):
-                        event_count += 1
-                        if event.author:
-                            logger.debug("agent_event", event_count=event_count, author=event.author)
             except Exception as e:
                 logger.error(
-                    "metadata_extraction_failed",
+                    "book_search_failed",
                     error=str(e),
                     error_type=type(e).__name__,
                     book_title=book_title,
-                    author=author
+                    author=author,
                 )
                 if metadata_span:
                     metadata_span.end(output={"error": str(e), "error_type": type(e).__name__})
+                print(f"\n❌ Could not search Google Books API: {e}")
+                print("   Please check your internet connection and try again.")
+                return None
 
-                # Graceful degradation: Use provided title/author if metadata extraction fails
-                print(f"\n⚠️  Could not verify book metadata from Google Books API: {str(e)}")
-                print(f"   Proceeding with provided title: \"{book_title}\"")
+            if not books:
+                logger.warning("book_not_found", book_title=book_title, author=author)
+                if metadata_span:
+                    metadata_span.end(output={"error": "book_not_found"})
+                print(f"\n❌ Could not find \"{book_title}\" in Google Books.")
+                print("   Please check the title and author spelling and try again.")
+                return None
 
-                # Continue with user-provided information
-                exact_title = book_title
-                exact_author = author or "Unknown"
+            # Let user select if multiple results
+            if len(books) > 1:
+                display_book_options(books)
+            selected = get_book_selection(books)
 
-                # Store basic metadata in session for downstream agents
-                session = await session_service.get_session(
-                    app_name="storyland", user_id=user_id, session_id=session_id
-                )
-                session.state["book_metadata"] = {
+            if not selected:
+                return None
+
+            # Build BookMetadata from selected BookInfo
+            exact_author = ", ".join(selected.authors) if selected.authors else "Unknown"
+            exact_title = selected.title
+            book_metadata = BookMetadata(
+                book_title=exact_title,
+                author=exact_author,
+                description=selected.description,
+                published_date=selected.published_date,
+                categories=selected.categories or [],
+                image_url=selected.image_url,
+                book_found=True,
+            )
+
+            logger.info("book_selected", exact_title=exact_title, exact_author=exact_author)
+
+            # Store in session state for downstream agents
+            session = await session_service.get_session(
+                app_name="storyland", user_id=user_id, session_id=session_id
+            )
+            session.state["book_metadata"] = book_metadata.model_dump()
+
+            if metadata_span:
+                metadata_span.end(output={
                     "book_title": exact_title,
                     "author": exact_author,
-                    "description": None,
-                    "published_date": None,
-                    "categories": [],
-                    "image_url": None,
-                }
-
-                if trace and metadata_span:
-                    metadata_span.update(
-                        output={
-                            "fallback_used": True,
-                            "book_title": exact_title,
-                            "author": exact_author,
-                        }
-                    )
-
-            if 'exact_title' not in locals():
-                # Get metadata from session state (only if not already set by fallback)
-                session = await session_service.get_session(
-                    app_name="storyland", user_id=user_id, session_id=session_id
-                )
-                book_metadata = session.state.get("book_metadata", {})
-                exact_title = book_metadata.get("book_title", book_title)
-                exact_author = book_metadata.get("author", author or "Unknown")
-
-                logger.info(
-                    "metadata_extracted",
-                    exact_title=exact_title,
-                    exact_author=exact_author
-                )
-                print(f"\nFound: \"{exact_title}\" by {exact_author}")
-
-                # Update Langfuse span with results
-                if metadata_span:
-                    metadata_span.end(
-                        output={
-                            "book_title": exact_title,
-                            "author": exact_author,
-                            "metadata": book_metadata,
-                        }
-                    )
+                    "metadata": book_metadata.model_dump(),
+                })
 
             # Phase 2: Discovery - find locations and analyze regions
             logger.info("phase_2_start", phase="location_discovery")

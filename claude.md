@@ -92,6 +92,26 @@ If VCR cassettes stop working (tests make real API calls instead of using casset
 2. New authentication headers not filtered → add to `filter_headers`
 3. VCR not intercepting HTTP client → verify httpcore/httpx support
 
+## Architecture: Book Lookup Flow
+
+Book lookup uses a **direct Google Books API call** (no LLM agent) for deterministic, fast results:
+
+1. `search_books_with_retry()` in `tools/google_books.py` calls Google Books API
+   - If title+author returns 0 results, automatically retries with title only
+2. Results are presented to the user:
+   - **0 results**: Immediate error, workflow stops
+   - **1 result**: Auto-selected
+   - **Multiple results**: User picks from a list (CLI: `input()` prompt, Streamlit: `st.radio()`)
+3. Selected book is stored as `BookMetadata` in session state
+4. Discovery and composition phases use the pre-resolved metadata
+
+**Key files:**
+- `tools/google_books.py` — `search_books()`, `search_books_with_retry()`, `search_book()` (agent tool)
+- `models/book.py` — `BookMetadata` (includes `book_found` flag), `BookInfo`
+- `main.py` — `display_book_options()`, `get_book_selection()` (CLI selection)
+- `streamlit_demo.py` — `book_selection` step (Streamlit selection UI)
+- `agents/book_metadata_agent.py` — LLM agent pipeline (kept for API/non-interactive use)
+
 ## Common Maintenance Tasks
 
 1. **Import Errors**: Check Google ADK version compatibility (currently v1.23.0)
