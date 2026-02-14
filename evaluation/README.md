@@ -1,32 +1,15 @@
-# Evaluation Pipeline
+# Evaluation & Observability
 
-Automated evaluation system for StoryLand AI using Langfuse to track quality over time.
+Automated evaluation system and LLM observability for StoryLand AI, powered by [Langfuse](https://langfuse.com).
 
 ## Overview
 
-The evaluation pipeline runs the complete StoryLand workflow (metadata → discovery → composition) on test datasets and tracks results in Langfuse. This enables:
-- Continuous quality monitoring
-- Regression detection before releases
-- Cost/token tracking per evaluation
-- Trend analysis over time
+This module provides two capabilities:
 
-## Directory Structure
+1. **Quality Evaluation** — Run the complete StoryLand workflow on test datasets and track results over time for regression detection
+2. **Token & Cost Tracking** — Monitor token usage, cost, and trace hierarchy for every Gemini API call via the Langfuse plugin
 
-```
-evaluation/
-├── README.md                      # This file
-├── tools/                         # Evaluation scripts
-│   ├── run_scheduled_eval.py      # Main evaluation runner
-│   ├── eval_dashboard.py          # Dashboard and reporting
-│   ├── langfuse_eval.py           # Dataset creation pipeline
-│   └── setup_langfuse_eval.sh     # Setup script
-├── single_test.evalset.json       # Test dataset (1 case: Pride & Prejudice)
-├── storyland_eval.evalset.json    # Main dataset (8 diverse books)
-├── langfuse_datasets.json         # Dataset registry (gitignored)
-├── results/                       # Evaluation run results (gitignored)
-├── trend_report.md                # Generated trend report (tracked)
-└── metrics.json                   # Exported metrics (gitignored)
-```
+Both require a Langfuse account. Token tracking is optional and auto-disables if credentials are missing.
 
 ## Setup
 
@@ -42,6 +25,11 @@ LANGFUSE_HOST=https://cloud.langfuse.com
 GOOGLE_API_KEY=your-google-api-key
 ```
 
+**To get credentials:**
+1. Sign up at [cloud.langfuse.com](https://cloud.langfuse.com)
+2. Create a new project
+3. Copy the API keys from project settings
+
 ### Initialize Datasets
 
 Create Langfuse datasets from evalset files (one-time):
@@ -51,10 +39,10 @@ make eval-setup
 ```
 
 This creates two datasets in Langfuse:
-- `single_test` - 1 test case (Pride & Prejudice) for quick validation
-- `storyland_eval` - 8 diverse scenarios for comprehensive testing
+- `single_test` — 1 test case (Pride & Prejudice) for quick validation
+- `storyland_eval` — 8 diverse scenarios for comprehensive testing
 
-## Quick Start
+## Quality Evaluation
 
 ### Run Evaluations
 
@@ -79,48 +67,20 @@ make eval-report
 make eval-export
 ```
 
-## Result Files
+### Quality Metrics
 
-### Evaluation Results (`results/`)
+Each evaluation is scored on 6 dimensions (1-5 scale):
 
-Files are named: `eval_results_YYYYMMDD_HHMMSS.json`
+1. **Book Relevance** — Are locations connected to the book's settings/themes/author?
+2. **Preference Adherence** — Does itinerary respect user preferences (budget, pace, etc.)?
+3. **Completeness** — Includes cities, landmarks, and author sites?
+4. **Actionability** — Specific places with practical trip-planning details?
+5. **Geographical Accuracy** — Real locations correctly associated with countries?
+6. **Engagement** — Descriptions capture the book's spirit?
 
-**Structure**:
-```json
-{
-  "timestamp": "2026-02-02T12:00:00",
-  "results": [
-    {
-      "dataset_name": "storyland_eval",
-      "evaluated_cases": 8,
-      "total_cases": 8
-    }
-  ]
-}
-```
+LLM-as-judge scoring is implemented in `evaluation/tools/llm_scorer.py` using Gemini to evaluate itineraries against these criteria.
 
-### Trend Report (`trend_report.md`)
-
-Markdown report showing:
-- Total evaluation runs
-- Recent evaluation results
-- Status of each dataset
-- Next steps and recommendations
-
-### Metrics Export (`metrics.json`)
-
-JSON format suitable for external dashboards (Grafana, Datadog, etc.)
-
-## Viewing in Langfuse
-
-For detailed evaluation results with scores:
-
-1. Log in to [cloud.langfuse.com](https://cloud.langfuse.com)
-2. Navigate to **Datasets**
-3. Select a dataset (e.g., `storyland_eval`)
-4. View evaluation runs, scores, and individual test cases
-
-## Automated Evaluations
+### Automated Evaluations
 
 Evaluations run automatically via GitHub Actions:
 
@@ -130,41 +90,155 @@ Evaluations run automatically via GitHub Actions:
 
 Manual trigger: Go to Actions tab → Scheduled Evaluation → Run workflow
 
-## Quality Metrics
+## Token & Cost Tracking (Langfuse Plugin)
 
-Each evaluation is scored on 6 dimensions (1-5 scale):
+### Features
 
-1. **Book Relevance** - Are locations connected to the book's settings/themes/author?
-2. **Preference Adherence** - Does itinerary respect user preferences (budget, pace, etc.)?
-3. **Completeness** - Includes cities, landmarks, and author sites?
-4. **Actionability** - Specific places with practical trip-planning details?
-5. **Geographical Accuracy** - Real locations correctly associated with countries?
-6. **Engagement** - Descriptions capture the book's spirit?
+- **Input/Output Tokens**: Accurate counts from Gemini API responses
+- **Per-Agent Metrics**: Track token usage for each agent call
+- **Real-time Monitoring**: View token consumption as workflows execute
+- **Cost Calculation**: Automatic cost estimation based on Gemini pricing
+- **Trace Hierarchy**: Top-level traces for workflows, spans for nested agents
+- **Tool Tracking**: Monitor tool execution within agent calls
 
-**Note**: LLM-as-judge scoring is not yet implemented (see Issue #96). Currently evaluations just run the workflow and track success/failure.
+### Current Gemini Pricing
+
+Gemini 2.0 Flash (as of Jan 2026):
+- Input: $0.075 per 1M tokens
+- Output: $0.30 per 1M tokens
+
+### Enabling the Plugin
+
+The plugin is automatically initialized if credentials are provided:
+
+```python
+from plugins.langfuse_plugin import LangfusePlugin
+from common.config import load_config
+
+config = load_config()
+
+langfuse_plugin = LangfusePlugin(
+    secret_key=config.langfuse_secret_key,
+    public_key=config.langfuse_public_key,
+    host=config.langfuse_host,
+)
+
+runner = Runner(
+    agent=my_agent,
+    plugins=[LoggingPlugin(), langfuse_plugin],
+)
+```
+
+Auto-disables if credentials are missing.
+
+### CLI Output
+
+Token stats are displayed at the end of each run:
+
+```
+📊 Context: 45 events, ~12000 tokens
+💰 Token Usage: 8,432 tokens (input: 5,123, output: 3,309)
+   Estimated cost: $0.001378
+```
+
+### Programmatic Access
+
+```python
+stats = langfuse_plugin.get_session_stats()
+print(f"Total tokens: {stats['total_tokens']}")
+print(f"Cost: ${stats['cost_usd']:.6f}")
+
+langfuse_plugin.reset_stats()
+await langfuse_plugin.flush()
+```
+
+### Architecture
+
+```
+ADK Runner
+    ↓
+Plugin.on_event()
+    ↓
+AgentStartEvent → Create Langfuse trace/span
+ModelRequestEvent → Start generation tracking
+ModelResponseEvent → Extract token usage, calculate cost
+AgentCompleteEvent → Finalize trace with totals
+```
+
+Token extraction from Gemini responses:
+```python
+response.usage_metadata.prompt_token_count      # Input tokens
+response.usage_metadata.candidates_token_count  # Output tokens
+response.usage_metadata.total_token_count       # Total tokens
+```
+
+### Disabling the Plugin
+
+**Option 1:** Omit from Runner plugins:
+```python
+runner = Runner(agent=my_agent, plugins=[LoggingPlugin()])
+```
+
+**Option 2:** Remove credentials from `.env`.
+
+## Viewing Data in Langfuse
+
+1. Log in to [cloud.langfuse.com](https://cloud.langfuse.com)
+2. Select your project
+3. **Traces** — One per workflow execution (metadata_extraction, discovery, composition)
+4. **Generations** — Individual LLM calls with token counts and costs
+5. **Spans** — Tool executions and nested agent calls
+6. **Datasets** — Evaluation runs, scores, and individual test cases
+
+## Directory Structure
+
+```
+evaluation/
+├── README.md                      # This file
+├── tools/                         # Evaluation scripts
+│   ├── run_scheduled_eval.py      # Main evaluation runner
+│   ├── eval_dashboard.py          # Dashboard and reporting
+│   ├── langfuse_eval.py           # Dataset creation pipeline
+│   ├── llm_scorer.py              # LLM-as-judge quality scoring
+│   └── setup_langfuse_eval.sh     # Setup script
+├── single_test.evalset.json       # Test dataset (1 case: Pride & Prejudice)
+├── storyland_eval.evalset.json    # Main dataset (8 diverse books)
+├── langfuse_datasets.json         # Dataset registry (gitignored)
+├── results/                       # Evaluation run results (gitignored)
+├── trend_report.md                # Generated trend report (tracked)
+└── metrics.json                   # Exported metrics (gitignored)
+```
+
+### Result Files
+
+- **`results/eval_results_YYYYMMDD_HHMMSS.json`** — Per-run evaluation results
+- **`trend_report.md`** — Markdown report with recent evaluation status
+- **`metrics.json`** — JSON export for external dashboards (Grafana, Datadog, etc.)
 
 ## Troubleshooting
 
-### "Langfuse authentication failed"
-Check credentials in `.env`:
+### Langfuse authentication failed
 ```bash
 python -c "from langfuse import Langfuse; print(Langfuse().auth_check())"
 ```
 
-### "Dataset not found"
-Run setup to create datasets:
+### Dataset not found
 ```bash
 make eval-setup
 ```
 
-### No evaluation results
-Run an evaluation first:
-```bash
-make eval-run
-```
+### Plugin not tracking tokens
+- Check credentials are set in `.env`
+- Look for `langfuse_enabled` or `langfuse_disabled` log messages
+- Verify installation: `pip list | grep langfuse`
+- **ADK Web mode**: Plugins are not supported in `adk web` mode (use CLI instead)
+
+### Zero cost displayed
+Token usage is tracked, but cost may show $0.000000 for very small usage. Verify pricing constants in `plugins/langfuse_plugin.py`.
 
 ## Resources
 
 - [Langfuse Documentation](https://langfuse.com/docs)
 - [Langfuse Datasets Guide](https://langfuse.com/docs/datasets)
-- Token tracking: [docs/langfuse-integration.md](../docs/langfuse-integration.md)
+- [Gemini API Pricing](https://ai.google.dev/pricing)
+- [Google ADK Plugins Guide](https://github.com/google/adk-plugins)

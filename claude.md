@@ -11,6 +11,22 @@
 
 Other commands: `make test-all` (both), `make test-cov` (with coverage).
 
+## Documentation Requirements
+
+**Before every commit, verify documentation is up to date.**
+
+If your changes affect any of the following, update the relevant docs:
+- **Project structure** (new files/directories) → update the tree in `README.md`
+- **CLI flags or config variables** → update Quick Start / Configuration in `README.md`
+- **Agent additions or changes** → update Architecture section in `README.md` and `docs/ARCHITECTURE.md`
+- **Evaluation or observability** → update `evaluation/README.md`
+- **Test counts** → update the Testing section in `README.md`
+
+Documentation files:
+- `README.md` — main project docs (structure, config, architecture, testing)
+- `docs/ARCHITECTURE.md` — architecture decision records
+- `evaluation/README.md` — evaluation pipeline and Langfuse token/cost tracking
+
 ## Project Context
 
 - **Project**: StoryLand AI — Literary travel itinerary generator

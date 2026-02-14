@@ -178,7 +178,7 @@ flowchart TB
 **Storage:** In-memory (default) or SQLite persistence. Multi-user support with isolated data. See [Configuration](#configuration) for options.
 
 **Technology Stack:**
-- [Google Agent Development Kit (ADK)](https://github.com/googleapis/python-genai)
+- [Google Agent Development Kit (ADK)](https://github.com/google/adk-python)
 - Google Gemini 2.0/2.5 models (configurable)
 - Pydantic for data validation
 - SQLite for persistence
@@ -243,6 +243,9 @@ storyland-ai/
 ├── common/              # Shared utilities
 │   ├── config.py        # Configuration management
 │   └── logging.py       # Structured logging (structlog)
+│
+├── plugins/             # ADK runner plugins
+│   └── langfuse_plugin.py  # Langfuse observability & token tracking
 │
 ├── tests/               # Test suite
 │   ├── unit/            # Unit tests (no API calls)
@@ -366,8 +369,7 @@ cp storyland_sessions.db backup_$(date +%Y%m%d).db  # Backup
 ## Documentation
 
 - **[Architecture Decisions](docs/ARCHITECTURE.md)** - ADRs explaining key design choices
-- **[Langfuse Integration](docs/langfuse-integration.md)** - Token usage tracking and cost monitoring
-- **[Evaluation Pipeline](evaluation/README.md)** - Automated quality evaluation and monitoring
+- **[Evaluation & Observability](evaluation/README.md)** - Quality evaluation pipeline and Langfuse token/cost tracking
 
 ## Why StoryLand AI?
 
