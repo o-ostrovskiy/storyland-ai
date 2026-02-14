@@ -210,7 +210,7 @@ Run unit tests locally without any API calls:
 .venv/bin/pytest tests/unit/test_agents.py::TestEvalWorkflow -v
 ```
 
-**Test coverage (125 tests total):**
+**Test coverage (143 tests total):**
 | Module | Tests | Description |
 |--------|-------|-------------|
 | `test_models.py` | 46 | Pydantic model validation (incl. RegionAnalysis) |
@@ -218,6 +218,7 @@ Run unit tests locally without any API calls:
 | `test_agents.py` | 41 | Agent factory functions (three-phase & eval workflows) |
 | `test_services.py` | 16 | Session service, context manager |
 | `test_workflow_timeout.py` | 6 | Workflow timeout behavior |
+| `test_llm_scorer.py` | 18 | LLM scoring models, criteria, and prompt building |
 
 ### Integration Tests
 

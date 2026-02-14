@@ -77,8 +77,11 @@ python main.py "Pride and Prejudice" --budget luxury --pace relaxed --museums
 # Family trip
 python main.py "Harry Potter" --with-kids --budget moderate
 
-# With database persistence
-python main.py "1984" --database
+# With database persistence and user ID
+python main.py "1984" --database --user-id alice
+
+# Custom timeout (default: 300s)
+python main.py "War and Peace" --timeout 600
 
 # Development mode (ADK Web UI)
 python main.py --dev
@@ -184,7 +187,7 @@ flowchart TB
 
 ### AI Models
 
-StoryLand AI uses Google Gemini models (default: `gemini-2.5-flash-lite`) for all agents, chosen for native ADK integration, fast parallel execution (sub-2s response times), and excellent structured output adherence across 11 Pydantic data models. The complete workflow takes 60-100 seconds end-to-end with parallel discovery providing 3x speedup over sequential execution.
+StoryLand AI uses Google Gemini models (default: `gemini-2.0-flash-lite`) for all agents, chosen for native ADK integration, fast parallel execution (sub-2s response times), and excellent structured output adherence across 16 Pydantic data models. The complete workflow takes 60-100 seconds end-to-end with parallel discovery providing 3x speedup over sequential execution.
 
 ## Documentation
 
