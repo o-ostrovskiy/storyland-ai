@@ -97,7 +97,7 @@ streamlit run streamlit_demo.py
 - Author-related sites (birthplace, museums, etc.)
 - Practical travel details and tips
 
-See [CLI Usage](docs/cli-usage.md) for all options and [Configuration](#configuration) for environment variables.
+See [Configuration](#configuration) for environment variables. Run `python main.py --help` for all CLI options.
 
 ## Screenshots
 
@@ -325,9 +325,46 @@ Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay H
 - **Missing dependencies:** `pip install -e ".[dev]"`
 - **Timeout errors:** Increase `WORKFLOW_TIMEOUT` in `.env` (default: 300s)
 
+## Database Reference
+
+When using `--database`, ADK's `DatabaseSessionService` creates a `sessions` table:
+
+```sql
+CREATE TABLE sessions (
+    app_name VARCHAR(128) NOT NULL,
+    user_id VARCHAR(128) NOT NULL,
+    id VARCHAR(128) NOT NULL,          -- note: "id", not "session_id"
+    state TEXT NOT NULL,               -- JSON-encoded session state
+    create_time DATETIME NOT NULL,     -- note: "create_time", not "created_at"
+    update_time DATETIME NOT NULL,
+    PRIMARY KEY (app_name, user_id, id)
+)
+```
+
+**State scopes:** No prefix = session-scoped (ephemeral). `user:` prefix = persists across sessions. `app:` prefix = global.
+
+**Common queries:**
+```sql
+-- User's book history
+SELECT id, json_extract(state, '$.book_title') as book, create_time
+FROM sessions WHERE app_name = 'storyland' AND user_id = 'alice'
+ORDER BY create_time DESC;
+
+-- User preferences (keys with colons must be quoted)
+SELECT json_extract(state, '$."user:preferences"') as preferences
+FROM sessions WHERE app_name = 'storyland' AND user_id = 'alice'
+ORDER BY create_time DESC LIMIT 1;
+```
+
+**Maintenance:**
+```bash
+rm storyland_sessions.db                    # Start fresh
+sqlite3 storyland_sessions.db "VACUUM;"     # Reclaim space
+cp storyland_sessions.db backup_$(date +%Y%m%d).db  # Backup
+```
+
 ## Documentation
 
-- **[CLI Usage & Database](docs/cli-usage.md)** - Command-line options, database reference, and SQL queries
 - **[Architecture Decisions](docs/ARCHITECTURE.md)** - ADRs explaining key design choices
 - **[Langfuse Integration](docs/langfuse-integration.md)** - Token usage tracking and cost monitoring
 - **[Evaluation Pipeline](evaluation/README.md)** - Automated quality evaluation and monitoring
