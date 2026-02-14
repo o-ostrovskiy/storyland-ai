@@ -97,7 +97,7 @@ streamlit run streamlit_demo.py
 - Author-related sites (birthplace, museums, etc.)
 - Practical travel details and tips
 
-See [CLI Usage](docs/cli-usage.md) for all options and [Configuration](docs/configuration.md) for environment variables.
+See [CLI Usage](docs/cli-usage.md) for all options and [Development Guide](docs/development.md#configuration) for environment variables.
 
 ## Screenshots
 
@@ -175,7 +175,7 @@ flowchart TB
 | `user:preferences` | All | User travel preferences (persists across sessions) |
 | `final_itinerary` | 3 | Complete travel plan |
 
-**Storage:** In-memory (default) or SQLite persistence. Multi-user support with isolated data. See [Configuration](docs/configuration.md) for options.
+**Storage:** In-memory (default) or SQLite persistence. Multi-user support with isolated data. See [Development Guide](docs/development.md#configuration) for options.
 
 **Technology Stack:**
 - [Google Agent Development Kit (ADK)](https://github.com/googleapis/python-genai)
@@ -189,11 +189,9 @@ StoryLand AI uses Google Gemini models (default: `gemini-2.0-flash-lite`) for al
 
 ## Documentation
 
-- **[CLI Usage](docs/cli-usage.md)** - Command-line options and examples
-- **[Configuration](docs/configuration.md)** - Environment variables reference
-- **[Development Guide](docs/development.md)** - Project structure, testing, observability, and troubleshooting
+- **[CLI Usage & Database](docs/cli-usage.md)** - Command-line options, database reference, and SQL queries
+- **[Development Guide](docs/development.md)** - Project structure, configuration, testing, observability, and troubleshooting
 - **[Architecture Decisions](docs/ARCHITECTURE.md)** - ADRs explaining key design choices
-- **[Database Schema](docs/DATABASE_SCHEMA.md)** - Complete database reference
 - **[Langfuse Integration](docs/langfuse-integration.md)** - Token usage tracking and cost monitoring
 - **[Evaluation Pipeline](evaluation/README.md)** - Automated quality evaluation and monitoring
 

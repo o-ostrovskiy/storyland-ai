@@ -226,45 +226,97 @@ CREATE TABLE sessions (
 )
 ```
 
-**Important:** Column names are:
-- `id` (not `session_id`)
-- `create_time` (not `created_at`)
-- `update_time` (not `updated_at`)
+**Important column name differences:**
 
-See **[DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md)** for complete reference.
+| Wrong | Correct |
+|-------|---------|
+| `session_id` | `id` |
+| `created_at` | `create_time` |
+| `updated_at` | `update_time` |
+
+### State JSON Structure
+
+The `state` column contains JSON with session data:
+
+```json
+{
+  "book_title": "Gone with the Wind",
+  "author": "Margaret Mitchell",
+  "book_metadata": { ... },
+  "final_itinerary": { ... },
+  "user:preferences": { "prefers_museums": true, "budget": "moderate" }
+}
+```
+
+**State Scopes:**
+- No prefix (e.g., `book_title`) — Session-scoped (ephemeral)
+- `user:` prefix (e.g., `user:preferences`) — Persists across sessions for the same user
+- `app:` prefix — App-scoped (global)
+- `temp:` prefix — Temporary (not persisted)
+
+### SQL Queries
+
+```sql
+-- Get user's book history
+SELECT id, json_extract(state, '$.book_title') as book, create_time
+FROM sessions WHERE app_name = 'storyland' AND user_id = 'alice'
+ORDER BY create_time DESC;
+
+-- Get user preferences
+SELECT json_extract(state, '$."user:preferences"') as preferences
+FROM sessions WHERE app_name = 'storyland' AND user_id = 'alice'
+ORDER BY create_time DESC LIMIT 1;
+
+-- Find sessions with specific book
+SELECT id, user_id FROM sessions
+WHERE json_extract(state, '$.book_title') = 'Gone with the Wind';
+
+-- Extract nested JSON (keys with colons must be quoted)
+SELECT json_extract(state, '$."user:preferences".budget') as budget
+FROM sessions WHERE app_name = 'storyland';
+```
+
+**JSON tips:** Use `json_extract(state, '$."user:key"')` for keys with colons. Booleans return as `1`/`0` in SQLite.
 
 ### Inspecting Database
 
 ```bash
-# Open database
-sqlite3 storyland_sessions.db
-
-# Inside sqlite3:
-.tables                    # List tables
-.schema                    # Show structures
-.mode column              # Better formatting
-.headers on
-
-# View sessions
-SELECT * FROM sessions;
-
-# View latest
-SELECT * FROM sessions ORDER BY create_time DESC LIMIT 1;
-
-# Exit
-.quit
-```
-
-**Quick one-liners:**
-
-```bash
-# List tables
+# Quick one-liners
 sqlite3 storyland_sessions.db ".tables"
-
-# Count sessions
 sqlite3 storyland_sessions.db "SELECT COUNT(*) FROM sessions;"
-
-# Latest session
 sqlite3 -column -header storyland_sessions.db \
   "SELECT id, user_id, create_time FROM sessions ORDER BY create_time DESC LIMIT 1;"
+```
+
+### Querying from Python
+
+```python
+import sqlite3, json
+
+conn = sqlite3.connect('storyland_sessions.db')
+cursor = conn.cursor()
+cursor.execute("""
+    SELECT id, json_extract(state, '$.book_title') as book, create_time
+    FROM sessions WHERE app_name = 'storyland' AND user_id = ?
+    ORDER BY create_time DESC
+""", ('alice',))
+for session_id, book, created in cursor.fetchall():
+    print(f"{book} - {created}")
+conn.close()
+```
+
+### Backup & Maintenance
+
+```bash
+# Backup
+cp storyland_sessions.db storyland_sessions_backup_$(date +%Y%m%d).db
+
+# Delete old sessions (older than 30 days)
+sqlite3 storyland_sessions.db "DELETE FROM sessions WHERE create_time < datetime('now', '-30 days');"
+
+# Vacuum to reclaim space
+sqlite3 storyland_sessions.db "VACUUM;"
+
+# Export to CSV
+sqlite3 -header -csv storyland_sessions.db "SELECT * FROM sessions;" > sessions_export.csv
 ```

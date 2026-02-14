@@ -131,56 +131,6 @@ Search queries to use:
 - "{book_title} {author} setting location"
 ```
 
-## Core Components
-
-### 1. Book Metadata Agent
-- Extracts book information from Google Books API
-- Uses both `title` and `author` parameters when available for accurate matching
-- Includes error handling guidance for failed searches
-- Validates with `BookMetadata` Pydantic model
-- Saves to `state["book_metadata"]`
-
-### 2. Book Context Agent
-- Receives exact `book_title` and `author` from Phase 1
-- Searches with precise queries (e.g., "The Nightingale Kristin Hannah setting")
-- Researches setting, time period, and themes
-- Uses Google Search for deep context
-- Validates with `BookContext` Pydantic model
-
-### 3. Discovery Agents (Parallel)
-- **City Agent**: Finds cities to visit
-- **Landmark Agent**: Discovers specific places
-- **Author Agent**: Locates author-related sites
-- All run in parallel for efficiency
-
-### 4. Region Analyzer Agent
-- Analyzes discovered cities and groups them into practical travel regions
-- Uses LLM world knowledge for geographic proximity analysis
-- Rules for grouping:
-  - Same country, close proximity (~500km) → ONE region
-  - Cross-border accessible (train/short flight) → can be ONE region
-  - Large countries split into regions (USA: East/West Coast, etc.)
-  - Never combines cities requiring intercontinental flights
-- Validates with `RegionAnalysis` Pydantic model
-- Saves to `state["region_analysis"]`
-
-### 5. Trip Composer Agent
-- Synthesizes discoveries into coherent itinerary for **selected region(s) only**
-- Groups by city, suggests timing
-- **Uses user preferences** for personalization:
-  - Budget level (budget/moderate/luxury)
-  - Pace (relaxed/moderate/fast-paced)
-  - Museum preference
-  - Traveling with kids
-  - Dietary restrictions
-- Validates with `TripItinerary` Pydantic model
-
-### 6. Reader Profile Agent
-- Uses `get_preferences_tool` to access `user:preferences` from session state
-- Tool reads from `ToolContext.state` (ADK's mechanism for state access)
-- Summarizes preferences for trip composer
-- Provides personalization context for itinerary generation
-
 ## Technology Stack
 
 - **Framework:** Google Agent Development Kit (ADK)
@@ -189,6 +139,28 @@ Search queries to use:
 - **Database:** SQLite (via ADK's DatabaseSessionService)
 - **Data Validation:** Pydantic models
 - **Agent Patterns:** Sequential and parallel orchestration
+
+## Configuration
+
+All configuration is via environment variables in `.env`. Copy `.env.example` to get started.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GOOGLE_API_KEY` | **Required.** Google AI API key from [AI Studio](https://aistudio.google.com/app/apikey) | — |
+| `MODEL_NAME` | Gemini model to use | `gemini-2.0-flash-lite` |
+| `USE_DATABASE` | Enable SQLite persistence | `false` |
+| `DATABASE_URL` | SQLite database path | `sqlite+aiosqlite:///storyland_sessions.db` |
+| `SESSION_MAX_EVENTS` | Max events in session | `20` |
+| `MAX_CONTEXT_TOKENS` | Max tokens for context window | `30000` |
+| `WORKFLOW_TIMEOUT` | Max seconds for entire workflow | `300` |
+| `AGENT_TIMEOUT` | Max seconds per agent | `60` |
+| `LOG_LEVEL` | Logging level (DEBUG/INFO/WARNING/ERROR) | `INFO` |
+| `ENABLE_ADK_DEBUG` | Enable ADK internal debug logging | `false` |
+| `LANGFUSE_SECRET_KEY` | Langfuse secret key (optional) | — |
+| `LANGFUSE_PUBLIC_KEY` | Langfuse public key (optional) | — |
+| `LANGFUSE_HOST` | Langfuse host URL (optional) | — |
+
+Free tier includes 15 RPM and 200 requests/day — sufficient for development.
 
 ## Testing
 
