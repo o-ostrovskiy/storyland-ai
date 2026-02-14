@@ -11,14 +11,16 @@ Split itinerary generation into three separate workflow phases with human region
 
 ### Architecture
 ```
-Phase 1: Metadata Extraction
+Phase 1: Book Search (direct Google Books API call)
     ↓
-Phase 2: Discovery & Region Analysis
+Phase 2: Discovery & Region Analysis (LLM agents)
     ↓
 [USER SELECTS REGION(S)] ← Human-in-the-Loop
     ↓
-Phase 3: Itinerary Composition
+Phase 3: Itinerary Composition (LLM agents)
 ```
+
+**Phase 1 implementation note:** The CLI and Streamlit workflows use a **direct Google Books API call** (`search_books_with_retry()` in `tools/google_books.py`) rather than the LLM-based `book_metadata_pipeline`. This is faster and more deterministic — no LLM needed to search a structured API. The LLM pipeline (`create_metadata_stage()` in `orchestrator.py`) is kept for the eval workflow and non-interactive API use.
 
 ### Rationale
 

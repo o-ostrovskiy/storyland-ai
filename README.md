@@ -68,11 +68,26 @@ cp .env.example .env
 # Basic usage
 python main.py "Gone with the Wind"
 
+# With author (for disambiguation)
+python main.py "The Nightingale" --author "Kristin Hannah"
+
 # With preferences
 python main.py "Pride and Prejudice" --budget luxury --pace relaxed --museums
 
-# Development mode (Web UI)
+# Family trip
+python main.py "Harry Potter" --with-kids --budget moderate
+
+# With database persistence and user ID
+python main.py "1984" --database --user-id alice
+
+# Custom timeout (default: 300s)
+python main.py "War and Peace" --timeout 600
+
+# Development mode (ADK Web UI)
 python main.py --dev
+
+# Streamlit demo
+streamlit run streamlit_demo.py
 ```
 
 **What you get:**
@@ -82,7 +97,7 @@ python main.py --dev
 - Author-related sites (birthplace, museums, etc.)
 - Practical travel details and tips
 
-📖 **[Full installation guide →](docs/getting-started.md)**
+See [Configuration](#configuration) for environment variables. Run `python main.py --help` for all CLI options.
 
 ## Screenshots
 
@@ -93,8 +108,6 @@ python main.py --dev
 
 ![Complete Itinerary](docs/images/trip%20iternary.png)
 *Detailed itinerary with literary context and practical travel info*
-
-**More screenshots:** See [Streamlit Demo Guide](docs/STREAMLIT_DEMO.md) for additional screenshots including the welcome screen and preference configuration.
 
 ## Architecture
 
@@ -149,37 +162,214 @@ flowchart TB
 - **Trip Composer** - Creates personalized itinerary based on user preferences
 - **Reader Profile Agent** - Accesses user preferences from session state
 
-**Session & State:**
-- In-memory (default) or SQLite persistence
-- User preferences persist across sessions
-- Multi-user support with isolated data
+**Session State Keys:**
+
+| Key | Phase | Description |
+|-----|-------|-------------|
+| `book_metadata` | 1 | Exact title, author, description |
+| `book_context` | 2 | Setting, themes, time period |
+| `city_discovery` | 2 | Cities with literary connections |
+| `landmark_discovery` | 2 | Specific landmarks and sites |
+| `author_sites` | 2 | Author-related locations |
+| `region_analysis` | 2 | Geographic region grouping |
+| `user:preferences` | All | User travel preferences (persists across sessions) |
+| `final_itinerary` | 3 | Complete travel plan |
+
+**Storage:** In-memory (default) or SQLite persistence. Multi-user support with isolated data. See [Configuration](#configuration) for options.
 
 **Technology Stack:**
-- [Google Agent Development Kit (ADK)](https://github.com/googleapis/python-genai)
+- [Google Agent Development Kit (ADK)](https://github.com/google/adk-python)
 - Google Gemini 2.0/2.5 models (configurable)
 - Pydantic for data validation
 - SQLite for persistence
 
 ### AI Models
 
-StoryLand AI uses Google Gemini models (default: `gemini-2.5-flash-lite`) for all agents, chosen for native ADK integration, fast parallel execution (sub-2s response times), and excellent structured output adherence across 11 Pydantic data models. The complete workflow takes 60-100 seconds end-to-end with parallel discovery providing 3x speedup over sequential execution.
+StoryLand AI uses Google Gemini models (default: `gemini-2.0-flash-lite`) for all agents, chosen for native ADK integration, fast parallel execution (sub-2s response times), and excellent structured output adherence across 16 Pydantic data models. The complete workflow takes 60-100 seconds end-to-end with parallel discovery providing 3x speedup over sequential execution.
+
+## Configuration
+
+All configuration is via environment variables in `.env`. Copy `.env.example` to get started.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GOOGLE_API_KEY` | **Required.** Google AI API key from [AI Studio](https://aistudio.google.com/app/apikey) | — |
+| `MODEL_NAME` | Gemini model to use | `gemini-2.0-flash-lite` |
+| `USE_DATABASE` | Enable SQLite persistence | `false` |
+| `DATABASE_URL` | SQLite database path | `sqlite+aiosqlite:///storyland_sessions.db` |
+| `SESSION_MAX_EVENTS` | Max events in session | `20` |
+| `MAX_CONTEXT_TOKENS` | Max tokens for context window | `30000` |
+| `WORKFLOW_TIMEOUT` | Max seconds for entire workflow | `300` |
+| `AGENT_TIMEOUT` | Max seconds per agent | `60` |
+| `LOG_LEVEL` | Logging level (DEBUG/INFO/WARNING/ERROR) | `INFO` |
+| `ENABLE_ADK_DEBUG` | Enable ADK internal debug logging | `false` |
+| `LANGFUSE_SECRET_KEY` | Langfuse secret key (optional) | — |
+| `LANGFUSE_PUBLIC_KEY` | Langfuse public key (optional) | — |
+| `LANGFUSE_HOST` | Langfuse host URL (optional) | — |
+
+Free tier includes 15 RPM and 200 requests/day — sufficient for development.
+
+## Development
+
+### Project Structure
+
+```
+storyland-ai/
+├── models/              # Pydantic data models
+│   ├── book.py          # BookMetadata, BookContext, BookInfo
+│   ├── discovery.py     # CityDiscovery, LandmarkDiscovery, AuthorSites,
+│   │                    # RegionCity, RegionOption, RegionAnalysis
+│   ├── itinerary.py     # TripItinerary, CityPlan, CityStop
+│   └── preferences.py   # TravelPreferences
+│
+├── tools/               # External API integrations
+│   ├── google_books.py  # Google Books search tool
+│   └── preferences.py   # Session state preferences tool
+│
+├── agents/              # AI agent definitions
+│   ├── book_metadata_agent.py    # Book metadata extraction
+│   ├── book_context_agent.py     # Book setting research
+│   ├── discovery_agents.py       # City/landmark/author discovery
+│   ├── trip_composer_agent.py    # Itinerary composition
+│   ├── reader_profile_agent.py   # Preferences-based personalization
+│   ├── region_analyzer_agent.py  # Geographic region grouping
+│   ├── orchestrator.py           # Three-phase workflow coordination
+│   └── storyland/agent.py        # ADK Web UI agent
+│
+├── services/            # Core services
+│   ├── session_service.py   # Session management (InMemory/SQLite)
+│   └── context_manager.py   # Context engineering
+│
+├── common/              # Shared utilities
+│   ├── config.py        # Configuration management
+│   └── logging.py       # Structured logging (structlog)
+│
+├── plugins/             # ADK runner plugins
+│   └── langfuse_plugin.py  # Langfuse observability & token tracking
+│
+├── tests/               # Test suite
+│   ├── unit/            # Unit tests (no API calls)
+│   └── integration/     # Integration tests (VCR cassettes)
+│
+├── main.py              # CLI entry point
+├── streamlit_demo.py    # Streamlit web UI
+├── pyproject.toml       # Dependencies & pytest config
+└── .env.example         # Environment template
+```
+
+### Extending the Codebase
+
+**Adding a new agent** — create in `agents/`, import in `orchestrator.py`:
+```python
+from google.adk.agents import LlmAgent
+def create_my_agent(model):
+    return LlmAgent(name="my_agent", model=model, instruction="...")
+```
+
+**Adding a new tool** — create in `tools/`:
+```python
+from google.adk.tools import FunctionTool
+def my_function(query: str) -> str:
+    return result
+my_tool = FunctionTool(my_function)
+```
+
+**Adding a new model** — create in `models/`:
+```python
+from pydantic import BaseModel, Field
+class MyModel(BaseModel):
+    field1: str = Field(description="Description")
+```
+
+### Prompt Engineering
+
+Agent prompts include reliability improvements:
+
+- **Anti-hallucination:** `"If the research found no cities, return an empty list - do not hallucinate."`
+- **Error handling:** `"If the tool returns an error, report it clearly and explain what went wrong"`
+- **Disambiguation:** Book title and author injected into search queries to avoid confusion with similarly-named books
+
+## Testing
+
+```bash
+make test                # Unit tests (143 tests)
+make test-integration    # Integration tests with VCR cassettes
+make test-all            # Both
+make test-cov            # With coverage
+```
+
+| Module | Tests | Description |
+|--------|-------|-------------|
+| `test_models.py` | 46 | Pydantic model validation |
+| `test_tools.py` | 16 | Google Books, preferences tools |
+| `test_agents.py` | 41 | Agent factory functions |
+| `test_services.py` | 16 | Session service, context manager |
+| `test_workflow_timeout.py` | 6 | Workflow timeout behavior |
+| `test_llm_scorer.py` | 18 | LLM scoring models and prompts |
+
+Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).
+
+### Observability
+
+| Mode | Logging | Use Case |
+|------|---------|----------|
+| `python main.py --dev` | ADK Web UI (DEBUG) | Development, debugging |
+| `python main.py "book"` | LoggingPlugin (INFO) | Production |
+| `python main.py "book" -v` | LoggingPlugin (DEBUG) | Troubleshooting |
+
+> **Note:** Plugins are NOT supported in ADK web mode.
+
+## Troubleshooting
+
+- **Rate limits (429):** Retry logic handles automatically. Wait ~60s between books.
+- **API key issues:** `python -c "import os; from dotenv import load_dotenv; load_dotenv(); print('OK' if os.getenv('GOOGLE_API_KEY') else 'MISSING')"`
+- **Database issues:** `rm storyland_sessions.db` to start fresh
+- **Virtual env not activated:** `source .venv/bin/activate`
+- **Missing dependencies:** `pip install -e ".[dev]"`
+- **Timeout errors:** Increase `WORKFLOW_TIMEOUT` in `.env` (default: 300s)
+
+## Database Reference
+
+When using `--database`, ADK's `DatabaseSessionService` creates a `sessions` table:
+
+```sql
+CREATE TABLE sessions (
+    app_name VARCHAR(128) NOT NULL,
+    user_id VARCHAR(128) NOT NULL,
+    id VARCHAR(128) NOT NULL,          -- note: "id", not "session_id"
+    state TEXT NOT NULL,               -- JSON-encoded session state
+    create_time DATETIME NOT NULL,     -- note: "create_time", not "created_at"
+    update_time DATETIME NOT NULL,
+    PRIMARY KEY (app_name, user_id, id)
+)
+```
+
+**State scopes:** No prefix = session-scoped (ephemeral). `user:` prefix = persists across sessions. `app:` prefix = global.
+
+**Common queries:**
+```sql
+-- User's book history
+SELECT id, json_extract(state, '$.book_title') as book, create_time
+FROM sessions WHERE app_name = 'storyland' AND user_id = 'alice'
+ORDER BY create_time DESC;
+
+-- User preferences (keys with colons must be quoted)
+SELECT json_extract(state, '$."user:preferences"') as preferences
+FROM sessions WHERE app_name = 'storyland' AND user_id = 'alice'
+ORDER BY create_time DESC LIMIT 1;
+```
+
+**Maintenance:**
+```bash
+rm storyland_sessions.db                    # Start fresh
+sqlite3 storyland_sessions.db "VACUUM;"     # Reclaim space
+cp storyland_sessions.db backup_$(date +%Y%m%d).db  # Backup
+```
 
 ## Documentation
 
-- **[Getting Started](docs/getting-started.md)** - Installation, setup, and usage options
-- **[CLI Usage](docs/cli-usage.md)** - Command-line options and examples
-- **[Observability](docs/observability.md)** - Logging and debugging
-- **[Langfuse Integration](docs/langfuse-integration.md)** - Token usage tracking and cost monitoring
-- **[Evaluation Pipeline](evaluation/README.md)** - Automated quality evaluation and monitoring
-- **[Testing](docs/testing.md)** - Unit and integration tests
-- **[Development](docs/development.md)** - Project structure and development guide
-- **[Configuration](docs/configuration.md)** - Environment variables reference
-- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
-
-## Additional Resources
-
-- **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Complete database reference
-- **[sessions_memory_demo.ipynb](sessions_memory_demo.ipynb)** - Session and preference demos
+- **[Architecture Decisions](docs/ARCHITECTURE.md)** - ADRs explaining key design choices
+- **[Evaluation & Observability](evaluation/README.md)** - Quality evaluation pipeline and Langfuse token/cost tracking
 
 ## Why StoryLand AI?
 

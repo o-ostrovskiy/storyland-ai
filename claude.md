@@ -1,120 +1,60 @@
 # Claude AI Assistant Guidelines for StoryLand AI
 
-This document contains guidelines and requirements for Claude when working on the StoryLand AI codebase.
-
 ## Testing Requirements
 
 **IMPORTANT: Always run tests when finishing a task.**
 
-When you complete any code changes, bug fixes, or new features, you MUST:
+1. Run `make test` (unit tests) and `make test-integration` (integration tests)
+2. Fix any failures before considering the task complete
+3. Report test results (passed/failed counts) to the user
+4. Never skip or ignore failing tests — fix syntax errors first (they block all tests)
 
-1. **Run Unit Tests**: Execute `make test` to run all unit tests
-2. **Run Integration Tests**: Execute `make test-integration` to run integration tests
-3. **Fix Any Failures**: If tests fail, investigate and fix the issues before considering the task complete
-4. **Report Results**: Inform the user of test results (passed/failed counts)
+Other commands: `make test-all` (both), `make test-cov` (with coverage).
 
-### Test Commands
+## Documentation Requirements
 
-```bash
-# Run all unit tests
-make test
+**Before every commit, verify documentation is up to date.**
 
-# Run integration tests
-make test-integration
+If your changes affect any of the following, update the relevant docs:
+- **Project structure** (new files/directories) → update the tree in `README.md`
+- **CLI flags or config variables** → update Quick Start / Configuration in `README.md`
+- **Agent additions or changes** → update Architecture section in `README.md` and `docs/ARCHITECTURE.md`
+- **Evaluation or observability** → update `evaluation/README.md`
+- **Test counts** → update the Testing section in `README.md`
 
-# Run all tests (unit + integration)
-make test-all
-
-# Run tests with coverage
-make test-cov
-```
-
-### When Tests Fail
-
-- Read the error messages carefully
-- Fix syntax errors first (they block all tests)
-- Update tests if functionality intentionally changed
-- Never skip or ignore failing tests
-- Ask the user for clarification if unsure about expected behavior
+Documentation files:
+- `README.md` — main project docs (structure, config, architecture, testing)
+- `docs/ARCHITECTURE.md` — architecture decision records
+- `evaluation/README.md` — evaluation pipeline and Langfuse token/cost tracking
 
 ## Project Context
 
-- **Project**: StoryLand AI - Literary travel itinerary generator
+- **Project**: StoryLand AI — Literary travel itinerary generator
 - **Framework**: Google ADK (Agent Development Kit)
 - **Language**: Python 3.12
 - **Key Dependencies**: google-adk, google-genai, pydantic
 - **Testing**: pytest with VCR for integration tests
 
-## Code Quality Standards
+## Code Quality
 
 - Follow existing code style and patterns
 - Use structured logging via `common.logging.get_logger()`
-- Write docstrings for new functions and classes
-- Handle errors gracefully with proper error messages
 - Validate input data using Pydantic models
+- Handle errors gracefully with proper error messages
 
-## Security Guidelines
+## Security: API Keys & VCR Cassettes
 
 **CRITICAL: Never expose API keys or credentials in code or test cassettes.**
 
-### API Key Protection
-
-1. **Environment Variables Only**: All API keys MUST be stored in `.env` files, never hardcoded
-2. **VCR Cassette Security**: When working with VCR cassettes for integration tests:
-   - **ALWAYS** verify that `tests/integration/conftest.py` filters sensitive headers:
-     ```python
-     "filter_headers": ["authorization", "x-goog-api-key"]
-     "filter_query_parameters": ["key"]
-     ```
-   - **ALWAYS** audit cassette files before committing to ensure no API keys are present
-   - Run this check: `grep -r "AIza\|x-goog-api-key" tests/integration/cassettes/`
-   - Expected result: No matches found
-
-3. **Adding New API Integrations**: When adding new external APIs:
-   - Identify all authentication headers/parameters
-   - Add them to VCR's `filter_headers` and `filter_query_parameters`
-   - Regenerate affected cassettes with `--vcr-record=all`
-   - Verify no credentials in cassettes before committing
-
-4. **Before Every Commit**:
-   - Check `.env` is in `.gitignore`
-   - Audit any modified cassettes for API keys
-   - Never commit files containing real credentials
-
-### VCR Configuration Details
-
-The VCR configuration in `tests/integration/conftest.py` currently filters:
-- **Headers**: `authorization`, `x-goog-api-key` (Google GenAI API)
-- **Query Parameters**: `key` (Google Books API)
-
-If VCR cassettes stop working (tests make real API calls instead of using cassettes), check:
-1. API key in cassette doesn't match current `.env` → regenerate cassette
-2. New authentication headers not filtered → add to `filter_headers`
-3. VCR not intercepting HTTP client → verify httpcore/httpx support
-
-## Architecture: Book Lookup Flow
-
-Book lookup uses a **direct Google Books API call** (no LLM agent) for deterministic, fast results:
-
-1. `search_books_with_retry()` in `tools/google_books.py` calls Google Books API
-   - If title+author returns 0 results, automatically retries with title only
-2. Results are presented to the user:
-   - **0 results**: Immediate error, workflow stops
-   - **1 result**: Auto-selected
-   - **Multiple results**: User picks from a list (CLI: `input()` prompt, Streamlit: `st.radio()`)
-3. Selected book is stored as `BookMetadata` in session state
-4. Discovery and composition phases use the pre-resolved metadata
-
-**Key files:**
-- `tools/google_books.py` — `search_books()`, `search_books_with_retry()`, `search_book()` (agent tool)
-- `models/book.py` — `BookMetadata` (includes `book_found` flag), `BookInfo`
-- `main.py` — `display_book_options()`, `get_book_selection()` (CLI selection)
-- `streamlit_demo.py` — `book_selection` step (Streamlit selection UI)
-- `agents/book_metadata_agent.py` — LLM agent pipeline (kept for API/non-interactive use)
-
-## Common Maintenance Tasks
-
-1. **Import Errors**: Check Google ADK version compatibility (currently v1.23.0)
-2. **Test Failures**: Often due to changed error messages or API responses
-3. **Syntax Errors**: Fix immediately as they block all tests
-4. **Type Errors**: Ensure Pydantic models match actual data structures
+- All API keys MUST be stored in `.env` files, never hardcoded
+- VCR cassettes in `tests/integration/conftest.py` must filter sensitive headers:
+  ```python
+  "filter_headers": ["authorization", "x-goog-api-key"]
+  "filter_query_parameters": ["key"]
+  ```
+- **Before committing cassettes**, always verify no keys leaked:
+  ```bash
+  grep -r "AIza\|x-goog-api-key" tests/integration/cassettes/
+  ```
+  Expected: No matches (0 results).
+- When adding new API integrations, add their auth headers/parameters to VCR filters and regenerate cassettes with `--vcr-record=all`
