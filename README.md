@@ -68,11 +68,23 @@ cp .env.example .env
 # Basic usage
 python main.py "Gone with the Wind"
 
+# With author (for disambiguation)
+python main.py "The Nightingale" --author "Kristin Hannah"
+
 # With preferences
 python main.py "Pride and Prejudice" --budget luxury --pace relaxed --museums
 
-# Development mode (Web UI)
+# Family trip
+python main.py "Harry Potter" --with-kids --budget moderate
+
+# With database persistence
+python main.py "1984" --database
+
+# Development mode (ADK Web UI)
 python main.py --dev
+
+# Streamlit demo
+streamlit run streamlit_demo.py
 ```
 
 **What you get:**
@@ -82,7 +94,7 @@ python main.py --dev
 - Author-related sites (birthplace, museums, etc.)
 - Practical travel details and tips
 
-📖 **[Full installation guide →](docs/getting-started.md)**
+See [CLI Usage](docs/cli-usage.md) for all options and [Configuration](docs/configuration.md) for environment variables.
 
 ## Screenshots
 
@@ -149,10 +161,20 @@ flowchart TB
 - **Trip Composer** - Creates personalized itinerary based on user preferences
 - **Reader Profile Agent** - Accesses user preferences from session state
 
-**Session & State:**
-- In-memory (default) or SQLite persistence
-- User preferences persist across sessions
-- Multi-user support with isolated data
+**Session State Keys:**
+
+| Key | Phase | Description |
+|-----|-------|-------------|
+| `book_metadata` | 1 | Exact title, author, description |
+| `book_context` | 2 | Setting, themes, time period |
+| `city_discovery` | 2 | Cities with literary connections |
+| `landmark_discovery` | 2 | Specific landmarks and sites |
+| `author_sites` | 2 | Author-related locations |
+| `region_analysis` | 2 | Geographic region grouping |
+| `user:preferences` | All | User travel preferences (persists across sessions) |
+| `final_itinerary` | 3 | Complete travel plan |
+
+**Storage:** In-memory (default) or SQLite persistence. Multi-user support with isolated data. See [Configuration](docs/configuration.md) for options.
 
 **Technology Stack:**
 - [Google Agent Development Kit (ADK)](https://github.com/googleapis/python-genai)
@@ -166,20 +188,14 @@ StoryLand AI uses Google Gemini models (default: `gemini-2.5-flash-lite`) for al
 
 ## Documentation
 
-- **[Getting Started](docs/getting-started.md)** - Installation, setup, and usage options
 - **[CLI Usage](docs/cli-usage.md)** - Command-line options and examples
-- **[Observability](docs/observability.md)** - Logging and debugging
+- **[Configuration](docs/configuration.md)** - Environment variables reference
+- **[Development Guide](docs/development.md)** - Project structure, testing, observability, and troubleshooting
+- **[Architecture Decisions](docs/ARCHITECTURE.md)** - ADRs explaining key design choices
+- **[Streamlit Demo](docs/STREAMLIT_DEMO.md)** - Interactive web UI guide
+- **[Database Schema](docs/DATABASE_SCHEMA.md)** - Complete database reference
 - **[Langfuse Integration](docs/langfuse-integration.md)** - Token usage tracking and cost monitoring
 - **[Evaluation Pipeline](evaluation/README.md)** - Automated quality evaluation and monitoring
-- **[Testing](docs/testing.md)** - Unit and integration tests
-- **[Development](docs/development.md)** - Project structure and development guide
-- **[Configuration](docs/configuration.md)** - Environment variables reference
-- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
-
-## Additional Resources
-
-- **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Complete database reference
-- **[sessions_memory_demo.ipynb](sessions_memory_demo.ipynb)** - Session and preference demos
 
 ## Why StoryLand AI?
 

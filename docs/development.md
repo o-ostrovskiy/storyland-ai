@@ -189,3 +189,112 @@ Search queries to use:
 - **Database:** SQLite (via ADK's DatabaseSessionService)
 - **Data Validation:** Pydantic models
 - **Agent Patterns:** Sequential and parallel orchestration
+
+## Testing
+
+### Unit Tests
+
+Run unit tests locally without any API calls:
+
+```bash
+# Run all unit tests
+.venv/bin/pytest tests/unit/ -v
+
+# Run with coverage
+.venv/bin/pytest tests/unit/ --cov=. --cov-report=term-missing
+
+# Run specific test file
+.venv/bin/pytest tests/unit/test_models.py -v
+
+# Run specific test class
+.venv/bin/pytest tests/unit/test_agents.py::TestEvalWorkflow -v
+```
+
+**Test coverage (125 tests total):**
+| Module | Tests | Description |
+|--------|-------|-------------|
+| `test_models.py` | 46 | Pydantic model validation (incl. RegionAnalysis) |
+| `test_tools.py` | 16 | Google Books, preferences tools |
+| `test_agents.py` | 41 | Agent factory functions (three-phase & eval workflows) |
+| `test_services.py` | 16 | Session service, context manager |
+| `test_workflow_timeout.py` | 6 | Workflow timeout behavior |
+
+### Integration Tests
+
+Run integration tests with VCR cassettes (no real API calls):
+
+```bash
+# Run all integration tests
+.venv/bin/pytest tests/integration/ -v
+
+# Run specific integration test
+.venv/bin/pytest tests/integration/test_main_workflow.py -v
+```
+
+Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions, eliminating the need for real API calls during testing.
+
+### Quality Evaluation
+
+For automated quality evaluation and monitoring, see the [Evaluation Pipeline](../evaluation/README.md).
+
+## Observability
+
+### Development: ADK Web UI
+
+For interactive development and debugging:
+
+```bash
+python main.py --dev
+# Or directly: .venv/bin/adk web agents/
+```
+
+The Web UI provides visual agent execution flow, request/response inspection, built-in DEBUG logging, and interactive testing.
+
+> **Note:** Plugins are NOT supported in ADK web mode.
+
+### Production: ADK LoggingPlugin
+
+For production runs, ADK's `LoggingPlugin` automatically logs agent, tool, and model activity:
+
+```bash
+python main.py "1984" --author "George Orwell"     # INFO level
+python main.py "1984" -v                             # DEBUG level
+```
+
+| Mode | Logging | Plugin | Use Case |
+|------|---------|--------|----------|
+| `--dev` | DEBUG (ADK Web) | None | Development, debugging |
+| Default | INFO | LoggingPlugin | Production |
+| `-v` | DEBUG | LoggingPlugin | Troubleshooting |
+
+**Logging config** (`.env`):
+```env
+LOG_LEVEL=INFO                 # DEBUG, INFO, WARNING, ERROR
+ENABLE_ADK_DEBUG=false         # Enable DEBUG for ADK internal logs
+```
+
+## Troubleshooting
+
+### Rate Limits (429 Errors)
+
+The workflow makes ~11 API calls per book, which can hit free tier limits (15 RPM). The retry logic handles this automatically. Wait ~60 seconds between books.
+
+### Database Issues
+
+```bash
+rm storyland_sessions.db       # Delete database to start fresh
+ls -lh *.db                    # Check database exists
+```
+
+### API Key Issues
+
+```bash
+python -c "import os; from dotenv import load_dotenv; load_dotenv(); print('OK' if os.getenv('GOOGLE_API_KEY') else 'MISSING')"
+```
+
+### Common Issues
+
+- **Virtual environment not activated**: Run `source .venv/bin/activate`
+- **Missing dependencies**: Run `pip install -e ".[dev]"`
+- **Database lock errors**: Check for running processes with `ps aux | grep python`
+- **Timeout errors**: Increase `WORKFLOW_TIMEOUT` in `.env` (default: 300 seconds)
