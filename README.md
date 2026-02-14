@@ -97,7 +97,7 @@ streamlit run streamlit_demo.py
 - Author-related sites (birthplace, museums, etc.)
 - Practical travel details and tips
 
-See [CLI Usage](docs/cli-usage.md) for all options and [Development Guide](docs/development.md#configuration) for environment variables.
+See [CLI Usage](docs/cli-usage.md) for all options and [Configuration](#configuration) for environment variables.
 
 ## Screenshots
 
@@ -175,7 +175,7 @@ flowchart TB
 | `user:preferences` | All | User travel preferences (persists across sessions) |
 | `final_itinerary` | 3 | Complete travel plan |
 
-**Storage:** In-memory (default) or SQLite persistence. Multi-user support with isolated data. See [Development Guide](docs/development.md#configuration) for options.
+**Storage:** In-memory (default) or SQLite persistence. Multi-user support with isolated data. See [Configuration](#configuration) for options.
 
 **Technology Stack:**
 - [Google Agent Development Kit (ADK)](https://github.com/googleapis/python-genai)
@@ -187,10 +187,147 @@ flowchart TB
 
 StoryLand AI uses Google Gemini models (default: `gemini-2.0-flash-lite`) for all agents, chosen for native ADK integration, fast parallel execution (sub-2s response times), and excellent structured output adherence across 16 Pydantic data models. The complete workflow takes 60-100 seconds end-to-end with parallel discovery providing 3x speedup over sequential execution.
 
+## Configuration
+
+All configuration is via environment variables in `.env`. Copy `.env.example` to get started.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GOOGLE_API_KEY` | **Required.** Google AI API key from [AI Studio](https://aistudio.google.com/app/apikey) | — |
+| `MODEL_NAME` | Gemini model to use | `gemini-2.0-flash-lite` |
+| `USE_DATABASE` | Enable SQLite persistence | `false` |
+| `DATABASE_URL` | SQLite database path | `sqlite+aiosqlite:///storyland_sessions.db` |
+| `SESSION_MAX_EVENTS` | Max events in session | `20` |
+| `MAX_CONTEXT_TOKENS` | Max tokens for context window | `30000` |
+| `WORKFLOW_TIMEOUT` | Max seconds for entire workflow | `300` |
+| `AGENT_TIMEOUT` | Max seconds per agent | `60` |
+| `LOG_LEVEL` | Logging level (DEBUG/INFO/WARNING/ERROR) | `INFO` |
+| `ENABLE_ADK_DEBUG` | Enable ADK internal debug logging | `false` |
+| `LANGFUSE_SECRET_KEY` | Langfuse secret key (optional) | — |
+| `LANGFUSE_PUBLIC_KEY` | Langfuse public key (optional) | — |
+| `LANGFUSE_HOST` | Langfuse host URL (optional) | — |
+
+Free tier includes 15 RPM and 200 requests/day — sufficient for development.
+
+## Development
+
+### Project Structure
+
+```
+storyland-ai/
+├── models/              # Pydantic data models
+│   ├── book.py          # BookMetadata, BookContext, BookInfo
+│   ├── discovery.py     # CityDiscovery, LandmarkDiscovery, AuthorSites,
+│   │                    # RegionCity, RegionOption, RegionAnalysis
+│   ├── itinerary.py     # TripItinerary, CityPlan, CityStop
+│   └── preferences.py   # TravelPreferences
+│
+├── tools/               # External API integrations
+│   ├── google_books.py  # Google Books search tool
+│   └── preferences.py   # Session state preferences tool
+│
+├── agents/              # AI agent definitions
+│   ├── book_metadata_agent.py    # Book metadata extraction
+│   ├── book_context_agent.py     # Book setting research
+│   ├── discovery_agents.py       # City/landmark/author discovery
+│   ├── trip_composer_agent.py    # Itinerary composition
+│   ├── reader_profile_agent.py   # Preferences-based personalization
+│   ├── region_analyzer_agent.py  # Geographic region grouping
+│   ├── orchestrator.py           # Three-phase workflow coordination
+│   └── storyland/agent.py        # ADK Web UI agent
+│
+├── services/            # Core services
+│   ├── session_service.py   # Session management (InMemory/SQLite)
+│   └── context_manager.py   # Context engineering
+│
+├── common/              # Shared utilities
+│   ├── config.py        # Configuration management
+│   └── logging.py       # Structured logging (structlog)
+│
+├── tests/               # Test suite
+│   ├── unit/            # Unit tests (no API calls)
+│   └── integration/     # Integration tests (VCR cassettes)
+│
+├── main.py              # CLI entry point
+├── streamlit_demo.py    # Streamlit web UI
+├── pyproject.toml       # Dependencies & pytest config
+└── .env.example         # Environment template
+```
+
+### Extending the Codebase
+
+**Adding a new agent** — create in `agents/`, import in `orchestrator.py`:
+```python
+from google.adk.agents import LlmAgent
+def create_my_agent(model):
+    return LlmAgent(name="my_agent", model=model, instruction="...")
+```
+
+**Adding a new tool** — create in `tools/`:
+```python
+from google.adk.tools import FunctionTool
+def my_function(query: str) -> str:
+    return result
+my_tool = FunctionTool(my_function)
+```
+
+**Adding a new model** — create in `models/`:
+```python
+from pydantic import BaseModel, Field
+class MyModel(BaseModel):
+    field1: str = Field(description="Description")
+```
+
+### Prompt Engineering
+
+Agent prompts include reliability improvements:
+
+- **Anti-hallucination:** `"If the research found no cities, return an empty list - do not hallucinate."`
+- **Error handling:** `"If the tool returns an error, report it clearly and explain what went wrong"`
+- **Disambiguation:** Book title and author injected into search queries to avoid confusion with similarly-named books
+
+## Testing
+
+```bash
+make test                # Unit tests (143 tests)
+make test-integration    # Integration tests with VCR cassettes
+make test-all            # Both
+make test-cov            # With coverage
+```
+
+| Module | Tests | Description |
+|--------|-------|-------------|
+| `test_models.py` | 46 | Pydantic model validation |
+| `test_tools.py` | 16 | Google Books, preferences tools |
+| `test_agents.py` | 41 | Agent factory functions |
+| `test_services.py` | 16 | Session service, context manager |
+| `test_workflow_timeout.py` | 6 | Workflow timeout behavior |
+| `test_llm_scorer.py` | 18 | LLM scoring models and prompts |
+
+Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).
+
+### Observability
+
+| Mode | Logging | Use Case |
+|------|---------|----------|
+| `python main.py --dev` | ADK Web UI (DEBUG) | Development, debugging |
+| `python main.py "book"` | LoggingPlugin (INFO) | Production |
+| `python main.py "book" -v` | LoggingPlugin (DEBUG) | Troubleshooting |
+
+> **Note:** Plugins are NOT supported in ADK web mode.
+
+## Troubleshooting
+
+- **Rate limits (429):** Retry logic handles automatically. Wait ~60s between books.
+- **API key issues:** `python -c "import os; from dotenv import load_dotenv; load_dotenv(); print('OK' if os.getenv('GOOGLE_API_KEY') else 'MISSING')"`
+- **Database issues:** `rm storyland_sessions.db` to start fresh
+- **Virtual env not activated:** `source .venv/bin/activate`
+- **Missing dependencies:** `pip install -e ".[dev]"`
+- **Timeout errors:** Increase `WORKFLOW_TIMEOUT` in `.env` (default: 300s)
+
 ## Documentation
 
 - **[CLI Usage & Database](docs/cli-usage.md)** - Command-line options, database reference, and SQL queries
-- **[Development Guide](docs/development.md)** - Project structure, configuration, testing, observability, and troubleshooting
 - **[Architecture Decisions](docs/ARCHITECTURE.md)** - ADRs explaining key design choices
 - **[Langfuse Integration](docs/langfuse-integration.md)** - Token usage tracking and cost monitoring
 - **[Evaluation Pipeline](evaluation/README.md)** - Automated quality evaluation and monitoring
