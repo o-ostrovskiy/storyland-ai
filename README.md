@@ -109,8 +109,6 @@ See [CLI Usage](docs/cli-usage.md) for all options and [Configuration](docs/conf
 ![Complete Itinerary](docs/images/trip%20iternary.png)
 *Detailed itinerary with literary context and practical travel info*
 
-**More screenshots:** See [Streamlit Demo Guide](docs/STREAMLIT_DEMO.md) for additional screenshots including the welcome screen and preference configuration.
-
 ## Architecture
 
 StoryLand AI uses a three-phase workflow with human-in-the-loop region selection:
@@ -195,7 +193,6 @@ StoryLand AI uses Google Gemini models (default: `gemini-2.0-flash-lite`) for al
 - **[Configuration](docs/configuration.md)** - Environment variables reference
 - **[Development Guide](docs/development.md)** - Project structure, testing, observability, and troubleshooting
 - **[Architecture Decisions](docs/ARCHITECTURE.md)** - ADRs explaining key design choices
-- **[Streamlit Demo](docs/STREAMLIT_DEMO.md)** - Interactive web UI guide
 - **[Database Schema](docs/DATABASE_SCHEMA.md)** - Complete database reference
 - **[Langfuse Integration](docs/langfuse-integration.md)** - Token usage tracking and cost monitoring
 - **[Evaluation Pipeline](evaluation/README.md)** - Automated quality evaluation and monitoring
