@@ -23,7 +23,6 @@ logger = get_logger(__name__)
 
 try:
     from langfuse import Langfuse
-    from langfuse.decorators import langfuse_context
     LANGFUSE_AVAILABLE = True
 except ImportError:
     LANGFUSE_AVAILABLE = False

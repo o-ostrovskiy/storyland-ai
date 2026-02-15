@@ -1,7 +1,7 @@
 # StoryLand AI - Makefile
 # Common commands for development and demo
 
-.PHONY: help install install-dev test test-cov test-agents test-models test-tools test-services test-integration test-integration-vcr-record test-all eval eval-setup eval-run eval-summary eval-report eval-export run run-1984 run-gatsby run-nightingale run-luxury run-family run-verbose run-db run-dev db-reset db-show db-users clean check-env notebook lab
+.PHONY: help install install-dev test test-cov test-agents test-models test-tools test-services test-api test-integration test-integration-vcr-record test-all eval eval-setup eval-run eval-summary eval-report eval-export run run-api run-1984 run-gatsby run-nightingale run-luxury run-family run-verbose run-db run-dev db-reset db-show db-users clean check-env notebook lab
 
 # Default target
 help:
@@ -16,6 +16,7 @@ help:
 	@echo "  make test          Run all unit tests"
 	@echo "  make test-cov      Run tests with coverage"
 	@echo "  make test-agents   Run agent tests only"
+	@echo "  make test-api        Run API unit tests"
 	@echo "  make test-integration        Run integration tests (VCR)"
 	@echo "  make test-integration-vcr-record  Re-record VCR cassettes"
 	@echo "  make test-all      Run all tests (unit + integration)"
@@ -28,6 +29,7 @@ help:
 	@echo "  make eval-summary  Show evaluation summary"
 	@echo ""
 	@echo "Running:"
+	@echo "  make run-api       Start FastAPI SSE server"
 	@echo "  make run           Run demo (Pride and Prejudice)"
 	@echo "  make run-1984      Run demo (1984 by George Orwell)"
 	@echo "  make run-gatsby    Run demo (The Great Gatsby)"
@@ -74,6 +76,9 @@ test-tools:
 test-services:
 	.venv/bin/pytest tests/unit/test_services.py -v
 
+test-api:
+	.venv/bin/pytest tests/unit/test_api.py -v
+
 test-integration:
 	.venv/bin/pytest tests/integration/ -v -m integration
 
@@ -108,6 +113,9 @@ eval-export:
 # =============================================================================
 # Running
 # =============================================================================
+
+run-api:
+	.venv/bin/uvicorn api.app:create_app --factory --host 0.0.0.0 --port 8080 --reload
 
 run:
 	.venv/bin/python main.py "Pride and Prejudice" --author "Jane Austen"
