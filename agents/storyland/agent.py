@@ -5,10 +5,6 @@ This is the entry point for `adk web agents/`.
 """
 
 import os
-import sys
-
-# Add parent directories to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from dotenv import load_dotenv
 from google.genai import types

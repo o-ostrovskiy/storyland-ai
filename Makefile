@@ -1,7 +1,7 @@
 # StoryLand AI - Makefile
 # Common commands for development and demo
 
-.PHONY: help install install-dev test test-cov test-agents test-models test-tools test-services test-api test-integration test-integration-vcr-record test-all eval eval-setup eval-run eval-summary eval-report eval-export run run-api run-1984 run-gatsby run-nightingale run-luxury run-family run-verbose run-db run-dev db-reset db-show db-users clean check-env notebook lab
+.PHONY: help install install-dev test test-cov test-agents test-models test-tools test-services test-api test-integration test-integration-live test-integration-vcr-record test-all eval eval-setup eval-run eval-summary eval-report eval-export run run-api run-1984 run-gatsby run-nightingale run-luxury run-family run-verbose run-db run-dev db-reset db-show db-users clean check-env notebook lab
 
 # Default target
 help:
@@ -18,6 +18,7 @@ help:
 	@echo "  make test-agents   Run agent tests only"
 	@echo "  make test-api        Run API unit tests"
 	@echo "  make test-integration        Run integration tests (VCR)"
+	@echo "  make test-integration-live   Run live integration tests (real API/network)"
 	@echo "  make test-integration-vcr-record  Re-record VCR cassettes"
 	@echo "  make test-all      Run all tests (unit + integration)"
 	@echo "  make eval          Run ADK evaluation (single test)"
@@ -80,10 +81,13 @@ test-api:
 	.venv/bin/pytest tests/unit/test_api.py -v
 
 test-integration:
-	.venv/bin/pytest tests/integration/ -v -m integration
+	.venv/bin/pytest tests/integration/ -v -m "integration and not real_api"
 
 test-integration-vcr-record:
 	.venv/bin/pytest tests/integration/ -v --vcr-record=all
+
+test-integration-live:
+	.venv/bin/pytest tests/integration/ -v -m "integration and real_api"
 
 test-all:
 	.venv/bin/pytest tests/ -v

@@ -93,6 +93,7 @@ class TestLangfusePluginIntegration:
 
     @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.real_api
     async def test_workflow_execution_with_plugin(self, simple_agent, session_service):
         """Test that workflows run successfully with Langfuse plugin (enabled or disabled)."""
         # Read Langfuse credentials directly from environment
@@ -151,6 +152,7 @@ class TestLangfusePluginIntegration:
 
     @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.real_api
     async def test_plugin_graceful_degradation(self, simple_agent, session_service):
         """Test that invalid credentials don't break workflows."""
         # Create plugin with invalid credentials
@@ -317,6 +319,7 @@ class TestLangfuseWithRealWorkflow:
 
     @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.real_api
     async def test_multiple_agents_with_langfuse(self):
         """Test that Langfuse correctly tracks multiple nested agents."""
         # Create plugin (will auto-disable if credentials missing or package unavailable)

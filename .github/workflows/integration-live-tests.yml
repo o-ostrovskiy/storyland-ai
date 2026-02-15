@@ -1,0 +1,76 @@
+name: Integration Tests (Live API)
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for running live tests (uses API quota/cost)'
+        required: true
+        default: 'Validate real API behavior before release'
+
+jobs:
+  integration-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Live test warning
+        run: |
+          echo "::warning::This workflow runs real API calls and may consume quota/cost."
+          echo "Reason: ${{ github.event.inputs.reason }}"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Create virtual environment
+        run: |
+          python -m venv .venv
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Validate required secrets
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
+        run: |
+          if [ -z "$GOOGLE_API_KEY" ]; then
+            echo "::error::GOOGLE_API_KEY is required for live integration tests."
+            exit 1
+          fi
+
+          if [ -z "$LANGFUSE_SECRET_KEY" ] || [ -z "$LANGFUSE_PUBLIC_KEY" ] || [ -z "$LANGFUSE_HOST" ]; then
+            echo "::warning::Langfuse secrets are incomplete. Langfuse assertions may run in degraded mode."
+          fi
+
+      - name: Create .env file for live tests
+        run: |
+          echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" > .env
+          echo "USE_DATABASE=false" >> .env
+          echo "SESSION_MAX_EVENTS=20" >> .env
+          echo "MAX_CONTEXT_TOKENS=30000" >> .env
+          echo "MODEL_NAME=gemini-2.0-flash-lite" >> .env
+          echo "WORKFLOW_TIMEOUT=300" >> .env
+          echo "AGENT_TIMEOUT=60" >> .env
+          echo "LOG_LEVEL=INFO" >> .env
+          echo "ENABLE_ADK_DEBUG=false" >> .env
+          echo "LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}" >> .env
+          echo "LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}" >> .env
+          echo "LANGFUSE_HOST=${{ secrets.LANGFUSE_HOST }}" >> .env
+
+      - name: Run live integration tests
+        run: |
+          make test-integration-live

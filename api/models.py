@@ -10,7 +10,7 @@ Defines Pydantic models for:
 from enum import Enum
 from typing import Optional, List, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # --- Request Models ---
@@ -36,7 +36,7 @@ class DiscoverRequest(BaseModel):
         }
     }
 
-    book_title: str = Field(description="Title of the book to search")
+    book_title: str = Field(min_length=1, description="Title of the book to search")
     author: Optional[str] = Field(
         default=None, description="Author name for disambiguation"
     )
@@ -44,6 +44,15 @@ class DiscoverRequest(BaseModel):
         default=None, description="User travel preferences"
     )
     user_id: str = Field(default="api_user", description="User identifier")
+
+    @field_validator("book_title")
+    @classmethod
+    def validate_book_title(cls, value: str) -> str:
+        """Require a non-empty, non-whitespace book title."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("book_title must not be empty")
+        return normalized
 
 
 class ComposeRequest(BaseModel):

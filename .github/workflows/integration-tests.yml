@@ -70,7 +70,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `${emoji} **Integration Tests ${testStatus}**\n\nTests ran using VCR cassettes (no API quota consumed).\nIncludes Langfuse integration checks (tests skip gracefully if credentials not configured).`
+              body: `${emoji} **Integration Tests ${testStatus}**\n\nDefault integration run excludes live API tests (\`real_api\` marker).\nUse manual jobs/targets for live network verification.`
             });
 
   # Optional: Re-record cassettes (manual trigger only, uses API quota)

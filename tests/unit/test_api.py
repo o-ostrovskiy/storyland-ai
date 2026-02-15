@@ -57,6 +57,14 @@ class TestDiscoverRequest:
         with pytest.raises(ValidationError):
             DiscoverRequest()
 
+    def test_blank_book_title_raises(self):
+        with pytest.raises(ValidationError):
+            DiscoverRequest(book_title="   ")
+
+    def test_book_title_is_trimmed(self):
+        req = DiscoverRequest(book_title="  1984  ")
+        assert req.book_title == "1984"
+
     def test_serialization_roundtrip(self):
         req = DiscoverRequest(book_title="1984", author="George Orwell")
         data = json.loads(req.model_dump_json())
@@ -1343,6 +1351,18 @@ class TestEmptyRegionIdsRejected:
         response = await test_client.post(
             "/api/v1/itinerary/job-123/compose",
             json={"region_ids": []},
+        )
+        assert response.status_code == 422
+
+
+class TestBlankBookTitleRejected:
+    """[P2] Verify blank book_title is rejected at API layer."""
+
+    @pytest.mark.asyncio
+    async def test_discover_blank_book_title_returns_422(self, test_client):
+        response = await test_client.post(
+            "/api/v1/itinerary/discover",
+            json={"book_title": "   "},
         )
         assert response.status_code == 422
 
