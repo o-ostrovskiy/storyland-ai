@@ -553,12 +553,12 @@ class TestComposeEndpoint:
     """Tests for POST /api/v1/itinerary/{job_id}/compose."""
 
     @pytest.mark.asyncio
-    async def test_compose_session_not_found(
+    async def test_compose_session_backend_error(
         self, test_client, mock_app_state
     ):
-        """When job_id doesn't exist, stream should emit error + done."""
-        mock_app_state.session_service.get_session.side_effect = Exception(
-            "Not found"
+        """When session backend raises, stream should emit SessionError, not JobNotFound."""
+        mock_app_state.session_service.get_session.side_effect = RuntimeError(
+            "DB connection lost"
         )
         response = await test_client.post(
             "/api/v1/itinerary/bad-job/compose",
@@ -571,8 +571,7 @@ class TestComposeEndpoint:
         assert event_types[-1] == "done"
 
         error_event = next(e for e in events if e["event"] == "error")
-        assert "not found" in error_event["message"].lower()
-        assert error_event["error_type"] == "JobNotFound"
+        assert error_event["error_type"] == "SessionError"
 
     @pytest.mark.asyncio
     async def test_compose_session_returns_none(
@@ -678,6 +677,71 @@ class TestComposeEndpoint:
         assert error_event["error_type"] == "InvalidRegionIds"
         # Valid IDs should only contain 1, not None
         assert "1" in error_event["message"]
+
+    @pytest.mark.asyncio
+    async def test_compose_success_no_session_refetch(
+        self, test_client, mock_app_state
+    ):
+        """Compose should succeed even if session would be unreachable after runner completes."""
+        mock_session = MagicMock()
+        mock_session.state = {
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
+            "region_analysis": {
+                "regions": [
+                    {
+                        "region_id": 1,
+                        "region_name": "England",
+                        "cities": [{"name": "London", "country": "UK"}],
+                    }
+                ]
+            },
+        }
+        # First call returns session, subsequent calls return None
+        mock_app_state.session_service.get_session.side_effect = [
+            mock_session,
+            None,
+        ]
+
+        itinerary_json = json.dumps(
+            {"cities": [{"name": "London"}], "summary_text": "test"}
+        )
+        mock_part = MagicMock()
+        mock_part.text = itinerary_json
+
+        mock_final_event = MagicMock()
+        mock_final_event.author = "trip_composer"
+        mock_final_event.is_final_response.return_value = True
+        mock_final_event.content.parts = [mock_part]
+
+        async def mock_run_async(*args, **kwargs):
+            yield mock_final_event
+
+        mock_runner_instance = MagicMock()
+        mock_runner_instance.run_async = mock_run_async
+        mock_runner_instance.__aenter__ = AsyncMock(
+            return_value=mock_runner_instance
+        )
+        mock_runner_instance.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("api.streaming.Runner", return_value=mock_runner_instance),
+            patch("api.streaming.create_composition_workflow"),
+            patch("api.streaming.LangfusePlugin") as mock_lf,
+        ):
+            mock_lf.return_value.enabled = False
+            response = await test_client.post(
+                "/api/v1/itinerary/job-123/compose",
+                json={"region_ids": [1]},
+            )
+            assert response.status_code == 200
+
+            events = _parse_sse_response(response.text)
+            event_types = [e["event"] for e in events]
+
+            # Should complete successfully without crashing on second get_session
+            assert "itinerary" in event_types
+            assert event_types[-1] == "done"
+            assert mock_session.state["_job_status"] == "completed"
 
     @pytest.mark.asyncio
     async def test_compose_success(self, test_client, mock_app_state):

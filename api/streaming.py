@@ -400,8 +400,25 @@ async def compose_stream(
             user_id=user_id,
             session_id=job_id,
         )
-    except Exception:
-        session = None
+    except Exception as e:
+        logger.error(
+            "compose_session_lookup_failed",
+            job_id=job_id,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        yield _sse(
+            "error",
+            SSEErrorEvent(
+                message="Failed to retrieve session",
+                error_type="SessionError",
+            ).model_dump_json(),
+        )
+        yield _sse(
+            "done",
+            SSEDoneEvent(job_id=job_id).model_dump_json(),
+        )
+        return
 
     if session is None:
         yield _sse(
@@ -547,11 +564,6 @@ async def compose_stream(
                                 )
 
             if result_data:
-                session = await app_state.session_service.get_session(
-                    app_name="storyland",
-                    user_id=user_id,
-                    session_id=job_id,
-                )
                 session.state["_job_status"] = "completed"
 
                 yield _sse(
