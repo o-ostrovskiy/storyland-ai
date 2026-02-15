@@ -86,6 +86,10 @@ python main.py "War and Peace" --timeout 600
 # Development mode (ADK Web UI)
 python main.py --dev
 
+# FastAPI SSE API server
+make run-api
+# curl http://localhost:8080/api/v1/health
+
 # Streamlit demo
 streamlit run streamlit_demo.py
 ```
@@ -183,6 +187,33 @@ flowchart TB
 - Pydantic for data validation
 - SQLite for persistence
 
+### API (FastAPI SSE)
+
+StoryLand AI includes a FastAPI server with Server-Sent Events streaming for web/mobile clients. The API splits the workflow into two streaming endpoints:
+
+```bash
+# Start the API server
+make run-api   # http://localhost:8080
+
+# Discover locations (phases 1-2) — streams progress events, returns regions
+curl -N -X POST http://localhost:8080/api/v1/itinerary/discover \
+  -H "Content-Type: application/json" \
+  -d '{"book_title": "1984", "author": "George Orwell"}'
+
+# Compose itinerary (phase 3) — streams final itinerary
+curl -N -X POST http://localhost:8080/api/v1/itinerary/{job_id}/compose \
+  -H "Content-Type: application/json" \
+  -d '{"region_ids": [1]}'
+
+# Check job status
+curl http://localhost:8080/api/v1/itinerary/{job_id}/status
+
+# Health check
+curl http://localhost:8080/api/v1/health
+```
+
+SSE event types: `progress`, `metadata`, `regions`, `itinerary`, `error`, `done`.
+
 ### AI Models
 
 StoryLand AI uses Google Gemini models (default: `gemini-2.0-flash-lite`) for all agents, chosen for native ADK integration, fast parallel execution (sub-2s response times), and excellent structured output adherence across 16 Pydantic data models. The complete workflow takes 60-100 seconds end-to-end with parallel discovery providing 3x speedup over sequential execution.
@@ -206,6 +237,7 @@ All configuration is via environment variables in `.env`. Copy `.env.example` to
 | `LANGFUSE_SECRET_KEY` | Langfuse secret key (optional) | — |
 | `LANGFUSE_PUBLIC_KEY` | Langfuse public key (optional) | — |
 | `LANGFUSE_HOST` | Langfuse host URL (optional) | — |
+| `CORS_ORIGINS` | Allowed CORS origins for API (comma-separated) | `*` |
 
 Free tier includes 15 RPM and 200 requests/day — sufficient for development.
 
@@ -235,6 +267,13 @@ storyland-ai/
 │   ├── region_analyzer_agent.py  # Geographic region grouping
 │   ├── orchestrator.py           # Three-phase workflow coordination
 │   └── storyland/agent.py        # ADK Web UI agent
+│
+├── api/                 # FastAPI SSE streaming API
+│   ├── app.py           # Application factory with lifespan
+│   ├── routes.py        # HTTP endpoints (discover, compose, status, health)
+│   ├── streaming.py     # SSE async generators wrapping ADK Runner
+│   ├── models.py        # Request/response/SSE event Pydantic models
+│   └── dependencies.py  # Shared app state & dependency injection
 │
 ├── services/            # Core services
 │   ├── session_service.py   # Session management (InMemory/SQLite)
@@ -292,7 +331,7 @@ Agent prompts include reliability improvements:
 ## Testing
 
 ```bash
-make test                # Unit tests (143 tests)
+make test                # Unit tests (194 tests)
 make test-integration    # Integration tests with VCR cassettes
 make test-all            # Both
 make test-cov            # With coverage
@@ -306,6 +345,7 @@ make test-cov            # With coverage
 | `test_services.py` | 16 | Session service, context manager |
 | `test_workflow_timeout.py` | 6 | Workflow timeout behavior |
 | `test_llm_scorer.py` | 18 | LLM scoring models and prompts |
+| `test_api.py` | 51 | API models, endpoints, SSE streaming |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).
 

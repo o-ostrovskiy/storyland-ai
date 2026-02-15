@@ -450,3 +450,51 @@ class TestEvalWorkflow:
         # Region analyzer should be at index 4 (before trip_composer)
         assert workflow.sub_agents[4].name == "region_analyzer"
         assert workflow.sub_agents[5].name == "trip_composer"
+
+    def test_eval_workflow_no_placeholder_literals(self, model_name, mock_google_books_tool):
+        """[P2] Eval workflow should not embed '[from conversation]' in instructions."""
+        workflow = create_eval_workflow(model_name, mock_google_books_tool)
+
+        book_context_pipeline = workflow.sub_agents[1]
+        researcher = book_context_pipeline.sub_agents[0]
+        assert "[from conversation]" not in researcher.instruction
+
+
+# =============================================================================
+# BookContext Pipeline Dynamic Instruction Tests
+# =============================================================================
+
+class TestBookContextDynamicInstruction:
+    """Verify book_context_pipeline handles both known and unknown title/author."""
+
+    def test_known_title_baked_into_instruction(self, model_name, mock_google_search_tool):
+        """When title/author are provided, they should appear in the instruction."""
+        pipeline = create_book_context_pipeline(
+            model_name, mock_google_search_tool,
+            book_title="1984", author="George Orwell"
+        )
+        researcher = pipeline.sub_agents[0]
+        assert '"1984"' in researcher.instruction
+        assert "George Orwell" in researcher.instruction
+
+    def test_no_title_uses_dynamic_reference(self, model_name, mock_google_search_tool):
+        """When no title/author provided, instruction should reference conversation history."""
+        pipeline = create_book_context_pipeline(
+            model_name, mock_google_search_tool
+        )
+        researcher = pipeline.sub_agents[0]
+        assert "book_metadata" in researcher.instruction
+        assert "[from conversation]" not in researcher.instruction
+
+    def test_title_starting_with_bracket_is_treated_as_real_title(
+        self, model_name, mock_google_search_tool
+    ):
+        """A real title like '[Pygmalion]' should still be baked into the instruction."""
+        pipeline = create_book_context_pipeline(
+            model_name,
+            mock_google_search_tool,
+            book_title="[Pygmalion]",
+            author="George Bernard Shaw",
+        )
+        researcher = pipeline.sub_agents[0]
+        assert '"[Pygmalion]" by George Bernard Shaw' in researcher.instruction

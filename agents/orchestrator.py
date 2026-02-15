@@ -193,7 +193,7 @@ def create_eval_workflow(model, google_books_tool):
     # Create all pipelines
     book_metadata_pipeline = create_book_metadata_pipeline(model, google_books_tool)
     book_context_pipeline = create_book_context_pipeline(
-        model, google_search, book_title="[from conversation]", author="[from conversation]"
+        model, google_search
     )
 
     city_pipeline = create_city_pipeline(model, google_search)

@@ -23,7 +23,6 @@ logger = get_logger(__name__)
 
 try:
     from langfuse import Langfuse
-    from langfuse.decorators import langfuse_context
     LANGFUSE_AVAILABLE = True
 except ImportError:
     LANGFUSE_AVAILABLE = False
@@ -131,9 +130,9 @@ class LangfusePlugin(BasePlugin):
             return None
 
         try:
-            # Create a new trace for this invocation
+            # Create a top-level span (auto-creates a trace in Langfuse v3)
             agent_name = getattr(invocation_context.agent, 'name', 'unknown_agent')
-            self._current_trace = self.client.trace(
+            self._current_trace = self.client.start_span(
                 name=f"{agent_name}_invocation",
                 metadata={
                     "invocation_id": invocation_context.invocation_id,
@@ -143,7 +142,7 @@ class LangfusePlugin(BasePlugin):
                 },
                 input=str(user_message),
             )
-            logger.debug("langfuse_trace_created", trace_id=self._current_trace.id)
+            logger.debug("langfuse_trace_created", trace_id=self._current_trace.trace_id)
         except Exception as e:
             logger.warning("langfuse_trace_error", error=str(e), error_type=type(e).__name__)
 
@@ -159,9 +158,8 @@ class LangfusePlugin(BasePlugin):
         try:
             agent_name = getattr(agent, 'name', 'unknown_agent')
 
-            # Create span for agent
-            span = self.client.span(
-                trace_id=self._current_trace.id,
+            # Create child span for agent under the current trace span
+            span = self._current_trace.start_span(
                 name=agent_name,
                 metadata={
                     "agent_type": type(agent).__name__,
@@ -185,6 +183,7 @@ class LangfusePlugin(BasePlugin):
         try:
             if self._agent_stack:
                 agent_name, span = self._agent_stack.pop()
+                span.end()
                 logger.debug("langfuse_agent_complete", agent=agent_name)
         except Exception as e:
             logger.warning("langfuse_agent_complete_error", error=str(e), error_type=type(e).__name__)
@@ -201,9 +200,10 @@ class LangfusePlugin(BasePlugin):
         try:
             model_name = getattr(llm_request, 'model', 'unknown_model')
 
-            # Create generation tracking
-            self._current_generation = self.client.generation(
-                trace_id=self._current_trace.id,
+            # Create generation tracking under the current agent span or trace span
+            parent = self._agent_stack[-1][1] if self._agent_stack else self._current_trace
+            self._current_generation = parent.start_observation(
+                as_type="generation",
                 name=f"{model_name}_call",
                 model=model_name,
                 input=str(llm_request),
@@ -262,6 +262,7 @@ class LangfusePlugin(BasePlugin):
                     cost_usd=usage.cost_usd,
                 )
 
+            self._current_generation.end()
             self._current_generation = None
         except Exception as e:
             logger.warning("langfuse_model_response_error", error=str(e), error_type=type(e).__name__)
@@ -320,8 +321,8 @@ class LangfusePlugin(BasePlugin):
 
         try:
             tool_name = getattr(tool, 'name', 'unknown_tool')
-            self._current_span = self.client.span(
-                trace_id=self._current_trace.id,
+            parent = self._agent_stack[-1][1] if self._agent_stack else self._current_trace
+            self._current_span = parent.start_span(
                 name=f"tool_{tool_name}",
                 metadata={
                     "tool_type": "adk_tool",
@@ -349,9 +350,8 @@ class LangfusePlugin(BasePlugin):
 
         try:
             tool_name = getattr(tool, 'name', 'unknown_tool')
-            self._current_span.update(
-                output=str(result),
-            )
+            self._current_span.update(output=str(result))
+            self._current_span.end()
             self._current_span = None
             logger.debug("langfuse_tool_complete", tool=tool_name)
         except Exception as e:
@@ -375,6 +375,7 @@ class LangfusePlugin(BasePlugin):
                     "total_cost_usd": self._token_usage.cost_usd,
                 },
             )
+            self._current_trace.end()
             logger.info(
                 "langfuse_invocation_complete",
                 input_tokens=self._token_usage.input_tokens,

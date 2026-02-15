@@ -538,6 +538,66 @@ Helps debug WHERE the timeout occurred without detailed logs.
 
 ---
 
+## 8. FastAPI SSE Streaming API
+
+### Decision
+Add a FastAPI HTTP API layer with Server-Sent Events (SSE) streaming for the agent workflow, splitting the three-phase workflow into two streaming endpoints.
+
+### Architecture
+```
+Client                          FastAPI Server
+  |                                |
+  |-- POST /discover ------------->|  Phase 1: Google Books API
+  |<-- SSE: progress --------------|  Phase 2: Discovery agents
+  |<-- SSE: metadata --------------|
+  |<-- SSE: progress (×N) ---------|
+  |<-- SSE: regions ----------------|  ← regions for user selection
+  |<-- SSE: done {job_id} ---------|
+  |                                |
+  |  [user selects regions]        |
+  |                                |
+  |-- POST /{job_id}/compose ----->|  Phase 3: Composition agent
+  |<-- SSE: progress --------------|
+  |<-- SSE: itinerary --------------|
+  |<-- SSE: done ------------------|
+```
+
+### Rationale
+
+**Problem:** The three-phase workflow takes ~60 seconds. Synchronous HTTP would mean clients wait with no feedback. The human-in-the-loop region selection between phases 2 and 3 doesn't fit a single request-response cycle.
+
+**Solution:** Two SSE streaming endpoints that mirror the existing HITL pattern:
+1. `/discover` streams phases 1-2, returns regions with a `job_id`
+2. `/compose` accepts the `job_id` + selected region IDs, streams phase 3
+
+**Key design decisions:**
+- **Session ID = Job ID:** The ADK session serves as job storage. All intermediate state (metadata, discoveries, regions) persists in `session.state` between the two HTTP calls.
+- **SSE over WebSocket:** SSE is unidirectional (server→client), which matches the workflow pattern. No need for bidirectional communication during streaming.
+- **Errors as SSE events:** Once headers are sent (200 OK), HTTP status can't change. All errors during streaming are emitted as `error` SSE events.
+- **Fresh LangfusePlugin per request:** Isolates token counters between concurrent requests.
+
+### Trade-offs
+
+**Benefits:**
+- **Real-time progress:** Clients see step-by-step progress during the ~60s workflow
+- **Preserves HITL:** Two-endpoint design maps naturally to the discover→select→compose flow
+- **No existing code changes:** API layer is purely additive — reuses orchestrator, models, and session service
+- **Standard protocol:** SSE works in all browsers via `EventSource` API
+
+**Costs:**
+- **Long-lived connections:** SSE streams stay open for ~30-60s per phase
+- **No reconnection for partial results:** If client disconnects mid-discover, must restart
+- **Session lookup requires user_id:** Compose endpoint needs the same `user_id` as discover
+
+### Files
+- `api/app.py` — FastAPI application factory with lifespan
+- `api/routes.py` — HTTP endpoint definitions
+- `api/streaming.py` — Async generators wrapping ADK Runner → SSE events
+- `api/models.py` — Request/response/SSE event Pydantic models
+- `api/dependencies.py` — Shared app state (config, model, session service)
+
+---
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -549,5 +609,6 @@ Helps debug WHERE the timeout occurred without detailed logs.
 | **Session state** | Cross-workflow data flow | Untyped dict |
 | **Dual backends** | Dev speed + prod persistence | Config complexity |
 | **Workflow timeout** | Safety net for hangs | Abrupt failures |
+| **SSE streaming API** | Real-time progress, HITL preserved | Long-lived connections |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.

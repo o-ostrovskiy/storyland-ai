@@ -36,7 +36,9 @@ class BookContext(BaseModel):
     primary_locations: List[str] = Field(
         description="Main locations where story takes place"
     )
-    time_period: str = Field(description="Historical era or time period of the story")
+    time_period: Optional[str] = Field(
+        default=None, description="Historical era or time period of the story"
+    )
     themes: List[str] = Field(description="Main themes of the book")
 
 
