@@ -22,15 +22,22 @@ def create_book_context_pipeline(model, google_search_tool, book_title: str = ""
     Returns:
         SequentialAgent that researches and formats book context
     """
-    # When title/author are known at creation time, bake them in.
+    # When title is known at creation time, bake it in.
     # Otherwise (eval workflow), instruct the agent to read from prior context.
-    if book_title and not book_title.startswith("["):
-        book_ref = f'BOOK: "{book_title}" by {author}'
+    normalized_title = (book_title or "").strip()
+    normalized_author = (author or "").strip()
+    if normalized_title:
+        if normalized_author:
+            book_ref = f'BOOK: "{normalized_title}" by {normalized_author}'
+            title_author_query = f"{normalized_title} {normalized_author}"
+        else:
+            book_ref = f'BOOK: "{normalized_title}"'
+            title_author_query = normalized_title
         search_hint = (
             f'Search queries to use:\n'
-            f'- "{book_title} {author} setting location"\n'
-            f'- "{book_title} {author} time period historical context"\n'
-            f'- "{book_title} {author} themes analysis"'
+            f'- "{title_author_query} setting location"\n'
+            f'- "{title_author_query} time period historical context"\n'
+            f'- "{title_author_query} themes analysis"'
         )
     else:
         book_ref = (

@@ -704,7 +704,26 @@ class TestComposeEndpoint:
         ]
 
         itinerary_json = json.dumps(
-            {"cities": [{"name": "London"}], "summary_text": "test"}
+            {
+                "cities": [
+                    {
+                        "name": "London",
+                        "country": "UK",
+                        "days_suggested": 2,
+                        "overview": "Explore literary London.",
+                        "stops": [
+                            {
+                                "name": "British Library",
+                                "type": "museum",
+                                "reason": "Literary archives and manuscripts.",
+                                "time_of_day": "morning",
+                                "notes": "Book tickets in advance.",
+                            }
+                        ],
+                    }
+                ],
+                "summary_text": "test",
+            }
         )
         mock_part = MagicMock()
         mock_part.text = itinerary_json
@@ -1080,7 +1099,23 @@ class TestItineraryExtractionFromState:
     ):
         """When final_itinerary is in session state, use it even if text parsing would fail."""
         itinerary_data = {
-            "cities": [{"name": "London"}],
+            "cities": [
+                {
+                    "name": "London",
+                    "country": "UK",
+                    "days_suggested": 2,
+                    "overview": "Explore literary London.",
+                    "stops": [
+                        {
+                            "name": "British Library",
+                            "type": "museum",
+                            "reason": "Literary archives and manuscripts.",
+                            "time_of_day": "morning",
+                            "notes": "Book tickets in advance.",
+                        }
+                    ],
+                }
+            ],
             "summary_text": "A literary journey",
         }
         mock_session = MagicMock()
@@ -1135,6 +1170,7 @@ class TestItineraryExtractionFromState:
                 e for e in events if e["event"] == "itinerary"
             )
             assert itinerary_event["itinerary"]["cities"][0]["name"] == "London"
+            assert itinerary_event["itinerary"]["cities"][0]["country"] == "UK"
 
     @pytest.mark.asyncio
     async def test_compose_falls_back_to_text_parsing(
@@ -1154,7 +1190,26 @@ class TestItineraryExtractionFromState:
         mock_app_state.session_service.get_session.return_value = mock_session
 
         itinerary_json = json.dumps(
-            {"cities": [{"name": "London"}], "summary_text": "test"}
+            {
+                "cities": [
+                    {
+                        "name": "London",
+                        "country": "UK",
+                        "days_suggested": 2,
+                        "overview": "Explore literary London.",
+                        "stops": [
+                            {
+                                "name": "British Library",
+                                "type": "museum",
+                                "reason": "Literary archives and manuscripts.",
+                                "time_of_day": "morning",
+                                "notes": "Book tickets in advance.",
+                            }
+                        ],
+                    }
+                ],
+                "summary_text": "test",
+            }
         )
         mock_part = MagicMock()
         mock_part.text = f"Here is the result: {itinerary_json}"
@@ -1188,6 +1243,62 @@ class TestItineraryExtractionFromState:
 
             events = _parse_sse_response(response.text)
             assert "itinerary" in [e["event"] for e in events]
+
+    @pytest.mark.asyncio
+    async def test_compose_rejects_invalid_itinerary_schema(
+        self, test_client, mock_app_state
+    ):
+        """Fallback text JSON that doesn't match TripItinerary should emit ExtractionError."""
+        mock_session = MagicMock()
+        mock_session.state = {
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
+            "region_analysis": {
+                "regions": [
+                    {"region_id": 1, "region_name": "England", "cities": []}
+                ]
+            },
+            # No final_itinerary in state
+        }
+        mock_app_state.session_service.get_session.return_value = mock_session
+
+        # Missing required fields like country/days_suggested/stops
+        invalid_itinerary_json = json.dumps(
+            {"cities": [{"name": "London"}], "summary_text": "test"}
+        )
+        mock_part = MagicMock()
+        mock_part.text = f"Result: {invalid_itinerary_json}"
+
+        mock_final_event = MagicMock()
+        mock_final_event.author = "trip_composer"
+        mock_final_event.is_final_response.return_value = True
+        mock_final_event.content.parts = [mock_part]
+
+        async def mock_run_async(*args, **kwargs):
+            yield mock_final_event
+
+        mock_runner_instance = MagicMock()
+        mock_runner_instance.run_async = mock_run_async
+        mock_runner_instance.__aenter__ = AsyncMock(
+            return_value=mock_runner_instance
+        )
+        mock_runner_instance.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("api.streaming.Runner", return_value=mock_runner_instance),
+            patch("api.streaming.create_composition_workflow"),
+            patch("api.streaming.LangfusePlugin") as mock_lf,
+        ):
+            mock_lf.return_value.enabled = False
+            response = await test_client.post(
+                "/api/v1/itinerary/job-123/compose",
+                json={"region_ids": [1]},
+            )
+            assert response.status_code == 200
+
+            events = _parse_sse_response(response.text)
+            event_types = [e["event"] for e in events]
+            assert "itinerary" not in event_types
+            assert "error" in event_types
 
 
 class TestBookContextTimePeriod:

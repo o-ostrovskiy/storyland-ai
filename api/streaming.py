@@ -17,6 +17,7 @@ import uuid
 from typing import AsyncGenerator, List, Optional
 
 from async_timeout import timeout
+from pydantic import ValidationError
 from google.genai import types
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
@@ -33,6 +34,7 @@ from api.models import (
 from common.logging import get_logger
 from tools.google_books import search_books_with_retry
 from models.book import BookMetadata
+from models.itinerary import TripItinerary
 from agents.orchestrator import create_discovery_workflow, create_composition_workflow
 from plugins.langfuse_plugin import LangfusePlugin
 
@@ -82,6 +84,24 @@ def _sse(event_type: str, data: str) -> dict:
         Dict with 'event' and 'data' keys for sse-starlette
     """
     return {"event": event_type, "data": data}
+
+
+def _validate_trip_itinerary(value: object) -> Optional[dict]:
+    """Validate an itinerary payload against TripItinerary schema."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+
+    if not isinstance(value, dict):
+        return None
+
+    try:
+        validated = TripItinerary.model_validate(value)
+        return validated.model_dump()
+    except ValidationError:
+        return None
 
 
 async def discover_stream(
@@ -551,15 +571,9 @@ async def compose_stream(
 
             # Primary: read from session state (set by output_key="final_itinerary")
             state_itinerary = session.state.get("final_itinerary") if session else None
-            if isinstance(state_itinerary, dict):
-                result_data = state_itinerary
+            result_data = _validate_trip_itinerary(state_itinerary)
+            if result_data is not None:
                 logger.info("itinerary_from_state", job_id=job_id[:8])
-            elif isinstance(state_itinerary, str):
-                try:
-                    result_data = json.loads(state_itinerary)
-                    logger.info("itinerary_from_state_str", job_id=job_id[:8])
-                except (json.JSONDecodeError, TypeError):
-                    pass
 
             # Fallback: parse from final response text
             if result_data is None and (
@@ -573,11 +587,11 @@ async def compose_stream(
                         json_end = part.text.rfind("}") + 1
                         if json_start >= 0 and json_end > json_start:
                             try:
-                                result_data = json.loads(
-                                    part.text[json_start:json_end]
-                                )
-                                logger.info("itinerary_from_text_fallback", job_id=job_id[:8])
-                                break
+                                candidate = json.loads(part.text[json_start:json_end])
+                                result_data = _validate_trip_itinerary(candidate)
+                                if result_data is not None:
+                                    logger.info("itinerary_from_text_fallback", job_id=job_id[:8])
+                                    break
                             except json.JSONDecodeError as e:
                                 logger.error(
                                     "json_parse_error", error=str(e)

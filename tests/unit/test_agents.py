@@ -485,3 +485,16 @@ class TestBookContextDynamicInstruction:
         researcher = pipeline.sub_agents[0]
         assert "book_metadata" in researcher.instruction
         assert "[from conversation]" not in researcher.instruction
+
+    def test_title_starting_with_bracket_is_treated_as_real_title(
+        self, model_name, mock_google_search_tool
+    ):
+        """A real title like '[Pygmalion]' should still be baked into the instruction."""
+        pipeline = create_book_context_pipeline(
+            model_name,
+            mock_google_search_tool,
+            book_title="[Pygmalion]",
+            author="George Bernard Shaw",
+        )
+        researcher = pipeline.sub_agents[0]
+        assert '"[Pygmalion]" by George Bernard Shaw' in researcher.instruction
