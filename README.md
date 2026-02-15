@@ -331,7 +331,7 @@ Agent prompts include reliability improvements:
 ## Testing
 
 ```bash
-make test                # Unit tests (188 tests)
+make test                # Unit tests (190 tests)
 make test-integration    # Integration tests with VCR cassettes
 make test-all            # Both
 make test-cov            # With coverage
@@ -345,7 +345,7 @@ make test-cov            # With coverage
 | `test_services.py` | 16 | Session service, context manager |
 | `test_workflow_timeout.py` | 6 | Workflow timeout behavior |
 | `test_llm_scorer.py` | 18 | LLM scoring models and prompts |
-| `test_api.py` | 45 | API models, endpoints, SSE streaming |
+| `test_api.py` | 47 | API models, endpoints, SSE streaming |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).
 

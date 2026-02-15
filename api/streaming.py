@@ -122,12 +122,29 @@ async def discover_stream(
         initial_state["user:preferences"] = preferences
 
     # Create session (job_id = session_id)
-    await app_state.session_service.create_session(
-        app_name="storyland",
-        user_id=user_id,
-        session_id=job_id,
-        state=initial_state,
-    )
+    try:
+        await app_state.session_service.create_session(
+            app_name="storyland",
+            user_id=user_id,
+            session_id=job_id,
+            state=initial_state,
+        )
+    except Exception as e:
+        logger.error(
+            "session_create_failed", error=str(e), error_type=type(e).__name__
+        )
+        yield _sse(
+            "error",
+            SSEErrorEvent(
+                message="Failed to initialize session",
+                error_type="SessionError",
+            ).model_dump_json(),
+        )
+        yield _sse(
+            "done",
+            SSEDoneEvent(job_id=job_id).model_dump_json(),
+        )
+        return
 
     try:
         async with timeout(app_state.config.workflow_timeout):
@@ -414,13 +431,27 @@ async def compose_stream(
         return
 
     # Filter regions by selected IDs (mirrors main.py lines 118-125)
+    valid_ids = {r.get("region_id") for r in all_regions}
+    invalid_ids = [rid for rid in region_ids if rid not in valid_ids]
+
+    if invalid_ids:
+        yield _sse(
+            "error",
+            SSEErrorEvent(
+                message=f"Invalid region_ids: {invalid_ids}. Valid IDs: {sorted(valid_ids)}",
+                error_type="InvalidRegionIds",
+                phase=3,
+            ).model_dump_json(),
+        )
+        yield _sse(
+            "done",
+            SSEDoneEvent(job_id=job_id).model_dump_json(),
+        )
+        return
+
     selected_regions = [
         r for r in all_regions if r.get("region_id") in region_ids
     ]
-
-    if not selected_regions:
-        # If no valid IDs match, use all regions (mirrors main.py lines 499-500)
-        selected_regions = all_regions
 
     # Store selected regions (mirrors main.py lines 515-518)
     session.state["selected_regions"] = selected_regions

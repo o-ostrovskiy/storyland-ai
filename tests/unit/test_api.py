@@ -412,6 +412,28 @@ class TestDiscoverEndpoint:
     """Tests for POST /api/v1/itinerary/discover."""
 
     @pytest.mark.asyncio
+    async def test_discover_session_create_failure(
+        self, test_client, mock_app_state
+    ):
+        """When session backend fails, stream should emit error + done, not crash."""
+        mock_app_state.session_service.create_session.side_effect = (
+            RuntimeError("DB connection refused")
+        )
+        response = await test_client.post(
+            "/api/v1/itinerary/discover",
+            json={"book_title": "1984"},
+        )
+        assert response.status_code == 200
+
+        events = _parse_sse_response(response.text)
+        event_types = [e["event"] for e in events]
+        assert "error" in event_types
+        assert event_types[-1] == "done"
+
+        error_event = next(e for e in events if e["event"] == "error")
+        assert error_event["error_type"] == "SessionError"
+
+    @pytest.mark.asyncio
     async def test_discover_book_not_found(self, test_client, mock_app_state):
         """When Google Books returns no results, stream should emit error + done."""
         with patch(
@@ -593,6 +615,38 @@ class TestComposeEndpoint:
 
         error_event = next(e for e in events if e["event"] == "error")
         assert "No regions" in error_event["message"]
+
+    @pytest.mark.asyncio
+    async def test_compose_invalid_region_ids(
+        self, test_client, mock_app_state
+    ):
+        """When region_ids don't match any discovered regions, emit error + done."""
+        mock_session = MagicMock()
+        mock_session.state = {
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
+            "region_analysis": {
+                "regions": [
+                    {"region_id": 1, "region_name": "England", "cities": []},
+                    {"region_id": 2, "region_name": "Spain", "cities": []},
+                ]
+            },
+        }
+        mock_app_state.session_service.get_session.return_value = mock_session
+
+        response = await test_client.post(
+            "/api/v1/itinerary/job-123/compose",
+            json={"region_ids": [99]},
+        )
+        assert response.status_code == 200
+
+        events = _parse_sse_response(response.text)
+        event_types = [e["event"] for e in events]
+        assert "error" in event_types
+        assert event_types[-1] == "done"
+
+        error_event = next(e for e in events if e["event"] == "error")
+        assert error_event["error_type"] == "InvalidRegionIds"
+        assert "99" in error_event["message"]
 
     @pytest.mark.asyncio
     async def test_compose_success(self, test_client, mock_app_state):
