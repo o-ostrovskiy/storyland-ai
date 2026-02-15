@@ -37,6 +37,19 @@ from plugins.langfuse_plugin import LangfusePlugin
 
 logger = get_logger("storyland.api.streaming")
 
+
+async def _set_job_failed(app_state: AppState, user_id: str, job_id: str) -> None:
+    """Best-effort: persist _job_status='failed' so /status reflects reality."""
+    try:
+        session = await app_state.session_service.get_session(
+            app_name="storyland", user_id=user_id, session_id=job_id
+        )
+        if session is not None:
+            session.state["_job_status"] = "failed"
+    except Exception:
+        pass  # Don't let status bookkeeping mask the real error
+
+
 # Map agent names to human-readable progress descriptions
 DISCOVERY_AGENT_STEPS = {
     "book_context_researcher": "Researching book setting and themes",
@@ -132,6 +145,7 @@ async def discover_stream(
                 )
             except Exception as e:
                 logger.error("book_search_failed", error=str(e))
+                await _set_job_failed(app_state, user_id, job_id)
                 yield _sse(
                     "error",
                     SSEErrorEvent(
@@ -147,6 +161,7 @@ async def discover_stream(
                 return
 
             if not books:
+                await _set_job_failed(app_state, user_id, job_id)
                 yield _sse(
                     "error",
                     SSEErrorEvent(
@@ -297,6 +312,7 @@ async def discover_stream(
 
     except TimeoutError:
         logger.error("discover_timeout", job_id=job_id, events=event_count)
+        await _set_job_failed(app_state, user_id, job_id)
         yield _sse(
             "error",
             SSEErrorEvent(
@@ -313,6 +329,7 @@ async def discover_stream(
         logger.error(
             "discover_error", error=str(e), error_type=type(e).__name__
         )
+        await _set_job_failed(app_state, user_id, job_id)
         yield _sse(
             "error",
             SSEErrorEvent(
@@ -361,6 +378,9 @@ async def compose_stream(
             session_id=job_id,
         )
     except Exception:
+        session = None
+
+    if session is None:
         yield _sse(
             "error",
             SSEErrorEvent(
@@ -500,6 +520,7 @@ async def compose_stream(
                     ).model_dump_json(),
                 )
             else:
+                session.state["_job_status"] = "failed"
                 yield _sse(
                     "error",
                     SSEErrorEvent(
@@ -529,6 +550,7 @@ async def compose_stream(
 
     except TimeoutError:
         logger.error("compose_timeout", job_id=job_id, events=event_count)
+        session.state["_job_status"] = "failed"
         yield _sse(
             "error",
             SSEErrorEvent(
@@ -545,6 +567,7 @@ async def compose_stream(
         logger.error(
             "compose_error", error=str(e), error_type=type(e).__name__
         )
+        session.state["_job_status"] = "failed"
         yield _sse(
             "error",
             SSEErrorEvent(

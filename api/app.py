@@ -66,10 +66,14 @@ def create_app() -> FastAPI:
     cors_origins = os.getenv("CORS_ORIGINS", "*")
     origins = [o.strip() for o in cors_origins.split(",")]
 
+    # Browsers reject Access-Control-Allow-Origin: * with credentials.
+    # Only enable credentials when specific origins are configured.
+    allow_credentials = origins != ["*"]
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
-        allow_credentials=True,
+        allow_credentials=allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
     )

@@ -9,6 +9,7 @@ import json
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 from pydantic import ValidationError
+from fastapi.middleware.cors import CORSMiddleware
 
 from api.models import (
     DiscoverRequest,
@@ -361,11 +362,21 @@ class TestStatusEndpoint:
 
     @pytest.mark.asyncio
     async def test_status_not_found(self, test_client, mock_app_state):
-        mock_app_state.session_service.get_session.side_effect = Exception(
-            "Not found"
-        )
+        mock_app_state.session_service.get_session.return_value = None
         response = await test_client.get("/api/v1/itinerary/bad-id/status")
         assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_status_backend_error_returns_500(
+        self, test_client, mock_app_state
+    ):
+        """Backend exceptions should return 500, not 404."""
+        mock_app_state.session_service.get_session.side_effect = RuntimeError(
+            "DB connection lost"
+        )
+        response = await test_client.get("/api/v1/itinerary/some-id/status")
+        assert response.status_code == 500
+        assert "Failed to retrieve job status" in response.json()["detail"]
 
     @pytest.mark.asyncio
     async def test_status_returns_none(self, test_client, mock_app_state):
@@ -542,6 +553,26 @@ class TestComposeEndpoint:
         assert error_event["error_type"] == "JobNotFound"
 
     @pytest.mark.asyncio
+    async def test_compose_session_returns_none(
+        self, test_client, mock_app_state
+    ):
+        """When get_session returns None (no exception), should emit error + done, not crash."""
+        mock_app_state.session_service.get_session.return_value = None
+        response = await test_client.post(
+            "/api/v1/itinerary/bad-job/compose",
+            json={"region_ids": [1]},
+        )
+        assert response.status_code == 200
+
+        events = _parse_sse_response(response.text)
+        event_types = [e["event"] for e in events]
+        assert event_types[-1] == "done"
+
+        error_event = next(e for e in events if e["event"] == "error")
+        assert "not found" in error_event["message"].lower()
+        assert error_event["error_type"] == "JobNotFound"
+
+    @pytest.mark.asyncio
     async def test_compose_no_regions_in_session(
         self, test_client, mock_app_state
     ):
@@ -643,6 +674,142 @@ class TestComposeEndpoint:
                 e for e in events if e["event"] == "itinerary"
             )
             assert itinerary_event["itinerary"]["cities"][0]["name"] == "London"
+
+
+# =============================================================================
+# Job Status Persistence Tests
+# =============================================================================
+
+
+class TestJobStatusFailedPersistence:
+    """Verify _job_status='failed' is set on error paths."""
+
+    @pytest.mark.asyncio
+    async def test_discover_book_not_found_sets_failed(
+        self, test_client, mock_app_state
+    ):
+        mock_session = MagicMock()
+        mock_session.state = {"_job_status": "searching"}
+        mock_app_state.session_service.get_session.return_value = mock_session
+
+        with patch(
+            "api.streaming.search_books_with_retry", return_value=[]
+        ):
+            await test_client.post(
+                "/api/v1/itinerary/discover",
+                json={"book_title": "Nonexistent"},
+            )
+        assert mock_session.state["_job_status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_discover_api_error_sets_failed(
+        self, test_client, mock_app_state
+    ):
+        mock_session = MagicMock()
+        mock_session.state = {"_job_status": "searching"}
+        mock_app_state.session_service.get_session.return_value = mock_session
+
+        with patch(
+            "api.streaming.search_books_with_retry",
+            side_effect=ConnectionError("fail"),
+        ):
+            await test_client.post(
+                "/api/v1/itinerary/discover",
+                json={"book_title": "1984"},
+            )
+        assert mock_session.state["_job_status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_compose_extraction_failure_sets_failed(
+        self, test_client, mock_app_state
+    ):
+        mock_session = MagicMock()
+        mock_session.state = {
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
+            "region_analysis": {
+                "regions": [
+                    {"region_id": 1, "region_name": "England", "cities": []}
+                ]
+            },
+        }
+        mock_app_state.session_service.get_session.return_value = mock_session
+
+        # Final event with no parseable JSON
+        mock_part = MagicMock()
+        mock_part.text = "Sorry, I cannot do that."
+
+        mock_final_event = MagicMock()
+        mock_final_event.author = "trip_composer"
+        mock_final_event.is_final_response.return_value = True
+        mock_final_event.content.parts = [mock_part]
+
+        async def mock_run_async(*args, **kwargs):
+            yield mock_final_event
+
+        mock_runner_instance = MagicMock()
+        mock_runner_instance.run_async = mock_run_async
+        mock_runner_instance.__aenter__ = AsyncMock(
+            return_value=mock_runner_instance
+        )
+        mock_runner_instance.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("api.streaming.Runner", return_value=mock_runner_instance),
+            patch("api.streaming.create_composition_workflow"),
+            patch("api.streaming.LangfusePlugin") as mock_lf,
+        ):
+            mock_lf.return_value.enabled = False
+            await test_client.post(
+                "/api/v1/itinerary/job-123/compose",
+                json={"region_ids": [1]},
+            )
+        assert mock_session.state["_job_status"] == "failed"
+
+
+# =============================================================================
+# CORS Configuration Tests
+# =============================================================================
+
+
+class TestCORSConfiguration:
+    """Tests for CORS middleware configuration."""
+
+    def test_wildcard_origin_disables_credentials(self):
+        """CORS_ORIGINS='*' should set allow_credentials=False."""
+        import os
+        from unittest.mock import patch as mock_patch
+
+        with mock_patch.dict(os.environ, {"CORS_ORIGINS": "*"}):
+            from api.app import create_app
+
+            app = create_app()
+            cors_middleware = None
+            for middleware in app.user_middleware:
+                if middleware.cls is CORSMiddleware:
+                    cors_middleware = middleware
+                    break
+            assert cors_middleware is not None
+            assert cors_middleware.kwargs["allow_credentials"] is False
+
+    def test_specific_origins_enable_credentials(self):
+        """Specific CORS origins should enable allow_credentials."""
+        import os
+        from unittest.mock import patch as mock_patch
+
+        with mock_patch.dict(
+            os.environ,
+            {"CORS_ORIGINS": "http://localhost:3000,https://app.example.com"},
+        ):
+            from api.app import create_app
+
+            app = create_app()
+            cors_middleware = None
+            for middleware in app.user_middleware:
+                if middleware.cls is CORSMiddleware:
+                    cors_middleware = middleware
+                    break
+            assert cors_middleware is not None
+            assert cors_middleware.kwargs["allow_credentials"] is True
 
 
 # =============================================================================

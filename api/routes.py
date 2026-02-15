@@ -151,8 +151,17 @@ async def get_status(job_id: str, user_id: str = "api_user"):
             user_id=user_id,
             session_id=job_id,
         )
-    except Exception:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    except Exception as e:
+        logger.error(
+            "status_session_error",
+            job_id=job_id,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve job status",
+        )
 
     if session is None:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
