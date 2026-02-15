@@ -56,7 +56,7 @@ DISCOVERY_AGENT_STEPS = {
     "book_context_researcher": "Researching book setting and themes",
     "book_context_formatter": "Formatting book context",
     "book_context_pipeline": "Analyzing book context",
-    "reader_profile": "Reading user preferences",
+    "reader_profile_agent": "Reading user preferences",
     "parallel_discovery": "Running parallel location discovery",
     "city_researcher": "Finding cities related to the book",
     "city_formatter": "Formatting city results",
@@ -541,9 +541,28 @@ async def compose_stream(
                     if event.is_final_response():
                         final_response = event
 
-            # Extract JSON from final response (mirrors main.py lines 639-650)
+            # Extract itinerary: prefer structured output_key, fall back to text parsing
+            refreshed = await app_state.session_service.get_session(
+                app_name="storyland", user_id=user_id, session_id=job_id
+            )
+            if refreshed is not None:
+                session = refreshed
             result_data = None
-            if (
+
+            # Primary: read from session state (set by output_key="final_itinerary")
+            state_itinerary = session.state.get("final_itinerary") if session else None
+            if isinstance(state_itinerary, dict):
+                result_data = state_itinerary
+                logger.info("itinerary_from_state", job_id=job_id[:8])
+            elif isinstance(state_itinerary, str):
+                try:
+                    result_data = json.loads(state_itinerary)
+                    logger.info("itinerary_from_state_str", job_id=job_id[:8])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Fallback: parse from final response text
+            if result_data is None and (
                 final_response
                 and final_response.content
                 and final_response.content.parts
@@ -557,6 +576,7 @@ async def compose_stream(
                                 result_data = json.loads(
                                     part.text[json_start:json_end]
                                 )
+                                logger.info("itinerary_from_text_fallback", job_id=job_id[:8])
                                 break
                             except json.JSONDecodeError as e:
                                 logger.error(

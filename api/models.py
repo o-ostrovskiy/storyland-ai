@@ -59,7 +59,8 @@ class ComposeRequest(BaseModel):
     }
 
     region_ids: List[int] = Field(
-        description="Selected region IDs from the discover response"
+        min_length=1,
+        description="Selected region IDs from the discover response",
     )
     user_id: str = Field(default="api_user", description="User identifier")
 

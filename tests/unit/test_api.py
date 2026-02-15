@@ -76,9 +76,10 @@ class TestComposeRequest:
         req = ComposeRequest(region_ids=[3])
         assert req.region_ids == [3]
 
-    def test_empty_region_ids(self):
-        req = ComposeRequest(region_ids=[])
-        assert req.region_ids == []
+    def test_empty_region_ids_rejected(self):
+        """Empty region_ids should be rejected (min_length=1)."""
+        with pytest.raises(ValidationError):
+            ComposeRequest(region_ids=[])
 
     def test_default_user_id(self):
         req = ComposeRequest(region_ids=[1])
@@ -1062,6 +1063,210 @@ class TestCORSConfiguration:
                     break
             assert cors_middleware is not None
             assert cors_middleware.kwargs["allow_credentials"] is True
+
+
+# =============================================================================
+# Regression Tests for Code Review Findings
+# =============================================================================
+
+
+class TestItineraryExtractionFromState:
+    """[P1] Verify compose_stream reads itinerary from session state (output_key)
+    before falling back to text parsing."""
+
+    @pytest.mark.asyncio
+    async def test_compose_reads_from_session_state(
+        self, test_client, mock_app_state
+    ):
+        """When final_itinerary is in session state, use it even if text parsing would fail."""
+        itinerary_data = {
+            "cities": [{"name": "London"}],
+            "summary_text": "A literary journey",
+        }
+        mock_session = MagicMock()
+        mock_session.state = {
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
+            "region_analysis": {
+                "regions": [
+                    {"region_id": 1, "region_name": "England", "cities": []}
+                ]
+            },
+            "final_itinerary": itinerary_data,
+        }
+        mock_app_state.session_service.get_session.return_value = mock_session
+
+        # Final event has NO parseable JSON text — only session state has it
+        mock_part = MagicMock()
+        mock_part.text = "Here is your itinerary!"  # no JSON
+
+        mock_final_event = MagicMock()
+        mock_final_event.author = "trip_composer"
+        mock_final_event.is_final_response.return_value = True
+        mock_final_event.content.parts = [mock_part]
+
+        async def mock_run_async(*args, **kwargs):
+            yield mock_final_event
+
+        mock_runner_instance = MagicMock()
+        mock_runner_instance.run_async = mock_run_async
+        mock_runner_instance.__aenter__ = AsyncMock(
+            return_value=mock_runner_instance
+        )
+        mock_runner_instance.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("api.streaming.Runner", return_value=mock_runner_instance),
+            patch("api.streaming.create_composition_workflow"),
+            patch("api.streaming.LangfusePlugin") as mock_lf,
+        ):
+            mock_lf.return_value.enabled = False
+            response = await test_client.post(
+                "/api/v1/itinerary/job-123/compose",
+                json={"region_ids": [1]},
+            )
+            assert response.status_code == 200
+
+            events = _parse_sse_response(response.text)
+            event_types = [e["event"] for e in events]
+            assert "itinerary" in event_types
+            assert event_types[-1] == "done"
+
+            itinerary_event = next(
+                e for e in events if e["event"] == "itinerary"
+            )
+            assert itinerary_event["itinerary"]["cities"][0]["name"] == "London"
+
+    @pytest.mark.asyncio
+    async def test_compose_falls_back_to_text_parsing(
+        self, test_client, mock_app_state
+    ):
+        """When session state has no final_itinerary, fall back to text parsing."""
+        mock_session = MagicMock()
+        mock_session.state = {
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
+            "region_analysis": {
+                "regions": [
+                    {"region_id": 1, "region_name": "England", "cities": []}
+                ]
+            },
+            # No final_itinerary in state
+        }
+        mock_app_state.session_service.get_session.return_value = mock_session
+
+        itinerary_json = json.dumps(
+            {"cities": [{"name": "London"}], "summary_text": "test"}
+        )
+        mock_part = MagicMock()
+        mock_part.text = f"Here is the result: {itinerary_json}"
+
+        mock_final_event = MagicMock()
+        mock_final_event.author = "trip_composer"
+        mock_final_event.is_final_response.return_value = True
+        mock_final_event.content.parts = [mock_part]
+
+        async def mock_run_async(*args, **kwargs):
+            yield mock_final_event
+
+        mock_runner_instance = MagicMock()
+        mock_runner_instance.run_async = mock_run_async
+        mock_runner_instance.__aenter__ = AsyncMock(
+            return_value=mock_runner_instance
+        )
+        mock_runner_instance.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("api.streaming.Runner", return_value=mock_runner_instance),
+            patch("api.streaming.create_composition_workflow"),
+            patch("api.streaming.LangfusePlugin") as mock_lf,
+        ):
+            mock_lf.return_value.enabled = False
+            response = await test_client.post(
+                "/api/v1/itinerary/job-123/compose",
+                json={"region_ids": [1]},
+            )
+            assert response.status_code == 200
+
+            events = _parse_sse_response(response.text)
+            assert "itinerary" in [e["event"] for e in events]
+
+
+class TestBookContextTimePeriod:
+    """[P1] Verify BookContext.time_period accepts null."""
+
+    def test_book_context_null_time_period(self):
+        from models.book import BookContext
+
+        ctx = BookContext(
+            primary_locations=["Paris"],
+            time_period=None,
+            themes=["war"],
+        )
+        assert ctx.time_period is None
+
+    def test_book_context_missing_time_period_defaults_none(self):
+        from models.book import BookContext
+
+        ctx = BookContext(
+            primary_locations=["Paris"],
+            themes=["war"],
+        )
+        assert ctx.time_period is None
+
+    def test_book_context_with_time_period(self):
+        from models.book import BookContext
+
+        ctx = BookContext(
+            primary_locations=["Paris"],
+            time_period="World War II (1940-1944)",
+            themes=["war"],
+        )
+        assert ctx.time_period == "World War II (1940-1944)"
+
+
+class TestEmptyRegionIdsRejected:
+    """[P2] Verify empty region_ids is rejected at API layer."""
+
+    @pytest.mark.asyncio
+    async def test_compose_empty_region_ids_returns_422(self, test_client):
+        """POST /compose with empty region_ids should return 422 validation error."""
+        response = await test_client.post(
+            "/api/v1/itinerary/job-123/compose",
+            json={"region_ids": []},
+        )
+        assert response.status_code == 422
+
+
+class TestDiscoveryProgressMapping:
+    """[P3] Verify reader_profile_agent emits progress events."""
+
+    def test_reader_profile_agent_in_progress_map(self):
+        from api.streaming import DISCOVERY_AGENT_STEPS
+
+        assert "reader_profile_agent" in DISCOVERY_AGENT_STEPS
+        # Old key should not exist
+        assert "reader_profile" not in DISCOVERY_AGENT_STEPS
+
+
+class TestEvalWorkflowBookContext:
+    """[P2] Verify eval workflow does not use placeholder literals."""
+
+    def test_eval_workflow_no_placeholder_in_instruction(self):
+        from google.adk.tools import FunctionTool
+        from agents.orchestrator import create_eval_workflow
+
+        def mock_search_book(title: str, author: str = "") -> str:
+            return '{"book_title": "Test"}'
+
+        mock_tool = FunctionTool(mock_search_book)
+        workflow = create_eval_workflow("gemini-2.0-flash", mock_tool)
+
+        # Find book_context_pipeline
+        book_context = workflow.sub_agents[1]
+        assert book_context.name == "book_context_pipeline"
+
+        # The researcher sub-agent's instruction should not contain placeholder literals
+        researcher = book_context.sub_agents[0]
+        assert "[from conversation]" not in researcher.instruction
 
 
 # =============================================================================
