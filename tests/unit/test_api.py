@@ -649,6 +649,37 @@ class TestComposeEndpoint:
         assert "99" in error_event["message"]
 
     @pytest.mark.asyncio
+    async def test_compose_malformed_region_ids_in_session(
+        self, test_client, mock_app_state
+    ):
+        """Regions with None/missing region_id should be excluded from valid set."""
+        mock_session = MagicMock()
+        mock_session.state = {
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
+            "region_analysis": {
+                "regions": [
+                    {"region_id": 1, "region_name": "England", "cities": []},
+                    {"region_name": "Unknown", "cities": []},  # missing region_id
+                    {"region_id": None, "region_name": "Bad", "cities": []},
+                ]
+            },
+        }
+        mock_app_state.session_service.get_session.return_value = mock_session
+
+        # region_id=99 is invalid; only region_id=1 is valid (None excluded)
+        response = await test_client.post(
+            "/api/v1/itinerary/job-123/compose",
+            json={"region_ids": [99]},
+        )
+        assert response.status_code == 200
+
+        events = _parse_sse_response(response.text)
+        error_event = next(e for e in events if e["event"] == "error")
+        assert error_event["error_type"] == "InvalidRegionIds"
+        # Valid IDs should only contain 1, not None
+        assert "1" in error_event["message"]
+
+    @pytest.mark.asyncio
     async def test_compose_success(self, test_client, mock_app_state):
         """Successful compose should emit: progress, itinerary, done."""
         mock_session = MagicMock()
@@ -817,6 +848,109 @@ class TestJobStatusFailedPersistence:
                 "/api/v1/itinerary/job-123/compose",
                 json={"region_ids": [1]},
             )
+        assert mock_session.state["_job_status"] == "failed"
+
+
+# =============================================================================
+# Cancellation Tests
+# =============================================================================
+
+
+class TestCancellationHandling:
+    """Verify CancelledError sets _job_status='failed' on disconnect."""
+
+    @pytest.mark.asyncio
+    async def test_discover_cancellation_sets_failed(self, mock_app_state):
+        """discover_stream should persist failed status on CancelledError."""
+        import asyncio
+        from api.streaming import discover_stream
+
+        mock_session = MagicMock()
+        mock_session.state = {"_job_status": "discovering"}
+        mock_app_state.session_service.get_session.return_value = mock_session
+
+        # Runner that raises CancelledError mid-stream
+        async def mock_run_async(*args, **kwargs):
+            raise asyncio.CancelledError()
+            yield  # noqa: unreachable — makes this an async generator
+
+        mock_runner = MagicMock()
+        mock_runner.run_async = mock_run_async
+        mock_runner.__aenter__ = AsyncMock(return_value=mock_runner)
+        mock_runner.__aexit__ = AsyncMock(return_value=False)
+
+        from models.book import BookInfo
+
+        mock_book = BookInfo(
+            title="1984", authors=["George Orwell"], description="test"
+        )
+
+        with (
+            patch(
+                "api.streaming.search_books_with_retry",
+                return_value=[mock_book],
+            ),
+            patch("api.streaming.Runner", return_value=mock_runner),
+            patch("api.streaming.create_discovery_workflow"),
+            patch("api.streaming.LangfusePlugin") as mock_lf,
+        ):
+            mock_lf.return_value.enabled = False
+            gen = discover_stream(
+                book_title="1984",
+                author="George Orwell",
+                preferences=None,
+                user_id="api_user",
+                app_state=mock_app_state,
+            )
+            with pytest.raises(asyncio.CancelledError):
+                async for _ in gen:
+                    pass
+
+        assert mock_session.state["_job_status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_compose_cancellation_sets_failed(self, mock_app_state):
+        """compose_stream should persist failed status on CancelledError."""
+        import asyncio
+        from api.streaming import compose_stream
+
+        mock_session = MagicMock()
+        mock_session.state = {
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
+            "region_analysis": {
+                "regions": [
+                    {"region_id": 1, "region_name": "England", "cities": []}
+                ]
+            },
+            "_job_status": "composing",
+        }
+        mock_app_state.session_service.get_session.return_value = mock_session
+
+        async def mock_run_async(*args, **kwargs):
+            raise asyncio.CancelledError()
+            yield  # noqa: unreachable
+
+        mock_runner = MagicMock()
+        mock_runner.run_async = mock_run_async
+        mock_runner.__aenter__ = AsyncMock(return_value=mock_runner)
+        mock_runner.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("api.streaming.Runner", return_value=mock_runner),
+            patch("api.streaming.create_composition_workflow"),
+            patch("api.streaming.LangfusePlugin") as mock_lf,
+        ):
+            mock_lf.return_value.enabled = False
+            gen = compose_stream(
+                job_id="job-123",
+                region_ids=[1],
+                user_id="api_user",
+                app_state=mock_app_state,
+            )
+            with pytest.raises(asyncio.CancelledError):
+                async for _ in gen:
+                    pass
+
         assert mock_session.state["_job_status"] == "failed"
 
 

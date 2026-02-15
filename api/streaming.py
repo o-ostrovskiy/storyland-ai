@@ -11,6 +11,7 @@ Key pattern:
 Mirrors main.py lines 286-603 (Runner + event loop).
 """
 
+import asyncio
 import json
 import uuid
 from typing import AsyncGenerator, List, Optional
@@ -342,6 +343,11 @@ async def discover_stream(
             "done",
             SSEDoneEvent(job_id=job_id).model_dump_json(),
         )
+    except asyncio.CancelledError:
+        # Client disconnected — can't yield SSE (client is gone), but persist status
+        logger.warning("discover_cancelled", job_id=job_id, events=event_count)
+        await _set_job_failed(app_state, user_id, job_id)
+        raise
     except Exception as e:
         logger.error(
             "discover_error", error=str(e), error_type=type(e).__name__
@@ -431,7 +437,11 @@ async def compose_stream(
         return
 
     # Filter regions by selected IDs (mirrors main.py lines 118-125)
-    valid_ids = {r.get("region_id") for r in all_regions}
+    # Exclude non-int region_ids (malformed agent output) to avoid TypeError in sorted()
+    valid_ids = {
+        r.get("region_id") for r in all_regions
+        if isinstance(r.get("region_id"), int)
+    }
     invalid_ids = [rid for rid in region_ids if rid not in valid_ids]
 
     if invalid_ids:
@@ -594,6 +604,11 @@ async def compose_stream(
             "done",
             SSEDoneEvent(job_id=job_id).model_dump_json(),
         )
+    except asyncio.CancelledError:
+        # Client disconnected — persist status, re-raise for asyncio
+        logger.warning("compose_cancelled", job_id=job_id, events=event_count)
+        session.state["_job_status"] = "failed"
+        raise
     except Exception as e:
         logger.error(
             "compose_error", error=str(e), error_type=type(e).__name__
