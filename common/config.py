@@ -30,6 +30,7 @@ class Config:
     langfuse_secret_key: Optional[str]
     langfuse_public_key: Optional[str]
     langfuse_host: Optional[str]
+    internal_api_secret: str
 
 
 def _require_env(key: str) -> str:
@@ -93,6 +94,7 @@ def load_config() -> Config:
         langfuse_secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
         langfuse_public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
         langfuse_host=os.getenv("LANGFUSE_HOST"),
+        internal_api_secret=os.getenv("INTERNAL_API_SECRET", ""),
     )
 
 

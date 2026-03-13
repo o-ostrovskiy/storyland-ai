@@ -598,6 +598,188 @@ Client                          FastAPI Server
 
 ---
 
+## 9. Transport-Agnostic Core SDK with Thin HTTP Adapter
+
+### Decision
+Split the codebase into two distinct layers: a transport-agnostic **Core SDK** (`core/`) that yields domain events, and a thin **HTTP adapter** (`api/`) that maps those events to SSE. Keep all business logic in the Core SDK so it can be consumed directly as a Python library or indirectly via HTTP.
+
+### Architecture
+
+```
+Two consumption patterns — same business logic:
+
+Pattern A: Library (direct import)
+  streamlit_demo.py
+    └── from core.executor import WorkflowExecutor
+         └── executor.discover("1984")  → yields DomainEvent (in-process)
+
+Pattern B: HTTP API
+  Frontend / Gateway
+    └── POST /api/v1/itinerary/discover
+         └── api/routes.py         (thin wiring)
+              └── api/streaming.py  (DomainEvent → SSE dict)
+                   └── core/executor.py → yields DomainEvent
+```
+
+**Core SDK layer** (`core/`):
+- `WorkflowExecutor` — the only public interface; has no HTTP imports
+- `executor.discover()` / `executor.compose()` — async generators yielding `DomainEvent`
+- `DomainEvent` types: `ProgressEvent`, `MetadataReady`, `RegionsReady`, `ItineraryReady`, `WorkflowError`, `WorkflowComplete`
+- `ExecutorConfig` — plain dataclass; config values come from the caller, not `os.environ`
+
+**HTTP adapter layer** (`api/`):
+- `api/streaming.py` — single function `domain_event_to_sse(event: DomainEvent) -> dict`; pattern-matches each domain event type → SSE format
+- `api/routes.py` — wires HTTP requests to executor calls, returns `EventSourceResponse`
+- `api/models.py` — Pydantic request/response models (HTTP-specific, not shared with core)
+- Zero business logic — no branching on content, no state manipulation
+
+**Interface between layers:**
+```python
+# core/events.py — language-native, no serialization
+@dataclass(frozen=True)
+class RegionsReady:
+    job_id: str
+    regions: list[dict]
+    analysis_note: str
+
+# api/streaming.py — converts at the HTTP boundary only
+case RegionsReady(job_id=j, regions=r, analysis_note=n):
+    yield {"event": "regions", "data": json.dumps({...})}
+```
+
+### Rationale
+
+**Problem:** The three-phase workflow was originally built for CLI/Streamlit use (direct Python calls). Adding a web API shouldn't require rewriting the workflow logic — and the API shouldn't be the only way to use the system.
+
+**Why transport-agnostic core matters:**
+- `streamlit_demo.py` imports `WorkflowExecutor` directly — no HTTP, no serialization, no service to run
+- Unit tests mock the executor without starting a web server
+- Future consumers (CLI, WebSocket, gRPC) can reuse the same executor without touching `api/`
+- The executor can be published as a standalone Python package if needed
+
+**Why a thin adapter (not a fat controller):**
+- If business logic lived in `api/routes.py`, it would be invisible to direct library users
+- All bugs and features would need to be fixed in two places (routes + library)
+- A thin adapter means: if the agent behavior changes, only `core/` changes — HTTP wiring stays the same
+
+### Trade-offs
+
+**Benefits:**
+- **Two consumption modes:** Streamlit uses library mode (zero latency, single process); web frontend uses API mode (language-agnostic, independently scalable)
+- **Single source of truth:** `core/executor.py` is the authoritative implementation — no duplicate logic
+- **Testability:** `WorkflowExecutor` is directly instantiable in tests without spinning up FastAPI
+- **Future-proof:** Adding WebSocket or gRPC transport is a new thin adapter, not a rewrite
+
+**Costs:**
+- **Interface drift risk:** The backend gateway (`backend/`) calls the agent API via hand-written `httpx` calls. If `api/models.py` renames a field, the backend silently sends wrong data (no compile-time check). Mitigation: keep a typed `AgentClient` wrapper in the gateway that uses the Pydantic request models.
+- **Two deployment modes to support:** Streamlit and API layer both need to work, meaning changes to `core/` must not break either consumer.
+- **Domain event → SSE mapping is manual:** `domain_event_to_sse()` in `api/streaming.py` must be updated whenever a new `DomainEvent` type is added. Missing a case silently drops the event.
+
+### Files
+- `core/executor.py` — `WorkflowExecutor`, transport-agnostic async generator
+- `core/events.py` — frozen dataclasses for all domain events
+- `core/types.py` — `ExecutorConfig` (plain dataclass, no env coupling)
+- `api/streaming.py` — `domain_event_to_sse()`: the only place domain events become HTTP
+- `api/routes.py` — thin wiring, no business logic
+- `streamlit_demo.py` — reference implementation of the library consumption pattern
+
+---
+
+## 11. Job Failure Status Tracking via Session State Flag
+
+### Decision
+Track terminal workflow failures with an explicit `job_failed` boolean flag in session state, rather than inferring failure from the absence of data.
+
+### Architecture
+
+```
+WorkflowExecutor error path:
+    await _mark_session_failed(job_id, user_id)
+        → append_event(session, state_delta={"job_failed": True})
+        ↑ In-place mutation of session.state does NOT persist across get_session() calls
+          in ADK's InMemorySessionService (each call returns a new Session object).
+          Persistence requires append_event() with state_delta.
+    yield WorkflowError(...)
+    yield WorkflowComplete(...)
+
+WorkflowExecutor compose() retry (after validation passes):
+    append_event(session, state_delta={
+        "job_failed": False,          → clears stale failure flag
+        "final_itinerary": None,      → removes stale itinerary from a prior successful compose
+        "selected_regions": [...],    → persists selected region IDs for COMPOSING status
+    })
+
+_derive_job_status() precedence (routes.py):
+    job_failed      → FAILED      (terminal failure — highest priority)
+    final_itinerary → COMPLETED   (terminal success)
+    selected_regions → COMPOSING
+    regions         → REGIONS_READY
+    book_metadata   → DISCOVERING
+    (none)          → SEARCHING
+```
+
+**Error paths covered:**
+- `discover()`: book search exception, book not found, discovery timeout, generic exception, `asyncio.CancelledError`
+- `compose()`: no regions, invalid region IDs, extraction failure, composition timeout, generic exception, `asyncio.CancelledError`
+- **Excluded**: session creation failure (no session exists yet — `/status` returns 404, which is correct)
+
+### Rationale
+
+**Problem:** Status was derived purely from which data keys were present in session state. This worked for the happy path but had a critical gap: after any error, the session still contained whatever partial data existed at failure time, so `/status` would report the last _in-progress_ phase indefinitely instead of `failed`.
+
+For example, after "book not found":
+- `book_metadata` is absent → status reads `searching` (correct during search, wrong after failure)
+
+After a composition timeout:
+- `book_metadata` ✓, `region_analysis` ✓, `selected_regions` ✓ → status reads `composing` forever
+
+**Why an explicit flag?**
+
+The fundamental issue is that "no data yet" and "failed before data was written" are indistinguishable from presence checks alone. An explicit `job_failed` flag makes the failure state unambiguous and directly writable from any error path.
+
+**Why `FAILED` beats `COMPLETED` in precedence?**
+
+If a compose retry succeeds, `final_itinerary` is written and `job_failed` is `False` (cleared at retry start) — so both checks agree on `COMPLETED`. The conflict only arises when a retry *fails*: `job_failed=True` is set, but a `final_itinerary` from a prior successful compose still lives in session state. Checking `job_failed` first ensures the current failure is visible rather than silently masked by the stale result.
+
+`clear_final_itinerary()` (called at retry start) removes the stale itinerary from the previous run. This is the primary guard; the `FAILED > COMPLETED` precedence is a secondary defence for any edge cases where both flags end up set simultaneously (e.g., runner writes `final_itinerary` and then an extraction error occurs).
+
+**Why clear both `job_failed` and `final_itinerary` in `compose()` rather than elsewhere?**
+
+Clearing happens unconditionally after validation passes (valid regions, valid IDs) — at the point where we're committed to running a new composition attempt. Doing it earlier (before validation) would clear the state even if we're about to reject the request with a validation error, leaving a misleading "no data" state instead of `failed`. Doing it at the start of `discover()` would not help because discover always creates a brand-new session with a new `job_id`.
+
+**`asyncio.CancelledError` handling:**
+
+When a client disconnects, the framework cancels the SSE generator coroutine. Once caught in the `except asyncio.CancelledError` block, subsequent `await` calls are not automatically cancelled — we're past the cancellation point. `_mark_session_failed()` is therefore safe to `await` here before re-raising.
+
+### Trade-offs
+
+**Benefits:**
+- **Correct terminal states:** Clients can distinguish "still running" from "failed" reliably
+- **Retryable compose:** Stale failure flag is cleared automatically on the next valid retry
+- **Disconnection safety:** Client disconnects mark the job failed instead of leaving it in-progress forever
+- **Minimal state overhead:** One boolean per job in the existing session state dict
+
+**Costs:**
+- **Async cleanup in cancellation handler:** `await _mark_session_failed()` runs inside an `except CancelledError` block — unusual but safe (see rationale above)
+- **Flag requires explicit clearing via `append_event`:** Compose retries must call `append_event` with `state_delta={"job_failed": False, ...}`. In-place mutation of `session.state` after `get_session()` does not persist — ADK's `InMemorySessionService` reconstructs the Session object on each retrieval. This was the root cause of a bug where `/status` continued to report `FAILED` after a successful retry.
+- **`_mark_session_failed` is best-effort:** If the session service itself is unavailable, the flag is not set (failure is logged and swallowed). The `/status` endpoint may then report a stale in-progress state, which is preferable to masking the original error.
+
+### Alternatives Considered
+
+1. **Separate status key (`_job_status = "failed"`)**
+   - Considered: Store the full status string in state
+   - Rejected: Adds redundancy with the derived-status logic; `_derive_job_status` would need to both read the key AND fall back to data-presence derivation for forward/backward compatibility
+
+2. **Dedicated status table in the database**
+   - Considered: Track job lifecycle in a separate `job_status` table
+   - Rejected: Over-engineering; session state is already the job store, adding a separate table creates two sources of truth
+
+3. **Error event replay on `/status`**
+   - Considered: Store the last `WorkflowError` in session state and surface it on `/status`
+   - Partially implemented: The `job_failed` flag could be extended to include the error message in a future iteration
+
+---
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -610,5 +792,8 @@ Client                          FastAPI Server
 | **Dual backends** | Dev speed + prod persistence | Config complexity |
 | **Workflow timeout** | Safety net for hangs | Abrupt failures |
 | **SSE streaming API** | Real-time progress, HITL preserved | Long-lived connections |
+| **Transport-agnostic core SDK** | Library or HTTP consumption, same logic | Interface drift risk between gateway and API layer |
+| **Failure status flag** | Terminal failures visible via /status, retryable | State must be persisted via `append_event`, not in-place mutation |
+| **Gateway secret** | Blocks direct access when deployed behind a gateway | Health endpoint intentionally excluded; leave secret empty for standalone dev |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.

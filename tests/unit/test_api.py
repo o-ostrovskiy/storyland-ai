@@ -479,6 +479,63 @@ class TestStatusEndpoint:
         data = response.json()
         assert data["status"] == "composing"
 
+    @pytest.mark.asyncio
+    async def test_status_failed_marker_returns_failed(self, test_client, mock_executor):
+        """Regression: job_failed=True in session state must yield status=failed."""
+        mock_session = MagicMock()
+        mock_session.state = {"job_failed": True}
+        mock_executor.session_service.get_session.return_value = mock_session
+        response = await test_client.get("/api/v1/itinerary/job-123/status")
+        assert response.status_code == 200
+        assert response.json()["status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_status_failed_takes_priority_over_partial_state(self, test_client, mock_executor):
+        """Regression: failed flag beats partial data (e.g. book_metadata present but job errored)."""
+        mock_session = MagicMock()
+        mock_session.state = {
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
+            "job_failed": True,
+        }
+        mock_executor.session_service.get_session.return_value = mock_session
+        response = await test_client.get("/api/v1/itinerary/job-123/status")
+        assert response.status_code == 200
+        assert response.json()["status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_status_failed_takes_priority_over_composing_state(self, test_client, mock_executor):
+        """Regression: failed flag beats composing-phase partial state."""
+        mock_session = MagicMock()
+        mock_session.state = {
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
+            "region_analysis": {"regions": [{"region_id": 1}]},
+            "selected_regions": [{"region_id": 1}],
+            "job_failed": True,
+        }
+        mock_executor.session_service.get_session.return_value = mock_session
+        response = await test_client.get("/api/v1/itinerary/job-123/status")
+        assert response.status_code == 200
+        assert response.json()["status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_status_failed_beats_stale_itinerary(self, test_client, mock_executor):
+        """Regression: job_failed=True must win over a stale final_itinerary from a prior
+        successful compose run, so clients see the current failure rather than a past success."""
+        mock_session = MagicMock()
+        mock_session.state = {
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
+            "region_analysis": {"regions": [{"region_id": 1}]},
+            "selected_regions": [{"region_id": 1}],
+            "final_itinerary": {"cities": [], "summary_text": "done"},
+            "job_failed": True,
+        }
+        mock_executor.session_service.get_session.return_value = mock_session
+        response = await test_client.get("/api/v1/itinerary/job-123/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "failed"
+        assert data["has_itinerary"] is False
+
 
 class TestDiscoverEndpoint:
     """Tests for POST /api/v1/itinerary/discover."""

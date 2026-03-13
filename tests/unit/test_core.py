@@ -220,6 +220,35 @@ class TestSessionStateAccessor:
         accessor = SessionStateAccessor(state)
         assert accessor.final_itinerary == itinerary
 
+    def test_failed_defaults_false(self):
+        accessor = SessionStateAccessor({})
+        assert accessor.failed is False
+
+    def test_write_failed_flag(self):
+        state = {}
+        accessor = SessionStateAccessor(state)
+        accessor.failed = True
+        assert state["job_failed"] is True
+
+    def test_clear_failed_flag(self):
+        state = {"job_failed": True}
+        accessor = SessionStateAccessor(state)
+        accessor.failed = False
+        assert accessor.failed is False
+
+    def test_clear_final_itinerary(self):
+        state = {"final_itinerary": {"cities": [], "summary_text": "done"}}
+        accessor = SessionStateAccessor(state)
+        accessor.clear_final_itinerary()
+        assert accessor.final_itinerary is None
+        assert "final_itinerary" not in state
+
+    def test_clear_final_itinerary_when_absent_is_safe(self):
+        state = {}
+        accessor = SessionStateAccessor(state)
+        accessor.clear_final_itinerary()  # must not raise
+        assert accessor.final_itinerary is None
+
 
 # =============================================================================
 # Prompts

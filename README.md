@@ -178,6 +178,7 @@ flowchart TB
 | `region_analysis` | 2 | Geographic region grouping |
 | `user:preferences` | All | User travel preferences (persists across sessions) |
 | `final_itinerary` | 3 | Complete travel plan |
+| `job_failed` | All | Terminal failure marker (set on error, cleared on compose retry) |
 
 **Storage:** In-memory (default) or SQLite persistence. Multi-user support with isolated data. See [Configuration](#configuration) for options.
 
@@ -195,7 +196,11 @@ StoryLand AI includes a FastAPI server with Server-Sent Events streaming for web
 # Start the API server
 make run-api   # http://localhost:8080
 
+# Health check (always open — no secret required)
+curl http://localhost:8080/api/v1/health
+
 # Discover locations (phases 1-2) — streams progress events, returns regions
+# Add -H "X-Internal-Secret: <value>" if INTERNAL_API_SECRET is set in .env
 curl -N -X POST http://localhost:8080/api/v1/itinerary/discover \
   -H "Content-Type: application/json" \
   -d '{"book_title": "1984", "author": "George Orwell"}'
@@ -207,12 +212,22 @@ curl -N -X POST http://localhost:8080/api/v1/itinerary/{job_id}/compose \
 
 # Check job status
 curl http://localhost:8080/api/v1/itinerary/{job_id}/status
-
-# Health check
-curl http://localhost:8080/api/v1/health
 ```
 
 SSE event types: `progress`, `metadata`, `regions`, `itinerary`, `error`, `done`.
+
+**Job status states** (`GET /api/v1/itinerary/{job_id}/status`):
+
+| Status | Meaning |
+|--------|---------|
+| `searching` | Phase 1 in progress (no data yet) |
+| `discovering` | Book found, Phase 2 in progress |
+| `regions_ready` | Discovery complete, awaiting region selection |
+| `composing` | Phase 3 in progress |
+| `completed` | Itinerary ready |
+| `failed` | Terminal error — book not found, timeout, or cancellation (takes priority over all other states) |
+
+Failed jobs can be retried by calling `/compose` again with the same `job_id`; the failure marker is cleared automatically when a new compose attempt begins.
 
 ### AI Models
 
@@ -238,6 +253,7 @@ All configuration is via environment variables in `.env`. Copy `.env.example` to
 | `LANGFUSE_PUBLIC_KEY` | Langfuse public key (optional) | — |
 | `LANGFUSE_HOST` | Langfuse host URL (optional) | — |
 | `CORS_ORIGINS` | Allowed CORS origins for API (comma-separated) | `*` |
+| `INTERNAL_API_SECRET` | Shared secret with the gateway service — when set, all itinerary endpoints require an `X-Internal-Secret` header with this value. The health endpoint (`/health`) is always open. Leave empty for standalone/dev use. | — |
 
 Free tier includes 15 RPM and 200 requests/day — sufficient for development.
 
@@ -331,7 +347,7 @@ Agent prompts include reliability improvements:
 ## Testing
 
 ```bash
-make test                # Unit tests (194 tests)
+make test                # Unit tests (264 tests)
 make test-integration    # Integration tests with VCR cassettes
 make test-all            # Both
 make test-cov            # With coverage
@@ -341,11 +357,12 @@ make test-cov            # With coverage
 |--------|-------|-------------|
 | `test_models.py` | 46 | Pydantic model validation |
 | `test_tools.py` | 16 | Google Books, preferences tools |
-| `test_agents.py` | 41 | Agent factory functions |
+| `test_agents.py` | 45 | Agent factory functions |
 | `test_services.py` | 16 | Session service, context manager |
 | `test_workflow_timeout.py` | 6 | Workflow timeout behavior |
 | `test_llm_scorer.py` | 18 | LLM scoring models and prompts |
-| `test_api.py` | 51 | API models, endpoints, SSE streaming |
+| `test_core.py` | 49 | Events, session state, extraction, regions |
+| `test_api.py` | 68 | API models, endpoints, SSE streaming, failure-status |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).
 

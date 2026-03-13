@@ -5,10 +5,10 @@ Maps HTTP endpoints to streaming generators and status queries.
 All business logic lives in core.executor — routes are thin wiring.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
-from api.dependencies import get_app_state
+from api.dependencies import get_app_state, verify_gateway_secret
 from api.models import (
     DiscoverRequest,
     ComposeRequest,
@@ -22,12 +22,18 @@ from core.session_state import SessionStateAccessor
 
 logger = get_logger("storyland.api.routes")
 
-router = APIRouter(tags=["itinerary"])
+# Health endpoint is unauthenticated — must be reachable for readiness/liveness probes
+# and for standalone testing without the gateway.
+system_router = APIRouter(tags=["system"])
+
+router = APIRouter(tags=["itinerary"], dependencies=[Depends(verify_gateway_secret)])
 
 
 def _derive_job_status(state: dict) -> JobStatus:
     """Derive job status from session state (no _job_status key needed)."""
     accessor = SessionStateAccessor(state)
+    if accessor.failed:
+        return JobStatus.FAILED
     if accessor.final_itinerary:
         return JobStatus.COMPLETED
     if accessor.selected_regions:
@@ -39,7 +45,7 @@ def _derive_job_status(state: dict) -> JobStatus:
     return JobStatus.SEARCHING
 
 
-@router.get("/health", response_model=HealthResponse, tags=["system"])
+@system_router.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
     """Check API health and model configuration."""
     try:
@@ -155,8 +161,13 @@ async def get_status(job_id: str, user_id: str = "api_user"):
     """
     Check the current status of a discovery/composition job.
 
-    Status is derived from session state:
-    `searching` -> `discovering` -> `regions_ready` -> `composing` -> `completed`.
+    Status is derived from session state with the following precedence:
+    `failed` (terminal error) > `completed` > `composing` > `regions_ready` >
+    `discovering` > `searching`.
+
+    `failed` is set on any terminal error (book not found, timeout, cancellation).
+    It takes priority over all other states so that a failed compose retry is
+    never masked by a stale itinerary from a prior successful run.
     """
     app_state = get_app_state()
 

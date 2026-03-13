@@ -28,6 +28,8 @@ from typing import AsyncGenerator, List, Optional
 
 from async_timeout import timeout
 from google.genai import types
+from google.adk.events import Event
+from google.adk.events.event_actions import EventActions
 from google.adk.models.google_llm import Gemini
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
@@ -193,6 +195,7 @@ class WorkflowExecutor:
                     )
                 except Exception as e:
                     logger.error("book_search_failed", error=str(e))
+                    await self._mark_session_failed(job_id, user_id)
                     yield WorkflowError(
                         message=f"Could not search Google Books API: {e}",
                         error_type=type(e).__name__,
@@ -202,6 +205,7 @@ class WorkflowExecutor:
                     return
 
                 if not books:
+                    await self._mark_session_failed(job_id, user_id)
                     yield WorkflowError(
                         message=f'Could not find "{book_title}" in Google Books.',
                         error_type="BookNotFound",
@@ -304,6 +308,7 @@ class WorkflowExecutor:
 
         except TimeoutError:
             logger.error("discover_timeout", job_id=job_id)
+            await self._mark_session_failed(job_id, user_id)
             yield WorkflowError(
                 message=f"Discovery timed out after {self._config.workflow_timeout}s",
                 error_type="WorkflowTimeoutError",
@@ -312,11 +317,13 @@ class WorkflowExecutor:
             yield WorkflowComplete(job_id=job_id)
         except asyncio.CancelledError:
             logger.warning("discover_cancelled", job_id=job_id)
+            await self._mark_session_failed(job_id, user_id)
             raise
         except Exception as e:
             logger.error(
                 "discover_error", error=str(e), error_type=type(e).__name__
             )
+            await self._mark_session_failed(job_id, user_id)
             yield WorkflowError(
                 message=str(e),
                 error_type=type(e).__name__,
@@ -370,6 +377,7 @@ class WorkflowExecutor:
         all_regions = state.regions
 
         if not all_regions:
+            await self._mark_session_failed(job_id, user_id)
             yield WorkflowError(
                 message="No regions found in session. Discovery may not have completed.",
                 error_type="NoRegions",
@@ -384,6 +392,7 @@ class WorkflowExecutor:
         )
         if invalid_ids:
             valid = sorted(get_valid_region_ids(all_regions))
+            await self._mark_session_failed(job_id, user_id)
             yield WorkflowError(
                 message=f"Invalid region_ids: {invalid_ids}. Valid IDs: {valid}",
                 error_type="InvalidRegionIds",
@@ -392,7 +401,20 @@ class WorkflowExecutor:
             yield WorkflowComplete(job_id=job_id)
             return
 
-        state.selected_regions = selected_regions
+        # Persist retry-clear state: unmark failure, clear stale itinerary, record selection.
+        # In-place mutation of session.state does NOT survive get_session(); use append_event.
+        clear_event = Event(
+            invocation_id="system",
+            author="system",
+            actions=EventActions(
+                state_delta={
+                    SessionStateKeys.JOB_FAILED: False,
+                    SessionStateKeys.FINAL_ITINERARY: None,
+                    SessionStateKeys.SELECTED_REGIONS: selected_regions,
+                }
+            ),
+        )
+        await self._session_service.append_event(session, clear_event)
 
         exact_title = state.book_title
         exact_author = state.author
@@ -446,6 +468,7 @@ class WorkflowExecutor:
                 if result_data:
                     yield ItineraryReady(itinerary=result_data)
                 else:
+                    await self._mark_session_failed(job_id, user_id)
                     yield WorkflowError(
                         message="Failed to extract itinerary from agent response",
                         error_type="ExtractionError",
@@ -464,6 +487,7 @@ class WorkflowExecutor:
 
         except TimeoutError:
             logger.error("compose_timeout", job_id=job_id)
+            await self._mark_session_failed(job_id, user_id)
             yield WorkflowError(
                 message=f"Composition timed out after {self._config.workflow_timeout}s",
                 error_type="WorkflowTimeoutError",
@@ -472,17 +496,35 @@ class WorkflowExecutor:
             yield WorkflowComplete(job_id=job_id)
         except asyncio.CancelledError:
             logger.warning("compose_cancelled", job_id=job_id)
+            await self._mark_session_failed(job_id, user_id)
             raise
         except Exception as e:
             logger.error(
                 "compose_error", error=str(e), error_type=type(e).__name__
             )
+            await self._mark_session_failed(job_id, user_id)
             yield WorkflowError(
                 message=str(e),
                 error_type=type(e).__name__,
                 phase=Phase.COMPOSITION,
             )
             yield WorkflowComplete(job_id=job_id)
+
+    async def _mark_session_failed(self, job_id: str, user_id: str) -> None:
+        """Persist a failure marker to session state so /status returns FAILED."""
+        try:
+            session = await self._session_service.get_session(
+                app_name=APP_NAME, user_id=user_id, session_id=job_id
+            )
+            if session is not None:
+                event = Event(
+                    invocation_id="system",
+                    author="system",
+                    actions=EventActions(state_delta={SessionStateKeys.JOB_FAILED: True}),
+                )
+                await self._session_service.append_event(session, event)
+        except Exception:
+            logger.warning("mark_session_failed_error", job_id=job_id)
 
     async def close(self) -> None:
         """Cleanup resources."""

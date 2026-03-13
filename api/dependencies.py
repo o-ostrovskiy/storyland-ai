@@ -8,6 +8,8 @@ available to all request handlers via get_app_state().
 from dataclasses import dataclass
 from typing import Optional
 
+from fastapi import Depends, HTTPException, Request
+
 from common.config import Config, load_config
 from common.logging import configure_logging, get_logger
 from common.langfuse_init import initialize_langfuse
@@ -66,3 +68,10 @@ def get_app_state() -> AppState:
     if _app_state is None:
         raise RuntimeError("Application not initialized. Call initialize() first.")
     return _app_state
+
+
+def verify_gateway_secret(request: Request) -> None:
+    """Require X-Internal-Secret header when INTERNAL_API_SECRET is configured."""
+    secret = get_app_state().config.internal_api_secret
+    if secret and request.headers.get("X-Internal-Secret") != secret:
+        raise HTTPException(status_code=403, detail="Forbidden")

@@ -23,6 +23,7 @@ class SessionStateKeys:
     SELECTED_REGIONS = "selected_regions"
     FINAL_ITINERARY = "final_itinerary"
     USER_PREFERENCES = "user:preferences"
+    JOB_FAILED = "job_failed"
 
 
 class SessionStateAccessor:
@@ -71,9 +72,21 @@ class SessionStateAccessor:
     def final_itinerary(self) -> Optional[object]:
         return self._state.get(SessionStateKeys.FINAL_ITINERARY)
 
+    def clear_final_itinerary(self) -> None:
+        """Remove a stale itinerary before a compose retry."""
+        self._state.pop(SessionStateKeys.FINAL_ITINERARY, None)
+
     @property
     def user_preferences(self) -> Optional[dict]:
         return self._state.get(SessionStateKeys.USER_PREFERENCES)
+
+    @property
+    def failed(self) -> bool:
+        return bool(self._state.get(SessionStateKeys.JOB_FAILED))
+
+    @failed.setter
+    def failed(self, value: bool) -> None:
+        self._state[SessionStateKeys.JOB_FAILED] = value
 
     @property
     def book_title(self) -> str:

@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.dependencies import initialize, shutdown
-from api.routes import router
+from api.routes import router, system_router
 
 
 @asynccontextmanager
@@ -78,7 +78,9 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Include API router
+    # Health check — no gateway secret required (probes, standalone testing)
+    app.include_router(system_router, prefix="/api/v1")
+    # Itinerary endpoints — gateway secret enforced
     app.include_router(router, prefix="/api/v1")
 
     return app
