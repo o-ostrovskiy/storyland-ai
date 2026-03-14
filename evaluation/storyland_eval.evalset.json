@@ -1,12 +1,17 @@
 {
   "eval_set_id": "storyland_eval",
   "name": "storyland_eval",
+  "description": "Evaluation dataset for Storyland AI literary travel itinerary generation. Covers diverse genres, languages, and geographic regions. Each case includes expected_output with must_include_locations (place names the itinerary must reference) and must_address (behavioral or edge-case criteria the response must satisfy).",
   "eval_cases": [
     {
       "eval_id": "794b0031",
       "conversation_scenario": {
         "starting_prompt": "Create a literary travel itinerary for Pride and Prejudice by Jane Austen",
         "conversation_plan": "Ask the agent to create a travel itinerary based on Pride and Prejudice. Verify the response includes relevant English locations like Bath, Derbyshire, or Chatsworth. If the itinerary seems incomplete, ask for more details about specific stops. End the conversation when a satisfactory itinerary with cities and landmarks is provided."
+      },
+      "expected_output": {
+        "must_include_locations": ["Derbyshire", "Chatsworth House", "Lacock Abbey", "Bath"],
+        "must_address": "Itinerary should cover English countryside locations associated with the novel, including Pemberley stand-ins and Austen-era estates. Should mention practical visitor information."
       },
       "session_input": {
         "app_name": "storyland",
@@ -20,6 +25,10 @@
         "starting_prompt": "I'd like a travel itinerary based on The Great Gatsby. I prefer luxury accommodations and a relaxed pace.",
         "conversation_plan": "Request an itinerary for The Great Gatsby while specifying luxury budget and relaxed pace preferences. Verify the response reflects these preferences with upscale venue suggestions. Ask about specific restaurants or hotels if not mentioned. The conversation is complete when the itinerary clearly caters to luxury travel preferences."
       },
+      "expected_output": {
+        "must_include_locations": ["Long Island", "New York City", "East Egg", "West Egg", "The Hamptons"],
+        "must_address": "Itinerary should reflect the luxury and opulence theme of the novel. Must recommend upscale hotels, fine dining, and Jazz Age–inspired venues. Should note that East/West Egg are fictional but map to Great Neck and Sands Point on Long Island."
+      },
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user"
@@ -31,6 +40,10 @@
       "conversation_scenario": {
         "starting_prompt": "Plan a family trip based on Harry Potter. We're traveling with kids and need accessible locations.",
         "conversation_plan": "Request an itinerary for Harry Potter suitable for family travel with children. Emphasize accessibility needs. Verify suggestions include kid-friendly attractions like the Warner Bros Studio Tour. Ask about practical logistics for families. End when the itinerary addresses both the literary connection and family-friendly considerations."
+      },
+      "expected_output": {
+        "must_include_locations": ["Warner Bros. Studio Tour London", "Oxford", "Alnwick Castle", "Edinburgh", "Gloucester Cathedral"],
+        "must_address": "Must include family-friendly logistics such as booking tips, age-appropriate activities, and accessible venues. Should cover both filming locations and real-world inspirations for Hogwarts and Diagon Alley. Children's literature category."
       },
       "session_input": {
         "app_name": "storyland",
@@ -44,6 +57,10 @@
         "starting_prompt": "I want to visit places from The Da Vinci Code but I'm on a tight budget",
         "conversation_plan": "Request a budget-friendly itinerary based on The Da Vinci Code. The response should include locations in Paris and London related to the book. Ask for free or low-cost alternatives if suggestions seem expensive. Complete the conversation when budget-conscious options are provided."
       },
+      "expected_output": {
+        "must_include_locations": ["Louvre Museum", "Paris", "London", "Westminster Abbey", "Rosslyn Chapel"],
+        "must_address": "Should provide free or low-cost alternatives for expensive attractions (e.g., free entry days at the Louvre, free entry to Westminster Abbey exterior). Must balance budget constraints with hitting the key Da Vinci Code landmarks."
+      },
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user"
@@ -55,6 +72,10 @@
       "conversation_scenario": {
         "starting_prompt": "I'm interested in visiting places connected to Ernest Hemingway's life and works",
         "conversation_plan": "Request an itinerary focused on Hemingway - both settings from his novels and places he lived. Expect suggestions like Paris, Key West, Cuba, or Spain. Ask about specific cafes or landmarks Hemingway frequented. End when comprehensive author-related sites are provided."
+      },
+      "expected_output": {
+        "must_include_locations": ["Paris", "Key West", "Havana", "Pamplona", "Café de Flore"],
+        "must_address": "Author-focused query — must cover both biographical locations (residences, favorite haunts) and settings from his major works (The Sun Also Rises → Spain, A Farewell to Arms → Italy, The Old Man and the Sea → Cuba). Multi-continent itinerary."
       },
       "session_input": {
         "app_name": "storyland",
@@ -68,6 +89,10 @@
         "starting_prompt": "Create a trip based on The Girl with the Dragon Tattoo. I love museums and want a fast-paced itinerary.",
         "conversation_plan": "Request an itinerary for a contemporary thriller set in Sweden. Verify Stockholm and Swedish locations are included. The fast-paced preference should result in an efficient itinerary. Ask about museum recommendations since that preference was stated. Complete when the itinerary reflects both the book's settings and the user's travel style."
       },
+      "expected_output": {
+        "must_include_locations": ["Stockholm", "Södermalm", "Gamla Stan", "Vanger Island (Hedestad stand-in)"],
+        "must_address": "Must honour the fast-paced travel style with a tight daily schedule. Museum suggestions should be specific (e.g., Fotografiska, Vasa Museum). Should identify real Stockholm neighbourhoods that map to fictional settings in the book."
+      },
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user"
@@ -79,6 +104,10 @@
       "conversation_scenario": {
         "starting_prompt": "I've read all of Agatha Christie's novels. Plan a trip to visit locations from her books.",
         "conversation_plan": "Request an itinerary covering multiple Agatha Christie works. Expect locations like Devon (her birthplace), various English villages, and possibly locations from Orient Express. Ask about her museum or memorial sites. The conversation is complete when a comprehensive Christie-themed itinerary is provided."
+      },
+      "expected_output": {
+        "must_include_locations": ["Torquay", "Greenway House", "Oxford", "Istanbul", "Devon"],
+        "must_address": "Should cover Christie's birthplace and museum (Greenway House, Devon), English village settings from Miss Marple novels, and the Orient Express route. Author-focused multi-location itinerary spanning England and Europe."
       },
       "session_input": {
         "app_name": "storyland",
@@ -92,11 +121,223 @@
         "starting_prompt": "Plan a trip based on Under the Tuscan Sun. I'm vegetarian and prefer a moderate budget.",
         "conversation_plan": "Request an Italian travel itinerary based on the memoir. Emphasize vegetarian dietary restrictions. Verify Tuscany and Cortona are included. Ask for restaurant recommendations that accommodate vegetarian diet. End when the itinerary includes food-related suggestions appropriate for vegetarians."
       },
+      "expected_output": {
+        "must_include_locations": ["Cortona", "Tuscany", "Florence", "Siena"],
+        "must_address": "Nonfiction travel narrative category. Must include vegetarian restaurant recommendations and local market suggestions in Cortona and surrounding Tuscan towns. Moderate budget framing should be respected throughout with mid-range accommodation suggestions."
+      },
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user"
       },
       "creation_timestamp": 1763863667.07095
+    },
+    {
+      "eval_id": "a1b2c3d4",
+      "conversation_scenario": {
+        "starting_prompt": "I want to travel to places from One Hundred Years of Solitude by Gabriel García Márquez",
+        "conversation_plan": "Request a travel itinerary for the classic Colombian magical realist novel. Verify the response includes Colombian locations and notes that Macondo is fictional but inspired by real places. Ask about García Márquez's hometown and the Caribbean coast. End when both the fictional-to-real mapping and actual visitable locations are covered."
+      },
+      "expected_output": {
+        "must_include_locations": ["Aracataca", "Cartagena", "Barranquilla", "Colombia", "Caribbean Coast"],
+        "must_address": "Non-English literature category. Must clarify that Macondo is a fictional town but is modelled on García Márquez's birthplace of Aracataca. Should include the Casa Museo Gabriel García Márquez in Aracataca and colonial Cartagena (setting of Love in the Time of Cholera). Response should be sensitive to the magical realist genre."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.071100
+    },
+    {
+      "eval_id": "e5f6a7b8",
+      "conversation_scenario": {
+        "starting_prompt": "Plan a literary trip based on Norwegian Wood by Haruki Murakami",
+        "conversation_plan": "Request an itinerary for Murakami's coming-of-age novel set in 1960s Tokyo. Verify the response includes Tokyo neighbourhoods and university settings. Ask about specific districts like Shinjuku or Shibuya mentioned in the novel. End when Japanese city locations are clearly covered."
+      },
+      "expected_output": {
+        "must_include_locations": ["Tokyo", "Shinjuku", "Waseda University area", "Kyoto"],
+        "must_address": "Non-English literature category (Japanese). Must ground the fictional Tokyo setting in real neighbourhoods. Should note the late-1960s student movement backdrop and suggest culturally relevant sites. Response should not require Japanese language knowledge to follow."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.071200
+    },
+    {
+      "eval_id": "c9d0e1f2",
+      "conversation_scenario": {
+        "starting_prompt": "Create a travel itinerary based on Crime and Punishment by Dostoevsky",
+        "conversation_plan": "Request an itinerary for Dostoevsky's classic set in St. Petersburg. Verify the response maps fictional addresses to real St. Petersburg landmarks. Ask about the Haymarket Square area where Raskolnikov lived. End when a walking-tour style itinerary of the relevant St. Petersburg districts is provided."
+      },
+      "expected_output": {
+        "must_include_locations": ["St. Petersburg", "Haymarket Square (Sennaya Ploshchad)", "Dostoevsky Museum", "Nevsky Prospect"],
+        "must_address": "Non-English literature category (Russian). Must map the novel's specific fictional addresses to real St. Petersburg streets and squares. Should include the Dostoevsky Literary-Memorial Museum. Walking-tour format is ideal given the dense urban setting of the novel."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.071300
+    },
+    {
+      "eval_id": "a3b4c5d6",
+      "conversation_scenario": {
+        "starting_prompt": "I want to visit the places from Lord of the Rings",
+        "conversation_plan": "Request a travel itinerary for Tolkien's fantasy epic, which is set entirely in the fictional world of Middle-earth. Verify the agent correctly identifies that the locations are fictional and pivots to offering real-world filming locations in New Zealand or Oxford connections. Ask about Hobbiton. End when the response clearly distinguishes fiction from reality while still providing a useful itinerary."
+      },
+      "expected_output": {
+        "must_include_locations": ["Matamata (Hobbiton)", "New Zealand", "Queenstown", "Oxford", "Birmingham"],
+        "must_address": "Edge case: all primary locations are fictional (Middle-earth). The agent MUST acknowledge that Middle-earth does not exist and offer real-world alternatives: New Zealand filming locations (Hobbiton, Weta Workshop, Tongariro National Park), and UK Tolkien heritage sites (Oxford Bodleian Library, Birmingham—where Tolkien grew up). Should not fabricate real-world map coordinates for fictional places."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.071400
+    },
+    {
+      "eval_id": "e7f8a9b0",
+      "conversation_scenario": {
+        "starting_prompt": "Plan a walking tour of Dublin based on Dubliners by James Joyce",
+        "conversation_plan": "Request a single-city walking itinerary based on Joyce's short story collection. Verify the response is focused on Dublin and references specific streets and venues from the stories. Ask about the story 'The Dead' and Gabriel Conroy's locations. End when a coherent Dublin walking tour tied to the stories is provided."
+      },
+      "expected_output": {
+        "must_include_locations": ["Dublin", "Grafton Street", "Eccles Street", "North Richmond Street", "The Gresham Hotel"],
+        "must_address": "Single-city itinerary category. All locations must be within Dublin. Should map specific stories to specific Dublin locations (e.g., 'The Dead' → The Gresham Hotel area; 'Araby' → North Richmond Street). May mention the James Joyce Centre. Should be structured as a walkable daily tour."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.071500
+    },
+    {
+      "eval_id": "c1d2e3f4",
+      "conversation_scenario": {
+        "starting_prompt": "Create an itinerary based on The Road",
+        "conversation_plan": "Request a travel itinerary for 'The Road'. This is an ambiguous title — there are multiple books called 'The Road'. The most notable is Cormac McCarthy's post-apocalyptic novel. Verify the agent seeks clarification or makes a reasonable assumption. If the agent assumes McCarthy's novel, check whether it notes that the locations are deliberately unspecified in the text. End when the agent either clarifies the title or provides a reasoned interpretation."
+      },
+      "expected_output": {
+        "must_include_locations": ["Appalachian region", "American South", "coastal United States"],
+        "must_address": "Ambiguous title category. The agent should either (a) ask which 'The Road' the user means, or (b) state its assumption clearly. If it interprets as Cormac McCarthy's novel, must note that specific locations are intentionally unnamed in the text but the journey follows a roughly southeastern US route. Should not invent precise fictional addresses. Alternative: could offer Jack Kerouac's 'On the Road' interpretation and contrast."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.071600
+    },
+    {
+      "eval_id": "a5b6c7d8",
+      "conversation_scenario": {
+        "starting_prompt": "Plan a trip inspired by Tomorrow, and Tomorrow, and Tomorrow by Gabrielle Zevin",
+        "conversation_plan": "Request a travel itinerary for this recent (2022) novel set across Boston, Los Angeles, and Cambridge MA. Verify the response includes locations from the novel such as Harvard, MIT, Santa Monica, and video game studios. Ask about specific Boston and LA neighborhoods referenced. End when a multi-city US itinerary tied to the novel's settings is provided."
+      },
+      "expected_output": {
+        "must_include_locations": ["Boston", "Cambridge MA", "Los Angeles", "Santa Monica", "Harvard University"],
+        "must_address": "Very recent book category (published 2022). Itinerary should span the novel's three primary cities: Cambridge/Boston, Los Angeles, and briefly New York. Should reference gaming culture landmarks given the novel's subject matter. Agent must demonstrate awareness of recent publications beyond its core training data."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.071700
+    },
+    {
+      "eval_id": "e9f0a1b2",
+      "conversation_scenario": {
+        "starting_prompt": "I love travel writing. Plan a journey following In Patagonia by Bruce Chatwin.",
+        "conversation_plan": "Request an itinerary based on Chatwin's landmark travel narrative set in South America. Verify the response includes Argentine and Chilean Patagonia. Ask about specific towns Chatwin visited like Puerto Madryn or Punta Arenas. End when a south-to-tip-of-the-continent itinerary is provided."
+      },
+      "expected_output": {
+        "must_include_locations": ["Patagonia", "Buenos Aires", "Puerto Madryn", "Punta Arenas", "Tierra del Fuego"],
+        "must_address": "Author-focused travel writer query and nonfiction travel narrative category. Should follow Chatwin's actual route south through Argentina and into Chilean Patagonia. Must distinguish between Argentine and Chilean Patagonia. Practical tips on remoteness and seasonal travel should be included."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.071800
+    },
+    {
+      "eval_id": "c3d4e5f6",
+      "conversation_scenario": {
+        "starting_prompt": "Plan a trip to visit the real locations behind The Chronicles of Narnia",
+        "conversation_plan": "Request an itinerary for C.S. Lewis's fantasy series. Since Narnia is fictional, verify the agent offers real-world alternatives such as Oxford (Lewis's home) and the Kilns, or New Zealand/Prague filming locations from the films. Ask about Lewis Carroll connections. End when the distinction between fictional and real locations is clearly handled."
+      },
+      "expected_output": {
+        "must_include_locations": ["Oxford", "The Kilns (C.S. Lewis House)", "Magdalen College Oxford", "Belfast"],
+        "must_address": "Children's literature category and fictional locations edge case. Agent must note that Narnia is fictional. Should offer: (a) C.S. Lewis heritage sites in Oxford and Belfast, (b) Mourne Mountains in Northern Ireland (Lewis's inspiration), (c) optionally film locations. Must not conflate Lewis Carroll (Alice in Wonderland) with C.S. Lewis."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.071900
+    },
+    {
+      "eval_id": "a7b8c9d0",
+      "conversation_scenario": {
+        "starting_prompt": "I'd like a travel itinerary based on Persepolis by Marjane Satrapi",
+        "conversation_plan": "Request an itinerary for this autobiographical graphic novel set in Iran, Austria, and France. Verify the response includes Tehran, Vienna, and Paris. Ask about the historical context of the Iranian Revolution sites. End when a multi-country itinerary grounded in the graphic novel's real-world settings is provided."
+      },
+      "expected_output": {
+        "must_include_locations": ["Tehran", "Vienna", "Paris", "Iran"],
+        "must_address": "Graphic novel / comics category with real-world settings. Must cover all three main geographic phases of the memoir: Tehran (childhood and revolution), Vienna (teenage exile), Paris (adult life). Should note current travel advisories for Iran and offer culturally sensitive framing. Should not treat Persepolis purely as fiction—it is autobiographical."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.072000
+    },
+    {
+      "eval_id": "e1f2a3b4",
+      "conversation_scenario": {
+        "starting_prompt": "Create a grand itinerary following Around the World in 80 Days by Jules Verne",
+        "conversation_plan": "Request a multi-continent itinerary following Phileas Fogg's route from the 1872 novel. Verify stops on multiple continents are included. Ask about the Reform Club departure point in London and the Indian leg of the journey. End when a round-the-world itinerary spanning at least four continents is provided."
+      },
+      "expected_output": {
+        "must_include_locations": ["London", "Paris", "Suez", "Bombay (Mumbai)", "Calcutta (Kolkata)", "Hong Kong", "Yokohama", "San Francisco", "New York"],
+        "must_address": "Books spanning multiple continents category. Must follow the canonical Fogg route across Europe, Africa (Suez), Asia, and North America. Should note which parts of the route are still feasible by rail/ship vs. requiring air travel. Reform Club in London is the start and end point. Historical context of 1870s travel should enrich the itinerary."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.072100
+    },
+    {
+      "eval_id": "c5d6e7f8",
+      "conversation_scenario": {
+        "starting_prompt": "I want to visit the locations from The Rings of Saturn by W.G. Sebald",
+        "conversation_plan": "Request an itinerary for Sebald's meditative walking narrative set along the Suffolk coast of England. Verify the response includes Suffolk towns and landmarks. Ask about Dunwich and the sunken city. End when a focused East Anglian itinerary tied to Sebald's actual walking route is provided."
+      },
+      "expected_output": {
+        "must_include_locations": ["Suffolk", "Lowestoft", "Dunwich", "Southwold", "Norwich"],
+        "must_address": "Very obscure / lesser-known book category. Agent should demonstrate knowledge of this less-mainstream literary work. Itinerary should follow Sebald's actual walking route along the Suffolk Heritage Coast. Must include Dunwich (the partially sunken medieval city). Should acknowledge the melancholic, contemplative tone of the work in framing the trip."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.072200
+    },
+    {
+      "eval_id": "a9b0c1d2",
+      "conversation_scenario": {
+        "starting_prompt": "Plan a trip to visit filming locations from Rebecca by Daphne du Maurier — I know it was filmed in both England and Hollywood",
+        "conversation_plan": "Request an itinerary for du Maurier's gothic novel, noting multiple film adaptations. Verify the response distinguishes between the real Cornish settings from the novel, the 1940 Hitchcock film (largely filmed in California), and the 2020 Netflix adaptation. Ask about Manderley. End when the response addresses the multi-adaptation complexity and provides real visitable locations."
+      },
+      "expected_output": {
+        "must_include_locations": ["Cornwall", "Fowey", "Menabilly (du Maurier's home)", "Devon"],
+        "must_address": "Books with multiple film adaptations at different locations category. Must distinguish: (a) the novel's real Cornish setting—Menabilly near Fowey is the inspiration for Manderley, (b) the 1940 Hitchcock film shot largely at Selznick Studios California, (c) the 2020 Netflix film shot in England. Itinerary should focus on du Maurier's Cornwall for authentic literary tourism. Must note Manderley is fictional."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "creation_timestamp": 1763863667.072300
     }
   ],
   "creation_timestamp": 1763863579.68724
