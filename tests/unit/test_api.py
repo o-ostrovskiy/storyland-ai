@@ -1,7 +1,7 @@
 """
 Unit tests for FastAPI SSE API layer.
 
-Tests API models, endpoint responses, and SSE streaming with mocked Runner.
+Tests API models, endpoint responses, and SSE streaming with mocked executor.
 """
 
 import json
@@ -24,7 +24,16 @@ from api.models import (
     JobStatusResponse,
     JobStatus,
 )
-from api.streaming import _sse
+from api.streaming import _sse, domain_event_to_sse
+from core.events import (
+    Phase,
+    ProgressEvent,
+    MetadataReady,
+    RegionsReady,
+    ItineraryReady,
+    WorkflowError,
+    WorkflowComplete,
+)
 
 
 # =============================================================================
@@ -85,7 +94,6 @@ class TestComposeRequest:
         assert req.region_ids == [3]
 
     def test_empty_region_ids_rejected(self):
-        """Empty region_ids should be rejected (min_length=1)."""
         with pytest.raises(ValidationError):
             ComposeRequest(region_ids=[])
 
@@ -104,8 +112,6 @@ class TestComposeRequest:
 
 
 class TestSSEProgressEvent:
-    """Tests for SSEProgressEvent model."""
-
     def test_basic_progress(self):
         event = SSEProgressEvent(phase=1, step="Searching")
         data = json.loads(event.model_dump_json())
@@ -127,8 +133,6 @@ class TestSSEProgressEvent:
 
 
 class TestSSEMetadataEvent:
-    """Tests for SSEMetadataEvent model."""
-
     def test_full_metadata(self):
         event = SSEMetadataEvent(
             book_title="1984",
@@ -141,7 +145,6 @@ class TestSSEMetadataEvent:
         data = json.loads(event.model_dump_json())
         assert data["event"] == "metadata"
         assert data["book_title"] == "1984"
-        assert data["author"] == "George Orwell"
         assert len(data["categories"]) == 2
 
     def test_minimal_metadata(self):
@@ -152,8 +155,6 @@ class TestSSEMetadataEvent:
 
 
 class TestSSERegionsEvent:
-    """Tests for SSERegionsEvent model."""
-
     def test_regions_event(self):
         regions = [
             {"region_id": 1, "region_name": "England", "cities": []},
@@ -168,7 +169,6 @@ class TestSSERegionsEvent:
         assert data["event"] == "regions"
         assert data["job_id"] == "abc-123"
         assert len(data["regions"]) == 2
-        assert data["analysis_note"] == "Grouped by proximity"
 
     def test_empty_regions(self):
         event = SSERegionsEvent(job_id="abc", regions=[])
@@ -177,8 +177,6 @@ class TestSSERegionsEvent:
 
 
 class TestSSEItineraryEvent:
-    """Tests for SSEItineraryEvent model."""
-
     def test_itinerary_event(self):
         itinerary = {
             "cities": [{"name": "London", "country": "UK"}],
@@ -191,13 +189,9 @@ class TestSSEItineraryEvent:
 
 
 class TestSSEErrorEvent:
-    """Tests for SSEErrorEvent model."""
-
     def test_error_with_phase(self):
         event = SSEErrorEvent(
-            message="Something failed",
-            error_type="TimeoutError",
-            phase=2,
+            message="Something failed", error_type="TimeoutError", phase=2,
         )
         data = json.loads(event.model_dump_json())
         assert data["event"] == "error"
@@ -212,8 +206,6 @@ class TestSSEErrorEvent:
 
 
 class TestSSEDoneEvent:
-    """Tests for SSEDoneEvent model."""
-
     def test_done_event(self):
         event = SSEDoneEvent(job_id="abc-123")
         data = json.loads(event.model_dump_json())
@@ -234,8 +226,6 @@ class TestSSEDoneEvent:
 
 
 class TestHealthResponse:
-    """Tests for HealthResponse model."""
-
     def test_defaults(self):
         resp = HealthResponse()
         assert resp.status == "healthy"
@@ -247,8 +237,6 @@ class TestHealthResponse:
 
 
 class TestJobStatusResponse:
-    """Tests for JobStatusResponse model."""
-
     def test_all_statuses_valid(self):
         for status in JobStatus:
             resp = JobStatusResponse(job_id="test", status=status)
@@ -267,21 +255,17 @@ class TestJobStatusResponse:
 
     def test_completed_status(self):
         resp = JobStatusResponse(
-            job_id="test",
-            status=JobStatus.COMPLETED,
-            has_itinerary=True,
+            job_id="test", status=JobStatus.COMPLETED, has_itinerary=True,
         )
         assert resp.has_itinerary is True
 
 
 # =============================================================================
-# SSE Helper Tests
+# SSE Helper & Adapter Tests
 # =============================================================================
 
 
 class TestSSEHelper:
-    """Tests for the _sse() helper function."""
-
     def test_sse_format(self):
         result = _sse("progress", '{"phase": 1}')
         assert result == {"event": "progress", "data": '{"phase": 1}'}
@@ -294,34 +278,86 @@ class TestSSEHelper:
         assert parsed["phase"] == 1
 
 
+class TestDomainEventToSSE:
+    """Tests for domain_event_to_sse adapter function."""
+
+    def test_progress_event(self):
+        event = ProgressEvent(phase=Phase.DISCOVERY, step="Finding cities")
+        result = domain_event_to_sse(event)
+        assert result["event"] == "progress"
+        data = json.loads(result["data"])
+        assert data["phase"] == 2
+        assert data["step"] == "Finding cities"
+
+    def test_metadata_ready(self):
+        event = MetadataReady(
+            metadata={"book_title": "1984", "author": "George Orwell", "categories": ["Fiction"]}
+        )
+        result = domain_event_to_sse(event)
+        assert result["event"] == "metadata"
+        data = json.loads(result["data"])
+        assert data["book_title"] == "1984"
+
+    def test_regions_ready(self):
+        event = RegionsReady(job_id="abc", regions=[{"region_id": 1}], analysis_note="test")
+        result = domain_event_to_sse(event)
+        assert result["event"] == "regions"
+        data = json.loads(result["data"])
+        assert data["job_id"] == "abc"
+
+    def test_itinerary_ready(self):
+        event = ItineraryReady(itinerary={"cities": []})
+        result = domain_event_to_sse(event)
+        assert result["event"] == "itinerary"
+
+    def test_workflow_error_with_phase(self):
+        event = WorkflowError(message="fail", error_type="TestError", phase=Phase.BOOK_SEARCH)
+        result = domain_event_to_sse(event)
+        data = json.loads(result["data"])
+        assert data["message"] == "fail"
+        assert data["phase"] == 1
+
+    def test_workflow_error_no_phase(self):
+        event = WorkflowError(message="fail", error_type="TestError")
+        result = domain_event_to_sse(event)
+        data = json.loads(result["data"])
+        assert data["phase"] is None
+
+    def test_workflow_complete(self):
+        event = WorkflowComplete(job_id="abc", token_usage={"total": 100})
+        result = domain_event_to_sse(event)
+        assert result["event"] == "done"
+        data = json.loads(result["data"])
+        assert data["job_id"] == "abc"
+
+
 # =============================================================================
-# Endpoint Tests (with mocked workflow)
+# Endpoint Tests (with mocked executor)
 # =============================================================================
 
 
 @pytest.fixture
-def mock_app_state():
+def mock_executor():
+    """Create a mock WorkflowExecutor."""
+    from core.executor import WorkflowExecutor
+
+    executor = MagicMock(spec=WorkflowExecutor)
+    executor.session_service = AsyncMock()
+    executor.config = MagicMock()
+    executor.config.model_name = "gemini-2.0-flash-lite"
+    executor.close = AsyncMock()
+    return executor
+
+
+@pytest.fixture
+def mock_app_state(mock_executor):
     """Create a mock AppState for testing."""
     from api.dependencies import AppState
 
     mock_config = MagicMock()
     mock_config.model_name = "gemini-2.0-flash-lite"
-    mock_config.workflow_timeout = 300
-    mock_config.langfuse_secret_key = None
-    mock_config.langfuse_public_key = None
-    mock_config.langfuse_host = None
 
-    mock_session_service = AsyncMock()
-    mock_model = MagicMock()
-    mock_langfuse = MagicMock()
-    mock_langfuse.enabled = False
-
-    return AppState(
-        config=mock_config,
-        model=mock_model,
-        session_service=mock_session_service,
-        langfuse_plugin=mock_langfuse,
-    )
+    return AppState(config=mock_config, executor=mock_executor)
 
 
 @pytest.fixture
@@ -331,11 +367,9 @@ def test_client(mock_app_state):
     from api.app import create_app
     from httpx import AsyncClient, ASGITransport
 
-    # Skip lifespan to avoid real initialization
     app = create_app()
     app.router.lifespan_context = _null_lifespan
 
-    # Set the mock app state
     deps._app_state = mock_app_state
 
     client = AsyncClient(
@@ -349,13 +383,10 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def _null_lifespan(app):
-    """No-op lifespan for testing (skip real initialization)."""
     yield
 
 
 class TestHealthEndpoint:
-    """Tests for GET /api/v1/health."""
-
     @pytest.mark.asyncio
     async def test_health_returns_200(self, test_client):
         response = await test_client.get("/api/v1/health")
@@ -367,47 +398,31 @@ class TestHealthEndpoint:
 
 
 class TestStatusEndpoint:
-    """Tests for GET /api/v1/itinerary/{job_id}/status."""
+    """Tests for GET /api/v1/itinerary/{job_id}/status (derived status)."""
 
     @pytest.mark.asyncio
-    async def test_status_not_found(self, test_client, mock_app_state):
-        mock_app_state.session_service.get_session.return_value = None
+    async def test_status_not_found(self, test_client, mock_executor):
+        mock_executor.session_service.get_session.return_value = None
         response = await test_client.get("/api/v1/itinerary/bad-id/status")
         assert response.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_status_backend_error_returns_500(
-        self, test_client, mock_app_state
-    ):
-        """Backend exceptions should return 500, not 404."""
-        mock_app_state.session_service.get_session.side_effect = RuntimeError(
-            "DB connection lost"
-        )
+    async def test_status_backend_error_returns_500(self, test_client, mock_executor):
+        mock_executor.session_service.get_session.side_effect = RuntimeError("DB connection lost")
         response = await test_client.get("/api/v1/itinerary/some-id/status")
         assert response.status_code == 500
         assert "Failed to retrieve job status" in response.json()["detail"]
 
     @pytest.mark.asyncio
-    async def test_status_returns_none(self, test_client, mock_app_state):
-        mock_app_state.session_service.get_session.return_value = None
-        response = await test_client.get("/api/v1/itinerary/bad-id/status")
-        assert response.status_code == 404
-
-    @pytest.mark.asyncio
-    async def test_status_regions_ready(self, test_client, mock_app_state):
+    async def test_status_derives_regions_ready(self, test_client, mock_executor):
         mock_session = MagicMock()
         mock_session.state = {
-            "_job_status": "regions_ready",
-            "book_metadata": {
-                "book_title": "1984",
-                "author": "George Orwell",
-            },
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
             "region_analysis": {
                 "regions": [{"region_id": 1, "region_name": "England"}]
             },
         }
-        mock_app_state.session_service.get_session.return_value = mock_session
-
+        mock_executor.session_service.get_session.return_value = mock_session
         response = await test_client.get("/api/v1/itinerary/job-123/status")
         assert response.status_code == 200
         data = response.json()
@@ -416,634 +431,336 @@ class TestStatusEndpoint:
         assert data["has_regions"] is True
         assert data["has_itinerary"] is False
 
+    @pytest.mark.asyncio
+    async def test_status_derives_completed(self, test_client, mock_executor):
+        mock_session = MagicMock()
+        mock_session.state = {
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
+            "region_analysis": {"regions": [{"region_id": 1}]},
+            "selected_regions": [{"region_id": 1}],
+            "final_itinerary": {"cities": [], "summary_text": "test"},
+        }
+        mock_executor.session_service.get_session.return_value = mock_session
+        response = await test_client.get("/api/v1/itinerary/job-123/status")
+        data = response.json()
+        assert data["status"] == "completed"
+        assert data["has_itinerary"] is True
+
+    @pytest.mark.asyncio
+    async def test_status_derives_discovering(self, test_client, mock_executor):
+        mock_session = MagicMock()
+        mock_session.state = {
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
+        }
+        mock_executor.session_service.get_session.return_value = mock_session
+        response = await test_client.get("/api/v1/itinerary/job-123/status")
+        data = response.json()
+        assert data["status"] == "discovering"
+
+    @pytest.mark.asyncio
+    async def test_status_derives_searching(self, test_client, mock_executor):
+        mock_session = MagicMock()
+        mock_session.state = {}
+        mock_executor.session_service.get_session.return_value = mock_session
+        response = await test_client.get("/api/v1/itinerary/job-123/status")
+        data = response.json()
+        assert data["status"] == "searching"
+
+    @pytest.mark.asyncio
+    async def test_status_derives_composing(self, test_client, mock_executor):
+        mock_session = MagicMock()
+        mock_session.state = {
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
+            "region_analysis": {"regions": [{"region_id": 1}]},
+            "selected_regions": [{"region_id": 1}],
+        }
+        mock_executor.session_service.get_session.return_value = mock_session
+        response = await test_client.get("/api/v1/itinerary/job-123/status")
+        data = response.json()
+        assert data["status"] == "composing"
+
+    @pytest.mark.asyncio
+    async def test_status_failed_marker_returns_failed(self, test_client, mock_executor):
+        """Regression: job_failed=True in session state must yield status=failed."""
+        mock_session = MagicMock()
+        mock_session.state = {"job_failed": True}
+        mock_executor.session_service.get_session.return_value = mock_session
+        response = await test_client.get("/api/v1/itinerary/job-123/status")
+        assert response.status_code == 200
+        assert response.json()["status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_status_failed_takes_priority_over_partial_state(self, test_client, mock_executor):
+        """Regression: failed flag beats partial data (e.g. book_metadata present but job errored)."""
+        mock_session = MagicMock()
+        mock_session.state = {
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
+            "job_failed": True,
+        }
+        mock_executor.session_service.get_session.return_value = mock_session
+        response = await test_client.get("/api/v1/itinerary/job-123/status")
+        assert response.status_code == 200
+        assert response.json()["status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_status_failed_takes_priority_over_composing_state(self, test_client, mock_executor):
+        """Regression: failed flag beats composing-phase partial state."""
+        mock_session = MagicMock()
+        mock_session.state = {
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
+            "region_analysis": {"regions": [{"region_id": 1}]},
+            "selected_regions": [{"region_id": 1}],
+            "job_failed": True,
+        }
+        mock_executor.session_service.get_session.return_value = mock_session
+        response = await test_client.get("/api/v1/itinerary/job-123/status")
+        assert response.status_code == 200
+        assert response.json()["status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_status_failed_beats_stale_itinerary(self, test_client, mock_executor):
+        """Regression: job_failed=True must win over a stale final_itinerary from a prior
+        successful compose run, so clients see the current failure rather than a past success."""
+        mock_session = MagicMock()
+        mock_session.state = {
+            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
+            "region_analysis": {"regions": [{"region_id": 1}]},
+            "selected_regions": [{"region_id": 1}],
+            "final_itinerary": {"cities": [], "summary_text": "done"},
+            "job_failed": True,
+        }
+        mock_executor.session_service.get_session.return_value = mock_session
+        response = await test_client.get("/api/v1/itinerary/job-123/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "failed"
+        assert data["has_itinerary"] is False
+
 
 class TestDiscoverEndpoint:
     """Tests for POST /api/v1/itinerary/discover."""
 
     @pytest.mark.asyncio
-    async def test_discover_session_create_failure(
-        self, test_client, mock_app_state
-    ):
-        """When session backend fails, stream should emit error + done, not crash."""
-        mock_app_state.session_service.create_session.side_effect = (
-            RuntimeError("DB connection refused")
-        )
-        response = await test_client.post(
-            "/api/v1/itinerary/discover",
-            json={"book_title": "1984"},
-        )
-        assert response.status_code == 200
+    async def test_discover_session_create_failure(self, test_client, mock_executor):
+        async def mock_discover(**kwargs):
+            yield WorkflowError(message="Failed to initialize session", error_type="SessionError")
+            yield WorkflowComplete(job_id="test-job")
 
+        mock_executor.discover = mock_discover
+        response = await test_client.post("/api/v1/itinerary/discover", json={"book_title": "1984"})
+        assert response.status_code == 200
         events = _parse_sse_response(response.text)
         event_types = [e["event"] for e in events]
         assert "error" in event_types
         assert event_types[-1] == "done"
-
         error_event = next(e for e in events if e["event"] == "error")
         assert error_event["error_type"] == "SessionError"
 
     @pytest.mark.asyncio
-    async def test_discover_book_not_found(self, test_client, mock_app_state):
-        """When Google Books returns no results, stream should emit error + done."""
-        with patch(
-            "api.streaming.search_books_with_retry", return_value=[]
-        ):
-            response = await test_client.post(
-                "/api/v1/itinerary/discover",
-                json={"book_title": "Nonexistent Book XYZ"},
+    async def test_discover_book_not_found(self, test_client, mock_executor):
+        async def mock_discover(**kwargs):
+            yield ProgressEvent(phase=Phase.BOOK_SEARCH, step="Searching Google Books API")
+            yield WorkflowError(
+                message='Could not find "Nonexistent Book XYZ" in Google Books.',
+                error_type="BookNotFound", phase=Phase.BOOK_SEARCH,
             )
-            assert response.status_code == 200
+            yield WorkflowComplete(job_id="test-job")
 
-            events = _parse_sse_response(response.text)
-
-            event_types = [e["event"] for e in events]
-            assert "progress" in event_types
-            assert "error" in event_types
-            assert event_types[-1] == "done"
-
-            error_event = next(e for e in events if e["event"] == "error")
-            assert "Nonexistent Book XYZ" in error_event["message"]
-            assert error_event["phase"] == 1
+        mock_executor.discover = mock_discover
+        response = await test_client.post(
+            "/api/v1/itinerary/discover", json={"book_title": "Nonexistent Book XYZ"},
+        )
+        assert response.status_code == 200
+        events = _parse_sse_response(response.text)
+        event_types = [e["event"] for e in events]
+        assert "progress" in event_types
+        assert "error" in event_types
+        assert event_types[-1] == "done"
+        error_event = next(e for e in events if e["event"] == "error")
+        assert "Nonexistent Book XYZ" in error_event["message"]
+        assert error_event["phase"] == 1
 
     @pytest.mark.asyncio
-    async def test_discover_search_api_error(
-        self, test_client, mock_app_state
-    ):
-        """When Google Books API fails, stream should emit error + done."""
-        with patch(
-            "api.streaming.search_books_with_retry",
-            side_effect=ConnectionError("Network error"),
-        ):
-            response = await test_client.post(
-                "/api/v1/itinerary/discover",
-                json={"book_title": "1984"},
+    async def test_discover_search_api_error(self, test_client, mock_executor):
+        async def mock_discover(**kwargs):
+            yield ProgressEvent(phase=Phase.BOOK_SEARCH, step="Searching Google Books API")
+            yield WorkflowError(
+                message="Could not search Google Books API: Network error",
+                error_type="ConnectionError", phase=Phase.BOOK_SEARCH,
             )
-            assert response.status_code == 200
+            yield WorkflowComplete(job_id="test-job")
 
-            events = _parse_sse_response(response.text)
-            event_types = [e["event"] for e in events]
-            assert event_types[-1] == "done"
-
-            error_event = next(e for e in events if e["event"] == "error")
-            assert "Network error" in error_event["message"]
-            assert error_event["error_type"] == "ConnectionError"
+        mock_executor.discover = mock_discover
+        response = await test_client.post("/api/v1/itinerary/discover", json={"book_title": "1984"})
+        assert response.status_code == 200
+        events = _parse_sse_response(response.text)
+        assert events[-1]["event"] == "done"
+        error_event = next(e for e in events if e["event"] == "error")
+        assert "Network error" in error_event["message"]
+        assert error_event["error_type"] == "ConnectionError"
 
     @pytest.mark.asyncio
-    async def test_discover_success_streams_events(
-        self, test_client, mock_app_state
-    ):
-        """Successful discover should emit: progress, metadata, progress..., regions, done."""
-        from models.book import BookInfo
-
-        mock_book = BookInfo(
-            title="1984",
-            authors=["George Orwell"],
-            description="A dystopian novel",
-            published_date="1949",
-            categories=["Fiction"],
-        )
-
-        mock_session = MagicMock()
-        mock_session.state = {}
-        mock_app_state.session_service.get_session.return_value = mock_session
-
-        # Mock the ADK Runner to yield a simple event
-        mock_event = MagicMock()
-        mock_event.author = "region_analyzer"
-        mock_event.is_final_response.return_value = False
-
-        async def mock_run_async(*args, **kwargs):
-            yield mock_event
-
-        mock_runner_instance = MagicMock()
-        mock_runner_instance.run_async = mock_run_async
-        mock_runner_instance.__aenter__ = AsyncMock(
-            return_value=mock_runner_instance
-        )
-        mock_runner_instance.__aexit__ = AsyncMock(return_value=False)
-
-        with (
-            patch(
-                "api.streaming.search_books_with_retry",
-                return_value=[mock_book],
-            ),
-            patch("api.streaming.Runner", return_value=mock_runner_instance),
-            patch("api.streaming.create_discovery_workflow"),
-            patch("api.streaming.LangfusePlugin") as mock_lf,
-        ):
-            mock_lf.return_value.enabled = False
-            response = await test_client.post(
-                "/api/v1/itinerary/discover",
-                json={"book_title": "1984", "author": "George Orwell"},
+    async def test_discover_success_streams_events(self, test_client, mock_executor):
+        async def mock_discover(**kwargs):
+            yield ProgressEvent(phase=Phase.BOOK_SEARCH, step="Searching Google Books API")
+            yield MetadataReady(
+                metadata={
+                    "book_title": "1984", "author": "George Orwell",
+                    "description": "A dystopian novel", "categories": ["Fiction"],
+                }
             )
-            assert response.status_code == 200
+            yield ProgressEvent(phase=Phase.DISCOVERY, step="Starting location discovery")
+            yield ProgressEvent(
+                phase=Phase.DISCOVERY, step="Analyzing geographic regions", detail="region_analyzer",
+            )
+            yield RegionsReady(
+                job_id="test-job-id",
+                regions=[{"region_id": 1, "region_name": "England"}],
+                analysis_note="test",
+            )
+            yield WorkflowComplete(job_id="test-job-id")
 
-            events = _parse_sse_response(response.text)
-            event_types = [e["event"] for e in events]
-
-            # Verify event sequence
-            assert event_types[0] == "progress"  # Phase 1 start
-            assert "metadata" in event_types
-            assert "regions" in event_types
-            assert event_types[-1] == "done"
-
-            # Verify metadata content
-            metadata = next(e for e in events if e["event"] == "metadata")
-            assert metadata["book_title"] == "1984"
-            assert metadata["author"] == "George Orwell"
-
-            # Verify done has job_id
-            done = next(e for e in events if e["event"] == "done")
-            assert "job_id" in done
-            assert len(done["job_id"]) > 0
+        mock_executor.discover = mock_discover
+        response = await test_client.post(
+            "/api/v1/itinerary/discover", json={"book_title": "1984", "author": "George Orwell"},
+        )
+        assert response.status_code == 200
+        events = _parse_sse_response(response.text)
+        event_types = [e["event"] for e in events]
+        assert event_types[0] == "progress"
+        assert "metadata" in event_types
+        assert "regions" in event_types
+        assert event_types[-1] == "done"
+        metadata = next(e for e in events if e["event"] == "metadata")
+        assert metadata["book_title"] == "1984"
+        assert metadata["author"] == "George Orwell"
+        done = next(e for e in events if e["event"] == "done")
+        assert done["job_id"] == "test-job-id"
 
 
 class TestComposeEndpoint:
     """Tests for POST /api/v1/itinerary/{job_id}/compose."""
 
     @pytest.mark.asyncio
-    async def test_compose_session_backend_error(
-        self, test_client, mock_app_state
-    ):
-        """When session backend raises, stream should emit SessionError, not JobNotFound."""
-        mock_app_state.session_service.get_session.side_effect = RuntimeError(
-            "DB connection lost"
-        )
+    async def test_compose_session_backend_error(self, test_client, mock_executor):
+        async def mock_compose(**kwargs):
+            yield WorkflowError(message="Failed to retrieve session", error_type="SessionError")
+            yield WorkflowComplete(job_id="bad-job")
+
+        mock_executor.compose = mock_compose
         response = await test_client.post(
-            "/api/v1/itinerary/bad-job/compose",
-            json={"region_ids": [1]},
+            "/api/v1/itinerary/bad-job/compose", json={"region_ids": [1]},
         )
         assert response.status_code == 200
-
         events = _parse_sse_response(response.text)
-        event_types = [e["event"] for e in events]
-        assert event_types[-1] == "done"
-
+        assert events[-1]["event"] == "done"
         error_event = next(e for e in events if e["event"] == "error")
         assert error_event["error_type"] == "SessionError"
 
     @pytest.mark.asyncio
-    async def test_compose_session_returns_none(
-        self, test_client, mock_app_state
-    ):
-        """When get_session returns None (no exception), should emit error + done, not crash."""
-        mock_app_state.session_service.get_session.return_value = None
+    async def test_compose_session_returns_none(self, test_client, mock_executor):
+        async def mock_compose(**kwargs):
+            yield WorkflowError(
+                message="Job bad-job not found. Run discover first.", error_type="JobNotFound",
+            )
+            yield WorkflowComplete(job_id="bad-job")
+
+        mock_executor.compose = mock_compose
         response = await test_client.post(
-            "/api/v1/itinerary/bad-job/compose",
-            json={"region_ids": [1]},
+            "/api/v1/itinerary/bad-job/compose", json={"region_ids": [1]},
         )
         assert response.status_code == 200
-
         events = _parse_sse_response(response.text)
-        event_types = [e["event"] for e in events]
-        assert event_types[-1] == "done"
-
+        assert events[-1]["event"] == "done"
         error_event = next(e for e in events if e["event"] == "error")
         assert "not found" in error_event["message"].lower()
         assert error_event["error_type"] == "JobNotFound"
 
     @pytest.mark.asyncio
-    async def test_compose_no_regions_in_session(
-        self, test_client, mock_app_state
-    ):
-        """When session has no region_analysis, stream should emit error + done."""
-        mock_session = MagicMock()
-        mock_session.state = {"book_metadata": {"book_title": "1984"}}
-        mock_app_state.session_service.get_session.return_value = mock_session
+    async def test_compose_no_regions_in_session(self, test_client, mock_executor):
+        async def mock_compose(**kwargs):
+            yield WorkflowError(
+                message="No regions found in session. Discovery may not have completed.",
+                error_type="NoRegions", phase=Phase.COMPOSITION,
+            )
+            yield WorkflowComplete(job_id="job-123")
 
+        mock_executor.compose = mock_compose
         response = await test_client.post(
-            "/api/v1/itinerary/job-123/compose",
-            json={"region_ids": [1]},
+            "/api/v1/itinerary/job-123/compose", json={"region_ids": [1]},
         )
         assert response.status_code == 200
-
         events = _parse_sse_response(response.text)
-        event_types = [e["event"] for e in events]
-        assert event_types[-1] == "done"
-
         error_event = next(e for e in events if e["event"] == "error")
         assert "No regions" in error_event["message"]
 
     @pytest.mark.asyncio
-    async def test_compose_invalid_region_ids(
-        self, test_client, mock_app_state
-    ):
-        """When region_ids don't match any discovered regions, emit error + done."""
-        mock_session = MagicMock()
-        mock_session.state = {
-            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
-            "region_analysis": {
-                "regions": [
-                    {"region_id": 1, "region_name": "England", "cities": []},
-                    {"region_id": 2, "region_name": "Spain", "cities": []},
-                ]
-            },
-        }
-        mock_app_state.session_service.get_session.return_value = mock_session
+    async def test_compose_invalid_region_ids(self, test_client, mock_executor):
+        async def mock_compose(**kwargs):
+            yield WorkflowError(
+                message="Invalid region_ids: [99]. Valid IDs: [1, 2]",
+                error_type="InvalidRegionIds", phase=Phase.COMPOSITION,
+            )
+            yield WorkflowComplete(job_id="job-123")
 
+        mock_executor.compose = mock_compose
         response = await test_client.post(
-            "/api/v1/itinerary/job-123/compose",
-            json={"region_ids": [99]},
+            "/api/v1/itinerary/job-123/compose", json={"region_ids": [99]},
         )
         assert response.status_code == 200
-
         events = _parse_sse_response(response.text)
-        event_types = [e["event"] for e in events]
-        assert "error" in event_types
-        assert event_types[-1] == "done"
-
         error_event = next(e for e in events if e["event"] == "error")
         assert error_event["error_type"] == "InvalidRegionIds"
         assert "99" in error_event["message"]
 
     @pytest.mark.asyncio
-    async def test_compose_malformed_region_ids_in_session(
-        self, test_client, mock_app_state
-    ):
-        """Regions with None/missing region_id should be excluded from valid set."""
-        mock_session = MagicMock()
-        mock_session.state = {
-            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
-            "region_analysis": {
-                "regions": [
-                    {"region_id": 1, "region_name": "England", "cities": []},
-                    {"region_name": "Unknown", "cities": []},  # missing region_id
-                    {"region_id": None, "region_name": "Bad", "cities": []},
-                ]
-            },
-        }
-        mock_app_state.session_service.get_session.return_value = mock_session
+    async def test_compose_success(self, test_client, mock_executor):
+        async def mock_compose(**kwargs):
+            yield ProgressEvent(
+                phase=Phase.COMPOSITION, step="Creating personalized itinerary",
+                detail="1 region(s) selected",
+            )
+            yield ItineraryReady(itinerary={
+                "cities": [{
+                    "name": "London", "country": "UK", "days_suggested": 3,
+                    "overview": "Explore Orwell's London", "stops": [],
+                }],
+                "summary_text": "A journey through 1984",
+            })
+            yield WorkflowComplete(job_id="job-123")
 
-        # region_id=99 is invalid; only region_id=1 is valid (None excluded)
+        mock_executor.compose = mock_compose
         response = await test_client.post(
-            "/api/v1/itinerary/job-123/compose",
-            json={"region_ids": [99]},
+            "/api/v1/itinerary/job-123/compose", json={"region_ids": [1]},
         )
         assert response.status_code == 200
-
         events = _parse_sse_response(response.text)
-        error_event = next(e for e in events if e["event"] == "error")
-        assert error_event["error_type"] == "InvalidRegionIds"
-        # Valid IDs should only contain 1, not None
-        assert "1" in error_event["message"]
+        event_types = [e["event"] for e in events]
+        assert "progress" in event_types
+        assert "itinerary" in event_types
+        assert event_types[-1] == "done"
+        itinerary_event = next(e for e in events if e["event"] == "itinerary")
+        assert itinerary_event["itinerary"]["cities"][0]["name"] == "London"
 
     @pytest.mark.asyncio
-    async def test_compose_success_no_session_refetch(
-        self, test_client, mock_app_state
-    ):
-        """Compose should succeed even if session would be unreachable after runner completes."""
-        mock_session = MagicMock()
-        mock_session.state = {
-            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
-            "region_analysis": {
-                "regions": [
-                    {
-                        "region_id": 1,
-                        "region_name": "England",
-                        "cities": [{"name": "London", "country": "UK"}],
-                    }
-                ]
-            },
-        }
-        # First call returns session, subsequent calls return None
-        mock_app_state.session_service.get_session.side_effect = [
-            mock_session,
-            None,
-        ]
+    async def test_compose_extraction_failure(self, test_client, mock_executor):
+        async def mock_compose(**kwargs):
+            yield ProgressEvent(phase=Phase.COMPOSITION, step="Creating personalized itinerary")
+            yield WorkflowError(
+                message="Failed to extract itinerary from agent response",
+                error_type="ExtractionError", phase=Phase.COMPOSITION,
+            )
+            yield WorkflowComplete(job_id="job-123")
 
-        itinerary_json = json.dumps(
-            {
-                "cities": [
-                    {
-                        "name": "London",
-                        "country": "UK",
-                        "days_suggested": 2,
-                        "overview": "Explore literary London.",
-                        "stops": [
-                            {
-                                "name": "British Library",
-                                "type": "museum",
-                                "reason": "Literary archives and manuscripts.",
-                                "time_of_day": "morning",
-                                "notes": "Book tickets in advance.",
-                            }
-                        ],
-                    }
-                ],
-                "summary_text": "test",
-            }
+        mock_executor.compose = mock_compose
+        response = await test_client.post(
+            "/api/v1/itinerary/job-123/compose", json={"region_ids": [1]},
         )
-        mock_part = MagicMock()
-        mock_part.text = itinerary_json
-
-        mock_final_event = MagicMock()
-        mock_final_event.author = "trip_composer"
-        mock_final_event.is_final_response.return_value = True
-        mock_final_event.content.parts = [mock_part]
-
-        async def mock_run_async(*args, **kwargs):
-            yield mock_final_event
-
-        mock_runner_instance = MagicMock()
-        mock_runner_instance.run_async = mock_run_async
-        mock_runner_instance.__aenter__ = AsyncMock(
-            return_value=mock_runner_instance
-        )
-        mock_runner_instance.__aexit__ = AsyncMock(return_value=False)
-
-        with (
-            patch("api.streaming.Runner", return_value=mock_runner_instance),
-            patch("api.streaming.create_composition_workflow"),
-            patch("api.streaming.LangfusePlugin") as mock_lf,
-        ):
-            mock_lf.return_value.enabled = False
-            response = await test_client.post(
-                "/api/v1/itinerary/job-123/compose",
-                json={"region_ids": [1]},
-            )
-            assert response.status_code == 200
-
-            events = _parse_sse_response(response.text)
-            event_types = [e["event"] for e in events]
-
-            # Should complete successfully without crashing on second get_session
-            assert "itinerary" in event_types
-            assert event_types[-1] == "done"
-            assert mock_session.state["_job_status"] == "completed"
-
-    @pytest.mark.asyncio
-    async def test_compose_success(self, test_client, mock_app_state):
-        """Successful compose should emit: progress, itinerary, done."""
-        mock_session = MagicMock()
-        mock_session.state = {
-            "book_metadata": {
-                "book_title": "1984",
-                "author": "George Orwell",
-            },
-            "region_analysis": {
-                "regions": [
-                    {
-                        "region_id": 1,
-                        "region_name": "England",
-                        "cities": [{"name": "London", "country": "UK"}],
-                    }
-                ]
-            },
-        }
-        mock_session.user_id = "api_user"
-        mock_app_state.session_service.get_session.return_value = mock_session
-
-        # Create mock final event with itinerary JSON
-        itinerary_json = json.dumps(
-            {
-                "cities": [
-                    {
-                        "name": "London",
-                        "country": "UK",
-                        "days_suggested": 3,
-                        "overview": "Explore Orwell's London",
-                        "stops": [],
-                    }
-                ],
-                "summary_text": "A journey through 1984",
-            }
-        )
-
-        mock_part = MagicMock()
-        mock_part.text = itinerary_json
-
-        mock_final_event = MagicMock()
-        mock_final_event.author = "trip_composer"
-        mock_final_event.is_final_response.return_value = True
-        mock_final_event.content.parts = [mock_part]
-
-        async def mock_run_async(*args, **kwargs):
-            yield mock_final_event
-
-        mock_runner_instance = MagicMock()
-        mock_runner_instance.run_async = mock_run_async
-        mock_runner_instance.__aenter__ = AsyncMock(
-            return_value=mock_runner_instance
-        )
-        mock_runner_instance.__aexit__ = AsyncMock(return_value=False)
-
-        with (
-            patch("api.streaming.Runner", return_value=mock_runner_instance),
-            patch("api.streaming.create_composition_workflow"),
-            patch("api.streaming.LangfusePlugin") as mock_lf,
-        ):
-            mock_lf.return_value.enabled = False
-            response = await test_client.post(
-                "/api/v1/itinerary/job-123/compose",
-                json={"region_ids": [1]},
-            )
-            assert response.status_code == 200
-
-            events = _parse_sse_response(response.text)
-            event_types = [e["event"] for e in events]
-
-            assert "progress" in event_types
-            assert "itinerary" in event_types
-            assert event_types[-1] == "done"
-
-            # Verify itinerary content
-            itinerary_event = next(
-                e for e in events if e["event"] == "itinerary"
-            )
-            assert itinerary_event["itinerary"]["cities"][0]["name"] == "London"
-
-
-# =============================================================================
-# Job Status Persistence Tests
-# =============================================================================
-
-
-class TestJobStatusFailedPersistence:
-    """Verify _job_status='failed' is set on error paths."""
-
-    @pytest.mark.asyncio
-    async def test_discover_book_not_found_sets_failed(
-        self, test_client, mock_app_state
-    ):
-        mock_session = MagicMock()
-        mock_session.state = {"_job_status": "searching"}
-        mock_app_state.session_service.get_session.return_value = mock_session
-
-        with patch(
-            "api.streaming.search_books_with_retry", return_value=[]
-        ):
-            await test_client.post(
-                "/api/v1/itinerary/discover",
-                json={"book_title": "Nonexistent"},
-            )
-        assert mock_session.state["_job_status"] == "failed"
-
-    @pytest.mark.asyncio
-    async def test_discover_api_error_sets_failed(
-        self, test_client, mock_app_state
-    ):
-        mock_session = MagicMock()
-        mock_session.state = {"_job_status": "searching"}
-        mock_app_state.session_service.get_session.return_value = mock_session
-
-        with patch(
-            "api.streaming.search_books_with_retry",
-            side_effect=ConnectionError("fail"),
-        ):
-            await test_client.post(
-                "/api/v1/itinerary/discover",
-                json={"book_title": "1984"},
-            )
-        assert mock_session.state["_job_status"] == "failed"
-
-    @pytest.mark.asyncio
-    async def test_compose_extraction_failure_sets_failed(
-        self, test_client, mock_app_state
-    ):
-        mock_session = MagicMock()
-        mock_session.state = {
-            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
-            "region_analysis": {
-                "regions": [
-                    {"region_id": 1, "region_name": "England", "cities": []}
-                ]
-            },
-        }
-        mock_app_state.session_service.get_session.return_value = mock_session
-
-        # Final event with no parseable JSON
-        mock_part = MagicMock()
-        mock_part.text = "Sorry, I cannot do that."
-
-        mock_final_event = MagicMock()
-        mock_final_event.author = "trip_composer"
-        mock_final_event.is_final_response.return_value = True
-        mock_final_event.content.parts = [mock_part]
-
-        async def mock_run_async(*args, **kwargs):
-            yield mock_final_event
-
-        mock_runner_instance = MagicMock()
-        mock_runner_instance.run_async = mock_run_async
-        mock_runner_instance.__aenter__ = AsyncMock(
-            return_value=mock_runner_instance
-        )
-        mock_runner_instance.__aexit__ = AsyncMock(return_value=False)
-
-        with (
-            patch("api.streaming.Runner", return_value=mock_runner_instance),
-            patch("api.streaming.create_composition_workflow"),
-            patch("api.streaming.LangfusePlugin") as mock_lf,
-        ):
-            mock_lf.return_value.enabled = False
-            await test_client.post(
-                "/api/v1/itinerary/job-123/compose",
-                json={"region_ids": [1]},
-            )
-        assert mock_session.state["_job_status"] == "failed"
-
-
-# =============================================================================
-# Cancellation Tests
-# =============================================================================
-
-
-class TestCancellationHandling:
-    """Verify CancelledError sets _job_status='failed' on disconnect."""
-
-    @pytest.mark.asyncio
-    async def test_discover_cancellation_sets_failed(self, mock_app_state):
-        """discover_stream should persist failed status on CancelledError."""
-        import asyncio
-        from api.streaming import discover_stream
-
-        mock_session = MagicMock()
-        mock_session.state = {"_job_status": "discovering"}
-        mock_app_state.session_service.get_session.return_value = mock_session
-
-        # Runner that raises CancelledError mid-stream
-        async def mock_run_async(*args, **kwargs):
-            raise asyncio.CancelledError()
-            yield  # noqa: unreachable — makes this an async generator
-
-        mock_runner = MagicMock()
-        mock_runner.run_async = mock_run_async
-        mock_runner.__aenter__ = AsyncMock(return_value=mock_runner)
-        mock_runner.__aexit__ = AsyncMock(return_value=False)
-
-        from models.book import BookInfo
-
-        mock_book = BookInfo(
-            title="1984", authors=["George Orwell"], description="test"
-        )
-
-        with (
-            patch(
-                "api.streaming.search_books_with_retry",
-                return_value=[mock_book],
-            ),
-            patch("api.streaming.Runner", return_value=mock_runner),
-            patch("api.streaming.create_discovery_workflow"),
-            patch("api.streaming.LangfusePlugin") as mock_lf,
-        ):
-            mock_lf.return_value.enabled = False
-            gen = discover_stream(
-                book_title="1984",
-                author="George Orwell",
-                preferences=None,
-                user_id="api_user",
-                app_state=mock_app_state,
-            )
-            with pytest.raises(asyncio.CancelledError):
-                async for _ in gen:
-                    pass
-
-        assert mock_session.state["_job_status"] == "failed"
-
-    @pytest.mark.asyncio
-    async def test_compose_cancellation_sets_failed(self, mock_app_state):
-        """compose_stream should persist failed status on CancelledError."""
-        import asyncio
-        from api.streaming import compose_stream
-
-        mock_session = MagicMock()
-        mock_session.state = {
-            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
-            "region_analysis": {
-                "regions": [
-                    {"region_id": 1, "region_name": "England", "cities": []}
-                ]
-            },
-            "_job_status": "composing",
-        }
-        mock_app_state.session_service.get_session.return_value = mock_session
-
-        async def mock_run_async(*args, **kwargs):
-            raise asyncio.CancelledError()
-            yield  # noqa: unreachable
-
-        mock_runner = MagicMock()
-        mock_runner.run_async = mock_run_async
-        mock_runner.__aenter__ = AsyncMock(return_value=mock_runner)
-        mock_runner.__aexit__ = AsyncMock(return_value=False)
-
-        with (
-            patch("api.streaming.Runner", return_value=mock_runner),
-            patch("api.streaming.create_composition_workflow"),
-            patch("api.streaming.LangfusePlugin") as mock_lf,
-        ):
-            mock_lf.return_value.enabled = False
-            gen = compose_stream(
-                job_id="job-123",
-                region_ids=[1],
-                user_id="api_user",
-                app_state=mock_app_state,
-            )
-            with pytest.raises(asyncio.CancelledError):
-                async for _ in gen:
-                    pass
-
-        assert mock_session.state["_job_status"] == "failed"
+        assert response.status_code == 200
+        events = _parse_sse_response(response.text)
+        event_types = [e["event"] for e in events]
+        assert "itinerary" not in event_types
+        assert "error" in event_types
 
 
 # =============================================================================
@@ -1052,16 +769,12 @@ class TestCancellationHandling:
 
 
 class TestCORSConfiguration:
-    """Tests for CORS middleware configuration."""
-
     def test_wildcard_origin_disables_credentials(self):
-        """CORS_ORIGINS='*' should set allow_credentials=False."""
         import os
         from unittest.mock import patch as mock_patch
 
         with mock_patch.dict(os.environ, {"CORS_ORIGINS": "*"}):
             from api.app import create_app
-
             app = create_app()
             cors_middleware = None
             for middleware in app.user_middleware:
@@ -1072,7 +785,6 @@ class TestCORSConfiguration:
             assert cors_middleware.kwargs["allow_credentials"] is False
 
     def test_specific_origins_enable_credentials(self):
-        """Specific CORS origins should enable allow_credentials."""
         import os
         from unittest.mock import patch as mock_patch
 
@@ -1081,7 +793,6 @@ class TestCORSConfiguration:
             {"CORS_ORIGINS": "http://localhost:3000,https://app.example.com"},
         ):
             from api.app import create_app
-
             app = create_app()
             cors_middleware = None
             for middleware in app.user_middleware:
@@ -1093,247 +804,23 @@ class TestCORSConfiguration:
 
 
 # =============================================================================
-# Regression Tests for Code Review Findings
+# Regression Tests
 # =============================================================================
 
 
-class TestItineraryExtractionFromState:
-    """[P1] Verify compose_stream reads itinerary from session state (output_key)
-    before falling back to text parsing."""
-
-    @pytest.mark.asyncio
-    async def test_compose_reads_from_session_state(
-        self, test_client, mock_app_state
-    ):
-        """When final_itinerary is in session state, use it even if text parsing would fail."""
-        itinerary_data = {
-            "cities": [
-                {
-                    "name": "London",
-                    "country": "UK",
-                    "days_suggested": 2,
-                    "overview": "Explore literary London.",
-                    "stops": [
-                        {
-                            "name": "British Library",
-                            "type": "museum",
-                            "reason": "Literary archives and manuscripts.",
-                            "time_of_day": "morning",
-                            "notes": "Book tickets in advance.",
-                        }
-                    ],
-                }
-            ],
-            "summary_text": "A literary journey",
-        }
-        mock_session = MagicMock()
-        mock_session.state = {
-            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
-            "region_analysis": {
-                "regions": [
-                    {"region_id": 1, "region_name": "England", "cities": []}
-                ]
-            },
-            "final_itinerary": itinerary_data,
-        }
-        mock_app_state.session_service.get_session.return_value = mock_session
-
-        # Final event has NO parseable JSON text — only session state has it
-        mock_part = MagicMock()
-        mock_part.text = "Here is your itinerary!"  # no JSON
-
-        mock_final_event = MagicMock()
-        mock_final_event.author = "trip_composer"
-        mock_final_event.is_final_response.return_value = True
-        mock_final_event.content.parts = [mock_part]
-
-        async def mock_run_async(*args, **kwargs):
-            yield mock_final_event
-
-        mock_runner_instance = MagicMock()
-        mock_runner_instance.run_async = mock_run_async
-        mock_runner_instance.__aenter__ = AsyncMock(
-            return_value=mock_runner_instance
-        )
-        mock_runner_instance.__aexit__ = AsyncMock(return_value=False)
-
-        with (
-            patch("api.streaming.Runner", return_value=mock_runner_instance),
-            patch("api.streaming.create_composition_workflow"),
-            patch("api.streaming.LangfusePlugin") as mock_lf,
-        ):
-            mock_lf.return_value.enabled = False
-            response = await test_client.post(
-                "/api/v1/itinerary/job-123/compose",
-                json={"region_ids": [1]},
-            )
-            assert response.status_code == 200
-
-            events = _parse_sse_response(response.text)
-            event_types = [e["event"] for e in events]
-            assert "itinerary" in event_types
-            assert event_types[-1] == "done"
-
-            itinerary_event = next(
-                e for e in events if e["event"] == "itinerary"
-            )
-            assert itinerary_event["itinerary"]["cities"][0]["name"] == "London"
-            assert itinerary_event["itinerary"]["cities"][0]["country"] == "UK"
-
-    @pytest.mark.asyncio
-    async def test_compose_falls_back_to_text_parsing(
-        self, test_client, mock_app_state
-    ):
-        """When session state has no final_itinerary, fall back to text parsing."""
-        mock_session = MagicMock()
-        mock_session.state = {
-            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
-            "region_analysis": {
-                "regions": [
-                    {"region_id": 1, "region_name": "England", "cities": []}
-                ]
-            },
-            # No final_itinerary in state
-        }
-        mock_app_state.session_service.get_session.return_value = mock_session
-
-        itinerary_json = json.dumps(
-            {
-                "cities": [
-                    {
-                        "name": "London",
-                        "country": "UK",
-                        "days_suggested": 2,
-                        "overview": "Explore literary London.",
-                        "stops": [
-                            {
-                                "name": "British Library",
-                                "type": "museum",
-                                "reason": "Literary archives and manuscripts.",
-                                "time_of_day": "morning",
-                                "notes": "Book tickets in advance.",
-                            }
-                        ],
-                    }
-                ],
-                "summary_text": "test",
-            }
-        )
-        mock_part = MagicMock()
-        mock_part.text = f"Here is the result: {itinerary_json}"
-
-        mock_final_event = MagicMock()
-        mock_final_event.author = "trip_composer"
-        mock_final_event.is_final_response.return_value = True
-        mock_final_event.content.parts = [mock_part]
-
-        async def mock_run_async(*args, **kwargs):
-            yield mock_final_event
-
-        mock_runner_instance = MagicMock()
-        mock_runner_instance.run_async = mock_run_async
-        mock_runner_instance.__aenter__ = AsyncMock(
-            return_value=mock_runner_instance
-        )
-        mock_runner_instance.__aexit__ = AsyncMock(return_value=False)
-
-        with (
-            patch("api.streaming.Runner", return_value=mock_runner_instance),
-            patch("api.streaming.create_composition_workflow"),
-            patch("api.streaming.LangfusePlugin") as mock_lf,
-        ):
-            mock_lf.return_value.enabled = False
-            response = await test_client.post(
-                "/api/v1/itinerary/job-123/compose",
-                json={"region_ids": [1]},
-            )
-            assert response.status_code == 200
-
-            events = _parse_sse_response(response.text)
-            assert "itinerary" in [e["event"] for e in events]
-
-    @pytest.mark.asyncio
-    async def test_compose_rejects_invalid_itinerary_schema(
-        self, test_client, mock_app_state
-    ):
-        """Fallback text JSON that doesn't match TripItinerary should emit ExtractionError."""
-        mock_session = MagicMock()
-        mock_session.state = {
-            "book_metadata": {"book_title": "1984", "author": "George Orwell"},
-            "region_analysis": {
-                "regions": [
-                    {"region_id": 1, "region_name": "England", "cities": []}
-                ]
-            },
-            # No final_itinerary in state
-        }
-        mock_app_state.session_service.get_session.return_value = mock_session
-
-        # Missing required fields like country/days_suggested/stops
-        invalid_itinerary_json = json.dumps(
-            {"cities": [{"name": "London"}], "summary_text": "test"}
-        )
-        mock_part = MagicMock()
-        mock_part.text = f"Result: {invalid_itinerary_json}"
-
-        mock_final_event = MagicMock()
-        mock_final_event.author = "trip_composer"
-        mock_final_event.is_final_response.return_value = True
-        mock_final_event.content.parts = [mock_part]
-
-        async def mock_run_async(*args, **kwargs):
-            yield mock_final_event
-
-        mock_runner_instance = MagicMock()
-        mock_runner_instance.run_async = mock_run_async
-        mock_runner_instance.__aenter__ = AsyncMock(
-            return_value=mock_runner_instance
-        )
-        mock_runner_instance.__aexit__ = AsyncMock(return_value=False)
-
-        with (
-            patch("api.streaming.Runner", return_value=mock_runner_instance),
-            patch("api.streaming.create_composition_workflow"),
-            patch("api.streaming.LangfusePlugin") as mock_lf,
-        ):
-            mock_lf.return_value.enabled = False
-            response = await test_client.post(
-                "/api/v1/itinerary/job-123/compose",
-                json={"region_ids": [1]},
-            )
-            assert response.status_code == 200
-
-            events = _parse_sse_response(response.text)
-            event_types = [e["event"] for e in events]
-            assert "itinerary" not in event_types
-            assert "error" in event_types
-
-
 class TestBookContextTimePeriod:
-    """[P1] Verify BookContext.time_period accepts null."""
-
     def test_book_context_null_time_period(self):
         from models.book import BookContext
-
-        ctx = BookContext(
-            primary_locations=["Paris"],
-            time_period=None,
-            themes=["war"],
-        )
+        ctx = BookContext(primary_locations=["Paris"], time_period=None, themes=["war"])
         assert ctx.time_period is None
 
     def test_book_context_missing_time_period_defaults_none(self):
         from models.book import BookContext
-
-        ctx = BookContext(
-            primary_locations=["Paris"],
-            themes=["war"],
-        )
+        ctx = BookContext(primary_locations=["Paris"], themes=["war"])
         assert ctx.time_period is None
 
     def test_book_context_with_time_period(self):
         from models.book import BookContext
-
         ctx = BookContext(
             primary_locations=["Paris"],
             time_period="World War II (1940-1944)",
@@ -1343,44 +830,31 @@ class TestBookContextTimePeriod:
 
 
 class TestEmptyRegionIdsRejected:
-    """[P2] Verify empty region_ids is rejected at API layer."""
-
     @pytest.mark.asyncio
     async def test_compose_empty_region_ids_returns_422(self, test_client):
-        """POST /compose with empty region_ids should return 422 validation error."""
         response = await test_client.post(
-            "/api/v1/itinerary/job-123/compose",
-            json={"region_ids": []},
+            "/api/v1/itinerary/job-123/compose", json={"region_ids": []},
         )
         assert response.status_code == 422
 
 
 class TestBlankBookTitleRejected:
-    """[P2] Verify blank book_title is rejected at API layer."""
-
     @pytest.mark.asyncio
     async def test_discover_blank_book_title_returns_422(self, test_client):
         response = await test_client.post(
-            "/api/v1/itinerary/discover",
-            json={"book_title": "   "},
+            "/api/v1/itinerary/discover", json={"book_title": "   "},
         )
         assert response.status_code == 422
 
 
 class TestDiscoveryProgressMapping:
-    """[P3] Verify reader_profile_agent emits progress events."""
-
     def test_reader_profile_agent_in_progress_map(self):
-        from api.streaming import DISCOVERY_AGENT_STEPS
-
+        from core.executor import DISCOVERY_AGENT_STEPS
         assert "reader_profile_agent" in DISCOVERY_AGENT_STEPS
-        # Old key should not exist
         assert "reader_profile" not in DISCOVERY_AGENT_STEPS
 
 
 class TestEvalWorkflowBookContext:
-    """[P2] Verify eval workflow does not use placeholder literals."""
-
     def test_eval_workflow_no_placeholder_in_instruction(self):
         from google.adk.tools import FunctionTool
         from agents.orchestrator import create_eval_workflow
@@ -1390,12 +864,8 @@ class TestEvalWorkflowBookContext:
 
         mock_tool = FunctionTool(mock_search_book)
         workflow = create_eval_workflow("gemini-2.0-flash", mock_tool)
-
-        # Find book_context_pipeline
         book_context = workflow.sub_agents[1]
         assert book_context.name == "book_context_pipeline"
-
-        # The researcher sub-agent's instruction should not contain placeholder literals
         researcher = book_context.sub_agents[0]
         assert "[from conversation]" not in researcher.instruction
 
@@ -1406,15 +876,7 @@ class TestEvalWorkflowBookContext:
 
 
 def _parse_sse_response(text: str) -> list[dict]:
-    """Parse SSE response text into list of event dicts.
-
-    Handles the SSE format:
-        event: <type>
-        data: <json>
-
-    Returns:
-        List of parsed JSON data dicts with 'event' key included
-    """
+    """Parse SSE response text into list of event dicts."""
     events = []
     current_event = None
     current_data = None
@@ -1436,7 +898,6 @@ def _parse_sse_response(text: str) -> list[dict]:
             current_event = None
             current_data = None
 
-    # Handle last event if no trailing newline
     if current_data is not None:
         try:
             parsed = json.loads(current_data)

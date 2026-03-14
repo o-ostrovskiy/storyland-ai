@@ -13,9 +13,17 @@ class CityStop(BaseModel):
 
     name: str = Field(description="Name of the place")
     type: str = Field(
-        description="Type: landmark, museum, cafe, restaurant, bookstore, etc."
+        description="Type: landmark, museum, cafe, restaurant, bookstore, filming_location, etc."
     )
     reason: str = Field(description="Why this place matters for the book")
+    address: Optional[str] = Field(
+        default=None,
+        description="Street address or location description (e.g., '221B Baker Street, London' or 'Near Ponte Vecchio, Florence'). Include if known.",
+    )
+    filming_scene: Optional[str] = Field(
+        default=None,
+        description="If this is a filming location: describe the specific scene or sequence filmed here (e.g., 'The opening chase scene from the 2005 film adaptation was filmed on these steps'). Leave null if not a filming location.",
+    )
     time_of_day: str = Field(
         description='Best time to visit: morning, afternoon, evening, full_day'
     )

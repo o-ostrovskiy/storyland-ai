@@ -67,7 +67,7 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["agents", "models", "tools", "services", "api"]
+source = ["agents", "models", "tools", "services", "api", "core"]
 omit = ["tests/*", "*/__pycache__/*"]
 
 [tool.coverage.report]
@@ -79,4 +79,4 @@ exclude_lines = [
 ]
 
 [tool.setuptools]
-packages = ["agents", "models", "common", "services", "tools", "plugins", "evaluation", "api"]
+packages = ["agents", "models", "common", "services", "tools", "plugins", "evaluation", "api", "core"]

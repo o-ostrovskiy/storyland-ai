@@ -2,12 +2,13 @@
 API route endpoints.
 
 Maps HTTP endpoints to streaming generators and status queries.
+All business logic lives in core.executor — routes are thin wiring.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
-from api.dependencies import get_app_state
+from api.dependencies import get_app_state, verify_gateway_secret
 from api.models import (
     DiscoverRequest,
     ComposeRequest,
@@ -17,13 +18,34 @@ from api.models import (
 )
 from api.streaming import discover_stream, compose_stream
 from common.logging import get_logger
+from core.session_state import SessionStateAccessor
 
 logger = get_logger("storyland.api.routes")
 
-router = APIRouter(tags=["itinerary"])
+# Health endpoint is unauthenticated — must be reachable for readiness/liveness probes
+# and for standalone testing without the gateway.
+system_router = APIRouter(tags=["system"])
+
+router = APIRouter(tags=["itinerary"], dependencies=[Depends(verify_gateway_secret)])
 
 
-@router.get("/health", response_model=HealthResponse, tags=["system"])
+def _derive_job_status(state: dict) -> JobStatus:
+    """Derive job status from session state (no _job_status key needed)."""
+    accessor = SessionStateAccessor(state)
+    if accessor.failed:
+        return JobStatus.FAILED
+    if accessor.final_itinerary:
+        return JobStatus.COMPLETED
+    if accessor.selected_regions:
+        return JobStatus.COMPOSING
+    if accessor.regions:
+        return JobStatus.REGIONS_READY
+    if accessor.book_metadata:
+        return JobStatus.DISCOVERING
+    return JobStatus.SEARCHING
+
+
+@system_router.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
     """Check API health and model configuration."""
     try:
@@ -79,7 +101,7 @@ async def discover(request: DiscoverRequest):
         author=request.author,
         preferences=request.preferences,
         user_id=request.user_id,
-        app_state=app_state,
+        executor=app_state.executor,
     )
 
     return EventSourceResponse(generator, media_type="text/event-stream")
@@ -124,7 +146,7 @@ async def compose(job_id: str, request: ComposeRequest):
         job_id=job_id,
         region_ids=request.region_ids,
         user_id=request.user_id,
-        app_state=app_state,
+        executor=app_state.executor,
     )
 
     return EventSourceResponse(generator, media_type="text/event-stream")
@@ -139,14 +161,18 @@ async def get_status(job_id: str, user_id: str = "api_user"):
     """
     Check the current status of a discovery/composition job.
 
-    Useful for reconnecting clients or polling after a disconnect.
-    Status progresses through: `pending` -> `searching` -> `discovering` ->
-    `regions_ready` -> `composing` -> `completed`.
+    Status is derived from session state with the following precedence:
+    `failed` (terminal error) > `completed` > `composing` > `regions_ready` >
+    `discovering` > `searching`.
+
+    `failed` is set on any terminal error (book not found, timeout, cancellation).
+    It takes priority over all other states so that a failed compose retry is
+    never masked by a stale itinerary from a prior successful run.
     """
     app_state = get_app_state()
 
     try:
-        session = await app_state.session_service.get_session(
+        session = await app_state.executor.session_service.get_session(
             app_name="storyland",
             user_id=user_id,
             session_id=job_id,
@@ -167,14 +193,7 @@ async def get_status(job_id: str, user_id: str = "api_user"):
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     state = session.state
-
-    # Derive status from _job_status key
-    job_status_str = state.get("_job_status", "pending")
-    try:
-        status = JobStatus(job_status_str)
-    except ValueError:
-        status = JobStatus.PENDING
-
+    status = _derive_job_status(state)
     book_metadata = state.get("book_metadata", {})
 
     return JobStatusResponse(
