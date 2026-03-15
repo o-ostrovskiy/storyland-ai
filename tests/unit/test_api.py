@@ -49,18 +49,15 @@ class TestDiscoverRequest:
         assert req.book_title == "1984"
         assert req.author is None
         assert req.preferences is None
-        assert req.user_id == "api_user"
 
     def test_full_request(self):
         req = DiscoverRequest(
             book_title="1984",
             author="George Orwell",
             preferences={"budget": "luxury"},
-            user_id="alice",
         )
         assert req.author == "George Orwell"
         assert req.preferences["budget"] == "luxury"
-        assert req.user_id == "alice"
 
     def test_missing_book_title_raises(self):
         with pytest.raises(ValidationError):
@@ -96,10 +93,6 @@ class TestComposeRequest:
     def test_empty_region_ids_rejected(self):
         with pytest.raises(ValidationError):
             ComposeRequest(region_ids=[])
-
-    def test_default_user_id(self):
-        req = ComposeRequest(region_ids=[1])
-        assert req.user_id == "api_user"
 
     def test_missing_region_ids_raises(self):
         with pytest.raises(ValidationError):

@@ -8,7 +8,7 @@ All business logic lives in core.executor — routes are thin wiring.
 from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
-from api.dependencies import get_app_state, verify_gateway_secret
+from api.dependencies import get_app_state, get_gateway_user_id, verify_gateway_secret
 from api.models import (
     DiscoverRequest,
     ComposeRequest,
@@ -78,7 +78,7 @@ async def health_check() -> HealthResponse:
         }
     },
 )
-async def discover(request: DiscoverRequest):
+async def discover(request: DiscoverRequest, user_id: str = Depends(get_gateway_user_id)):
     """
     Run book search and location discovery (phases 1-2).
 
@@ -100,7 +100,7 @@ async def discover(request: DiscoverRequest):
         book_title=request.book_title,
         author=request.author,
         preferences=request.preferences,
-        user_id=request.user_id,
+        user_id=user_id,
         executor=app_state.executor,
     )
 
@@ -125,7 +125,7 @@ async def discover(request: DiscoverRequest):
         }
     },
 )
-async def compose(job_id: str, request: ComposeRequest):
+async def compose(job_id: str, request: ComposeRequest, user_id: str = Depends(get_gateway_user_id)):
     """
     Create a personalized itinerary for selected regions (phase 3).
 
@@ -145,7 +145,7 @@ async def compose(job_id: str, request: ComposeRequest):
     generator = compose_stream(
         job_id=job_id,
         region_ids=request.region_ids,
-        user_id=request.user_id,
+        user_id=user_id,
         executor=app_state.executor,
     )
 
@@ -157,7 +157,7 @@ async def compose(job_id: str, request: ComposeRequest):
     response_model=JobStatusResponse,
     summary="Check job status",
 )
-async def get_status(job_id: str, user_id: str = "api_user"):
+async def get_status(job_id: str, user_id: str = Depends(get_gateway_user_id)):
     """
     Check the current status of a discovery/composition job.
 
