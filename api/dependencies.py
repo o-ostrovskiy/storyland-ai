@@ -8,7 +8,7 @@ available to all request handlers via get_app_state().
 from dataclasses import dataclass
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, Header, HTTPException, Request
 
 from common.config import Config, load_config
 from common.logging import configure_logging, get_logger
@@ -75,3 +75,25 @@ def verify_gateway_secret(request: Request) -> None:
     secret = get_app_state().config.internal_api_secret
     if secret and request.headers.get("X-Internal-Secret") != secret:
         raise HTTPException(status_code=403, detail="Forbidden")
+
+
+def get_gateway_user_id(
+    x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+) -> str:
+    """
+    Extract the authenticated user_id from the X-User-ID header.
+
+    The gateway derives this from the validated JWT and injects it into every
+    forwarded request. When INTERNAL_API_SECRET is not configured (standalone/dev
+    mode), falls back to 'dev_user' so local testing works without the full
+    gateway stack.
+
+    Raises HTTP 403 if the secret is configured but the header is absent,
+    which indicates a misconfigured or bypassed gateway.
+    """
+    secret = get_app_state().config.internal_api_secret
+    if not secret:
+        return x_user_id or "dev_user"
+    if not x_user_id:
+        raise HTTPException(status_code=403, detail="X-User-ID header is required")
+    return x_user_id

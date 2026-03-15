@@ -30,7 +30,6 @@ class DiscoverRequest(BaseModel):
                     "book_title": "Pride and Prejudice",
                     "author": "Jane Austen",
                     "preferences": {"budget": "luxury", "preferred_pace": "relaxed"},
-                    "user_id": "alice",
                 },
             ]
         }
@@ -43,7 +42,6 @@ class DiscoverRequest(BaseModel):
     preferences: Optional[dict] = Field(
         default=None, description="User travel preferences"
     )
-    user_id: str = Field(default="api_user", description="User identifier")
 
     @field_validator("book_title")
     @classmethod
@@ -62,7 +60,7 @@ class ComposeRequest(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {"region_ids": [1]},
-                {"region_ids": [1, 2], "user_id": "alice"},
+                {"region_ids": [1, 2]},
             ]
         }
     }
@@ -71,7 +69,6 @@ class ComposeRequest(BaseModel):
         min_length=1,
         description="Selected region IDs from the discover response",
     )
-    user_id: str = Field(default="api_user", description="User identifier")
 
 
 # --- SSE Event Models ---
