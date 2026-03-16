@@ -7,12 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies first (layer caching)
-COPY pyproject.toml .
-RUN pip install --no-cache-dir .
-
 # Copy application code
 COPY . .
+
+# Install package and all dependencies
+RUN pip install --no-cache-dir .
 
 EXPOSE 8080
 
