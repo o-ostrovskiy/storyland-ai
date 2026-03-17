@@ -30,6 +30,7 @@ class Config:
     langfuse_secret_key: Optional[str]
     langfuse_public_key: Optional[str]
     langfuse_host: Optional[str]
+    environment: str
     internal_api_secret: str
 
 
@@ -73,6 +74,7 @@ def load_config() -> Config:
         - LANGFUSE_SECRET_KEY: Langfuse secret key
         - LANGFUSE_PUBLIC_KEY: Langfuse public key
         - LANGFUSE_HOST: Langfuse host URL
+        - ENVIRONMENT: deployment environment tag (default: "local")
 
     Returns:
         Config object
@@ -94,6 +96,7 @@ def load_config() -> Config:
         langfuse_secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
         langfuse_public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
         langfuse_host=os.getenv("LANGFUSE_HOST"),
+        environment=os.getenv("ENVIRONMENT", "local"),
         internal_api_secret=os.getenv("INTERNAL_API_SECRET", ""),
     )
 

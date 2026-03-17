@@ -25,6 +25,7 @@ class ExecutorConfig:
     langfuse_secret_key: Optional[str] = None
     langfuse_public_key: Optional[str] = None
     langfuse_host: Optional[str] = None
+    environment: str = "local"
 
     @classmethod
     def from_config(cls, config) -> "ExecutorConfig":
@@ -38,4 +39,5 @@ class ExecutorConfig:
             langfuse_secret_key=config.langfuse_secret_key,
             langfuse_public_key=config.langfuse_public_key,
             langfuse_host=config.langfuse_host,
+            environment=config.environment,
         )

@@ -262,7 +262,7 @@ async def create_itinerary(
                     "user_id": user_id,
                     "preferences": preferences or {},
                 },
-                tags=["itinerary", "adk-workflow"],
+                tags=["itinerary", "adk-workflow", config.environment],
             )
             logger.info("langfuse_trace_created", trace_id=trace.id)
         except Exception as e:
