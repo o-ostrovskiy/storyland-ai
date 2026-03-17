@@ -13,6 +13,13 @@ on:
         type: string
         required: false
         default: ''
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_ACCOUNT_ID:
+        required: true
     outputs:
       image-uri:
         description: 'Full ECR image URI with SHA tag'
