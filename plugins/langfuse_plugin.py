@@ -132,17 +132,19 @@ class LangfusePlugin(BasePlugin):
         try:
             # Create a top-level span (auto-creates a trace in Langfuse v3)
             agent_name = getattr(invocation_context.agent, 'name', 'unknown_agent')
+            user_id = invocation_context.user_id
             self._current_trace = self.client.start_span(
                 name=f"{agent_name}_invocation",
                 metadata={
                     "invocation_id": invocation_context.invocation_id,
                     "session_id": invocation_context.session.id if invocation_context.session else None,
-                    "user_id": invocation_context.user_id,
                     "agent_type": "google_adk",
                 },
                 input=str(user_message),
             )
-            logger.debug("langfuse_trace_created", trace_id=self._current_trace.trace_id)
+            # Set user_id on the trace so it appears as the Langfuse User field
+            self._current_trace.update_trace(user_id=user_id)
+            logger.debug("langfuse_trace_created", trace_id=self._current_trace.trace_id, user_id=user_id)
         except Exception as e:
             logger.warning("langfuse_trace_error", error=str(e), error_type=type(e).__name__)
 
