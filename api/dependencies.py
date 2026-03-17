@@ -77,23 +77,38 @@ def verify_gateway_secret(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
+def _user_from_jwt(authorization: str | None) -> str | None:
+    """Extract email/sub from a Bearer JWT payload without verifying the signature."""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    try:
+        import base64
+        import json
+        payload_b64 = authorization.split(" ", 1)[1].split(".")[1]
+        payload_b64 += "=" * (4 - len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        return payload.get("email") or payload.get("sub") or None
+    except Exception:
+        return None
+
+
 def get_gateway_user_id(
     x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+    authorization: str | None = Header(default=None),
 ) -> str:
     """
-    Extract the authenticated user_id from the X-User-ID header.
+    Extract the authenticated user_id.
 
-    The gateway derives this from the validated JWT and injects it into every
-    forwarded request. When INTERNAL_API_SECRET is not configured (standalone/dev
-    mode), falls back to 'dev_user' so local testing works without the full
-    gateway stack.
+    Priority:
+    1. X-User-ID header (set by the backend proxy after JWT validation)
+    2. JWT payload from Authorization header (when frontend calls AI directly)
+    3. 'dev_user' fallback for local development
 
-    Raises HTTP 403 if the secret is configured but the header is absent,
-    which indicates a misconfigured or bypassed gateway.
+    Raises HTTP 403 if INTERNAL_API_SECRET is configured but X-User-ID is absent.
     """
     secret = get_app_state().config.internal_api_secret
     if not secret:
-        return x_user_id or "dev_user"
+        return x_user_id or _user_from_jwt(authorization) or "dev_user"
     if not x_user_id:
         raise HTTPException(status_code=403, detail="X-User-ID header is required")
     return x_user_id
