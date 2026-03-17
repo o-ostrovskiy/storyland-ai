@@ -29,6 +29,10 @@ jobs:
   integration-tests:
     name: Integration Tests
     if: ${{ !inputs.skip-tests }}
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
     uses: ./.github/workflows/integration-tests.yml
     secrets:
       GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
