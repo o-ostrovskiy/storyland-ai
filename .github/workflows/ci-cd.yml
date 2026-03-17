@@ -1,0 +1,64 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip-tests:
+        description: 'Skip unit and integration tests'
+        type: boolean
+        required: false
+        default: false
+      skip-deploy:
+        description: 'Build only, skip deploy to ECS'
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: cicd-storyland-ai-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    if: ${{ !inputs.skip-tests }}
+    uses: ./.github/workflows/codex.yml
+
+  integration-tests:
+    name: Integration Tests
+    if: ${{ !inputs.skip-tests }}
+    uses: ./.github/workflows/integration-tests.yml
+    secrets:
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+      LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+      LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
+
+  build:
+    name: Build
+    needs: [unit-tests, integration-tests]
+    if: |
+      always() &&
+      (needs.unit-tests.result == 'success' || needs.unit-tests.result == 'skipped') &&
+      (needs.integration-tests.result == 'success' || needs.integration-tests.result == 'skipped')
+    uses: ./.github/workflows/build.yml
+    secrets:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+
+  deploy:
+    name: Deploy
+    needs: [build]
+    if: |
+      always() &&
+      needs.build.result == 'success' &&
+      !inputs.skip-deploy
+    uses: ./.github/workflows/deploy.yml
+    with:
+      image-tag: ${{ needs.build.outputs.image-tag }}
+    secrets:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

@@ -6,6 +6,16 @@ on:
   pull_request:
     branches: [main, develop]
   workflow_dispatch: # Allow manual trigger
+  workflow_call:
+    secrets:
+      GOOGLE_API_KEY:
+        required: true
+      LANGFUSE_SECRET_KEY:
+        required: false
+      LANGFUSE_PUBLIC_KEY:
+        required: false
+      LANGFUSE_HOST:
+        required: false
 
 jobs:
   integration-tests:
