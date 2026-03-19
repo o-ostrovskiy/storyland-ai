@@ -352,8 +352,9 @@ async def _run_evaluation_case(
         )
 
         # Create session with initial state
-        # Extract session_input from metadata (includes user preferences)
+        # Extract session_input and quality_criteria from metadata
         session_input = item_metadata.get("session_input", {})
+        quality_criteria = item_metadata.get("quality_criteria")
         user_id = session_input.get("user_id", "eval_user")
 
         session_id = str(uuid.uuid4())
@@ -612,7 +613,9 @@ Include ALL cities from the selected regions in your itinerary."""
                     input_text=book_title,
                     itinerary=itinerary_data,
                     preferences=preferences,
-                    model_name="gemini-3.1-flash-lite-preview",
+                    quality_criteria=quality_criteria,
+                    expected_output=expected_output,
+                    model_name="gemini-2.5-flash-lite",
                     langfuse_trace_id=trace_id,
                     langfuse_client=langfuse_plugin.client,
                 )

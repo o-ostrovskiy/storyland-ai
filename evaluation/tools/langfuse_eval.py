@@ -11,6 +11,7 @@ from typing import Optional, Dict, List, Any
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
+from evaluation.tools.llm_scorer import SCORING_CRITERIA
 
 # Load environment variables from .env file
 load_dotenv()
@@ -123,11 +124,25 @@ class LangfuseEvalPipeline:
             # Extract expected output (if available)
             expected_output = case.get('expected_output', None)
 
+            # Validate quality_criteria keys if present
+            quality_criteria = case.get('quality_criteria')
+            if quality_criteria:
+                valid_keys = set(SCORING_CRITERIA.keys())
+                unknown_keys = set(quality_criteria.keys()) - valid_keys
+                if unknown_keys:
+                    logger.warning(
+                        "quality_criteria_unknown_keys",
+                        eval_id=eval_id,
+                        unknown_keys=sorted(unknown_keys),
+                        valid_keys=sorted(valid_keys),
+                    )
+
             # Add metadata
             metadata = {
                 'eval_id': eval_id,
                 'session_input': case.get('session_input', {}),
                 'creation_timestamp': case.get('creation_timestamp'),
+                'quality_criteria': quality_criteria,
             }
 
             self.client.create_dataset_item(
@@ -306,26 +321,32 @@ class LangfuseEvalPipeline:
 
 def create_dataset_from_evalsets(
     evalset_dir: str = "agents/storyland",
+    evalset_file: Optional[str] = None,
     output_summary: str = "evaluation/langfuse_datasets.json",
 ) -> None:
     """
-    Create Langfuse datasets from all evalset files.
+    Create Langfuse datasets from all evalset files or a single one.
 
     Args:
-        evalset_dir: Directory containing .evalset.json files
+        evalset_dir: Directory containing .evalset.json files (used when evalset_file is None)
+        evalset_file: Path to a single .evalset.json file to register (overrides evalset_dir)
         output_summary: Path to save summary of created datasets
     """
     pipeline = LangfuseEvalPipeline()
 
-    evalset_files = list(Path(evalset_dir).glob("*.evalset.json"))
-    logger.info("found_evalset_files", count=len(evalset_files))
+    if evalset_file:
+        evalset_files = [Path(evalset_file)]
+        logger.info("registering_single_evalset", file=evalset_file)
+    else:
+        evalset_files = list(Path(evalset_dir).glob("*.evalset.json"))
+        logger.info("found_evalset_files", count=len(evalset_files))
 
     created_datasets = []
 
-    for evalset_file in evalset_files:
-        dataset_name = pipeline.create_dataset_from_evalset(str(evalset_file))
+    for ef in evalset_files:
+        dataset_name = pipeline.create_dataset_from_evalset(str(ef))
         created_datasets.append({
-            'evalset_file': str(evalset_file),
+            'evalset_file': str(ef),
             'dataset_name': dataset_name,
             'created_at': datetime.now().isoformat(),
         })
@@ -356,10 +377,18 @@ if __name__ == '__main__':
         default='agents/storyland',
         help='Directory containing .evalset.json files',
     )
+    parser.add_argument(
+        '--evalset-file',
+        default=None,
+        help='Path to a single .evalset.json file to register (overrides --evalset-dir)',
+    )
 
     args = parser.parse_args()
 
     if args.create_datasets:
-        create_dataset_from_evalsets(evalset_dir=args.evalset_dir)
+        create_dataset_from_evalsets(
+            evalset_dir=args.evalset_dir,
+            evalset_file=args.evalset_file,
+        )
     else:
         parser.print_help()

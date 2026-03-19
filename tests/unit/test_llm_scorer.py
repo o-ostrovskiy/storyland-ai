@@ -310,3 +310,80 @@ class TestBuildScoringPrompt:
         # Check JSON is indented (formatted)
         assert '  "cities"' in prompt or '"cities"' in prompt
         assert '  "budget"' in prompt or '"budget"' in prompt
+
+
+class TestBuildScoringPromptWithQualityCriteria:
+    """Test quality_criteria injection in the scoring prompt."""
+
+    def test_quality_criteria_injected_into_prompt(self):
+        """Book-specific requirement lines appear for each provided key."""
+        quality_criteria = {
+            "book_relevance": "Must include Hobbiton and Rivendell filming locations in NZ.",
+            "geographical_accuracy": "Sites must be real NZ/UK locations tied to Tolkien.",
+        }
+        prompt = _build_scoring_prompt(
+            book_title="The Lord of the Rings",
+            author="J.R.R. Tolkien",
+            input_text="Plan a trip",
+            itinerary={"cities": ["Matamata"]},
+            quality_criteria=quality_criteria,
+        )
+        assert "Book-specific requirement:" in prompt
+        assert "Hobbiton and Rivendell" in prompt
+        assert "real NZ/UK locations" in prompt
+
+    def test_quality_criteria_only_injects_provided_keys(self):
+        """Only the dimension keys present in quality_criteria get injected."""
+        quality_criteria = {"book_relevance": "Must reference the One Ring."}
+        prompt = _build_scoring_prompt(
+            book_title="The Lord of the Rings",
+            author="J.R.R. Tolkien",
+            input_text="Plan a trip",
+            itinerary={"cities": ["Matamata"]},
+            quality_criteria=quality_criteria,
+        )
+        assert prompt.count("Book-specific requirement:") == 1
+
+    def test_no_quality_criteria_no_injection(self):
+        """No injection when quality_criteria is None."""
+        prompt = _build_scoring_prompt(
+            book_title="The Lord of the Rings",
+            author="J.R.R. Tolkien",
+            input_text="Plan a trip",
+            itinerary={"cities": ["Matamata"]},
+            quality_criteria=None,
+        )
+        assert "Book-specific requirement:" not in prompt
+
+
+class TestBuildScoringPromptWithExpectedOutput:
+    """Test expected_output reference section injection in the scoring prompt."""
+
+    def test_expected_output_section_appears_when_provided(self):
+        """REFERENCE OUTPUT section appears in prompt when expected_output is given."""
+        expected_output = {
+            "locations": [{"city": "Matamata", "country": "New Zealand"}],
+            "themes": ["Epic quest"],
+            "duration": "10-14 days",
+        }
+        prompt = _build_scoring_prompt(
+            book_title="The Lord of the Rings",
+            author="J.R.R. Tolkien",
+            input_text="Plan a trip",
+            itinerary={"cities": ["Matamata"]},
+            expected_output=expected_output,
+        )
+        assert "REFERENCE OUTPUT" in prompt
+        assert "Matamata" in prompt
+        assert "10-14 days" in prompt
+
+    def test_no_expected_output_no_reference_section(self):
+        """No REFERENCE OUTPUT section when expected_output is None."""
+        prompt = _build_scoring_prompt(
+            book_title="The Lord of the Rings",
+            author="J.R.R. Tolkien",
+            input_text="Plan a trip",
+            itinerary={"cities": ["Matamata"]},
+            expected_output=None,
+        )
+        assert "REFERENCE OUTPUT" not in prompt

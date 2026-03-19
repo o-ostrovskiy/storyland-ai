@@ -1,0 +1,915 @@
+{
+  "eval_set_id": "books_v1",
+  "name": "Book Evaluation Dataset v1 + v2",
+  "description": "Combined evaluation dataset: Lord of the Rings (v1) + 9 additional cases covering fantasy, sci-fi, memoir, romance, and edge cases (v2).",
+  "version": "2.0",
+  "eval_cases": [
+    {
+      "eval_id": "query_011",
+      "book": {
+        "title": "The Lord of the Rings",
+        "author": "J.R.R. Tolkien",
+        "genre": "Fantasy",
+        "year": 1954
+      },
+      "conversation_scenario": {
+        "starting_prompt": "Plan an adventure trip based on The Lord of the Rings by J.R.R. Tolkien. I love hiking and outdoor experiences.",
+        "conversation_plan": "Request an adventure itinerary for The Lord of the Rings. Verify New Zealand filming locations (Hobbiton/Matamata, Tongariro National Park, Queenstown) and UK Tolkien biography sites (Oxford) are included. Confirm hiking trails with difficulty ratings and outdoor activities are specified at each stop. Ask about Hobbiton booking requirements and seasonal hiking advice if not mentioned. End the conversation when a satisfactory itinerary with film locations, hiking trails, and author biography sites is provided with practical outdoor adventure details."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user",
+        "state": {
+          "user:preferences": {
+            "budget": "moderate",
+            "pace": "fast",
+            "duration_days": 12,
+            "interests": [
+              "hiking",
+              "outdoor adventures",
+              "film locations",
+              "nature"
+            ]
+          }
+        }
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "Matamata",
+            "country": "New Zealand",
+            "description": "Home of the Hobbiton Movie Set, the real-world Shire",
+            "must_visit": [
+              "Hobbiton Movie Set",
+              "The Green Dragon Inn",
+              "Bag End"
+            ]
+          },
+          {
+            "city": "Tongariro National Park",
+            "country": "New Zealand",
+            "description": "Mount Ngauruhoe doubled as Mount Doom; active volcanic landscape",
+            "must_visit": [
+              "Tongariro Alpine Crossing",
+              "Mount Ngauruhoe",
+              "Mordor Lookout"
+            ]
+          },
+          {
+            "city": "Queenstown",
+            "country": "New Zealand",
+            "description": "Filming location for the Misty Mountains and Ithilien sequences",
+            "must_visit": [
+              "Remarkables Range",
+              "Arrow River (Ford of Bruinen)",
+              "Closeburn Station (Ithilien Camp)"
+            ]
+          },
+          {
+            "city": "Oxford",
+            "country": "England",
+            "description": "Where Tolkien lived, taught, and wrote The Lord of the Rings",
+            "must_visit": [
+              "Tolkien's home at 20 Northmoor Road",
+              "Eagle and Child pub (Inklings meeting place)",
+              "Bodleian Library",
+              "Exeter College"
+            ]
+          }
+        ],
+        "themes": [
+          "Epic quest",
+          "Nature and wilderness",
+          "Author biography"
+        ],
+        "duration": "10-14 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must include New Zealand filming locations and UK Tolkien biography sites; should not confuse fictional Middle-earth with real geography",
+        "preference_adherence": "Adventure preference must be reflected with specific hiking trails, outdoor activities, and trek difficulty notes at each location",
+        "completeness": "Must cover both New Zealand (Hobbiton, Tongariro, Queenstown) and UK (Oxford/Birmingham) with specific landmarks",
+        "actionability": "Should include trail difficulty ratings, booking requirements for Hobbiton, and seasonal hiking advice",
+        "geographical_accuracy": "New Zealand and UK locations must be real, accurately named, and correctly attributed to filming",
+        "engagement": "Should evoke the epic scope of the journey and connect outdoor experiences to specific scenes from the book"
+      },
+      "creation_timestamp": 1772496000.0
+    },
+    {
+      "eval_id": "query_012",
+      "book": {
+        "title": "The Long Walk",
+        "author": "Stephen King",
+        "genre": "Dystopian Horror",
+        "year": 1979
+      },
+      "conversation_scenario": {
+        "starting_prompt": "I want to visit real locations connected to The Long Walk by Stephen King.",
+        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user",
+        "state": {
+          "user:preferences": {
+            "budget": "budget",
+            "pace": "moderate",
+            "duration_days": 4,
+            "interests": [
+              "literary pilgrimage",
+              "history",
+              "road trips"
+            ]
+          }
+        }
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "Bangor",
+            "country": "USA",
+            "description": "Stephen King's home city in Maine; his primary residence and inspiration for many works",
+            "must_visit": [
+              "Stephen King's home on West Broadway",
+              "Penobscot County (fictional Walk starting area)",
+              "Bangor Public Library"
+            ]
+          },
+          {
+            "city": "Portland",
+            "country": "USA",
+            "description": "Largest city in Maine along the fictional Walk corridor; real King filming and event location",
+            "must_visit": [
+              "Portland Head Light",
+              "Old Port district",
+              "Maine Historical Society"
+            ]
+          },
+          {
+            "city": "Augusta",
+            "country": "USA",
+            "description": "Maine's state capital along the US-1 corridor the fictional Walk follows",
+            "must_visit": [
+              "Maine State Museum",
+              "Capitol grounds",
+              "Kennebec River waterfront"
+            ]
+          }
+        ],
+        "themes": [
+          "Dystopian fiction",
+          "New England landscape",
+          "Author biography"
+        ],
+        "duration": "3-5 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must surface real Maine/New England locations as the geographic inspiration for the fictional Walk route; should correctly identify King's Bangor connections",
+        "preference_adherence": "Budget travel should feature free or low-cost sites; road trip suggestions appropriate for the linear route format",
+        "completeness": "Should cover Bangor (King biography), the Maine coastal corridor, and at least acknowledge the Walk's fictional endpoint near Boston",
+        "actionability": "Should include practical road-trip routing along US-1 and specific King-related addresses",
+        "geographical_accuracy": "All locations must be real and in Maine or New England; fictional Gatlin or Walk checkpoints should not be treated as real places",
+        "engagement": "Should connect the bleak Maine landscape to the novel's atmosphere of endurance and dread"
+      },
+      "creation_timestamp": 1773934021.2773013
+    },
+    {
+      "eval_id": "query_013",
+      "book": {
+        "title": "The Expanse",
+        "author": "James S. A. Corey",
+        "genre": "Science Fiction",
+        "year": 2011
+      },
+      "conversation_scenario": {
+        "starting_prompt": "Create a travel itinerary inspired by The Expanse series. I know it's mostly set in space — I'm curious about any real Earth locations or author connections.",
+        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user",
+        "state": {
+          "user:preferences": {
+            "budget": "moderate",
+            "pace": "moderate",
+            "duration_days": 5,
+            "interests": [
+              "science",
+              "space",
+              "urban exploration",
+              "future technology"
+            ]
+          }
+        }
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "Albuquerque",
+            "country": "USA",
+            "description": "Home base of Ty Franck and Daniel Abraham (the two authors behind James S. A. Corey)",
+            "must_visit": [
+              "University of New Mexico (where Franck worked)",
+              "Sandia Mountains (dramatic landscape echoing Martian terrain)",
+              "Albuquerque Biopark"
+            ]
+          },
+          {
+            "city": "New York City",
+            "country": "USA",
+            "description": "Location of the UN headquarters featured in the series as Earth's governing body",
+            "must_visit": [
+              "United Nations Headquarters",
+              "Hudson Yards (near-future architecture)",
+              "Intrepid Sea, Air and Space Museum"
+            ]
+          },
+          {
+            "city": "Houston",
+            "country": "USA",
+            "description": "NASA Johnson Space Center — the closest real-world hub to the series' space exploration themes",
+            "must_visit": [
+              "NASA Johnson Space Center",
+              "Space Center Houston",
+              "Rocket Park"
+            ]
+          }
+        ],
+        "themes": [
+          "Space exploration",
+          "Near-future Earth",
+          "Author biography"
+        ],
+        "duration": "5-7 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must acknowledge the series is space-set and pivot gracefully to author biography and Earth locations from the novels; should not invent space travel destinations",
+        "preference_adherence": "Science and space interests should drive the itinerary toward NASA, astronomy, and technology venues",
+        "completeness": "Should cover author biography sites and at least two real-world Earth locations with connections to the series' themes",
+        "actionability": "Should provide practical visiting info for NASA/space venues and explain their connection to the series",
+        "geographical_accuracy": "No fictional asteroid belt or Mars locations; all destinations must be real Earth locations",
+        "engagement": "Should frame the Earth locations through the lens of the series' near-future extrapolation without hallucinating impossible travel"
+      },
+      "creation_timestamp": 1773934021.2773013
+    },
+    {
+      "eval_id": "query_014",
+      "book": {
+        "title": "Red, White & Royal Blue",
+        "author": "Casey McQuiston",
+        "genre": "Contemporary Romance",
+        "year": 2019
+      },
+      "conversation_scenario": {
+        "starting_prompt": "Plan a romantic trip for two inspired by Red, White & Royal Blue by Casey McQuiston. We love history, architecture, and finding hidden gem cafés.",
+        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user",
+        "state": {
+          "user:preferences": {
+            "budget": "moderate",
+            "pace": "relaxed",
+            "duration_days": 10,
+            "interests": [
+              "romance",
+              "history",
+              "architecture",
+              "cafés",
+              "royal heritage"
+            ],
+            "group": "couple"
+          }
+        }
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "London",
+            "country": "England",
+            "description": "Prince Henry's home city; Kensington Palace, St James's Park, and the royal geography central to the novel",
+            "must_visit": [
+              "Kensington Palace and Gardens",
+              "St James's Park (Henry and Alex's secret meeting spot)",
+              "Buckingham Palace forecourt",
+              "Notting Hill (neighbourhood scenes)",
+              "The Wolseley café on Piccadilly"
+            ]
+          },
+          {
+            "city": "Washington DC",
+            "country": "USA",
+            "description": "Alex Claremont-Diaz's home as First Son; the White House and Georgetown form the novel's American backbone",
+            "must_visit": [
+              "Lafayette Square (White House exterior)",
+              "Georgetown neighbourhood",
+              "Lincoln Memorial (night scene)",
+              "Smithsonian National Portrait Gallery",
+              "Compass Rose restaurant (Dupont Circle)"
+            ]
+          },
+          {
+            "city": "New York City",
+            "country": "USA",
+            "description": "Setting of the MoMA gala scene and the novel's most publicly romantic moments",
+            "must_visit": [
+              "MoMA (The Museum of Modern Art)",
+              "The Plaza Hotel area",
+              "Central Park (Bethesda Fountain)",
+              "West Village coffee shops"
+            ]
+          }
+        ],
+        "themes": [
+          "Royal romance",
+          "Political life",
+          "Transatlantic love story"
+        ],
+        "duration": "9-11 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must include London royal landmarks (Kensington Palace, St James's Park), Washington DC First Family locations (White House area, Georgetown), and NYC MoMA scene; should connect each stop to specific plot moments",
+        "preference_adherence": "Romantic couple framing should prioritise intimate cafés, park walks, and neighbourhood strolls over mass-tourism sites; relaxed pace means max 2-3 stops per day",
+        "completeness": "Should cover London (Henry's world), Washington DC (Alex's world), and at least one shared neutral city such as NYC; hidden gem cafés should feature at each stop",
+        "actionability": "Should include specific café and restaurant recommendations, Kensington Palace booking guidance, and a suggested split of days between cities",
+        "geographical_accuracy": "All locations must be real and correctly placed; fictional White House interiors should not be treated as visitable spaces — focus on surrounding public areas",
+        "engagement": "Should capture the novel's wit, warmth, and the tension of a very public romance — framing each location through the lens of stolen moments and political scrutiny"
+      },
+      "creation_timestamp": 1773934021.2773013
+    },
+    {
+      "eval_id": "query_015",
+      "book": {
+        "title": "One Hundred Years of Solitude",
+        "author": "Gabriel García Márquez",
+        "genre": "Magical Realism",
+        "year": 1967
+      },
+      "conversation_scenario": {
+        "starting_prompt": "I want to explore Colombia through the lens of One Hundred Years of Solitude by Gabriel García Márquez. I'm travelling on a budget.",
+        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user",
+        "state": {
+          "user:preferences": {
+            "budget": "budget",
+            "pace": "moderate",
+            "duration_days": 9,
+            "interests": [
+              "local culture",
+              "history",
+              "literature",
+              "street food"
+            ]
+          }
+        }
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "Aracataca",
+            "country": "Colombia",
+            "description": "García Márquez's birthplace and the real-world model for the fictional Macondo",
+            "must_visit": [
+              "Casa Museo Gabriel García Márquez (birthplace)",
+              "Aracataca train station",
+              "Banana plantation ruins"
+            ]
+          },
+          {
+            "city": "Cartagena de Indias",
+            "country": "Colombia",
+            "description": "Where García Márquez spent much of his later life; the walled city appears in several of his works",
+            "must_visit": [
+              "Ciudad Amurallada (walled city)",
+              "Getsemaní neighbourhood",
+              "Casa de Rafael Núñez"
+            ]
+          },
+          {
+            "city": "Bogotá",
+            "country": "Colombia",
+            "description": "Colombia's capital and home to the García Márquez foundation and major literary institutions",
+            "must_visit": [
+              "La Candelaria historic centre",
+              "Biblioteca Nacional de Colombia",
+              "Museo Botero",
+              "Chapinero literary cafés"
+            ]
+          }
+        ],
+        "themes": [
+          "Magical realism",
+          "Colombian history",
+          "Family and memory"
+        ],
+        "duration": "8-10 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must identify Aracataca as Macondo's inspiration and connect Cartagena and Bogotá to the author's biography and Colombian historical context",
+        "preference_adherence": "Budget options must be highlighted: free museums, street food, budget guesthouses in La Candelaria and Cartagena",
+        "completeness": "Should cover Aracataca (literary pilgrimage), Cartagena (author's city), and Bogotá (cultural capital) with specific landmarks",
+        "actionability": "Should include practical travel notes between cities (bus vs. flight costs) and free/low-cost museum entry days",
+        "geographical_accuracy": "All Colombian locations must be real and accurately located; fictional Macondo should be clearly distinguished from Aracataca",
+        "engagement": "Should evoke the humid Caribbean heat and cyclical melancholy of the Buendía family saga"
+      },
+      "creation_timestamp": 1773934021.2773013
+    },
+    {
+      "eval_id": "query_016",
+      "book": {
+        "title": "The Kite Runner",
+        "author": "Khaled Hosseini",
+        "genre": "Contemporary Fiction",
+        "year": 2003
+      },
+      "conversation_scenario": {
+        "starting_prompt": "Create an itinerary based on The Kite Runner by Khaled Hosseini. I'm interested in both the Afghan cultural heritage and the San Francisco Bay Area connections.",
+        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user",
+        "state": {
+          "user:preferences": {
+            "budget": "moderate",
+            "pace": "moderate",
+            "duration_days": 7,
+            "interests": [
+              "cultural heritage",
+              "diaspora communities",
+              "history",
+              "architecture"
+            ]
+          }
+        }
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "Fremont",
+            "country": "USA",
+            "description": "Home to the largest Afghan diaspora community in the US, known as Little Kabul; mirrors Amir's California life in the novel",
+            "must_visit": [
+              "Little Kabul district on Fremont Blvd",
+              "Afghan restaurants and bakeries",
+              "Fremont Afghan Cultural Center"
+            ]
+          },
+          {
+            "city": "San Francisco",
+            "country": "USA",
+            "description": "Where Amir and Baba settle after fleeing Afghanistan; Golden Gate Park flea market features in the story",
+            "must_visit": [
+              "Golden Gate Park flea market area",
+              "Haight-Ashbury neighbourhood",
+              "Afghans of California cultural events"
+            ]
+          },
+          {
+            "city": "Kabul",
+            "country": "Afghanistan",
+            "description": "Heart of the novel's childhood scenes; travel requires careful planning given current security conditions",
+            "must_visit": [
+              "Kabul Museum (when accessible)",
+              "Wazir Akbar Khan district",
+              "Kite-flying traditions"
+            ]
+          }
+        ],
+        "themes": [
+          "Afghan diaspora",
+          "Redemption and guilt",
+          "Cultural identity"
+        ],
+        "duration": "6-8 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must include Fremont's Little Kabul community, San Francisco Bay Area Amir connections, and Kabul cultural sites",
+        "preference_adherence": "Cultural and heritage interests should drive recommendations toward community spaces, food, and historical sites rather than generic tourism",
+        "completeness": "Should cover both the US diaspora locations and Afghan cultural heritage, with the Kabul section framed appropriately given current travel conditions",
+        "actionability": "Must include a responsible travel advisory for Afghanistan and practical guidance on experiencing Afghan culture safely in the Bay Area as an alternative",
+        "geographical_accuracy": "Accurate California geography and Afghan locations; Fremont's Little Kabul area must be correctly identified",
+        "engagement": "Should honour the emotional weight of the novel's themes of displacement and return without romanticising conflict zones"
+      },
+      "creation_timestamp": 1773934021.2773013
+    },
+    {
+      "eval_id": "query_017",
+      "book": {
+        "title": "Crime and Punishment",
+        "author": "Fyodor Dostoevsky",
+        "genre": "Classic Literature",
+        "year": 1866
+      },
+      "conversation_scenario": {
+        "starting_prompt": "I'm planning a solo academic trip following Crime and Punishment by Dostoevsky through St. Petersburg.",
+        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user",
+        "state": {
+          "user:preferences": {
+            "budget": "moderate",
+            "pace": "moderate",
+            "duration_days": 5,
+            "interests": [
+              "literature",
+              "history",
+              "architecture",
+              "museums"
+            ]
+          }
+        }
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "Saint Petersburg",
+            "country": "Russia",
+            "description": "The entire novel unfolds in the streets, canals, and tenements of 19th-century St. Petersburg",
+            "must_visit": [
+              "Sennaya Square (Haymarket — Raskolnikov's neighbourhood)",
+              "Stolyarny Lane (location of Raskolnikov's garret)",
+              "Dostoevsky Memorial Museum (Kuznechny Lane)",
+              "Griboedov Canal embankment (pawnbroker's building)",
+              "Voznesensky Bridge (where Raskolnikov nearly confesses)"
+            ]
+          }
+        ],
+        "themes": [
+          "Russian literature",
+          "Psychological drama",
+          "19th-century poverty"
+        ],
+        "duration": "4-6 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must include Sennaya Square, the canal district around Griboedov Canal, Dostoevsky Memorial Museum, and Stolyarny Lane; locations must match the novel's geography",
+        "preference_adherence": "Solo academic framing should produce an intellectually rich itinerary with reading suggestions, walking routes, and literary context rather than generic sightseeing",
+        "completeness": "Must trace Raskolnikov's walking route through the city and include the Dostoevsky Museum as a primary stop",
+        "actionability": "Should provide a self-guided walking route with approximate distances and museum opening times",
+        "geographical_accuracy": "All St. Petersburg locations must be real and correctly placed in the Haymarket/canal district; no conflation with other Russian cities",
+        "engagement": "Should convey the oppressive summer heat, canal smells, and psychological intensity of Raskolnikov's world"
+      },
+      "creation_timestamp": 1773934021.2773013
+    },
+    {
+      "eval_id": "query_018",
+      "book": {
+        "title": "Wild",
+        "author": "Cheryl Strayed",
+        "genre": "Adventure Memoir",
+        "year": 2012
+      },
+      "conversation_scenario": {
+        "starting_prompt": "Plan a trip inspired by Wild by Cheryl Strayed. I want to hike sections of the Pacific Crest Trail solo.",
+        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user",
+        "state": {
+          "user:preferences": {
+            "budget": "budget",
+            "pace": "moderate",
+            "duration_days": 14,
+            "interests": [
+              "hiking",
+              "solo adventure",
+              "nature",
+              "camping"
+            ]
+          }
+        }
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "Mojave Desert (Tehachapi area)",
+            "country": "USA",
+            "description": "Strayed's PCT starting point in Southern California; brutal heat and desert landscape",
+            "must_visit": [
+              "PCT Monument at the Mexican Border",
+              "Tehachapi Pass",
+              "Walker Pass"
+            ]
+          },
+          {
+            "city": "Kennedy Meadows",
+            "country": "USA",
+            "description": "Gateway to the Sierra Nevada section; pivotal resupply point in the memoir",
+            "must_visit": [
+              "Kennedy Meadows General Store (resupply stop)",
+              "Kern River",
+              "PCT southern Sierra trailhead"
+            ]
+          },
+          {
+            "city": "Crater Lake National Park",
+            "country": "USA",
+            "description": "One of the most dramatic landscapes in Strayed's Oregon section",
+            "must_visit": [
+              "Crater Lake Rim Trail",
+              "Rim Village",
+              "Garfield Peak hike"
+            ]
+          },
+          {
+            "city": "Cascade Locks",
+            "country": "USA",
+            "description": "Strayed's endpoint at the Bridge of the Gods on the Oregon-Washington border",
+            "must_visit": [
+              "Bridge of the Gods",
+              "PCT northern Oregon terminus approach",
+              "Columbia River Gorge"
+            ]
+          }
+        ],
+        "themes": [
+          "Solo hiking",
+          "Self-discovery",
+          "American wilderness"
+        ],
+        "duration": "12-16 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must include the Mojave starting stretch, Kennedy Meadows, Oregon sections, and Cascade Locks Bridge of the Gods ending; locations must match Strayed's actual route",
+        "preference_adherence": "Budget focus should include campsite costs, permit requirements, and free resupply options; solo hiking safety notes appropriate",
+        "completeness": "Should cover Southern California start, Sierra Nevada midpoint, and Oregon finish with resupply town logistics",
+        "actionability": "Must include PCT permit information, resupply town options, and recommended gear for each section",
+        "geographical_accuracy": "All PCT sections must be real and accurately placed in California and Oregon; no fictional trail segments",
+        "engagement": "Should capture the physical and emotional arc of the hike — isolation, endurance, and catharsis"
+      },
+      "creation_timestamp": 1773934021.2773013
+    },
+    {
+      "eval_id": "query_019",
+      "book": {
+        "title": "Dracula",
+        "author": "Bram Stoker",
+        "genre": "Gothic Horror",
+        "year": 1897
+      },
+      "conversation_scenario": {
+        "starting_prompt": "I want to do a Dracula-themed trip based on Bram Stoker's novel. Moderate budget, and I'm travelling with an elderly parent who has limited mobility.",
+        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user",
+        "state": {
+          "user:preferences": {
+            "budget": "moderate",
+            "pace": "relaxed",
+            "duration_days": 9,
+            "interests": [
+              "gothic architecture",
+              "history",
+              "horror",
+              "castles"
+            ],
+            "accessibility": "limited mobility, elevator/ramp access required"
+          }
+        }
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "Brasov",
+            "country": "Romania",
+            "description": "Gateway to Transylvania; base for visiting Bran Castle (the popular Dracula castle)",
+            "must_visit": [
+              "Bran Castle (accessibility: partial — lower floors accessible, tower stairs not)",
+              "Brasov old town",
+              "Peles Castle in nearby Sinaia (good accessibility)"
+            ]
+          },
+          {
+            "city": "Whitby",
+            "country": "England",
+            "description": "Where Dracula's ship runs aground; Whitby Abbey is the novel's most iconic English location",
+            "must_visit": [
+              "Whitby Abbey (note: 199 steps to abbey — mobility alternative is the lower viewing area)",
+              "St Mary's Church (Dracula's earth box scene)",
+              "Whitby Museum",
+              "Dracula Experience attraction"
+            ]
+          },
+          {
+            "city": "London",
+            "country": "England",
+            "description": "Setting for the London chapters including Mina's encounters and the final chase",
+            "must_visit": [
+              "Highgate Cemetery (Victorian Gothic; wheelchair accessible main paths)",
+              "British Museum (Stoker's research base)",
+              "Piccadilly area (Dracula's Piccadilly house location)"
+            ]
+          }
+        ],
+        "themes": [
+          "Gothic horror",
+          "Victorian England",
+          "Transylvanian folklore"
+        ],
+        "duration": "8-10 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must include Bran Castle/Transylvania, Whitby Abbey, and London locations; should note that Bran Castle is associated by tourism rather than explicit text — Stoker based the castle on descriptions of Slains Castle",
+        "preference_adherence": "Accessibility requirements must be addressed at every location: step counts, lift availability, alternative viewpoints, and wheelchair-accessible routes must be specified",
+        "completeness": "Should cover Romania (Transylvania) and England (Whitby + London) with specific sites at each",
+        "actionability": "Must include specific accessibility notes per site and suggest relaxed daily schedules with rest stops",
+        "geographical_accuracy": "Romanian and English locations must be real and correctly described; Stoker's fictional Transylvania should be clearly mapped to real geography",
+        "engagement": "Should evoke the Gothic atmosphere without sensationalising; respectful of the elderly traveller context"
+      },
+      "creation_timestamp": 1773934021.2773013
+    },
+    {
+      "eval_id": "query_020",
+      "book": {
+        "title": "Shogun",
+        "author": "James Clavell",
+        "genre": "Historical Fiction",
+        "year": 1975
+      },
+      "conversation_scenario": {
+        "starting_prompt": "Plan a luxury trip inspired by Shogun by James Clavell. I want to experience feudal Japan's atmosphere through castles and traditional culture.",
+        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
+      },
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user",
+        "state": {
+          "user:preferences": {
+            "budget": "luxury",
+            "pace": "relaxed",
+            "duration_days": 11,
+            "interests": [
+              "castles",
+              "traditional culture",
+              "samurai history",
+              "fine dining",
+              "tea ceremony"
+            ]
+          }
+        }
+      },
+      "expected_output": {
+        "locations": [
+          {
+            "city": "Osaka",
+            "country": "Japan",
+            "description": "Osaka Castle is central to Shogun's setting; the novel's primary power struggles unfold here",
+            "must_visit": [
+              "Osaka Castle and Museum",
+              "Dotonbori (luxury kaiseki restaurants)",
+              "Shinsekai district",
+              "Kuromon Ichiba Market"
+            ]
+          },
+          {
+            "city": "Kyoto",
+            "country": "Japan",
+            "description": "Imperial capital and heart of the samurai aesthetic; provides the cultural backdrop for much of the novel",
+            "must_visit": [
+              "Nijo Castle (shogun's Kyoto palace)",
+              "Fushimi Inari-taisha",
+              "Gion district (geisha culture)",
+              "Urasenke tea ceremony school",
+              "Kinkaku-ji (Golden Pavilion)"
+            ]
+          },
+          {
+            "city": "Himeji",
+            "country": "Japan",
+            "description": "Himeji Castle is Japan's finest surviving feudal castle — the model for Clavell's fictional Osaka castle interiors",
+            "must_visit": [
+              "Himeji Castle (UNESCO World Heritage)",
+              "Koko-en Garden",
+              "Shogun Experience guided tour"
+            ]
+          },
+          {
+            "city": "Hakone",
+            "country": "Japan",
+            "description": "Luxury ryokan base with views of Mount Fuji; exemplifies the traditional Japanese aesthetic of the novel",
+            "must_visit": [
+              "Hakone Open Air Museum",
+              "Mount Fuji views from Owakudani",
+              "Luxury onsen ryokan (Gora Kadan or Hakone Ginyu)"
+            ]
+          }
+        ],
+        "themes": [
+          "Feudal Japan",
+          "Samurai culture",
+          "East-West encounter"
+        ],
+        "duration": "10-12 days"
+      },
+      "quality_criteria": {
+        "book_relevance": "Must include Osaka Castle, Kyoto imperial culture, and Himeji Castle; should connect each location to specific scenes or themes from the novel",
+        "preference_adherence": "Luxury preference must be reflected with specific high-end ryokan recommendations, private castle tours, and kaiseki dining; pace should allow extended time at each location",
+        "completeness": "Should cover Osaka (castle/power), Kyoto (court culture/geisha/tea ceremony), Himeji (finest castle), and a luxury ryokan base",
+        "actionability": "Should include specific luxury ryokan names, tea ceremony booking guidance, and private guide recommendations",
+        "geographical_accuracy": "All Japanese locations must be real, accurately placed, and correctly attributed to feudal history",
+        "engagement": "Should capture the collision of Western and Japanese culture central to the novel and evoke the aesthetic beauty of the Sengoku period"
+      },
+      "creation_timestamp": 1773934021.2773013
+    }
+  ],
+  "scoring_functions": [
+    {
+      "name": "book_relevance",
+      "description": "Evaluates if itinerary locations are connected to the book's settings, themes, or author",
+      "scale": "1-5",
+      "criteria": {
+        "5": "All locations strongly connected to book",
+        "4": "Most locations clearly relevant",
+        "3": "Some locations relevant, some generic",
+        "2": "Few relevant locations",
+        "1": "No clear connection to book"
+      }
+    },
+    {
+      "name": "preference_adherence",
+      "description": "Evaluates if recommendations respect user preferences (budget, pace, accessibility)",
+      "scale": "1-5",
+      "criteria": {
+        "5": "Perfectly aligned with all preferences",
+        "4": "Respects most preferences well",
+        "3": "Acknowledges some preferences",
+        "2": "Ignores most preferences",
+        "1": "No consideration of preferences"
+      }
+    },
+    {
+      "name": "completeness",
+      "description": "Evaluates if itinerary includes comprehensive details (cities, landmarks, author sites)",
+      "scale": "1-5",
+      "criteria": {
+        "5": "Comprehensive with all components",
+        "4": "Good coverage of main elements",
+        "3": "Basic itinerary, missing some details",
+        "2": "Minimal information",
+        "1": "Incomplete or vague response"
+      }
+    },
+    {
+      "name": "actionability",
+      "description": "Evaluates if itinerary is practical with specific places and logistics",
+      "scale": "1-5",
+      "criteria": {
+        "5": "Highly detailed and actionable",
+        "4": "Good practical details",
+        "3": "Some actionable information",
+        "2": "Vague suggestions",
+        "1": "No practical details"
+      }
+    },
+    {
+      "name": "geographical_accuracy",
+      "description": "Evaluates accuracy of locations and geographical information",
+      "scale": "1-5",
+      "criteria": {
+        "5": "All locations accurate and real",
+        "4": "Minor geographical details off",
+        "3": "Some questionable locations",
+        "2": "Multiple inaccuracies",
+        "1": "Fictional or incorrect locations"
+      }
+    },
+    {
+      "name": "engagement",
+      "description": "Evaluates if descriptions are engaging and evoke the spirit of the book",
+      "scale": "1-5",
+      "criteria": {
+        "5": "Highly engaging, captures book's spirit",
+        "4": "Good descriptions, engaging tone",
+        "3": "Adequate but generic descriptions",
+        "2": "Dry or uninspiring",
+        "1": "No literary connection in writing"
+      }
+    }
+  ],
+  "usage_notes": [
+    "This dataset provides expected outputs and quality criteria for evaluation",
+    "Each query includes user preferences to test preference adherence",
+    "Books span multiple genres, time periods, and geographical regions",
+    "Expected outputs can be used as gold standard for evaluation",
+    "Quality criteria provide guidance for manual or automated scoring",
+    "This dataset provides expected outputs and quality criteria for evaluation",
+    "Each query includes user preferences to test preference adherence",
+    "Books span multiple genres, time periods, and geographical regions",
+    "Expected outputs can be used as gold standard for evaluation",
+    "Quality criteria provide guidance for manual or automated scoring",
+    "Query 013 is edge case testing graceful handling of fictional/space settings",
+    "Query 014 (Red, White & Royal Blue) tests romantic couple itinerary across London, Washington DC, and NYC",
+    "Query 016 (The Kite Runner) includes a responsible travel advisory scenario for Afghanistan",
+    "Query 019 (Dracula) tests accessibility requirement handling for mobility-limited travellers"
+  ],
+  "creation_timestamp": 1773934197.2312667
+}
