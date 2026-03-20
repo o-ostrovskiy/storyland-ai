@@ -9,8 +9,11 @@ help:
 	@echo "=================================="
 	@echo ""
 	@echo "Setup:"
-	@echo "  make install       Install dependencies"
+	@echo "  make install       Install runtime dependencies only"
 	@echo "  make install-dev   Install with dev dependencies"
+	@echo "  make install-demo  Install with demo dependencies (Streamlit, Jupyter)"
+	@echo "  make install-eval  Install with eval dependencies (Langfuse)"
+	@echo "  make install-all   Install all dependencies"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test          Run all unit tests"
@@ -54,6 +57,15 @@ install:
 
 install-dev:
 	pip install -e ".[dev]"
+
+install-demo:
+	pip install -e ".[demo]"
+
+install-eval:
+	pip install -e ".[eval]"
+
+install-all:
+	pip install -e ".[dev,demo,eval]"
 
 # =============================================================================
 # Testing
@@ -191,7 +203,9 @@ check-env:
 # =============================================================================
 
 notebook:
+	@command -v jupyter >/dev/null 2>&1 || (echo "Jupyter not installed. Run: make install-demo" && exit 1)
 	jupyter notebook
 
 lab:
+	@command -v jupyter >/dev/null 2>&1 || (echo "Jupyter not installed. Run: make install-demo" && exit 1)
 	jupyter lab
