@@ -863,17 +863,6 @@ class TestDiscoveryProgressMapping:
         assert "reader_profile" not in DISCOVERY_AGENT_STEPS
 
 
-class TestEvalWorkflowBookContext:
-    def test_eval_workflow_no_placeholder_in_instruction(self):
-        from agents.orchestrator import create_eval_workflow
-
-        workflow = create_eval_workflow("gemini-2.0-flash")
-        book_context = workflow.sub_agents[1]
-        assert book_context.name == "book_context_pipeline"
-        researcher = book_context.sub_agents[0]
-        assert "[from conversation]" not in researcher.instruction
-
-
 # =============================================================================
 # Test Helpers
 # =============================================================================

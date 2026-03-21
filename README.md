@@ -85,9 +85,6 @@ python main.py "1984" --database --user-id alice
 # Custom timeout (default: 300s)
 python main.py "War and Peace" --timeout 600
 
-# Development mode (ADK Web UI)
-python main.py --dev
-
 # FastAPI SSE API server
 make run-api
 # curl http://localhost:8080/api/v1/health
@@ -282,7 +279,6 @@ storyland-ai/
 │   ├── reader_profile_agent.py   # Preferences-based personalization
 │   ├── region_analyzer_agent.py  # Geographic region grouping
 │   ├── orchestrator.py           # Two-phase workflow coordination
-│   └── storyland/agent.py        # ADK Web UI agent
 │
 ├── api/                 # FastAPI SSE streaming API
 │   ├── app.py           # Application factory with lifespan
@@ -357,12 +353,12 @@ make test-cov            # With coverage
 |--------|-------|-------------|
 | `test_models.py` | 46 | Pydantic model validation |
 | `test_tools.py` | 4 | Preferences tool |
-| `test_agents.py` | 42 | Agent factory functions |
+| `test_agents.py` | 32 | Agent factory functions |
 | `test_services.py` | 16 | Session service, context manager |
 | `test_workflow_timeout.py` | 6 | Workflow timeout behavior |
 | `test_llm_scorer.py` | 18 | LLM scoring models and prompts |
 | `test_core.py` | 49 | Events, session state, extraction, regions |
-| `test_api.py` | 71 | API models, endpoints, SSE streaming, failure-status |
+| `test_api.py` | 70 | API models, endpoints, SSE streaming, failure-status |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).
 
@@ -370,11 +366,8 @@ Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay H
 
 | Mode | Logging | Use Case |
 |------|---------|----------|
-| `python main.py --dev` | ADK Web UI (DEBUG) | Development, debugging |
 | `python main.py "book"` | LoggingPlugin (INFO) | Production |
 | `python main.py "book" -v` | LoggingPlugin (DEBUG) | Troubleshooting |
-
-> **Note:** Plugins are NOT supported in ADK web mode.
 
 ## Troubleshooting
 

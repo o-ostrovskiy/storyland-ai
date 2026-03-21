@@ -1,31 +1,9 @@
 interactions:
 - request:
     body: '{"contents": [{"parts": [{"text": "Find book metadata for ''1984'' by George
-      Orwell"}], "role": "user"}], "systemInstruction": {"parts": [{"text": "Format
-      the book information from the conversation into a BookMetadata object.\n\nThe
-      book title and author have been confirmed and are provided in the conversation.\nExtract
-      them and structure as BookMetadata:\n- book_title: The full book title as provided\n-
-      author: The author name as provided\n- description: Leave empty string if not
-      provided\n- published_date: Leave empty string if not provided\n- categories:
-      Empty list if not provided\n- image_url: null if not provided\n- book_found:
-      true (the caller has confirmed this book exists)\n\nUse only data explicitly
-      present in the conversation. Do not invent any details.\n\nYou are an agent.
-      Your internal name is \"book_metadata_pipeline\"."}], "role": "user"}, "generationConfig":
-      {"responseMimeType": "application/json", "responseSchema": {"description": "Book
-      metadata from Google Books API", "properties": {"book_title": {"description":
-      "Full book title", "title": "Book Title", "type": "STRING"}, "author": {"description":
-      "Primary author name", "title": "Author", "type": "STRING"}, "description":
-      {"description": "Book description/synopsis", "nullable": true, "title": "Description",
-      "type": "STRING"}, "published_date": {"description": "Publication date", "nullable":
-      true, "title": "Published Date", "type": "STRING"}, "categories": {"description":
-      "Book categories/genres", "items": {"type": "STRING"}, "title": "Categories",
-      "type": "ARRAY"}, "image_url": {"description": "Book cover image URL", "nullable":
-      true, "title": "Image Url", "type": "STRING"}, "book_found": {"default": true,
-      "description": "Whether the book was found via Google Books API. False when
-      search returned no results.", "title": "Book Found", "type": "BOOLEAN"}}, "property_ordering":
-      ["book_title", "author", "description", "published_date", "categories", "image_url",
-      "book_found"], "required": ["book_title", "author"], "title": "BookMetadata",
-      "type": "OBJECT"}}}'
+      Orwell"}], "role": "user"}], "systemInstruction": {"parts": [{"text": "You are
+      a helpful assistant. Respond briefly.\n\nYou are an agent. Your internal name
+      is \"book_metadata_pipeline\"."}], "role": "user"}, "generationConfig": {}}'
     headers:
       Content-Type:
       - application/json
@@ -38,28 +16,28 @@ interactions:
   response:
     body:
       string: "{\n  \"candidates\": [\n    {\n      \"content\": {\n        \"parts\":
-        [\n          {\n            \"text\": \"{\\n  \\\"book_title\\\": \\\"1984\\\",\\n
-        \ \\\"author\\\": \\\"George Orwell\\\",\\n  \\\"description\\\": \\\"\\\",\\n
-        \ \\\"published_date\\\": \\\"\\\",\\n  \\\"categories\\\": [],\\n  \\\"image_url\\\":
-        null,\\n  \\\"book_found\\\": true\\n}\"\n          }\n        ],\n        \"role\":
-        \"model\"\n      },\n      \"finishReason\": \"STOP\",\n      \"avgLogprobs\":
-        -1.396900681298106e-05\n    }\n  ],\n  \"usageMetadata\": {\n    \"promptTokenCount\":
-        266,\n    \"candidatesTokenCount\": 62,\n    \"totalTokenCount\": 328,\n    \"promptTokensDetails\":
-        [\n      {\n        \"modality\": \"TEXT\",\n        \"tokenCount\": 266\n
-        \     }\n    ],\n    \"candidatesTokensDetails\": [\n      {\n        \"modality\":
-        \"TEXT\",\n        \"tokenCount\": 62\n      }\n    ]\n  },\n  \"modelVersion\":
-        \"gemini-2.0-flash-lite\",\n  \"responseId\": \"x8C9aYSdM97O_uMP_efQqA4\"\n}\n"
+        [\n          {\n            \"text\": \"```json\\n{\\n  \\\"title\\\": \\\"1984\\\",\\n
+        \ \\\"author\\\": \\\"George Orwell\\\",\\n  \\\"publication_year\\\": 1949,\\n
+        \ \\\"genre\\\": \\\"Dystopian Fiction\\\",\\n  \\\"isbn\\\": \\\"978-0451524935\\\"\\n}\\n```\"\n
+        \         }\n        ],\n        \"role\": \"model\"\n      },\n      \"finishReason\":
+        \"STOP\",\n      \"avgLogprobs\": -0.052161566198688662\n    }\n  ],\n  \"usageMetadata\":
+        {\n    \"promptTokenCount\": 39,\n    \"candidatesTokenCount\": 73,\n    \"totalTokenCount\":
+        112,\n    \"promptTokensDetails\": [\n      {\n        \"modality\": \"TEXT\",\n
+        \       \"tokenCount\": 39\n      }\n    ],\n    \"candidatesTokensDetails\":
+        [\n      {\n        \"modality\": \"TEXT\",\n        \"tokenCount\": 73\n
+        \     }\n    ]\n  },\n  \"modelVersion\": \"gemini-2.0-flash-lite\",\n  \"responseId\":
+        \"NPS9aba3LpSZ_uMPzcuS8QQ\"\n}\n"
     headers:
       Alt-Svc:
       - h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
       Content-Type:
       - application/json; charset=UTF-8
       Date:
-      - Fri, 20 Mar 2026 21:48:56 GMT
+      - Sat, 21 Mar 2026 01:28:21 GMT
       Server:
       - scaffolding on HTTPServer2
       Server-Timing:
-      - gfet4t7; dur=675
+      - gfet4t7; dur=833
       Transfer-Encoding:
       - chunked
       Vary:
@@ -75,7 +53,7 @@ interactions:
       X-XSS-Protection:
       - '0'
       content-length:
-      - '849'
+      - '829'
     status:
       code: 200
       message: OK

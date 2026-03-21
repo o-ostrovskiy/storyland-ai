@@ -6,14 +6,11 @@ Transform books into travel adventures using AI agents.
 Usage:
     python main.py "1984" --author "George Orwell"
     python main.py "1984" -v   # verbose logging
-    python main.py --dev       # ADK Web UI
 """
 
 import asyncio
 import json
 import uuid
-import subprocess
-import sys
 from typing import Optional, List
 
 from async_timeout import timeout
@@ -633,22 +630,6 @@ def display_itinerary(result_data: dict):
     print()
 
 
-def launch_adk_web():
-    """Launch the ADK web UI for development."""
-    print("\n🚀 Launching ADK Web UI...")
-    print("   Open http://localhost:8000 to interact with the workflow.")
-    print("   Note: Plugins are NOT supported in ADK web mode.\n")
-
-    try:
-        # ADK expects agents in subdirectories with agent.py files
-        subprocess.run([".venv/bin/adk", "web", "--log_level", "DEBUG", "agents/"], check=True)
-    except FileNotFoundError:
-        print("Error: 'adk' command not found. Install with: pip install google-adk")
-        sys.exit(1)
-    except KeyboardInterrupt:
-        print("\n\nADK Web UI stopped.")
-
-
 async def main():
     """Main entry point for the CLI."""
     import argparse
@@ -660,17 +641,15 @@ async def main():
 Examples:
   python main.py "1984" --author "George Orwell"
   python main.py "1984" -v --budget luxury
-  python main.py --dev
         """,
     )
 
     parser.add_argument("book_title", nargs="?", help="Title of the book")
-    parser.add_argument("--author", "-a", help="Author name (required for itinerary generation)")
+    parser.add_argument("--author", "-a", help="Author name (required)")
     parser.add_argument("--user-id", "-u", default="user1", help="User ID")
     parser.add_argument("--database", "-d", action="store_true", help="Use SQLite for sessions")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable DEBUG logging")
     parser.add_argument("--timeout", "-t", type=int, help="Workflow timeout in seconds (default: 300)")
-    parser.add_argument("--dev", action="store_true", help="Launch ADK Web UI")
 
     # Preference arguments
     parser.add_argument("--budget", choices=["budget", "moderate", "luxury"])
@@ -682,12 +661,8 @@ Examples:
 
     args = parser.parse_args()
 
-    if args.dev:
-        launch_adk_web()
-        return
-
     if not args.book_title:
-        parser.error("book_title is required (or use --dev for ADK Web UI)")
+        parser.error("book_title is required")
 
     if not args.author:
         parser.error("--author is required")

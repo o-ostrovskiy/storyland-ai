@@ -231,7 +231,6 @@ make eval-setup
 - Check credentials are set in `.env`
 - Look for `langfuse_enabled` or `langfuse_disabled` log messages
 - Verify installation: `pip list | grep langfuse`
-- **ADK Web mode**: Plugins are not supported in `adk web` mode (use CLI instead)
 
 ### Zero cost displayed
 Token usage is tracked, but cost may show $0.000000 for very small usage. Verify pricing constants in `plugins/langfuse_plugin.py`.

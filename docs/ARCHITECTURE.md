@@ -63,7 +63,6 @@ Book title and author are now **pre-confirmed inputs** — the Backend service o
 
 1. **Single workflow, auto-select all regions**
    - Rejected: Creates impractical multi-continent itineraries
-   - Used in eval_workflow variant for ADK evals
 
 2. **Post-generation filtering**
    - Rejected: Wastes tokens generating unwanted itineraries
@@ -159,7 +158,7 @@ This pattern appears in:
 - `book_context_agent.py` → BookContext
 - `discovery_agents.py` → CityDiscovery, LandmarkDiscovery, AuthorSites
 
-**Note:** `book_metadata_agent.py` previously followed this pattern (researcher + formatter). It has been simplified to a single `LlmAgent` that formats pre-confirmed title/author into `BookMetadata` schema (see ADR #12).
+**Note:** `book_metadata_agent.py` previously followed this pattern (researcher + formatter). It was later removed entirely when the ADK web UI was dropped (see ADR #12 and #13).
 
 ---
 
@@ -375,24 +374,6 @@ session.state["selected_regions"] = selected_regions  # User's choice
 4. **In-memory cache**
    - Rejected: Doesn't persist across restarts
    - session.state already has in-memory backend option
-
-### Eval Workflow Variant
-
-For ADK evals (no HITL), we use a single workflow with region_analyzer:
-
-```python
-eval_workflow = SequentialAgent(
-    sub_agents=[
-        book_metadata_pipeline,
-        book_context_pipeline,
-        parallel_discovery,
-        region_analyzer,  # Creates regions
-        trip_composer,    # Auto-uses all regions (no selection)
-    ]
-)
-```
-
-Trip composer reads `state["region_analysis"]` directly, no manual selection step.
 
 ---
 
@@ -810,13 +791,13 @@ storyland-ai: POST /discover { book_title: "1984", author: "George Orwell" }
 - A complex multi-step Phase 1 (search → select best match → extract metadata)
 - Fragile behavior when Book API returned no results or ambiguous matches
 
-**Solution:** Move book selection entirely to the Backend service. storyland-ai receives a pre-confirmed DTO and proceeds directly to discovery. The `book_metadata_pipeline` LLM agent still exists in the eval workflow to format the DTO into the `BookMetadata` schema for downstream agents.
+**Solution:** Move book selection entirely to the Backend service. storyland-ai receives a pre-confirmed DTO and proceeds directly to discovery.
 
 ### Changes
 - `tools/google_books.py` — deleted
 - `core/executor.py` — Phase 1 replaced with direct `BookMetadata` construction
 - `api/models.py` — `author` field made required (both `book_title` and `author` required)
-- `agents/book_metadata_agent.py` — simplified to single `LlmAgent` (no `google_books_tool`)
+- `agents/book_metadata_agent.py` — deleted (no longer needed; see ADR #13)
 - CLI (`main.py`) — `--author` made required argument
 - Streamlit (`streamlit_demo.py`) — author field required, book-selection screen removed
 
