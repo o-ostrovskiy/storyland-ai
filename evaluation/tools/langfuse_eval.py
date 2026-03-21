@@ -108,8 +108,7 @@ class LangfuseEvalPipeline:
             num_cases=len(evalset.get('eval_cases', [])),
         )
 
-        # Create or get dataset
-        dataset = self.client.create_dataset(
+        self.client.create_dataset(
             name=dataset_name,
             description=description,
         )
@@ -131,7 +130,6 @@ class LangfuseEvalPipeline:
                 'creation_timestamp': case.get('creation_timestamp'),
             }
 
-            # Create dataset item
             self.client.create_dataset_item(
                 dataset_name=dataset_name,
                 input=input_data,
@@ -144,23 +142,10 @@ class LangfuseEvalPipeline:
 
     def _extract_input_from_case(self, case: Dict[str, Any]) -> Dict[str, Any]:
         """Extract input data from eval case."""
-        # Handle conversation_scenario format
-        if 'conversation_scenario' in case:
-            scenario = case['conversation_scenario']
-            return {
-                'starting_prompt': scenario.get('starting_prompt'),
-                'conversation_plan': scenario.get('conversation_plan'),
-            }
-
-        # Handle conversation format
-        if 'conversation' in case and case['conversation']:
-            first_turn = case['conversation'][0]
-            user_content = first_turn.get('user_content', {})
-            parts = user_content.get('parts', [])
-            if parts:
-                return {'text': parts[0].get('text', '')}
-
-        return {}
+        return {
+            'book_title': case.get('book_title', ''),
+            'author': case.get('author', ''),
+        }
 
     def create_scoring_functions(self) -> List[str]:
         """

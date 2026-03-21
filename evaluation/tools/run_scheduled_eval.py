@@ -311,104 +311,13 @@ async def _run_evaluation_case(
         Evaluation result with status "evaluated" on success
     """
     try:
-        # Extract the book query from input
-        text = input_data.get('text') or input_data.get('starting_prompt', '')
-
-        if not text:
-            logger.warning("no_input_text", input_data=input_data)
-            return {"status": "skipped", "reason": "No input text"}
-
-        # Parse book title and author from the text
-        # Supported formats:
-        # Book-focused:
-        # - "Create a literary travel itinerary for Pride and Prejudice"
-        # - "I'd like a travel itinerary based on The Great Gatsby"
-        # - "Plan a family trip based on Harry Potter"
-        # - "I want to visit places from The Da Vinci Code"
-        # Author-focused:
-        # - "I'm interested in visiting places connected to Ernest Hemingway's life and works"
-        # - "I've read all of Agatha Christie's novels. Plan a trip..."
-        # All can optionally include " by AUTHOR"
-        book_title = None
-        author = None
-
-        # First, try to detect author-focused prompts
-        # Pattern: "connected to AUTHOR's", "AUTHOR's novels/works/books", "of AUTHOR's"
-        import re
-
-        # Look for possessive author patterns
-        # Enhanced regex handles: initials (J.K. Rowling), particles (de, van, von), compound names
-        author_name_pattern = r"[A-Z][A-Za-z.]+(?:\s+(?:[a-z]+\s+)?[A-Z][A-Za-z.]+)*"
-        author_patterns = [
-            rf"connected to ({author_name_pattern})'s",  # "connected to Ernest Hemingway's"
-            rf"of ({author_name_pattern})'s",  # "of Agatha Christie's"
-            rf"all of ({author_name_pattern})'s",  # "all of J.K. Rowling's"
-            rf"by ({author_name_pattern})'s",  # "by Miguel de Cervantes's"
-            rf"from ({author_name_pattern})'s",  # "from T.S. Eliot's"
-        ]
-
-        for pattern in author_patterns:
-            match = re.search(pattern, text)
-            if match:
-                author = match.group(1)
-                # For author-focused queries there is no specific book title;
-                # set a descriptive placeholder so downstream agents know
-                # to generate an author-sites itinerary.
-                book_title = f"{author}'s works"
-                logger.info(
-                    "author_focused_prompt",
-                    author=author,
-                    original_text=text[:80],
-                )
-                break
-
-        # If not author-focused, try book title patterns
-        if not book_title:
-            # Extract author if present with " by " pattern
-            text_without_author = text
-            if " by " in text:
-                parts = text.split(" by ", 1)
-                if len(parts) == 2:
-                    text_without_author = parts[0]
-                    # Extract author, removing any trailing punctuation/preferences
-                    author_part = parts[1].strip()
-                    # Stop at common sentence boundaries
-                    for boundary in ['.', ',', '!', '?']:
-                        if boundary in author_part:
-                            author_part = author_part.split(boundary)[0]
-                    extracted_author = author_part.strip()
-                    # Only use if it looks like an author name (not a pronoun)
-                    if extracted_author and not extracted_author.lower() in ['her', 'his', 'their', 'my']:
-                        author = extracted_author
-
-            # Try multiple patterns to extract book title
-            patterns = [
-                (" for ", 5),
-                (" based on ", 10),
-                (" from ", 6),
-                (" on ", 4),  # Fallback for shortened "based on"
-            ]
-
-            for pattern, offset in patterns:
-                idx = text_without_author.rfind(pattern)
-                if idx >= 0:
-                    # Extract everything after the pattern until punctuation or preference indicators
-                    remainder = text_without_author[idx + offset:].strip()
-                    # Stop at common sentence boundaries or preference indicators
-                    for boundary in ['.', ',', '!', '?', ' I ', ' We ', ' but ', ' and I', ' and we']:
-                        if boundary in remainder:
-                            remainder = remainder.split(boundary)[0].strip()
-
-                    # Validate that we got a real book title, not a generic pronoun reference
-                    if remainder and remainder.lower() not in ['her books', 'his books', 'their books',
-                                                                'her novels', 'his novels', 'their novels',
-                                                                'her works', 'his works', 'their works']:
-                        book_title = remainder
-                        break
+        # Extract book_title and author directly from input data
+        book_title = input_data.get('book_title', '').strip()
+        author = input_data.get('author', '').strip()
 
         if not book_title:
-            logger.warning("could_not_parse_book_title", input_text=text)
-            return {"status": "skipped", "reason": "Could not parse book title or author from input"}
+            logger.warning("missing_book_title", input_data=input_data)
+            return {"status": "skipped", "reason": "No book_title in input data"}
 
         logger.info(
             "starting_workflow_evaluation",
@@ -700,7 +609,7 @@ Include ALL cities from the selected regions in your itinerary."""
                     api_key=config.google_api_key,
                     book_title=exact_title,
                     author=exact_author,
-                    input_text=text,
+                    input_text=book_title,
                     itinerary=itinerary_data,
                     preferences=preferences,
                     model_name="gemini-2.0-flash-lite",
@@ -779,7 +688,7 @@ Include ALL cities from the selected regions in your itinerary."""
             "status": "evaluated",
             "book_title": exact_title,
             "author": exact_author,
-            "input": text,
+            "input": book_title,
             "itinerary_created": itinerary_data is not None,
             "num_cities": len(itinerary_data.get("cities", [])) if itinerary_data else 0,
             "num_regions": len(selected_regions),
