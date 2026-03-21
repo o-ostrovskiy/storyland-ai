@@ -132,6 +132,7 @@ class LangfuseEvalPipeline:
 
             self.client.create_dataset_item(
                 dataset_name=dataset_name,
+                id=eval_id,
                 input=input_data,
                 expected_output=expected_output,
                 metadata=metadata,

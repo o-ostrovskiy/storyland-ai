@@ -59,6 +59,11 @@ jobs:
           echo "LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}" >> .env
           echo "LANGFUSE_HOST=${{ secrets.LANGFUSE_HOST }}" >> .env
 
+      - name: Sync Langfuse datasets
+        timeout-minutes: 5
+        run: |
+          python evaluation/tools/langfuse_eval.py --create-datasets --evalset-dir evaluation
+
       - name: Run scheduled evaluations
         timeout-minutes: 30
         run: |
