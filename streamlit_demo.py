@@ -656,7 +656,9 @@ def main():
             st.error("Please enter the author name")
             return
 
-        # Build BookMetadata directly from provided title and author
+        # Trust user-supplied title/author as-is (demo entrypoint;
+        # no external API validation is performed).  book_found=True means
+        # "user confirmed this book", not "verified against an external API".
         metadata = BookMetadata(
             book_title=book_title.strip(),
             author=author.strip(),

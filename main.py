@@ -265,7 +265,9 @@ async def create_itinerary(
 
     try:
         async with timeout(workflow_timeout):
-            # Confirm book metadata from provided title/author (no API lookup needed)
+            # Trust the user-supplied title/author as-is (dev CLI entrypoint;
+            # no external API validation is performed).  book_found=True means
+            # "user confirmed this book", not "verified against an external API".
             exact_title = book_title
             exact_author = author
             book_metadata = BookMetadata(
@@ -663,7 +665,7 @@ Examples:
     )
 
     parser.add_argument("book_title", nargs="?", help="Title of the book")
-    parser.add_argument("--author", "-a", required=True, help="Author name (required)")
+    parser.add_argument("--author", "-a", help="Author name (required for itinerary generation)")
     parser.add_argument("--user-id", "-u", default="user1", help="User ID")
     parser.add_argument("--database", "-d", action="store_true", help="Use SQLite for sessions")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable DEBUG logging")
@@ -686,6 +688,9 @@ Examples:
 
     if not args.book_title:
         parser.error("book_title is required (or use --dev for ADK Web UI)")
+
+    if not args.author:
+        parser.error("--author is required")
 
     preferences = {}
     if args.budget:

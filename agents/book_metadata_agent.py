@@ -33,17 +33,21 @@ def create_book_metadata_pipeline(model):
         model=model,
         output_schema=BookMetadata,
         output_key="book_metadata",
-        instruction="""Format the book information from the conversation into a BookMetadata object.
+        instruction="""Extract book title and author from the user's message and format as BookMetadata.
 
-The book title and author have been confirmed and are provided in the conversation.
-Extract them and structure as BookMetadata:
-- book_title: The full book title as provided
-- author: The author name as provided
-- description: Leave empty string if not provided
-- published_date: Leave empty string if not provided
-- categories: Empty list if not provided
-- image_url: null if not provided
-- book_found: true (the caller has confirmed this book exists)
+EXTRACTION RULES:
+- book_title: Extract the title from patterns like "for {title}", "based on {title}",
+  "from {title}", "{title} by {author}", or the main subject of the request.
+  For author-focused requests with no specific title (e.g. "visiting places connected
+  to Ernest Hemingway's life and works"), set book_title to "{Author}'s works"
+  (e.g. "Ernest Hemingway's works").
+- author: Extract from "by {author}" or possessive patterns like "{author}'s".
+  If the author is not mentioned in the message, use an empty string — do NOT invent
+  or guess an author name.
+- description, published_date, categories: Leave empty/null — do not infer or hallucinate.
+- image_url: null
+- book_found: true
 
-Use only data explicitly present in the conversation. Do not invent any details.""",
+CRITICAL: Never invent an author that was not explicitly stated in the user's message.
+If only a title is provided (e.g. "Pride and Prejudice"), set author to "".""",
     )

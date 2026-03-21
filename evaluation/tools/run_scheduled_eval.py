@@ -351,9 +351,10 @@ async def _run_evaluation_case(
             match = re.search(pattern, text)
             if match:
                 author = match.group(1)
-                # For author-focused queries, use author name as book query
-                # The metadata agent will handle this appropriately
-                book_title = f"works by {author}"
+                # For author-focused queries there is no specific book title;
+                # set a descriptive placeholder so downstream agents know
+                # to generate an author-sites itinerary.
+                book_title = f"{author}'s works"
                 logger.info(
                     "author_focused_prompt",
                     author=author,
@@ -449,7 +450,7 @@ async def _run_evaluation_case(
         session_id = str(uuid.uuid4())
         initial_state = {
             "book_title": book_title,
-            "author": author or "Unknown",
+            "author": author or "",
         }
 
         # Initialize preferences from metadata if available
@@ -476,7 +477,7 @@ async def _run_evaluation_case(
         root_span.update(metadata={"current_phase": "metadata_confirmation"})
 
         exact_title = book_title
-        exact_author = author or "Unknown"
+        exact_author = author or ""
 
         # Store metadata in session state for downstream agents
         session = await session_service.get_session(
