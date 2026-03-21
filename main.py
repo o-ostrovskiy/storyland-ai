@@ -661,10 +661,10 @@ Examples:
 
     args = parser.parse_args()
 
-    if not args.book_title:
+    if not args.book_title or not args.book_title.strip():
         parser.error("book_title is required")
 
-    if not args.author:
+    if not args.author or not args.author.strip():
         parser.error("--author is required")
 
     preferences = {}
@@ -684,8 +684,8 @@ Examples:
 
     try:
         result = await create_itinerary(
-            book_title=args.book_title,
-            author=args.author,
+            book_title=args.book_title.strip(),
+            author=args.author.strip(),
             user_id=args.user_id,
             use_database=args.database,
             preferences=preferences if preferences else None,

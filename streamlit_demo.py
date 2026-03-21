@@ -649,7 +649,7 @@ def main():
 
     # Main content area
     if start_button and st.session_state.current_step == 'input':
-        if not book_title:
+        if not book_title or not book_title.strip():
             st.error("Please enter a book title")
             return
         if not author or not author.strip():
