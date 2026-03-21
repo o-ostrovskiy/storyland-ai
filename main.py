@@ -27,10 +27,8 @@ from common.langfuse_init import initialize_langfuse, is_enabled
 from langfuse import Langfuse
 from services.session_service import create_session_service
 from services.context_manager import ContextManager
-from tools.google_books import google_books_tool, search_books_with_retry
-from models.book import BookInfo, BookMetadata
+from models.book import BookMetadata
 from agents.orchestrator import (
-    create_metadata_stage,
     create_discovery_workflow,
     create_composition_workflow,
 )
@@ -132,76 +130,9 @@ def get_region_selection(region_analysis: dict) -> List[dict]:
             return []
 
 
-def display_book_options(books: List[BookInfo]) -> None:
-    """Display book search results to the user."""
-    print(f"\n{'='*70}")
-    print("MULTIPLE BOOKS FOUND")
-    print(f"{'='*70}\n")
-
-    for i, book in enumerate(books, 1):
-        author_str = ", ".join(book.authors) if book.authors else "Unknown"
-        date_str = f" ({book.published_date})" if book.published_date else ""
-        print(f"[{i}] {book.title} by {author_str}{date_str}")
-        if book.description:
-            # Show first 120 chars of description
-            desc = book.description[:120] + "..." if len(book.description) > 120 else book.description
-            print(f"    {desc}")
-        print()
-
-
-def get_book_selection(books: List[BookInfo]) -> Optional[BookInfo]:
-    """
-    Get user's book selection from search results.
-
-    Args:
-        books: List of BookInfo results from Google Books API
-
-    Returns:
-        Selected BookInfo, or None if cancelled
-    """
-    if not books:
-        return None
-
-    if len(books) == 1:
-        author_str = ", ".join(books[0].authors) if books[0].authors else "Unknown"
-        print(f"\nFound: \"{books[0].title}\" by {author_str}")
-        return books[0]
-
-    # Non-interactive fallback: auto-select first result if no TTY
-    if not sys.stdin.isatty():
-        selected = books[0]
-        author_str = ", ".join(selected.authors) if selected.authors else "Unknown"
-        print(f"\nAuto-selected (non-interactive): \"{selected.title}\" by {author_str}")
-        return selected
-
-    print(f"Enter a number (1-{len(books)}) to select a book:")
-
-    while True:
-        try:
-            choice = input(f"Which book? [1-{len(books)}]: ")
-            idx = int(choice.strip()) - 1
-            if 0 <= idx < len(books):
-                selected = books[idx]
-                author_str = ", ".join(selected.authors) if selected.authors else "Unknown"
-                print(f"\nSelected: \"{selected.title}\" by {author_str}")
-                return selected
-            print(f"Please enter a number between 1 and {len(books)}")
-        except ValueError:
-            print(f"Please enter a number between 1 and {len(books)}")
-        except KeyboardInterrupt:
-            print("\nSelection cancelled.")
-            return None
-        except EOFError:
-            # Non-interactive: auto-select first result
-            selected = books[0]
-            author_str = ", ".join(selected.authors) if selected.authors else "Unknown"
-            print(f"\nAuto-selected: \"{selected.title}\" by {author_str}")
-            return selected
-
-
 async def create_itinerary(
     book_title: str,
-    author: Optional[str] = None,
+    author: str,
     user_id: str = "user1",
     use_database: bool = False,
     preferences: Optional[dict] = None,
@@ -211,14 +142,13 @@ async def create_itinerary(
     """
     Create a literary travel itinerary for a book.
 
-    Uses a three-phase workflow with human-in-the-loop region selection:
-    1. Metadata extraction - identify book and author
-    2. Discovery - find locations and group into travel regions
-    3. Composition - create itinerary for selected region(s)
+    Uses a two-phase workflow with human-in-the-loop region selection:
+    1. Discovery - find locations and group into travel regions
+    2. Composition - create itinerary for selected region(s)
 
     Args:
-        book_title: Title of the book
-        author: Optional author name
+        book_title: Title of the book (required)
+        author: Author name (required)
         user_id: User ID for session tracking
         use_database: If True, use SQLite for session persistence
         preferences: Optional user preferences for personalization
@@ -258,7 +188,7 @@ async def create_itinerary(
                 name="generate-itinerary",
                 metadata={
                     "book": book_title,
-                    "author": author or "unknown",
+                    "author": author,
                     "user_id": user_id,
                     "preferences": preferences or {},
                 },
@@ -298,7 +228,7 @@ async def create_itinerary(
         logger.info("langfuse_disabled", reason="credentials_not_configured")
 
     # Build initial state
-    initial_state = {"book_title": book_title, "author": author or ""}
+    initial_state = {"book_title": book_title, "author": author}
     if preferences:
         initial_state["user:preferences"] = preferences
 
@@ -324,8 +254,7 @@ async def create_itinerary(
     # Display header
     print(f"\n{'='*70}")
     print(f"Creating itinerary for: {book_title}")
-    if author:
-        print(f"Author: {author}")
+    print(f"Author: {author}")
     if preferences:
         print(f"Preferences: {', '.join(f'{k}={v}' for k, v in preferences.items())}")
     logger.debug("workflow_timeout_config", timeout_seconds=workflow_timeout)
@@ -336,62 +265,15 @@ async def create_itinerary(
 
     try:
         async with timeout(workflow_timeout):
-            # Phase 1: Search for book via Google Books API (direct call, no LLM)
-            logger.info("phase_1_start", phase="book_search")
-            print("Phase 1: Searching for book...")
-
-            metadata_span = None
-            if trace:
-                metadata_span = trace.span(name="metadata-stage", metadata={"phase": 1})
-
-            try:
-                books = search_books_with_retry(
-                    title=book_title, author=author or None
-                )
-            except Exception as e:
-                logger.error(
-                    "book_search_failed",
-                    error=str(e),
-                    error_type=type(e).__name__,
-                    book_title=book_title,
-                    author=author,
-                )
-                if metadata_span:
-                    metadata_span.end(output={"error": str(e), "error_type": type(e).__name__})
-                print(f"\n❌ Could not search Google Books API: {e}")
-                print("   Please check your internet connection and try again.")
-                return None
-
-            if not books:
-                logger.warning("book_not_found", book_title=book_title, author=author)
-                if metadata_span:
-                    metadata_span.end(output={"error": "book_not_found"})
-                print(f"\n❌ Could not find \"{book_title}\" in Google Books.")
-                print("   Please check the title and author spelling and try again.")
-                return None
-
-            # Let user select if multiple results
-            if len(books) > 1:
-                display_book_options(books)
-            selected = get_book_selection(books)
-
-            if not selected:
-                return None
-
-            # Build BookMetadata from selected BookInfo
-            exact_author = ", ".join(selected.authors) if selected.authors else "Unknown"
-            exact_title = selected.title
+            # Confirm book metadata from provided title/author (no API lookup needed)
+            exact_title = book_title
+            exact_author = author
             book_metadata = BookMetadata(
                 book_title=exact_title,
                 author=exact_author,
-                description=selected.description,
-                published_date=selected.published_date,
-                categories=selected.categories or [],
-                image_url=selected.image_url,
                 book_found=True,
             )
-
-            logger.info("book_selected", exact_title=exact_title, exact_author=exact_author)
+            logger.info("book_metadata_confirmed", exact_title=exact_title, exact_author=exact_author)
 
             # Store in session state for downstream agents
             session = await session_service.get_session(
@@ -399,23 +281,16 @@ async def create_itinerary(
             )
             session.state["book_metadata"] = book_metadata.model_dump()
 
-            if metadata_span:
-                metadata_span.end(output={
-                    "book_title": exact_title,
-                    "author": exact_author,
-                    "metadata": book_metadata.model_dump(),
-                })
-
-            # Phase 2: Discovery - find locations and analyze regions
-            logger.info("phase_2_start", phase="location_discovery")
-            print("\nPhase 2: Discovering locations and analyzing travel regions...")
+            # Phase 1: Discovery - find locations and analyze regions
+            logger.info("phase_1_start", phase="location_discovery")
+            print("\nPhase 1: Discovering locations and analyzing travel regions...")
 
             # Create Langfuse span for discovery stage
             discovery_span = None
             if trace:
                 discovery_span = trace.span(
                     name="discovery-stage",
-                    metadata={"phase": 2, "book_title": exact_title, "author": exact_author}
+                    metadata={"phase": 1, "book_title": exact_title, "author": exact_author}
                 )
 
             try:
@@ -465,7 +340,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
                 # Log to Langfuse for debugging
                 if trace:
                     trace.update(
-                        output={"error": "discovery_failed", "phase": 2},
+                        output={"error": "discovery_failed", "phase": 1},
                         tags=["itinerary", "adk-workflow", "error", "discovery_failed"],
                     )
 
@@ -519,13 +394,13 @@ Find cities, landmarks, and author-related sites, then group them into practical
 
             logger.info("selected_regions_stored", region_count=len(selected_regions))
 
-            # Phase 3: Composition - create itinerary for selected region(s)
+            # Phase 2: Composition - create itinerary for selected region(s)
             if len(selected_regions) == 1:
                 region_name = selected_regions[0].get("region_name", "all locations")
             else:
                 region_name = f"{len(selected_regions)} regions"
-            logger.info("phase_3_start", phase="itinerary_composition", region_count=len(selected_regions))
-            print(f"\nPhase 3: Creating itinerary for {region_name}...")
+            logger.info("phase_2_start", phase="itinerary_composition", region_count=len(selected_regions))
+            print(f"\nPhase 2: Creating itinerary for {region_name}...")
 
             # Create Langfuse span for composition stage
             composition_span = None
@@ -533,7 +408,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
                 composition_span = trace.span(
                     name="composition-stage",
                     metadata={
-                        "phase": 3,
+                        "phase": 2,
                         "region_count": len(selected_regions),
                         "selected_regions": [r.get("region_name") for r in selected_regions],
                     }
@@ -595,7 +470,7 @@ Include ALL cities from the selected regions in your itinerary."""
                 # Log to Langfuse for debugging
                 if trace:
                     trace.update(
-                        output={"error": "composition_failed", "phase": 3},
+                        output={"error": "composition_failed", "phase": 2},
                         tags=["itinerary", "adk-workflow", "error", "composition_failed"],
                     )
 
@@ -683,9 +558,9 @@ Include ALL cities from the selected regions in your itinerary."""
             },
             metadata={
                 "book": book_title,
-                "author": author or "unknown",
-                "exact_title": exact_title if 'exact_title' in locals() else book_title,
-                "exact_author": exact_author if 'exact_author' in locals() else author,
+                "author": author,
+                "exact_title": exact_title,
+                "exact_author": exact_author,
                 "user_id": user_id,
                 "preferences": preferences or {},
                 "token_usage": {
@@ -788,7 +663,7 @@ Examples:
     )
 
     parser.add_argument("book_title", nargs="?", help="Title of the book")
-    parser.add_argument("--author", "-a", help="Author name (optional)")
+    parser.add_argument("--author", "-a", required=True, help="Author name (required)")
     parser.add_argument("--user-id", "-u", default="user1", help="User ID")
     parser.add_argument("--database", "-d", action="store_true", help="Use SQLite for sessions")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable DEBUG logging")

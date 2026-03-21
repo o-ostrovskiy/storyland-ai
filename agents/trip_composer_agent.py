@@ -90,7 +90,7 @@ Create a TripItinerary that RESPECTS user preferences:
    - name: Exact name of the place
    - type: "museum", "landmark", "cafe", "bookstore", "monument", "filming_location", etc.
    - reason: 1-2 sentences explaining WHY this matters for the book
-   - address: Street address or location description if known (e.g., "221B Baker Street, London" or "Piazza della Signoria, Florence"). Leave null if address is uncertain.
+   - address: REQUIRED. Street address or location description (e.g., "221B Baker Street, London" or "Piazza della Signoria, Florence"). Always provide at least the landmark name and city/country (e.g., "Jane Austen's House Museum, Chawton, Hampshire, England"). Only leave null for completely fictional locations with no real-world counterpart.
    - filming_scene: If this location was used in a film/TV adaptation, describe the SPECIFIC scene or sequence filmed there (e.g., "The 1995 BBC adaptation filmed the Pemberley exterior scenes here" or "The opening chase sequence from the 2005 film was shot on these steps"). Set to null if not a filming location.
    - time_of_day: "morning", "afternoon", "evening", or "full_day"
    - notes: Practical tip (include budget-appropriate suggestions)

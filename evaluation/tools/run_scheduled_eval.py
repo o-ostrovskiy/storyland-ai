@@ -19,9 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from common.logging import get_logger, configure_logging
 from common.config import load_config
 from services.session_service import create_session_service
-from tools.google_books import google_books_tool
 from agents.orchestrator import (
-    create_metadata_stage,
     create_discovery_workflow,
     create_composition_workflow,
 )
@@ -451,7 +449,7 @@ async def _run_evaluation_case(
         session_id = str(uuid.uuid4())
         initial_state = {
             "book_title": book_title,
-            "author": author or "",
+            "author": author or "Unknown",
         }
 
         # Initialize preferences from metadata if available
@@ -473,79 +471,34 @@ async def _run_evaluation_case(
 
         logger.info("eval_session_created", session_id=session_id[:8])
 
-        # Phase 1: Extract book metadata
-        logger.info("eval_phase_1_start", phase="metadata_extraction")
+        # Phase 1: Confirm book metadata from provided title/author (no API lookup needed)
+        logger.info("eval_phase_1_start", phase="metadata_confirmation")
+        root_span.update(metadata={"current_phase": "metadata_confirmation"})
 
-        # Track phase in root_span metadata
-        root_span.update(metadata={"current_phase": "metadata_extraction"})
+        exact_title = book_title
+        exact_author = author or "Unknown"
 
-        try:
-            metadata_stage = create_metadata_stage(model, google_books_tool)
-            metadata_runner = Runner(
-                agent=metadata_stage,
-                app_name="storyland",
-                session_service=session_service,
-                plugins=[LoggingPlugin(), langfuse_plugin],
-            )
+        # Store metadata in session state for downstream agents
+        session = await session_service.get_session(
+            app_name="storyland", user_id=user_id, session_id=session_id
+        )
+        session.state["book_metadata"] = {
+            "book_title": exact_title,
+            "author": exact_author,
+        }
 
-            metadata_prompt = f"""Find book metadata for "{book_title}" by {author or 'unknown author'}."""
-            metadata_message = types.Content(role="user", parts=[types.Part(text=metadata_prompt)])
-
-            async with metadata_runner:
-                async for event in metadata_runner.run_async(
-                    user_id=user_id, session_id=session_id, new_message=metadata_message
-                ):
-                    pass
-
-            # Get metadata from session state
-            session = await session_service.get_session(
-                app_name="storyland", user_id=user_id, session_id=session_id
-            )
-            book_metadata = session.state.get("book_metadata", {})
-            exact_title = book_metadata.get("book_title", book_title)
-            exact_author = book_metadata.get("author", author or "Unknown")
-
-            logger.info(
-                "eval_metadata_extracted",
-                exact_title=exact_title,
-                exact_author=exact_author
-            )
-
-            # Update root_span with metadata results
-            root_span.update(
-                metadata={
-                    "phase_1_complete": True,
-                    "book_title": exact_title,
-                    "author": exact_author,
-                }
-            )
-        except Exception as e:
-            logger.warning(
-                "eval_metadata_failed_using_fallback",
-                error=str(e),
-                book_title=book_title,
-            )
-
-            # Update root_span with error info
-            root_span.update(
-                metadata={
-                    "phase_1_error": str(e),
-                    "fallback_used": True,
-                }
-            )
-
-            # Fallback to provided title/author
-            exact_title = book_title
-            exact_author = author or "Unknown"
-
-            # Store basic metadata in session
-            session = await session_service.get_session(
-                app_name="storyland", user_id=user_id, session_id=session_id
-            )
-            session.state["book_metadata"] = {
+        logger.info(
+            "eval_metadata_confirmed",
+            exact_title=exact_title,
+            exact_author=exact_author,
+        )
+        root_span.update(
+            metadata={
+                "phase_1_complete": True,
                 "book_title": exact_title,
                 "author": exact_author,
             }
+        )
 
         # Phase 2: Discovery - find locations and analyze regions
         logger.info("eval_phase_2_start", phase="location_discovery")
@@ -631,7 +584,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
 
         logger.info("eval_selected_regions_stored", region_count=len(selected_regions))
 
-        # Phase 3: Composition - create itinerary
+        # Phase 3 (Composition) - numbering kept in spans for Langfuse compat
         logger.info("eval_phase_3_start", phase="itinerary_composition")
 
         # Update root_span for phase 3

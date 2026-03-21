@@ -115,15 +115,15 @@ See [Configuration](#configuration) for environment variables. Run `python main.
 
 ## Architecture
 
-StoryLand AI uses a three-phase workflow with human-in-the-loop region selection:
+StoryLand AI uses a two-phase workflow with human-in-the-loop region selection. Book title and author are pre-confirmed by the upstream service (Backend → storyland-ai):
 
 ```mermaid
 flowchart TB
-    subgraph Phase1["Phase 1: Metadata"]
-        BM[book_metadata_pipeline<br/>📚 Google Books API] --> Extract[Extract exact<br/>title & author]
+    subgraph Input["Input (pre-confirmed)"]
+        DTO[book_title + author<br/>📖 from Backend]
     end
 
-    subgraph Phase2["Phase 2: Discovery"]
+    subgraph Phase1["Phase 1: Discovery"]
         BC[book_context_pipeline<br/>🔍 Setting & themes]
         RP[reader_profile_agent<br/>👤 User preferences]
 
@@ -142,24 +142,23 @@ flowchart TB
         Select[Choose region to explore]
     end
 
-    subgraph Phase3["Phase 3: Composition"]
+    subgraph Phase2["Phase 2: Composition"]
         TC[trip_composer<br/>🗺️ Personalized itinerary]
     end
 
-    Extract --> BC
+    DTO --> BC
     RA --> Select
     Select --> TC
 ```
 
-**Three-phase design:**
-1. **Phase 1 (Metadata)**: Resolves the exact book (handles common titles like "The Nightingale")
-2. **Phase 2 (Discovery)**: Finds all locations and groups them into practical travel regions
-3. **Human Selection**: User chooses which region(s) to explore (prevents impractical multi-continent itineraries)
-4. **Phase 3 (Composition)**: Creates detailed itinerary for selected region(s) only
+**Two-phase design:**
+1. **Phase 1 (Discovery)**: Finds all locations and groups them into practical travel regions
+2. **Human Selection**: User chooses which region(s) to explore (prevents impractical multi-continent itineraries)
+3. **Phase 2 (Composition)**: Creates detailed itinerary for selected region(s) only
 
 ### Key Components
 
-- **Book Metadata Agent** - Extracts book info from Google Books API
+- **Book Metadata Agent** - Formats pre-confirmed title/author into BookMetadata schema (eval workflow)
 - **Book Context Agent** - Researches setting, themes, and time period
 - **Discovery Agents** - Parallel search for cities, landmarks, and author sites
 - **Region Analyzer** - Groups cities by geographic proximity using LLM world knowledge
@@ -220,10 +219,10 @@ SSE event types: `progress`, `metadata`, `regions`, `itinerary`, `error`, `done`
 
 | Status | Meaning |
 |--------|---------|
-| `searching` | Phase 1 in progress (no data yet) |
-| `discovering` | Book found, Phase 2 in progress |
+| `searching` | Phase 1 (Discovery) in progress |
+| `discovering` | Discovery running, collecting locations |
 | `regions_ready` | Discovery complete, awaiting region selection |
-| `composing` | Phase 3 in progress |
+| `composing` | Phase 2 (Composition) in progress |
 | `completed` | Itinerary ready |
 | `failed` | Terminal error — book not found, timeout, or cancellation (takes priority over all other states) |
 
@@ -270,8 +269,7 @@ storyland-ai/
 │   ├── itinerary.py     # TripItinerary, CityPlan, CityStop
 │   └── preferences.py   # TravelPreferences
 │
-├── tools/               # External API integrations
-│   ├── google_books.py  # Google Books search tool
+├── tools/               # ADK tool integrations
 │   └── preferences.py   # Session state preferences tool
 │
 ├── agents/              # AI agent definitions
@@ -281,7 +279,7 @@ storyland-ai/
 │   ├── trip_composer_agent.py    # Itinerary composition
 │   ├── reader_profile_agent.py   # Preferences-based personalization
 │   ├── region_analyzer_agent.py  # Geographic region grouping
-│   ├── orchestrator.py           # Three-phase workflow coordination
+│   ├── orchestrator.py           # Two-phase workflow coordination
 │   └── storyland/agent.py        # ADK Web UI agent
 │
 ├── api/                 # FastAPI SSE streaming API
@@ -356,13 +354,13 @@ make test-cov            # With coverage
 | Module | Tests | Description |
 |--------|-------|-------------|
 | `test_models.py` | 46 | Pydantic model validation |
-| `test_tools.py` | 16 | Google Books, preferences tools |
-| `test_agents.py` | 45 | Agent factory functions |
+| `test_tools.py` | 4 | Preferences tool |
+| `test_agents.py` | 42 | Agent factory functions |
 | `test_services.py` | 16 | Session service, context manager |
 | `test_workflow_timeout.py` | 6 | Workflow timeout behavior |
 | `test_llm_scorer.py` | 18 | LLM scoring models and prompts |
 | `test_core.py` | 49 | Events, session state, extraction, regions |
-| `test_api.py` | 68 | API models, endpoints, SSE streaming, failure-status |
+| `test_api.py` | 71 | API models, endpoints, SSE streaming, failure-status |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).
 

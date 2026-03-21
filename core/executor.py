@@ -39,7 +39,6 @@ from common.logging import get_logger
 from models.book import BookMetadata
 from plugins.langfuse_plugin import LangfusePlugin
 from services.session_service import create_session_service
-from tools.google_books import search_books_with_retry
 
 from .events import (
     DomainEvent,
@@ -138,18 +137,18 @@ class WorkflowExecutor:
     async def discover(
         self,
         book_title: str,
-        author: Optional[str] = None,
+        author: str,
         preferences: Optional[dict] = None,
         user_id: str = "default",
     ) -> AsyncGenerator[DomainEvent, None]:
-        """Run phases 1-2: book search + location discovery.
+        """Run phases 1-2: confirm book metadata + location discovery.
 
         Yields domain events as work progresses. The final meaningful event
         before WorkflowComplete is always either RegionsReady or WorkflowError.
 
         Args:
-            book_title: Title of the book to search
-            author: Optional author name for disambiguation
+            book_title: Title of the book (pre-confirmed by caller)
+            author: Author name (pre-confirmed by caller, required)
             preferences: Optional travel preferences dict
             user_id: User identifier for session isolation
         """
@@ -158,7 +157,7 @@ class WorkflowExecutor:
         # Build initial state
         initial_state = {
             SessionStateKeys.BOOK_TITLE: book_title,
-            SessionStateKeys.AUTHOR: author or "",
+            SessionStateKeys.AUTHOR: author,
         }
         if preferences:
             initial_state[SessionStateKeys.USER_PREFERENCES] = preferences
@@ -184,50 +183,13 @@ class WorkflowExecutor:
 
         try:
             async with timeout(self._config.workflow_timeout):
-                # Phase 1: Book search
-                yield ProgressEvent(
-                    phase=Phase.BOOK_SEARCH, step="Searching Google Books API"
-                )
-
-                try:
-                    books = search_books_with_retry(
-                        title=book_title, author=author or None
-                    )
-                except Exception as e:
-                    logger.error("book_search_failed", error=str(e))
-                    await self._mark_session_failed(job_id, user_id)
-                    yield WorkflowError(
-                        message=f"Could not search Google Books API: {e}",
-                        error_type=type(e).__name__,
-                        phase=Phase.BOOK_SEARCH,
-                    )
-                    yield WorkflowComplete(job_id=job_id)
-                    return
-
-                if not books:
-                    await self._mark_session_failed(job_id, user_id)
-                    yield WorkflowError(
-                        message=f'Could not find "{book_title}" in Google Books.',
-                        error_type="BookNotFound",
-                        phase=Phase.BOOK_SEARCH,
-                    )
-                    yield WorkflowComplete(job_id=job_id)
-                    return
-
-                # Auto-select first result
-                selected = books[0]
-                exact_author = (
-                    ", ".join(selected.authors) if selected.authors else "Unknown"
-                )
-                exact_title = selected.title
+                # Confirm book metadata from provided title/author (no API lookup needed)
+                exact_title = book_title
+                exact_author = author
 
                 book_metadata = BookMetadata(
                     book_title=exact_title,
                     author=exact_author,
-                    description=selected.description,
-                    published_date=selected.published_date,
-                    categories=selected.categories or [],
-                    image_url=selected.image_url,
                     book_found=True,
                 )
 

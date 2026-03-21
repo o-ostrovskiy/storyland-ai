@@ -35,10 +35,8 @@ class DiscoverRequest(BaseModel):
         }
     }
 
-    book_title: str = Field(min_length=1, description="Title of the book to search")
-    author: Optional[str] = Field(
-        default=None, description="Author name for disambiguation"
-    )
+    book_title: str = Field(min_length=1, description="Title of the book")
+    author: str = Field(min_length=1, description="Author name (required)")
     preferences: Optional[dict] = Field(
         default=None, description="User travel preferences"
     )
@@ -50,6 +48,15 @@ class DiscoverRequest(BaseModel):
         normalized = value.strip()
         if not normalized:
             raise ValueError("book_title must not be empty")
+        return normalized
+
+    @field_validator("author")
+    @classmethod
+    def validate_author(cls, value: str) -> str:
+        """Require a non-empty, non-whitespace author name."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("author must not be empty")
         return normalized
 
 
@@ -86,7 +93,7 @@ class SSEProgressEvent(BaseModel):
 
 
 class SSEMetadataEvent(BaseModel):
-    """Book metadata resolved from Google Books API."""
+    """Book metadata confirmed from the upstream service."""
 
     event: Literal["metadata"] = "metadata"
     book_title: str

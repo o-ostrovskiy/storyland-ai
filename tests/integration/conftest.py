@@ -64,6 +64,11 @@ def vcr_config():
         "decode_compressed_response": True,
         "before_record_request": before_record_request,
         "before_record_response": before_record_response,
+        "ignore_hosts": [
+            "cloud.langfuse.com",
+            "us.cloud.langfuse.com",
+            "eu.cloud.langfuse.com",
+        ],  # Don't intercept Langfuse OTLP telemetry calls
     }
 
 

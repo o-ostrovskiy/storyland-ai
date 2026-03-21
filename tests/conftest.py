@@ -242,39 +242,6 @@ def family_preferences_dict() -> Dict[str, Any]:
 # =============================================================================
 
 @pytest.fixture
-def mock_google_books_response() -> Dict[str, Any]:
-    """Mock Google Books API response."""
-    return {
-        "kind": "books#volumes",
-        "totalItems": 1,
-        "items": [
-            {
-                "id": "s1gVAAAAYAAJ",
-                "volumeInfo": {
-                    "title": "Pride and Prejudice",
-                    "authors": ["Jane Austen"],
-                    "description": "A classic novel about love and social standing in early 19th century England.",
-                    "publishedDate": "1813",
-                    "categories": ["Fiction", "Romance"],
-                    "imageLinks": {
-                        "thumbnail": "https://books.google.com/books/content?id=s1gVAAAAYAAJ"
-                    }
-                }
-            }
-        ]
-    }
-
-
-@pytest.fixture
-def mock_google_books_empty_response() -> Dict[str, Any]:
-    """Mock empty Google Books API response."""
-    return {
-        "kind": "books#volumes",
-        "totalItems": 0
-    }
-
-
-@pytest.fixture
 def mock_tool_context(sample_preferences_dict):
     """Mock ToolContext for testing tools."""
     context = MagicMock()

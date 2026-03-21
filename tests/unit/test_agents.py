@@ -18,7 +18,6 @@ from agents import (
     create_trip_composer_agent,
     create_reader_profile_agent,
     create_region_analyzer_agent,
-    create_metadata_stage,
     create_discovery_workflow,
     create_composition_workflow,
     create_eval_workflow,
@@ -33,16 +32,6 @@ from agents import (
 def model_name():
     """Return a valid model name string for agent creation."""
     return "gemini-2.0-flash"
-
-
-@pytest.fixture
-def mock_google_books_tool():
-    """Create a mock Google Books FunctionTool."""
-    def mock_search_book(title: str, author: str = "") -> str:
-        """Mock search function."""
-        return '{"book_title": "Test", "author": "Test Author"}'
-
-    return FunctionTool(mock_search_book)
 
 
 @pytest.fixture
@@ -62,23 +51,23 @@ def mock_google_search_tool():
 class TestBookMetadataPipeline:
     """Tests for create_book_metadata_pipeline."""
 
-    def test_creates_sequential_agent(self, model_name, mock_google_books_tool):
-        """Test that pipeline returns a SequentialAgent."""
-        pipeline = create_book_metadata_pipeline(model_name, mock_google_books_tool)
+    def test_creates_llm_agent(self, model_name):
+        """Test that pipeline returns an LlmAgent (simplified single-stage formatter)."""
+        pipeline = create_book_metadata_pipeline(model_name)
 
-        assert isinstance(pipeline, SequentialAgent)
+        assert isinstance(pipeline, LlmAgent)
 
-    def test_pipeline_has_correct_name(self, model_name, mock_google_books_tool):
+    def test_pipeline_has_correct_name(self, model_name):
         """Test pipeline has expected name."""
-        pipeline = create_book_metadata_pipeline(model_name, mock_google_books_tool)
+        pipeline = create_book_metadata_pipeline(model_name)
 
         assert pipeline.name == "book_metadata_pipeline"
 
-    def test_pipeline_has_sub_agents(self, model_name, mock_google_books_tool):
-        """Test pipeline contains sub-agents."""
-        pipeline = create_book_metadata_pipeline(model_name, mock_google_books_tool)
+    def test_pipeline_has_output_key(self, model_name):
+        """Test pipeline stores result in book_metadata session state key."""
+        pipeline = create_book_metadata_pipeline(model_name)
 
-        assert len(pipeline.sub_agents) == 2
+        assert pipeline.output_key == "book_metadata"
 
 
 # =============================================================================
@@ -234,30 +223,6 @@ class TestReaderProfileAgent:
 # =============================================================================
 # Workflow Orchestrator Tests
 # =============================================================================
-# Metadata Stage Tests (Two-Phase Workflow)
-# =============================================================================
-
-class TestMetadataStage:
-    """Tests for create_metadata_stage."""
-
-    def test_creates_sequential_agent(self, model_name, mock_google_books_tool):
-        """Test that metadata stage returns a SequentialAgent."""
-        stage = create_metadata_stage(model_name, mock_google_books_tool)
-
-        assert isinstance(stage, SequentialAgent)
-
-    def test_stage_has_correct_name(self, model_name, mock_google_books_tool):
-        """Test metadata stage has expected name."""
-        stage = create_metadata_stage(model_name, mock_google_books_tool)
-
-        assert stage.name == "metadata_stage"
-
-    def test_stage_contains_metadata_pipeline(self, model_name, mock_google_books_tool):
-        """Test metadata stage contains book_metadata_pipeline."""
-        stage = create_metadata_stage(model_name, mock_google_books_tool)
-
-        assert len(stage.sub_agents) == 1
-        assert stage.sub_agents[0].name == "book_metadata_pipeline"
 
 
 # =============================================================================
@@ -401,28 +366,28 @@ class TestCompositionWorkflow:
 class TestEvalWorkflow:
     """Tests for create_eval_workflow (used by ADK evals and web UI)."""
 
-    def test_creates_sequential_agent(self, model_name, mock_google_books_tool):
+    def test_creates_sequential_agent(self, model_name):
         """Test that eval workflow returns a SequentialAgent."""
-        workflow = create_eval_workflow(model_name, mock_google_books_tool)
+        workflow = create_eval_workflow(model_name)
 
         assert isinstance(workflow, SequentialAgent)
 
-    def test_workflow_has_correct_name(self, model_name, mock_google_books_tool):
+    def test_workflow_has_correct_name(self, model_name):
         """Test eval workflow has expected name."""
-        workflow = create_eval_workflow(model_name, mock_google_books_tool)
+        workflow = create_eval_workflow(model_name)
 
         assert workflow.name == "eval_workflow"
 
-    def test_workflow_has_six_stages(self, model_name, mock_google_books_tool):
+    def test_workflow_has_six_stages(self, model_name):
         """Test eval workflow has 6 stages (metadata, context, profile, discovery, region_analyzer, composer)."""
-        workflow = create_eval_workflow(model_name, mock_google_books_tool)
+        workflow = create_eval_workflow(model_name)
 
         # Should have 6 stages: metadata, context, reader_profile, parallel_discovery, region_analyzer, trip_composer
         assert len(workflow.sub_agents) == 6
 
-    def test_workflow_stage_order(self, model_name, mock_google_books_tool):
+    def test_workflow_stage_order(self, model_name):
         """Test eval workflow stages are in correct order."""
-        workflow = create_eval_workflow(model_name, mock_google_books_tool)
+        workflow = create_eval_workflow(model_name)
 
         stage_names = [agent.name for agent in workflow.sub_agents]
         assert stage_names[0] == "book_metadata_pipeline"
@@ -432,9 +397,9 @@ class TestEvalWorkflow:
         assert stage_names[4] == "region_analyzer"
         assert stage_names[5] == "trip_composer"
 
-    def test_workflow_contains_parallel_agent(self, model_name, mock_google_books_tool):
+    def test_workflow_contains_parallel_agent(self, model_name):
         """Test eval workflow contains a ParallelAgent for discovery."""
-        workflow = create_eval_workflow(model_name, mock_google_books_tool)
+        workflow = create_eval_workflow(model_name)
 
         parallel_agents = [
             agent for agent in workflow.sub_agents
@@ -443,17 +408,17 @@ class TestEvalWorkflow:
         assert len(parallel_agents) == 1
         assert parallel_agents[0].name == "parallel_discovery"
 
-    def test_workflow_includes_region_analyzer(self, model_name, mock_google_books_tool):
+    def test_workflow_includes_region_analyzer(self, model_name):
         """Test eval workflow includes region analyzer before trip composer."""
-        workflow = create_eval_workflow(model_name, mock_google_books_tool)
+        workflow = create_eval_workflow(model_name)
 
         # Region analyzer should be at index 4 (before trip_composer)
         assert workflow.sub_agents[4].name == "region_analyzer"
         assert workflow.sub_agents[5].name == "trip_composer"
 
-    def test_eval_workflow_no_placeholder_literals(self, model_name, mock_google_books_tool):
+    def test_eval_workflow_no_placeholder_literals(self, model_name):
         """[P2] Eval workflow should not embed '[from conversation]' in instructions."""
-        workflow = create_eval_workflow(model_name, mock_google_books_tool)
+        workflow = create_eval_workflow(model_name)
 
         book_context_pipeline = workflow.sub_agents[1]
         researcher = book_context_pipeline.sub_agents[0]

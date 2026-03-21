@@ -4,12 +4,11 @@ Workflow orchestrator.
 Creates workflows that coordinate all agents to produce complete literary
 travel itineraries.
 
-Three-phase architecture (CLI with HITL):
-1. Metadata stage - fetches book metadata (title, author)
-2. Discovery workflow - finds locations and groups into travel regions
-3. Composition workflow - creates itinerary for selected region(s)
+Two-phase architecture (HTTP API with HITL):
+1. Discovery workflow - finds locations and groups into travel regions
+2. Composition workflow - creates itinerary for selected region(s)
 
-WHY THREE PHASES WITH HITL?
+WHY TWO PHASES WITH HITL?
 - Problem: Books like "Gone with the Wind" span Georgia (USA) and have author
   sites in Atlanta. Auto-generating itineraries for ALL regions would create
   impractical multi-continent trips.
@@ -39,47 +38,13 @@ from .reader_profile_agent import create_reader_profile_agent
 from .region_analyzer_agent import create_region_analyzer_agent
 
 
-def create_metadata_stage(model, google_books_tool):
-    """
-    Create the metadata extraction stage.
-
-    This stage runs first to get the exact book title and author,
-    which are then used to create the main workflow.
-
-    WHY SEPARATE METADATA STAGE?
-    - Problem: Books like "The Nightingale" have multiple authors (Kristin Hannah
-      vs. Hans Christian Andersen). User input may be ambiguous.
-    - Solution: Use Google Books API early to disambiguate and get exact title/author
-      before running expensive discovery workflows.
-    - Benefit: Prevents wrong book discovery (e.g., searching for fairy tale locations
-      instead of WWII France).
-
-    Architecture:
-        SequentialAgent (metadata_stage)
-        └─ book_metadata_pipeline [fetch → format] → state["book_metadata"]
-
-    Args:
-        model: The LLM model to use
-        google_books_tool: The Google Books FunctionTool
-
-    Returns:
-        SequentialAgent that extracts book metadata
-    """
-    book_metadata_pipeline = create_book_metadata_pipeline(model, google_books_tool)
-
-    return SequentialAgent(
-        name="metadata_stage",
-        sub_agents=[book_metadata_pipeline],
-    )
-
-
 def create_discovery_workflow(model, book_title: str, author: str):
     """
     Create the discovery workflow that finds locations and analyzes regions.
 
-    This workflow runs after metadata extraction and before user region selection.
-    It discovers cities, landmarks, and author sites, then groups them into
-    practical travel regions for the user to choose from.
+    This workflow runs after the book metadata has been confirmed and before
+    user region selection. It discovers cities, landmarks, and author sites,
+    then groups them into practical travel regions for the user to choose from.
 
     Architecture:
         SequentialAgent (discovery_workflow)
@@ -93,8 +58,8 @@ def create_discovery_workflow(model, book_title: str, author: str):
 
     Args:
         model: The LLM model to use
-        book_title: Exact book title from metadata stage
-        author: Exact author name from metadata stage
+        book_title: Exact book title (pre-confirmed by caller)
+        author: Exact author name (pre-confirmed by caller)
 
     Returns:
         SequentialAgent orchestrating the discovery workflow
@@ -163,7 +128,7 @@ def create_composition_workflow(model):
     )
 
 
-def create_eval_workflow(model, google_books_tool):
+def create_eval_workflow(model):
     """
     Create evaluation workflow with automated region selection.
 
@@ -171,9 +136,12 @@ def create_eval_workflow(model, google_books_tool):
     interaction is not possible. It includes region analysis but the
     trip composer will receive all discovered regions automatically.
 
+    The book title and author must be provided in the initial message /
+    session state before this workflow runs.
+
     Architecture:
         SequentialAgent (eval_workflow)
-        ├─ book_metadata_pipeline [fetch → format] → state["book_metadata"]
+        ├─ book_metadata_pipeline [format] → state["book_metadata"]
         ├─ book_context_pipeline [research → format] → state["book_context"]
         ├─ reader_profile_agent [read preferences] → state["reader_profile"]
         ├─ ParallelAgent (parallel_discovery) ⚡ CONCURRENT
@@ -185,13 +153,12 @@ def create_eval_workflow(model, google_books_tool):
 
     Args:
         model: The LLM model to use for all agents
-        google_books_tool: The Google Books FunctionTool
 
     Returns:
         SequentialAgent orchestrating the complete eval workflow
     """
     # Create all pipelines
-    book_metadata_pipeline = create_book_metadata_pipeline(model, google_books_tool)
+    book_metadata_pipeline = create_book_metadata_pipeline(model)
     book_context_pipeline = create_book_context_pipeline(
         model, google_search
     )

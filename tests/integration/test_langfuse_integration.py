@@ -255,7 +255,6 @@ class TestLangfuseWithRealWorkflow:
     async def test_book_metadata_workflow_with_langfuse(self):
         """Test book metadata extraction workflow with Langfuse tracking."""
         from agents import create_book_metadata_pipeline
-        from tools.google_books import google_books_tool
 
         # Create plugin (will auto-disable if credentials missing or package unavailable)
         plugin = LangfusePlugin(
@@ -264,8 +263,8 @@ class TestLangfuseWithRealWorkflow:
             host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
         )
 
-        # Create metadata pipeline
-        pipeline = create_book_metadata_pipeline("gemini-2.0-flash-lite", google_books_tool)
+        # Create metadata pipeline (simplified formatter, no Google Books tool needed)
+        pipeline = create_book_metadata_pipeline("gemini-2.0-flash-lite")
 
         # Create session service
         session_service = create_session_service(use_database=False)

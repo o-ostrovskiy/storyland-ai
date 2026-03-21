@@ -45,10 +45,22 @@ class TestDiscoverRequest:
     """Tests for DiscoverRequest model."""
 
     def test_minimal_request(self):
-        req = DiscoverRequest(book_title="1984")
+        req = DiscoverRequest(book_title="1984", author="George Orwell")
         assert req.book_title == "1984"
-        assert req.author is None
+        assert req.author == "George Orwell"
         assert req.preferences is None
+
+    def test_missing_author_raises(self):
+        with pytest.raises(ValidationError):
+            DiscoverRequest(book_title="1984")
+
+    def test_blank_author_raises(self):
+        with pytest.raises(ValidationError):
+            DiscoverRequest(book_title="1984", author="   ")
+
+    def test_author_is_trimmed(self):
+        req = DiscoverRequest(book_title="1984", author="  George Orwell  ")
+        assert req.author == "George Orwell"
 
     def test_full_request(self):
         req = DiscoverRequest(
@@ -68,7 +80,7 @@ class TestDiscoverRequest:
             DiscoverRequest(book_title="   ")
 
     def test_book_title_is_trimmed(self):
-        req = DiscoverRequest(book_title="  1984  ")
+        req = DiscoverRequest(book_title="  1984  ", author="George Orwell")
         assert req.book_title == "1984"
 
     def test_serialization_roundtrip(self):
@@ -540,7 +552,9 @@ class TestDiscoverEndpoint:
             yield WorkflowComplete(job_id="test-job")
 
         mock_executor.discover = mock_discover
-        response = await test_client.post("/api/v1/itinerary/discover", json={"book_title": "1984"})
+        response = await test_client.post(
+            "/api/v1/itinerary/discover", json={"book_title": "1984", "author": "George Orwell"}
+        )
         assert response.status_code == 200
         events = _parse_sse_response(response.text)
         event_types = [e["event"] for e in events]
@@ -561,7 +575,7 @@ class TestDiscoverEndpoint:
 
         mock_executor.discover = mock_discover
         response = await test_client.post(
-            "/api/v1/itinerary/discover", json={"book_title": "Nonexistent Book XYZ"},
+            "/api/v1/itinerary/discover", json={"book_title": "Nonexistent Book XYZ", "author": "Unknown Author"},
         )
         assert response.status_code == 200
         events = _parse_sse_response(response.text)
@@ -584,7 +598,9 @@ class TestDiscoverEndpoint:
             yield WorkflowComplete(job_id="test-job")
 
         mock_executor.discover = mock_discover
-        response = await test_client.post("/api/v1/itinerary/discover", json={"book_title": "1984"})
+        response = await test_client.post(
+            "/api/v1/itinerary/discover", json={"book_title": "1984", "author": "George Orwell"}
+        )
         assert response.status_code == 200
         events = _parse_sse_response(response.text)
         assert events[-1]["event"] == "done"
@@ -849,14 +865,9 @@ class TestDiscoveryProgressMapping:
 
 class TestEvalWorkflowBookContext:
     def test_eval_workflow_no_placeholder_in_instruction(self):
-        from google.adk.tools import FunctionTool
         from agents.orchestrator import create_eval_workflow
 
-        def mock_search_book(title: str, author: str = "") -> str:
-            return '{"book_title": "Test"}'
-
-        mock_tool = FunctionTool(mock_search_book)
-        workflow = create_eval_workflow("gemini-2.0-flash", mock_tool)
+        workflow = create_eval_workflow("gemini-2.0-flash")
         book_context = workflow.sub_agents[1]
         assert book_context.name == "book_context_pipeline"
         researcher = book_context.sub_agents[0]
