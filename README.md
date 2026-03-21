@@ -67,23 +67,20 @@ cp .env.example .env
 ### Run
 
 ```bash
-# Basic usage
-python main.py "Gone with the Wind"
-
-# With author (for disambiguation)
-python main.py "The Nightingale" --author "Kristin Hannah"
+# Basic usage (--author is required)
+python main.py "Gone with the Wind" --author "Margaret Mitchell"
 
 # With preferences
-python main.py "Pride and Prejudice" --budget luxury --pace relaxed --museums
+python main.py "Pride and Prejudice" --author "Jane Austen" --budget luxury --pace relaxed --museums
 
 # Family trip
-python main.py "Harry Potter" --with-kids --budget moderate
+python main.py "Harry Potter" --author "J.K. Rowling" --with-kids --budget moderate
 
 # With database persistence and user ID
-python main.py "1984" --database --user-id alice
+python main.py "1984" --author "George Orwell" --database --user-id alice
 
 # Custom timeout (default: 300s)
-python main.py "War and Peace" --timeout 600
+python main.py "War and Peace" --author "Leo Tolstoy" --timeout 600
 
 # FastAPI SSE API server
 make run-api
@@ -157,7 +154,6 @@ flowchart TB
 
 ### Key Components
 
-- **Book Metadata Agent** - Formats pre-confirmed title/author into BookMetadata schema (eval workflow)
 - **Book Context Agent** - Researches setting, themes, and time period
 - **Discovery Agents** - Parallel search for cities, landmarks, and author sites
 - **Region Analyzer** - Groups cities by geographic proximity using LLM world knowledge
@@ -168,14 +164,14 @@ flowchart TB
 
 | Key | Phase | Description |
 |-----|-------|-------------|
-| `book_metadata` | 1 | Exact title, author, description |
-| `book_context` | 2 | Setting, themes, time period |
-| `city_discovery` | 2 | Cities with literary connections |
-| `landmark_discovery` | 2 | Specific landmarks and sites |
-| `author_sites` | 2 | Author-related locations |
-| `region_analysis` | 2 | Geographic region grouping |
+| `book_metadata` | 1 | Exact title and author (from request DTO) |
+| `book_context` | 1 | Setting, themes, time period |
+| `city_discovery` | 1 | Cities with literary connections |
+| `landmark_discovery` | 1 | Specific landmarks and sites |
+| `author_sites` | 1 | Author-related locations |
+| `region_analysis` | 1 | Geographic region grouping |
 | `user:preferences` | All | User travel preferences (persists across sessions) |
-| `final_itinerary` | 3 | Complete travel plan |
+| `final_itinerary` | 2 | Complete travel plan |
 | `job_failed` | All | Terminal failure marker (set on error, cleared on compose retry) |
 
 **Storage:** In-memory (default) or SQLite persistence. Multi-user support with isolated data. See [Configuration](#configuration) for options.
@@ -197,13 +193,13 @@ make run-api   # http://localhost:8080
 # Health check (always open — no secret required)
 curl http://localhost:8080/api/v1/health
 
-# Discover locations (phases 1-2) — streams progress events, returns regions
+# Discover locations (phase 1) — streams progress events, returns regions
 # Add -H "X-Internal-Secret: <value>" if INTERNAL_API_SECRET is set in .env
 curl -N -X POST http://localhost:8080/api/v1/itinerary/discover \
   -H "Content-Type: application/json" \
   -d '{"book_title": "1984", "author": "George Orwell"}'
 
-# Compose itinerary (phase 3) — streams final itinerary
+# Compose itinerary (phase 2) — streams final itinerary
 curl -N -X POST http://localhost:8080/api/v1/itinerary/{job_id}/compose \
   -H "Content-Type: application/json" \
   -d '{"region_ids": [1]}'
@@ -272,7 +268,6 @@ storyland-ai/
 │   └── preferences.py   # Session state preferences tool
 │
 ├── agents/              # AI agent definitions
-│   ├── book_metadata_agent.py    # Book metadata extraction
 │   ├── book_context_agent.py     # Book setting research
 │   ├── discovery_agents.py       # City/landmark/author discovery
 │   ├── trip_composer_agent.py    # Itinerary composition

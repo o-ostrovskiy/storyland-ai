@@ -640,7 +640,8 @@ async def main():
         epilog="""
 Examples:
   python main.py "1984" --author "George Orwell"
-  python main.py "1984" -v --budget luxury
+  python main.py "1984" --author "George Orwell" -v --budget luxury
+  python main.py "Pride and Prejudice" --author "Jane Austen" --pace relaxed
         """,
     )
 
