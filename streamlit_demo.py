@@ -23,10 +23,8 @@ from common.config import load_config
 from common.logging import configure_logging, get_logger
 from common.langfuse_init import initialize_langfuse
 from services.session_service import create_session_service
-from tools.google_books import google_books_tool, search_books_with_retry
-from models.book import BookInfo, BookMetadata
+from models.book import BookMetadata
 from agents.orchestrator import (
-    create_metadata_stage,
     create_discovery_workflow,
     create_composition_workflow,
 )
@@ -605,9 +603,9 @@ def main():
         )
 
         author = st.text_input(
-            "Author (optional)",
+            "Author",
             placeholder="e.g., Jane Austen",
-            help="Providing the author helps find the correct book"
+            help="Author name is required"
         )
 
         st.markdown("---")
@@ -651,83 +649,24 @@ def main():
 
     # Main content area
     if start_button and st.session_state.current_step == 'input':
-        if not book_title:
+        if not book_title or not book_title.strip():
             st.error("Please enter a book title")
             return
-
-        # Phase 1: Search Google Books directly (no LLM needed)
-        with st.spinner("Searching Google Books..."):
-            try:
-                books = search_books_with_retry(
-                    title=book_title, author=author or None
-                )
-            except Exception as e:
-                st.error(f"Could not search Google Books API: {e}")
-                return
-
-        if not books:
-            st.error(
-                f"Could not find \"{book_title}\" in Google Books. "
-                "Please check the title and author spelling and try again."
-            )
+        if not author or not author.strip():
+            st.error("Please enter the author name")
             return
 
-        if len(books) == 1:
-            # Auto-select the only result
-            selected = books[0]
-            author_str = ", ".join(selected.authors) if selected.authors else "Unknown"
-            metadata = BookMetadata(
-                book_title=selected.title,
-                author=author_str,
-                description=selected.description,
-                published_date=selected.published_date,
-                categories=selected.categories or [],
-                image_url=selected.image_url,
-                book_found=True,
-            )
-            st.session_state.selected_book_metadata = metadata.model_dump()
-            st.session_state.current_step = 'run_discovery'
-            st.rerun()
-        else:
-            # Multiple results — let user choose
-            st.session_state.book_search_results = [b.model_dump() for b in books]
-            st.session_state.current_step = 'book_selection'
-            st.rerun()
-
-    # Book selection screen (multiple results)
-    if st.session_state.current_step == 'book_selection' and st.session_state.book_search_results:
-        st.header("Multiple Books Found")
-        st.markdown("Please select which book you meant:")
-
-        books_data = st.session_state.book_search_results
-        options = []
-        for i, b in enumerate(books_data):
-            author_str = ", ".join(b.get("authors", [])) or "Unknown"
-            date_str = f" ({b.get('published_date', '')})" if b.get("published_date") else ""
-            options.append(f"{b.get('title', '?')} by {author_str}{date_str}")
-
-        selected_idx = st.radio(
-            "Select a book:",
-            range(len(options)),
-            format_func=lambda i: options[i],
+        # Trust user-supplied title/author as-is (demo entrypoint;
+        # no external API validation is performed).  book_found=True means
+        # "user confirmed this book", not "verified against an external API".
+        metadata = BookMetadata(
+            book_title=book_title.strip(),
+            author=author.strip(),
+            book_found=True,
         )
-
-        if st.button("Confirm Selection", type="primary"):
-            selected = books_data[selected_idx]
-            author_str = ", ".join(selected.get("authors", [])) or "Unknown"
-            metadata = BookMetadata(
-                book_title=selected.get("title", ""),
-                author=author_str,
-                description=selected.get("description"),
-                published_date=selected.get("published_date"),
-                categories=selected.get("categories", []),
-                image_url=selected.get("image_url"),
-                book_found=True,
-            )
-            st.session_state.selected_book_metadata = metadata.model_dump()
-            st.session_state.current_step = 'run_discovery'
-            st.rerun()
-        return
+        st.session_state.selected_book_metadata = metadata.model_dump()
+        st.session_state.current_step = 'run_discovery'
+        st.rerun()
 
     # Run discovery workflow (after book is selected)
     if st.session_state.current_step == 'run_discovery' and st.session_state.selected_book_metadata:

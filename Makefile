@@ -1,7 +1,7 @@
 # StoryLand AI - Makefile
 # Common commands for development and demo
 
-.PHONY: help install install-dev test test-cov test-agents test-models test-tools test-services test-api test-integration test-integration-live test-integration-vcr-record test-all eval eval-setup eval-run eval-summary eval-report eval-export run run-api run-1984 run-gatsby run-nightingale run-luxury run-family run-verbose run-db run-dev db-reset db-show db-users clean check-env notebook lab
+.PHONY: help install install-dev test test-cov test-agents test-models test-tools test-services test-api test-integration test-integration-live test-integration-vcr-record test-all eval eval-setup eval-run eval-summary eval-report eval-export run run-api run-1984 run-gatsby run-nightingale run-luxury run-family run-verbose run-db db-reset db-show db-users clean check-env notebook lab
 
 # Default target
 help:
@@ -34,7 +34,6 @@ help:
 	@echo "  make run           Run demo (Pride and Prejudice)"
 	@echo "  make run-1984      Run demo (1984 by George Orwell)"
 	@echo "  make run-gatsby    Run demo (The Great Gatsby)"
-	@echo "  make run-dev       Start ADK Web UI"
 	@echo "  make run-verbose   Run with verbose logging"
 	@echo ""
 	@echo "Database:"
@@ -147,8 +146,6 @@ run-verbose:
 run-db:
 	.venv/bin/python main.py "Pride and Prejudice" --author "Jane Austen" --database
 
-run-dev:
-	.venv/bin/python main.py --dev
 
 # =============================================================================
 # Database

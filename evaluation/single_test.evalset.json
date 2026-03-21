@@ -6,14 +6,8 @@
   "eval_cases": [
     {
       "eval_id": "pride_and_prejudice",
-      "conversation": [
-        {
-          "invocation_id": "turn_1",
-          "user_content": {
-            "parts": [{"text": "Create a literary travel itinerary for Pride and Prejudice"}]
-          }
-        }
-      ],
+      "book_title": "Pride and Prejudice",
+      "author": "Jane Austen",
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user",

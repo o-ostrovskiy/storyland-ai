@@ -2,6 +2,8 @@
 
 > Turn your favorite books into meaningful travel experiences
 
+**We're live! Try it at [mystoryland.ai](https://mystoryland.ai/)**
+
 ## Overview
 
 StoryLand AI transforms the worlds within beloved books into real, actionable travel plans. When readers finish a book they love, they often want to explore the places that inspired it—but turning that impulse into reality requires navigating scattered information across countless sources. StoryLand AI solves this by using a multi-agent system that automatically researches, discovers, and composes personalized travel itineraries based on any book.
@@ -65,26 +67,20 @@ cp .env.example .env
 ### Run
 
 ```bash
-# Basic usage
-python main.py "Gone with the Wind"
-
-# With author (for disambiguation)
-python main.py "The Nightingale" --author "Kristin Hannah"
+# Basic usage (--author is required)
+python main.py "Gone with the Wind" --author "Margaret Mitchell"
 
 # With preferences
-python main.py "Pride and Prejudice" --budget luxury --pace relaxed --museums
+python main.py "Pride and Prejudice" --author "Jane Austen" --budget luxury --pace relaxed --museums
 
 # Family trip
-python main.py "Harry Potter" --with-kids --budget moderate
+python main.py "Harry Potter" --author "J.K. Rowling" --with-kids --budget moderate
 
 # With database persistence and user ID
-python main.py "1984" --database --user-id alice
+python main.py "1984" --author "George Orwell" --database --user-id alice
 
 # Custom timeout (default: 300s)
-python main.py "War and Peace" --timeout 600
-
-# Development mode (ADK Web UI)
-python main.py --dev
+python main.py "War and Peace" --author "Leo Tolstoy" --timeout 600
 
 # FastAPI SSE API server
 make run-api
@@ -115,15 +111,15 @@ See [Configuration](#configuration) for environment variables. Run `python main.
 
 ## Architecture
 
-StoryLand AI uses a three-phase workflow with human-in-the-loop region selection:
+StoryLand AI uses a two-phase workflow with human-in-the-loop region selection. Book title and author are pre-confirmed by the upstream service (Backend → storyland-ai):
 
 ```mermaid
 flowchart TB
-    subgraph Phase1["Phase 1: Metadata"]
-        BM[book_metadata_pipeline<br/>📚 Google Books API] --> Extract[Extract exact<br/>title & author]
+    subgraph Input["Input (pre-confirmed)"]
+        DTO[book_title + author<br/>📖 from Backend]
     end
 
-    subgraph Phase2["Phase 2: Discovery"]
+    subgraph Phase1["Phase 1: Discovery"]
         BC[book_context_pipeline<br/>🔍 Setting & themes]
         RP[reader_profile_agent<br/>👤 User preferences]
 
@@ -142,24 +138,22 @@ flowchart TB
         Select[Choose region to explore]
     end
 
-    subgraph Phase3["Phase 3: Composition"]
+    subgraph Phase2["Phase 2: Composition"]
         TC[trip_composer<br/>🗺️ Personalized itinerary]
     end
 
-    Extract --> BC
+    DTO --> BC
     RA --> Select
     Select --> TC
 ```
 
-**Three-phase design:**
-1. **Phase 1 (Metadata)**: Resolves the exact book (handles common titles like "The Nightingale")
-2. **Phase 2 (Discovery)**: Finds all locations and groups them into practical travel regions
-3. **Human Selection**: User chooses which region(s) to explore (prevents impractical multi-continent itineraries)
-4. **Phase 3 (Composition)**: Creates detailed itinerary for selected region(s) only
+**Two-phase design:**
+1. **Phase 1 (Discovery)**: Finds all locations and groups them into practical travel regions
+2. **Human Selection**: User chooses which region(s) to explore (prevents impractical multi-continent itineraries)
+3. **Phase 2 (Composition)**: Creates detailed itinerary for selected region(s) only
 
 ### Key Components
 
-- **Book Metadata Agent** - Extracts book info from Google Books API
 - **Book Context Agent** - Researches setting, themes, and time period
 - **Discovery Agents** - Parallel search for cities, landmarks, and author sites
 - **Region Analyzer** - Groups cities by geographic proximity using LLM world knowledge
@@ -170,14 +164,14 @@ flowchart TB
 
 | Key | Phase | Description |
 |-----|-------|-------------|
-| `book_metadata` | 1 | Exact title, author, description |
-| `book_context` | 2 | Setting, themes, time period |
-| `city_discovery` | 2 | Cities with literary connections |
-| `landmark_discovery` | 2 | Specific landmarks and sites |
-| `author_sites` | 2 | Author-related locations |
-| `region_analysis` | 2 | Geographic region grouping |
+| `book_metadata` | 1 | Exact title and author (from request DTO) |
+| `book_context` | 1 | Setting, themes, time period |
+| `city_discovery` | 1 | Cities with literary connections |
+| `landmark_discovery` | 1 | Specific landmarks and sites |
+| `author_sites` | 1 | Author-related locations |
+| `region_analysis` | 1 | Geographic region grouping |
 | `user:preferences` | All | User travel preferences (persists across sessions) |
-| `final_itinerary` | 3 | Complete travel plan |
+| `final_itinerary` | 2 | Complete travel plan |
 | `job_failed` | All | Terminal failure marker (set on error, cleared on compose retry) |
 
 **Storage:** In-memory (default) or SQLite persistence. Multi-user support with isolated data. See [Configuration](#configuration) for options.
@@ -199,13 +193,13 @@ make run-api   # http://localhost:8080
 # Health check (always open — no secret required)
 curl http://localhost:8080/api/v1/health
 
-# Discover locations (phases 1-2) — streams progress events, returns regions
+# Discover locations (phase 1) — streams progress events, returns regions
 # Add -H "X-Internal-Secret: <value>" if INTERNAL_API_SECRET is set in .env
 curl -N -X POST http://localhost:8080/api/v1/itinerary/discover \
   -H "Content-Type: application/json" \
   -d '{"book_title": "1984", "author": "George Orwell"}'
 
-# Compose itinerary (phase 3) — streams final itinerary
+# Compose itinerary (phase 2) — streams final itinerary
 curl -N -X POST http://localhost:8080/api/v1/itinerary/{job_id}/compose \
   -H "Content-Type: application/json" \
   -d '{"region_ids": [1]}'
@@ -220,10 +214,10 @@ SSE event types: `progress`, `metadata`, `regions`, `itinerary`, `error`, `done`
 
 | Status | Meaning |
 |--------|---------|
-| `searching` | Phase 1 in progress (no data yet) |
-| `discovering` | Book found, Phase 2 in progress |
+| `searching` | Phase 1 (Discovery) in progress |
+| `discovering` | Discovery running, collecting locations |
 | `regions_ready` | Discovery complete, awaiting region selection |
-| `composing` | Phase 3 in progress |
+| `composing` | Phase 2 (Composition) in progress |
 | `completed` | Itinerary ready |
 | `failed` | Terminal error — book not found, timeout, or cancellation (takes priority over all other states) |
 
@@ -270,19 +264,16 @@ storyland-ai/
 │   ├── itinerary.py     # TripItinerary, CityPlan, CityStop
 │   └── preferences.py   # TravelPreferences
 │
-├── tools/               # External API integrations
-│   ├── google_books.py  # Google Books search tool
+├── tools/               # ADK tool integrations
 │   └── preferences.py   # Session state preferences tool
 │
 ├── agents/              # AI agent definitions
-│   ├── book_metadata_agent.py    # Book metadata extraction
 │   ├── book_context_agent.py     # Book setting research
 │   ├── discovery_agents.py       # City/landmark/author discovery
 │   ├── trip_composer_agent.py    # Itinerary composition
 │   ├── reader_profile_agent.py   # Preferences-based personalization
 │   ├── region_analyzer_agent.py  # Geographic region grouping
-│   ├── orchestrator.py           # Three-phase workflow coordination
-│   └── storyland/agent.py        # ADK Web UI agent
+│   ├── orchestrator.py           # Two-phase workflow coordination
 │
 ├── api/                 # FastAPI SSE streaming API
 │   ├── app.py           # Application factory with lifespan
@@ -356,13 +347,13 @@ make test-cov            # With coverage
 | Module | Tests | Description |
 |--------|-------|-------------|
 | `test_models.py` | 46 | Pydantic model validation |
-| `test_tools.py` | 16 | Google Books, preferences tools |
-| `test_agents.py` | 45 | Agent factory functions |
+| `test_tools.py` | 4 | Preferences tool |
+| `test_agents.py` | 32 | Agent factory functions |
 | `test_services.py` | 16 | Session service, context manager |
 | `test_workflow_timeout.py` | 6 | Workflow timeout behavior |
 | `test_llm_scorer.py` | 18 | LLM scoring models and prompts |
 | `test_core.py` | 49 | Events, session state, extraction, regions |
-| `test_api.py` | 68 | API models, endpoints, SSE streaming, failure-status |
+| `test_api.py` | 70 | API models, endpoints, SSE streaming, failure-status |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).
 
@@ -370,11 +361,8 @@ Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay H
 
 | Mode | Logging | Use Case |
 |------|---------|----------|
-| `python main.py --dev` | ADK Web UI (DEBUG) | Development, debugging |
 | `python main.py "book"` | LoggingPlugin (INFO) | Production |
 | `python main.py "book" -v` | LoggingPlugin (DEBUG) | Troubleshooting |
-
-> **Note:** Plugins are NOT supported in ADK web mode.
 
 ## Troubleshooting
 

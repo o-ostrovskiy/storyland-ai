@@ -19,9 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from common.logging import get_logger, configure_logging
 from common.config import load_config
 from services.session_service import create_session_service
-from tools.google_books import google_books_tool
 from agents.orchestrator import (
-    create_metadata_stage,
     create_discovery_workflow,
     create_composition_workflow,
 )
@@ -313,103 +311,13 @@ async def _run_evaluation_case(
         Evaluation result with status "evaluated" on success
     """
     try:
-        # Extract the book query from input
-        text = input_data.get('text') or input_data.get('starting_prompt', '')
-
-        if not text:
-            logger.warning("no_input_text", input_data=input_data)
-            return {"status": "skipped", "reason": "No input text"}
-
-        # Parse book title and author from the text
-        # Supported formats:
-        # Book-focused:
-        # - "Create a literary travel itinerary for Pride and Prejudice"
-        # - "I'd like a travel itinerary based on The Great Gatsby"
-        # - "Plan a family trip based on Harry Potter"
-        # - "I want to visit places from The Da Vinci Code"
-        # Author-focused:
-        # - "I'm interested in visiting places connected to Ernest Hemingway's life and works"
-        # - "I've read all of Agatha Christie's novels. Plan a trip..."
-        # All can optionally include " by AUTHOR"
-        book_title = None
-        author = None
-
-        # First, try to detect author-focused prompts
-        # Pattern: "connected to AUTHOR's", "AUTHOR's novels/works/books", "of AUTHOR's"
-        import re
-
-        # Look for possessive author patterns
-        # Enhanced regex handles: initials (J.K. Rowling), particles (de, van, von), compound names
-        author_name_pattern = r"[A-Z][A-Za-z.]+(?:\s+(?:[a-z]+\s+)?[A-Z][A-Za-z.]+)*"
-        author_patterns = [
-            rf"connected to ({author_name_pattern})'s",  # "connected to Ernest Hemingway's"
-            rf"of ({author_name_pattern})'s",  # "of Agatha Christie's"
-            rf"all of ({author_name_pattern})'s",  # "all of J.K. Rowling's"
-            rf"by ({author_name_pattern})'s",  # "by Miguel de Cervantes's"
-            rf"from ({author_name_pattern})'s",  # "from T.S. Eliot's"
-        ]
-
-        for pattern in author_patterns:
-            match = re.search(pattern, text)
-            if match:
-                author = match.group(1)
-                # For author-focused queries, use author name as book query
-                # The metadata agent will handle this appropriately
-                book_title = f"works by {author}"
-                logger.info(
-                    "author_focused_prompt",
-                    author=author,
-                    original_text=text[:80],
-                )
-                break
-
-        # If not author-focused, try book title patterns
-        if not book_title:
-            # Extract author if present with " by " pattern
-            text_without_author = text
-            if " by " in text:
-                parts = text.split(" by ", 1)
-                if len(parts) == 2:
-                    text_without_author = parts[0]
-                    # Extract author, removing any trailing punctuation/preferences
-                    author_part = parts[1].strip()
-                    # Stop at common sentence boundaries
-                    for boundary in ['.', ',', '!', '?']:
-                        if boundary in author_part:
-                            author_part = author_part.split(boundary)[0]
-                    extracted_author = author_part.strip()
-                    # Only use if it looks like an author name (not a pronoun)
-                    if extracted_author and not extracted_author.lower() in ['her', 'his', 'their', 'my']:
-                        author = extracted_author
-
-            # Try multiple patterns to extract book title
-            patterns = [
-                (" for ", 5),
-                (" based on ", 10),
-                (" from ", 6),
-                (" on ", 4),  # Fallback for shortened "based on"
-            ]
-
-            for pattern, offset in patterns:
-                idx = text_without_author.rfind(pattern)
-                if idx >= 0:
-                    # Extract everything after the pattern until punctuation or preference indicators
-                    remainder = text_without_author[idx + offset:].strip()
-                    # Stop at common sentence boundaries or preference indicators
-                    for boundary in ['.', ',', '!', '?', ' I ', ' We ', ' but ', ' and I', ' and we']:
-                        if boundary in remainder:
-                            remainder = remainder.split(boundary)[0].strip()
-
-                    # Validate that we got a real book title, not a generic pronoun reference
-                    if remainder and remainder.lower() not in ['her books', 'his books', 'their books',
-                                                                'her novels', 'his novels', 'their novels',
-                                                                'her works', 'his works', 'their works']:
-                        book_title = remainder
-                        break
+        # Extract book_title and author directly from input data
+        book_title = input_data.get('book_title', '').strip()
+        author = input_data.get('author', '').strip()
 
         if not book_title:
-            logger.warning("could_not_parse_book_title", input_text=text)
-            return {"status": "skipped", "reason": "Could not parse book title or author from input"}
+            logger.warning("missing_book_title", input_data=input_data)
+            return {"status": "skipped", "reason": "No book_title in input data"}
 
         logger.info(
             "starting_workflow_evaluation",
@@ -473,79 +381,34 @@ async def _run_evaluation_case(
 
         logger.info("eval_session_created", session_id=session_id[:8])
 
-        # Phase 1: Extract book metadata
-        logger.info("eval_phase_1_start", phase="metadata_extraction")
+        # Phase 1: Confirm book metadata from provided title/author (no API lookup needed)
+        logger.info("eval_phase_1_start", phase="metadata_confirmation")
+        root_span.update(metadata={"current_phase": "metadata_confirmation"})
 
-        # Track phase in root_span metadata
-        root_span.update(metadata={"current_phase": "metadata_extraction"})
+        exact_title = book_title
+        exact_author = author or ""
 
-        try:
-            metadata_stage = create_metadata_stage(model, google_books_tool)
-            metadata_runner = Runner(
-                agent=metadata_stage,
-                app_name="storyland",
-                session_service=session_service,
-                plugins=[LoggingPlugin(), langfuse_plugin],
-            )
+        # Store metadata in session state for downstream agents
+        session = await session_service.get_session(
+            app_name="storyland", user_id=user_id, session_id=session_id
+        )
+        session.state["book_metadata"] = {
+            "book_title": exact_title,
+            "author": exact_author,
+        }
 
-            metadata_prompt = f"""Find book metadata for "{book_title}" by {author or 'unknown author'}."""
-            metadata_message = types.Content(role="user", parts=[types.Part(text=metadata_prompt)])
-
-            async with metadata_runner:
-                async for event in metadata_runner.run_async(
-                    user_id=user_id, session_id=session_id, new_message=metadata_message
-                ):
-                    pass
-
-            # Get metadata from session state
-            session = await session_service.get_session(
-                app_name="storyland", user_id=user_id, session_id=session_id
-            )
-            book_metadata = session.state.get("book_metadata", {})
-            exact_title = book_metadata.get("book_title", book_title)
-            exact_author = book_metadata.get("author", author or "Unknown")
-
-            logger.info(
-                "eval_metadata_extracted",
-                exact_title=exact_title,
-                exact_author=exact_author
-            )
-
-            # Update root_span with metadata results
-            root_span.update(
-                metadata={
-                    "phase_1_complete": True,
-                    "book_title": exact_title,
-                    "author": exact_author,
-                }
-            )
-        except Exception as e:
-            logger.warning(
-                "eval_metadata_failed_using_fallback",
-                error=str(e),
-                book_title=book_title,
-            )
-
-            # Update root_span with error info
-            root_span.update(
-                metadata={
-                    "phase_1_error": str(e),
-                    "fallback_used": True,
-                }
-            )
-
-            # Fallback to provided title/author
-            exact_title = book_title
-            exact_author = author or "Unknown"
-
-            # Store basic metadata in session
-            session = await session_service.get_session(
-                app_name="storyland", user_id=user_id, session_id=session_id
-            )
-            session.state["book_metadata"] = {
+        logger.info(
+            "eval_metadata_confirmed",
+            exact_title=exact_title,
+            exact_author=exact_author,
+        )
+        root_span.update(
+            metadata={
+                "phase_1_complete": True,
                 "book_title": exact_title,
                 "author": exact_author,
             }
+        )
 
         # Phase 2: Discovery - find locations and analyze regions
         logger.info("eval_phase_2_start", phase="location_discovery")
@@ -631,7 +494,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
 
         logger.info("eval_selected_regions_stored", region_count=len(selected_regions))
 
-        # Phase 3: Composition - create itinerary
+        # Phase 3 (Composition) - numbering kept in spans for Langfuse compat
         logger.info("eval_phase_3_start", phase="itinerary_composition")
 
         # Update root_span for phase 3
@@ -746,7 +609,7 @@ Include ALL cities from the selected regions in your itinerary."""
                     api_key=config.google_api_key,
                     book_title=exact_title,
                     author=exact_author,
-                    input_text=text,
+                    input_text=book_title,
                     itinerary=itinerary_data,
                     preferences=preferences,
                     model_name="gemini-2.0-flash-lite",
@@ -825,7 +688,7 @@ Include ALL cities from the selected regions in your itinerary."""
             "status": "evaluated",
             "book_title": exact_title,
             "author": exact_author,
-            "input": text,
+            "input": book_title,
             "itinerary_created": itinerary_data is not None,
             "num_cities": len(itinerary_data.get("cities", [])) if itinerary_data else 0,
             "num_regions": len(selected_regions),

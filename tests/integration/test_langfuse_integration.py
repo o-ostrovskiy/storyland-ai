@@ -253,10 +253,7 @@ class TestLangfuseWithRealWorkflow:
     @pytest.mark.vcr()
     @pytest.mark.asyncio
     async def test_book_metadata_workflow_with_langfuse(self):
-        """Test book metadata extraction workflow with Langfuse tracking."""
-        from agents import create_book_metadata_pipeline
-        from tools.google_books import google_books_tool
-
+        """Test a simple agent workflow with Langfuse tracking."""
         # Create plugin (will auto-disable if credentials missing or package unavailable)
         plugin = LangfusePlugin(
             secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
@@ -264,8 +261,13 @@ class TestLangfuseWithRealWorkflow:
             host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
         )
 
-        # Create metadata pipeline
-        pipeline = create_book_metadata_pipeline("gemini-2.0-flash-lite", google_books_tool)
+        # Use a simple agent — this test is about Langfuse plugin integration,
+        # not the specific agent under test.
+        pipeline = LlmAgent(
+            name="book_metadata_pipeline",
+            model="gemini-2.0-flash-lite",
+            instruction="You are a helpful assistant. Respond briefly.",
+        )
 
         # Create session service
         session_service = create_session_service(use_database=False)

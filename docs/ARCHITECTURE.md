@@ -4,23 +4,21 @@ This document explains key design decisions in the StoryLand AI project and the 
 
 ---
 
-## 1. Three-Phase Workflow with Human-in-the-Loop
+## 1. Two-Phase Workflow with Human-in-the-Loop
 
 ### Decision
-Split itinerary generation into three separate workflow phases with human region selection between phases 2 and 3.
+Split itinerary generation into two separate workflow phases with human region selection between phases 1 and 2.
 
 ### Architecture
 ```
-Phase 1: Book Search (direct Google Books API call)
+Input: pre-confirmed book_title + author (DTO from Backend)
     ↓
-Phase 2: Discovery & Region Analysis (LLM agents)
+Phase 1: Discovery & Region Analysis (LLM agents)
     ↓
 [USER SELECTS REGION(S)] ← Human-in-the-Loop
     ↓
-Phase 3: Itinerary Composition (LLM agents)
+Phase 2: Itinerary Composition (LLM agents)
 ```
-
-**Phase 1 implementation note:** The CLI and Streamlit workflows use a **direct Google Books API call** (`search_books_with_retry()` in `tools/google_books.py`) rather than the LLM-based `book_metadata_pipeline`. This is faster and more deterministic — no LLM needed to search a structured API. The LLM pipeline (`create_metadata_stage()` in `orchestrator.py`) is kept for the eval workflow and non-interactive API use.
 
 ### Rationale
 
@@ -43,7 +41,7 @@ Auto-generating itineraries for ALL discovered regions would create:
 Which region(s) would you like to explore? [1/2/3]:
 ```
 
-User selects regions of interest, and Phase 3 only generates itineraries for those regions.
+User selects regions of interest, and Phase 2 only generates itineraries for those regions.
 
 ### Trade-offs
 
@@ -58,11 +56,13 @@ User selects regions of interest, and Phase 3 only generates itineraries for tho
 - Cannot use in eval mode without modification (see ADR #5)
 - Adds UX complexity (users must understand region grouping)
 
+### Note on ADR #12 (Google Books removal)
+Book title and author are now **pre-confirmed inputs** — the Backend service owns the Google Books API lookup and passes the confirmed DTO to this service. storyland-ai no longer performs any book search.
+
 ### Alternatives Considered
 
 1. **Single workflow, auto-select all regions**
    - Rejected: Creates impractical multi-continent itineraries
-   - Used in eval_workflow variant for ADK evals
 
 2. **Post-generation filtering**
    - Rejected: Wastes tokens generating unwanted itineraries
@@ -155,9 +155,10 @@ pipeline = SequentialAgent(sub_agents=[researcher, formatter])
 
 ### Usage Across Codebase
 This pattern appears in:
-- `book_metadata_agent.py` → BookMetadata
 - `book_context_agent.py` → BookContext
 - `discovery_agents.py` → CityDiscovery, LandmarkDiscovery, AuthorSites
+
+**Note:** `book_metadata_agent.py` previously followed this pattern (researcher + formatter). It was later removed entirely when the ADK web UI was dropped (see ADR #12 and #13).
 
 ---
 
@@ -374,24 +375,6 @@ session.state["selected_regions"] = selected_regions  # User's choice
    - Rejected: Doesn't persist across restarts
    - session.state already has in-memory backend option
 
-### Eval Workflow Variant
-
-For ADK evals (no HITL), we use a single workflow with region_analyzer:
-
-```python
-eval_workflow = SequentialAgent(
-    sub_agents=[
-        book_metadata_pipeline,
-        book_context_pipeline,
-        parallel_discovery,
-        region_analyzer,  # Creates regions
-        trip_composer,    # Auto-uses all regions (no selection)
-    ]
-)
-```
-
-Trip composer reads `state["region_analysis"]` directly, no manual selection step.
-
 ---
 
 ## 6. Dual Session Backend (In-Memory vs. SQLite)
@@ -541,22 +524,21 @@ Helps debug WHERE the timeout occurred without detailed logs.
 ## 8. FastAPI SSE Streaming API
 
 ### Decision
-Add a FastAPI HTTP API layer with Server-Sent Events (SSE) streaming for the agent workflow, splitting the three-phase workflow into two streaming endpoints.
+Add a FastAPI HTTP API layer with Server-Sent Events (SSE) streaming for the agent workflow, splitting the two-phase workflow into two streaming endpoints.
 
 ### Architecture
 ```
 Client                          FastAPI Server
   |                                |
-  |-- POST /discover ------------->|  Phase 1: Google Books API
-  |<-- SSE: progress --------------|  Phase 2: Discovery agents
-  |<-- SSE: metadata --------------|
+  |-- POST /discover ------------->|  Phase 1: Discovery agents
+  |<-- SSE: metadata --------------|  (book DTO formatted into BookMetadata)
   |<-- SSE: progress (×N) ---------|
   |<-- SSE: regions ----------------|  ← regions for user selection
   |<-- SSE: done {job_id} ---------|
   |                                |
   |  [user selects regions]        |
   |                                |
-  |-- POST /{job_id}/compose ----->|  Phase 3: Composition agent
+  |-- POST /{job_id}/compose ----->|  Phase 2: Composition agent
   |<-- SSE: progress --------------|
   |<-- SSE: itinerary --------------|
   |<-- SSE: done ------------------|
@@ -564,11 +546,11 @@ Client                          FastAPI Server
 
 ### Rationale
 
-**Problem:** The three-phase workflow takes ~60 seconds. Synchronous HTTP would mean clients wait with no feedback. The human-in-the-loop region selection between phases 2 and 3 doesn't fit a single request-response cycle.
+**Problem:** The two-phase workflow takes ~60 seconds. Synchronous HTTP would mean clients wait with no feedback. The human-in-the-loop region selection between phases 1 and 2 doesn't fit a single request-response cycle.
 
 **Solution:** Two SSE streaming endpoints that mirror the existing HITL pattern:
-1. `/discover` streams phases 1-2, returns regions with a `job_id`
-2. `/compose` accepts the `job_id` + selected region IDs, streams phase 3
+1. `/discover` streams Phase 1 (discovery + region analysis), returns regions with a `job_id`
+2. `/compose` accepts the `job_id` + selected region IDs, streams Phase 2
 
 **Key design decisions:**
 - **Session ID = Job ID:** The ADK session serves as job storage. All intermediate state (metadata, discoveries, regions) persists in `session.state` between the two HTTP calls.
@@ -780,11 +762,63 @@ When a client disconnects, the framework cancels the SSE generator coroutine. On
 
 ---
 
+## 12. Frontend Owns Google Books Lookup; storyland-ai Accepts Pre-Confirmed DTO
+
+### Decision
+Remove the Google Books API integration from storyland-ai. The system architecture is `Frontend → Backend → storyland-ai`. The Backend service now owns book discovery (Google Books API). It passes a pre-confirmed `book_title` + `author` DTO to storyland-ai after the user selects a book. storyland-ai treats these as authoritative inputs.
+
+### Architecture Before
+```
+storyland-ai: POST /discover { book_title: "1984" }
+    → search Google Books API → select best match → extract exact title/author
+    → Phase 2: Discovery agents
+```
+
+### Architecture After
+```
+Frontend: user searches for book
+Backend: calls Google Books API, user confirms book
+storyland-ai: POST /discover { book_title: "1984", author: "George Orwell" }
+    → both fields required; no search step
+    → Phase 1: Discovery agents
+```
+
+### Rationale
+
+**Problem:** storyland-ai was performing its own Google Books API lookup as Phase 1. This created:
+- A duplicate search (Backend already owns the book-selection UX and calls Google Books)
+- A dependency on `GOOGLE_BOOKS_API_KEY` in storyland-ai's config
+- A complex multi-step Phase 1 (search → select best match → extract metadata)
+- Fragile behavior when Book API returned no results or ambiguous matches
+
+**Solution:** Move book selection entirely to the Backend service. storyland-ai receives a pre-confirmed DTO and proceeds directly to discovery.
+
+### Changes
+- `tools/google_books.py` — deleted
+- `core/executor.py` — Phase 1 replaced with direct `BookMetadata` construction
+- `api/models.py` — `author` field made required (both `book_title` and `author` required)
+- `agents/book_metadata_agent.py` — deleted (no longer needed; see ADR #13)
+- CLI (`main.py`) — `--author` made required argument
+- Streamlit (`streamlit_demo.py`) — author field required, book-selection screen removed
+
+### Trade-offs
+
+**Benefits:**
+- **Separation of concerns:** storyland-ai focuses on itinerary generation; Backend handles book discovery
+- **Simpler code:** Removes ~300 lines of Google Books integration, retry logic, and ambiguity handling
+- **Faster workflows:** Phase 1 (book search) is eliminated from storyland-ai's processing time
+- **No API key dependency:** `GOOGLE_BOOKS_API_KEY` no longer needed in storyland-ai config
+
+**Costs:**
+- **Caller must provide both fields:** Any client calling storyland-ai directly (e.g. CLI, tests) must supply both `book_title` and `author` — there is no fallback lookup
+
+---
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
 |---------|---------|-----------|
-| **Three-phase HITL** | User control, practical itineraries | Not fully autonomous |
+| **Two-phase HITL** | User control, practical itineraries | Not fully autonomous |
 | **Two-stage pipelines** | Anti-hallucination, type safety | 2x LLM calls |
 | **Parallel discovery** | 3x speedup | Rate limit risk |
 | **Exponential backoff** | Reliability on rate limits | Potential long waits |
