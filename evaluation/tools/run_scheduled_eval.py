@@ -612,7 +612,7 @@ Include ALL cities from the selected regions in your itinerary."""
                     input_text=book_title,
                     itinerary=itinerary_data,
                     preferences=preferences,
-                    model_name="gemini-2.0-flash-lite",
+                    model_name="gemini-3.1-flash-lite-preview",
                     langfuse_trace_id=trace_id,
                     langfuse_client=langfuse_plugin.client,
                 )

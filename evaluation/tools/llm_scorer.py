@@ -191,14 +191,14 @@ async def score_itinerary(
     input_text: str,
     itinerary: Dict[str, Any],
     preferences: Optional[Dict[str, Any]] = None,
-    model_name: str = "gemini-2.0-flash-lite",
+    model_name: str = "gemini-3.1-flash-lite-preview",
     langfuse_trace_id: Optional[str] = None,
     langfuse_client: Optional[Any] = None,
 ) -> ItineraryScores:
     """
     Score an itinerary using LLM-as-judge with structured output.
 
-    This function uses Gemini 2.0 Flash Lite to evaluate a travel itinerary across
+    This function uses Gemini to evaluate a travel itinerary across
     6 quality dimensions: book relevance, preference adherence, completeness,
     actionability, geographical accuracy, and engagement.
 
@@ -209,7 +209,7 @@ async def score_itinerary(
         input_text: Original user input/prompt that generated the itinerary
         itinerary: Generated itinerary data (dict)
         preferences: User preferences used for itinerary generation (optional)
-        model_name: Gemini model to use for scoring (default: gemini-2.0-flash-lite)
+        model_name: Gemini model to use for scoring (default: gemini-3.1-flash-lite-preview)
         langfuse_trace_id: Optional Langfuse trace ID for execution tracing
         langfuse_client: Optional Langfuse client for creating observations
 
@@ -277,7 +277,6 @@ async def score_itinerary(
 
         # Call model requesting JSON output in prompt
         # Note: Using simple prompt-based JSON request instead of response_schema
-        # due to API compatibility issues with gemini-2.0-flash-lite
         json_instruction = """
 
 Respond with ONLY a valid JSON object (no markdown, no explanation) with these exact fields:
