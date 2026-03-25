@@ -50,7 +50,7 @@ jobs:
           echo "USE_DATABASE=false" >> .env
           echo "SESSION_MAX_EVENTS=20" >> .env
           echo "MAX_CONTEXT_TOKENS=30000" >> .env
-          echo "MODEL_NAME=gemini-3.1-flash-lite-preview" >> .env
+          echo "MODEL_NAME=gemini-2.5-flash" >> .env
           echo "WORKFLOW_TIMEOUT=300" >> .env
           echo "AGENT_TIMEOUT=60" >> .env
           echo "LOG_LEVEL=INFO" >> .env

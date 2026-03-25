@@ -191,7 +191,7 @@ async def score_itinerary(
     input_text: str,
     itinerary: Dict[str, Any],
     preferences: Optional[Dict[str, Any]] = None,
-    model_name: str = "gemini-3.1-flash-lite-preview",
+    model_name: str = "gemini-2.5-flash",
     langfuse_trace_id: Optional[str] = None,
     langfuse_client: Optional[Any] = None,
 ) -> ItineraryScores:
@@ -209,7 +209,7 @@ async def score_itinerary(
         input_text: Original user input/prompt that generated the itinerary
         itinerary: Generated itinerary data (dict)
         preferences: User preferences used for itinerary generation (optional)
-        model_name: Gemini model to use for scoring (default: gemini-3.1-flash-lite-preview)
+        model_name: Gemini model to use for scoring (default: gemini-2.5-flash)
         langfuse_trace_id: Optional Langfuse trace ID for execution tracing
         langfuse_client: Optional Langfuse client for creating observations
 
