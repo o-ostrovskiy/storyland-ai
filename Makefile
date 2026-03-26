@@ -105,7 +105,7 @@ eval-setup-one:
 	@echo "✅ Dataset registered. View at your Langfuse dashboard."
 
 eval-run:
-	.venv/bin/python evaluation/tools/run_scheduled_eval.py --output-dir evaluation/results --max-cases 10
+	PYTHONIOENCODING=utf-8 .venv/bin/python evaluation/tools/run_scheduled_eval.py --output-dir evaluation/results --max-cases 10
 
 eval-summary:
 	.venv/bin/python evaluation/tools/eval_dashboard.py --action summary --days 7

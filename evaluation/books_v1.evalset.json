@@ -6,16 +6,8 @@
   "eval_cases": [
     {
       "eval_id": "query_011",
-      "book": {
-        "title": "The Lord of the Rings",
-        "author": "J.R.R. Tolkien",
-        "genre": "Fantasy",
-        "year": 1954
-      },
-      "conversation_scenario": {
-        "starting_prompt": "Plan an adventure trip based on The Lord of the Rings by J.R.R. Tolkien. I love hiking and outdoor experiences.",
-        "conversation_plan": "Request an adventure itinerary for The Lord of the Rings. Verify New Zealand filming locations (Hobbiton/Matamata, Tongariro National Park, Queenstown) and UK Tolkien biography sites (Oxford) are included. Confirm hiking trails with difficulty ratings and outdoor activities are specified at each stop. Ask about Hobbiton booking requirements and seasonal hiking advice if not mentioned. End the conversation when a satisfactory itinerary with film locations, hiking trails, and author biography sites is provided with practical outdoor adventure details."
-      },
+      "book_title": "The Lord of the Rings",
+      "author": "J.R.R. Tolkien",
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user",
@@ -96,16 +88,8 @@
     },
     {
       "eval_id": "query_012",
-      "book": {
-        "title": "The Long Walk",
-        "author": "Stephen King",
-        "genre": "Dystopian Horror",
-        "year": 1979
-      },
-      "conversation_scenario": {
-        "starting_prompt": "I want to visit real locations connected to The Long Walk by Stephen King.",
-        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
-      },
+      "book_title": "The Long Walk",
+      "author": "Stephen King",
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user",
@@ -174,16 +158,8 @@
     },
     {
       "eval_id": "query_013",
-      "book": {
-        "title": "The Expanse",
-        "author": "James S. A. Corey",
-        "genre": "Science Fiction",
-        "year": 2011
-      },
-      "conversation_scenario": {
-        "starting_prompt": "Create a travel itinerary inspired by The Expanse series. I know it's mostly set in space — I'm curious about any real Earth locations or author connections.",
-        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
-      },
+      "book_title": "Leviathan Wakes",
+      "author": "James S. A. Corey",
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user",
@@ -232,6 +208,12 @@
               "Space Center Houston",
               "Rocket Park"
             ]
+          },
+          {
+            "city": "Baltimore",
+            "country": "USA",
+            "description": "Maryland city with strong connections to The Expanse's themes of urban decay and resilience",
+            "must_visit": []
           }
         ],
         "themes": [
@@ -253,16 +235,8 @@
     },
     {
       "eval_id": "query_014",
-      "book": {
-        "title": "Red, White & Royal Blue",
-        "author": "Casey McQuiston",
-        "genre": "Contemporary Romance",
-        "year": 2019
-      },
-      "conversation_scenario": {
-        "starting_prompt": "Plan a romantic trip for two inspired by Red, White & Royal Blue by Casey McQuiston. We love history, architecture, and finding hidden gem cafés.",
-        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
-      },
+      "book_title": "Red, White & Royal Blue",
+      "author": "Casey McQuiston",
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user",
@@ -339,16 +313,8 @@
     },
     {
       "eval_id": "query_015",
-      "book": {
-        "title": "One Hundred Years of Solitude",
-        "author": "Gabriel García Márquez",
-        "genre": "Magical Realism",
-        "year": 1967
-      },
-      "conversation_scenario": {
-        "starting_prompt": "I want to explore Colombia through the lens of One Hundred Years of Solitude by Gabriel García Márquez. I'm travelling on a budget.",
-        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
-      },
+      "book_title": "One Hundred Years of Solitude",
+      "author": "Gabriel García Márquez",
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user",
@@ -419,16 +385,8 @@
     },
     {
       "eval_id": "query_016",
-      "book": {
-        "title": "The Kite Runner",
-        "author": "Khaled Hosseini",
-        "genre": "Contemporary Fiction",
-        "year": 2003
-      },
-      "conversation_scenario": {
-        "starting_prompt": "Create an itinerary based on The Kite Runner by Khaled Hosseini. I'm interested in both the Afghan cultural heritage and the San Francisco Bay Area connections.",
-        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
-      },
+      "book_title": "The Kite Runner",
+      "author": "Khaled Hosseini",
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user",
@@ -498,16 +456,8 @@
     },
     {
       "eval_id": "query_017",
-      "book": {
-        "title": "Crime and Punishment",
-        "author": "Fyodor Dostoevsky",
-        "genre": "Classic Literature",
-        "year": 1866
-      },
-      "conversation_scenario": {
-        "starting_prompt": "I'm planning a solo academic trip following Crime and Punishment by Dostoevsky through St. Petersburg.",
-        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
-      },
+      "book_title": "Crime and Punishment",
+      "author": "Fyodor Dostoevsky",
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user",
@@ -559,16 +509,8 @@
     },
     {
       "eval_id": "query_018",
-      "book": {
-        "title": "Wild",
-        "author": "Cheryl Strayed",
-        "genre": "Adventure Memoir",
-        "year": 2012
-      },
-      "conversation_scenario": {
-        "starting_prompt": "Plan a trip inspired by Wild by Cheryl Strayed. I want to hike sections of the Pacific Crest Trail solo.",
-        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
-      },
+      "book_title": "Wild",
+      "author": "Cheryl Strayed",
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user",
@@ -648,16 +590,8 @@
     },
     {
       "eval_id": "query_019",
-      "book": {
-        "title": "Dracula",
-        "author": "Bram Stoker",
-        "genre": "Gothic Horror",
-        "year": 1897
-      },
-      "conversation_scenario": {
-        "starting_prompt": "I want to do a Dracula-themed trip based on Bram Stoker's novel. Moderate budget, and I'm travelling with an elderly parent who has limited mobility.",
-        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
-      },
+      "book_title": "Dracula",
+      "author": "Bram Stoker",
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user",
@@ -729,16 +663,8 @@
     },
     {
       "eval_id": "query_020",
-      "book": {
-        "title": "Shogun",
-        "author": "James Clavell",
-        "genre": "Historical Fiction",
-        "year": 1975
-      },
-      "conversation_scenario": {
-        "starting_prompt": "Plan a luxury trip inspired by Shogun by James Clavell. I want to experience feudal Japan's atmosphere through castles and traditional culture.",
-        "conversation_plan": "Single-turn: user sends the query, agent responds with itinerary."
-      },
+      "book_title": "Shogun",
+      "author": "James Clavell",
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user",
