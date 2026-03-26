@@ -198,8 +198,11 @@ async def score_itinerary(
     input_text: str,
     itinerary: Dict[str, Any],
     preferences: Optional[Dict[str, Any]] = None,
+<<<<<<< 129-evaluation-pipeline-enhancements
     quality_criteria: Optional[Dict[str, str]] = None,
     expected_output: Optional[Dict[str, Any]] = None,
+=======
+>>>>>>> main
     model_name: str = "gemini-2.5-flash",
     langfuse_trace_id: Optional[str] = None,
     langfuse_client: Optional[Any] = None,
