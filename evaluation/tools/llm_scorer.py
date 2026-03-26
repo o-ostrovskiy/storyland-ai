@@ -120,6 +120,8 @@ def _build_scoring_prompt(
     input_text: str,
     itinerary: Dict[str, Any],
     preferences: Optional[Dict[str, Any]] = None,
+    quality_criteria: Optional[Dict[str, str]] = None,
+    expected_output: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Build the scoring prompt for LLM-as-judge evaluation.
@@ -143,27 +145,33 @@ def _build_scoring_prompt(
     # Format itinerary for display
     itinerary_json = json.dumps(itinerary, indent=2)
 
+    # Format expected output section (only when provided)
+    if expected_output:
+        reference_section = f"**REFERENCE OUTPUT** (use this as benchmark when scoring):\n{json.dumps(expected_output, indent=2)}\n"
+    else:
+        reference_section = ""
+
+    def _criterion_block(key: str, number: int, label: str) -> str:
+        block = f"**{number}. {label} (1-5)**\n{SCORING_CRITERIA[key]}"
+        if quality_criteria and quality_criteria.get(key):
+            block += f"\n\nBook-specific requirement: {quality_criteria[key]}"
+        return block
+
     prompt = f"""Evaluate this travel itinerary for "{book_title}" by {author}.
 
 Rate each dimension on a 1-5 scale based on the criteria below:
 
-**1. BOOK_RELEVANCE (1-5)**
-{SCORING_CRITERIA['book_relevance']}
+{_criterion_block('book_relevance', 1, 'BOOK_RELEVANCE')}
 
-**2. PREFERENCE_ADHERENCE (1-5)**
-{SCORING_CRITERIA['preference_adherence']}
+{_criterion_block('preference_adherence', 2, 'PREFERENCE_ADHERENCE')}
 
-**3. COMPLETENESS (1-5)**
-{SCORING_CRITERIA['completeness']}
+{_criterion_block('completeness', 3, 'COMPLETENESS')}
 
-**4. ACTIONABILITY (1-5)**
-{SCORING_CRITERIA['actionability']}
+{_criterion_block('actionability', 4, 'ACTIONABILITY')}
 
-**5. GEOGRAPHICAL_ACCURACY (1-5)**
-{SCORING_CRITERIA['geographical_accuracy']}
+{_criterion_block('geographical_accuracy', 5, 'GEOGRAPHICAL_ACCURACY')}
 
-**6. ENGAGEMENT (1-5)**
-{SCORING_CRITERIA['engagement']}
+{_criterion_block('engagement', 6, 'ENGAGEMENT')}
 
 ---
 
@@ -172,8 +180,7 @@ Rate each dimension on a 1-5 scale based on the criteria below:
 
 **USER PREFERENCES**:
 {preferences_json}
-
-**GENERATED ITINERARY**:
+{reference_section}**GENERATED ITINERARY**:
 {itinerary_json}
 
 ---
@@ -191,6 +198,8 @@ async def score_itinerary(
     input_text: str,
     itinerary: Dict[str, Any],
     preferences: Optional[Dict[str, Any]] = None,
+    quality_criteria: Optional[Dict[str, str]] = None,
+    expected_output: Optional[Dict[str, Any]] = None,
     model_name: str = "gemini-2.5-flash",
     langfuse_trace_id: Optional[str] = None,
     langfuse_client: Optional[Any] = None,
@@ -233,13 +242,28 @@ async def score_itinerary(
         input_text=input_text,
         itinerary=itinerary,
         preferences=preferences,
+        quality_criteria=quality_criteria,
+        expected_output=expected_output,
     )
 
     logger.debug(
         "llm_scoring_prompt_built",
         prompt_length=len(prompt),
         has_preferences=preferences is not None,
+        has_quality_criteria=quality_criteria is not None,
+        quality_criteria_keys=list(quality_criteria.keys()) if quality_criteria else [],
+        has_expected_output=expected_output is not None,
     )
+
+    if quality_criteria:
+        missing_keys = sorted(set(SCORING_CRITERIA.keys()) - set(quality_criteria.keys()))
+        if missing_keys:
+            logger.warning(
+                "quality_criteria_partial",
+                book_title=book_title,
+                missing_keys=missing_keys,
+                message="These dimensions will use generic scoring criteria",
+            )
 
     # Create Langfuse generation for execution tracing
     generation_id = None
@@ -277,6 +301,7 @@ async def score_itinerary(
 
         # Call model requesting JSON output in prompt
         # Note: Using simple prompt-based JSON request instead of response_schema
+        # due to API compatibility issues with gemini-2.5-flash-lite
         json_instruction = """
 
 Respond with ONLY a valid JSON object (no markdown, no explanation) with these exact fields:

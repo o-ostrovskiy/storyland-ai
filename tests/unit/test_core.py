@@ -26,6 +26,7 @@ from core.extraction import (
     extract_itinerary_from_response,
 )
 from core.regions import get_valid_region_ids, validate_region_selection
+from evaluation.tools.run_scheduled_eval import select_first_region, select_all_regions
 
 
 # =============================================================================
@@ -468,3 +469,50 @@ class TestValidateRegionSelection:
         selected, invalid = validate_region_selection([1, 99], all_regions)
         assert selected == []
         assert invalid == [99]
+
+
+# =============================================================================
+# Eval Runner Region Selection
+# =============================================================================
+
+
+class TestSelectFirstRegion:
+    def test_returns_first_region(self):
+        region_analysis = {
+            "regions": [
+                {"region_id": 1, "region_name": "England"},
+                {"region_id": 2, "region_name": "Scotland"},
+                {"region_id": 3, "region_name": "Wales"},
+            ]
+        }
+        result = select_first_region(region_analysis)
+        assert len(result) == 1
+        assert result[0]["region_name"] == "England"
+
+    def test_empty_regions(self):
+        assert select_first_region({"regions": []}) == []
+
+    def test_missing_regions_key(self):
+        assert select_first_region({}) == []
+
+
+class TestSelectAllRegions:
+    def test_returns_all_regions(self):
+        regions = [
+            {"region_id": 1, "region_name": "England"},
+            {"region_id": 2, "region_name": "Scotland"},
+            {"region_id": 3, "region_name": "Wales"},
+        ]
+        result = select_all_regions({"regions": regions})
+        assert result == regions
+
+    def test_single_region(self):
+        regions = [{"region_id": 1, "region_name": "England"}]
+        result = select_all_regions({"regions": regions})
+        assert len(result) == 1
+
+    def test_empty_regions(self):
+        assert select_all_regions({"regions": []}) == []
+
+    def test_missing_regions_key(self):
+        assert select_all_regions({}) == []

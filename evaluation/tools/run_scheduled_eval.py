@@ -75,10 +75,40 @@ def select_first_region(region_analysis: Dict[str, Any]) -> List[Dict[str, Any]]
     return selected
 
 
+def select_all_regions(region_analysis: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Automated region selection for evaluation mode — selects all regions.
+
+    Returns all discovered regions so the composer builds a complete
+    multi-region itinerary.
+
+    Args:
+        region_analysis: Region analysis dict from discovery workflow
+
+    Returns:
+        List of all regions, or empty list if none found
+    """
+    regions = region_analysis.get("regions", [])
+
+    if not regions:
+        logger.warning("no_regions_found_for_selection")
+        return []
+
+    logger.info(
+        "automated_all_regions_selected",
+        total_regions=len(regions),
+        region_names=[r.get("region_name", "Unknown") for r in regions],
+    )
+
+    return regions
+
+
 async def run_evaluation_on_dataset(
     dataset_name: str,
     config: Any,
     max_cases: int = 10,
+    region_selection: str = "all",
+    item_ids: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Run evaluation on a Langfuse dataset.
@@ -87,6 +117,7 @@ async def run_evaluation_on_dataset(
         dataset_name: Name of the Langfuse dataset
         config: Application configuration
         max_cases: Maximum number of test cases to evaluate
+        item_ids: If provided, only evaluate items with these IDs
 
     Returns:
         Evaluation results summary
@@ -138,7 +169,9 @@ async def run_evaluation_on_dataset(
             "evaluated_cases": 0,
         }
 
-    # Limit to max_cases for actual evaluation
+    # Filter to specific item IDs if provided, then limit to max_cases
+    if item_ids:
+        items = [item for item in items if item.id in item_ids]
     items_to_evaluate = items[:max_cases]
     total_cases = len(items_to_evaluate)  # Actual attempted count, not full dataset size
     evaluated_cases = 0  # Real workflow evaluations only
@@ -193,6 +226,7 @@ async def run_evaluation_on_dataset(
                     item_metadata=item_metadata,
                     config=config,
                     root_span=root_span,
+                    region_selection=region_selection,
                 )
 
                 # Log execution type for observability
@@ -290,6 +324,7 @@ async def _run_evaluation_case(
     item_metadata: Dict[str, Any],
     config: Any,
     root_span: Any,
+    region_selection: str = "all",
 ) -> Dict[str, Any]:
     """
     Run evaluation for a single test case.
@@ -297,8 +332,8 @@ async def _run_evaluation_case(
     Executes the full StoryLand workflow:
     1. Metadata extraction - identify book and author
     2. Discovery - find locations and group into travel regions
-    3. Automated region selection - Issue #97 (select first region)
-    4. Composition - create itinerary for selected region
+    3. Automated region selection - Issue #97 (select first/all regions)
+    4. Composition - create itinerary for selected region(s)
 
     Args:
         input_data: Input from dataset item
@@ -352,8 +387,9 @@ async def _run_evaluation_case(
         )
 
         # Create session with initial state
-        # Extract session_input from metadata (includes user preferences)
+        # Extract session_input and quality_criteria from metadata
         session_input = item_metadata.get("session_input", {})
+        quality_criteria = item_metadata.get("quality_criteria")
         user_id = session_input.get("user_id", "eval_user")
 
         session_id = str(uuid.uuid4())
@@ -403,6 +439,11 @@ async def _run_evaluation_case(
             exact_author=exact_author,
         )
         root_span.update(
+            input={
+                "book_title": exact_title,
+                "author": exact_author,
+                "preferences": item_metadata.get("session_input", {}).get("state", {}).get("user:preferences", {}),
+            },
             metadata={
                 "phase_1_complete": True,
                 "book_title": exact_title,
@@ -473,8 +514,11 @@ Find cities, landmarks, and author-related sites, then group them into practical
             raise
 
         # Automated region selection (Issue #97)
-        logger.info("eval_region_selection", mode="automated")
-        selected_regions = select_first_region(region_analysis)
+        logger.info("eval_region_selection", mode="automated", strategy=region_selection)
+        if region_selection == "all":
+            selected_regions = select_all_regions(region_analysis)
+        else:
+            selected_regions = select_first_region(region_analysis)
 
         if not selected_regions:
             error_msg = "No regions available to create an itinerary"
@@ -556,6 +600,7 @@ Include ALL cities from the selected regions in your itinerary."""
 
             # Update root_span with composition results
             root_span.update(
+                output=itinerary_data,
                 metadata={
                     "phase_3_complete": True,
                     "itinerary_created": itinerary_data is not None,
@@ -612,6 +657,8 @@ Include ALL cities from the selected regions in your itinerary."""
                     input_text=book_title,
                     itinerary=itinerary_data,
                     preferences=preferences,
+                    quality_criteria=quality_criteria,
+                    expected_output=expected_output,
                     model_name="gemini-2.5-flash",
                     langfuse_trace_id=trace_id,
                     langfuse_client=langfuse_plugin.client,
@@ -710,6 +757,8 @@ async def run_all_evaluations(
     output_dir: str = "evaluation/results",
     max_cases_per_dataset: int = 10,
     dataset_names: Optional[List[str]] = None,
+    region_selection: str = "all",
+    item_ids: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Run evaluations on specified or all available datasets.
@@ -782,6 +831,8 @@ async def run_all_evaluations(
                 dataset_name=dataset_name,
                 config=config,
                 max_cases=max_cases_per_dataset,
+                region_selection=region_selection,
+                item_ids=item_ids,
             )
             results.append(result)
         except Exception as e:
@@ -838,6 +889,17 @@ def main():
         help='Specific datasets to evaluate (e.g., single_test storyland_eval). '
              'If not specified, evaluates all configured datasets.',
     )
+    parser.add_argument(
+        '--region-selection',
+        choices=['first', 'all'],
+        default='all',
+        help="Region selection strategy: 'first' (single region) or 'all' (all regions). Default: all",
+    )
+    parser.add_argument(
+        '--item-ids',
+        nargs='+',
+        help='Specific item IDs to evaluate (e.g., query_013 query_014). Evaluates all items if not specified.',
+    )
 
     args = parser.parse_args()
 
@@ -847,6 +909,8 @@ def main():
             output_dir=args.output_dir,
             max_cases_per_dataset=args.max_cases,
             dataset_names=args.datasets,
+            region_selection=args.region_selection,
+            item_ids=args.item_ids,
         )
     )
 

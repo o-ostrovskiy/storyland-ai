@@ -1,7 +1,7 @@
 # StoryLand AI - Makefile
 # Common commands for development and demo
 
-.PHONY: help install install-dev test test-cov test-agents test-models test-tools test-services test-api test-integration test-integration-live test-integration-vcr-record test-all eval eval-setup eval-run eval-summary eval-report eval-export run run-api run-1984 run-gatsby run-nightingale run-luxury run-family run-verbose run-db db-reset db-show db-users clean check-env notebook lab
+.PHONY: help install install-dev test test-cov test-agents test-models test-tools test-services test-api test-integration test-integration-live test-integration-vcr-record test-all eval eval-setup eval-setup-one eval-run eval-summary eval-report eval-export run run-api run-1984 run-gatsby run-nightingale run-luxury run-family run-verbose run-db run-dev db-reset db-show db-users clean check-env notebook lab
 
 # Default target
 help:
@@ -24,7 +24,8 @@ help:
 	@echo "  make eval          Run ADK evaluation (single test)"
 	@echo ""
 	@echo "Evaluation (Langfuse):"
-	@echo "  make eval-setup    Create Langfuse datasets from evalsets"
+	@echo "  make eval-setup              Create Langfuse datasets from all evalsets"
+	@echo "  make eval-setup-one EVALSET_FILE=<path>  Register a single evalset file"
 	@echo "  make eval-run      Run scheduled evaluations"
 	@echo "  make eval-report   Generate evaluation trend report"
 	@echo "  make eval-summary  Show evaluation summary"
@@ -99,8 +100,12 @@ eval-setup:
 	.venv/bin/python evaluation/tools/langfuse_eval.py --create-datasets --evalset-dir evaluation
 	@echo "✅ Langfuse datasets created. View at your Langfuse dashboard."
 
+eval-setup-one:
+	.venv/bin/python evaluation/tools/langfuse_eval.py --create-datasets --evalset-file $(EVALSET_FILE)
+	@echo "✅ Dataset registered. View at your Langfuse dashboard."
+
 eval-run:
-	.venv/bin/python evaluation/tools/run_scheduled_eval.py --output-dir evaluation/results --max-cases 10
+	PYTHONIOENCODING=utf-8 .venv/bin/python evaluation/tools/run_scheduled_eval.py --output-dir evaluation/results --max-cases 10
 
 eval-summary:
 	.venv/bin/python evaluation/tools/eval_dashboard.py --action summary --days 7
