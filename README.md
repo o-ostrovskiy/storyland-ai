@@ -225,7 +225,7 @@ Failed jobs can be retried by calling `/compose` again with the same `job_id`; t
 
 ### AI Models
 
-StoryLand AI uses Google Gemini models (default: `gemini-2.5-flash`) for all agents, chosen for native ADK integration, fast parallel execution (sub-2s response times), and excellent structured output adherence across 16 Pydantic data models. The complete workflow takes 60-100 seconds end-to-end with parallel discovery providing 3x speedup over sequential execution.
+StoryLand AI uses Google Gemini models (default: `gemini-2.5-flash-lite`) for all agents, chosen for native ADK integration, fast parallel execution (sub-2s response times), and excellent structured output adherence across 16 Pydantic data models. The complete workflow takes 60-100 seconds end-to-end with parallel discovery providing 3x speedup over sequential execution.
 
 ## Configuration
 
@@ -234,7 +234,7 @@ All configuration is via environment variables in `.env`. Copy `.env.example` to
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `GOOGLE_API_KEY` | **Required.** Google AI API key from [AI Studio](https://aistudio.google.com/app/apikey) | — |
-| `MODEL_NAME` | Gemini model to use | `gemini-2.5-flash` |
+| `MODEL_NAME` | Gemini model to use | `gemini-2.5-flash-lite` |
 | `USE_DATABASE` | Enable SQLite persistence | `false` |
 | `DATABASE_URL` | SQLite database path | `sqlite+aiosqlite:///storyland_sessions.db` |
 | `SESSION_MAX_EVENTS` | Max events in session | `20` |

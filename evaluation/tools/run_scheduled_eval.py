@@ -8,6 +8,7 @@ for tracking quality over time. Designed to be run via cron or GitHub Actions.
 import os
 import sys
 import json
+import time
 import asyncio
 from datetime import datetime
 from pathlib import Path
@@ -109,6 +110,8 @@ async def run_evaluation_on_dataset(
     max_cases: int = 10,
     region_selection: str = "all",
     item_ids: Optional[List[str]] = None,
+    start_time: Optional[float] = None,
+    timeout_seconds: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Run evaluation on a Langfuse dataset.
@@ -198,6 +201,21 @@ async def run_evaluation_on_dataset(
 
     # Evaluate each dataset item
     for item in items_to_evaluate:
+        # Check remaining budget before starting each case
+        if start_time is not None and timeout_seconds is not None:
+            elapsed = time.monotonic() - start_time
+            remaining = timeout_seconds - elapsed
+            if remaining < 120:  # 2-minute safety margin per case
+                logger.warning(
+                    "timeout_budget_nearly_exhausted",
+                    dataset_name=dataset_name,
+                    item_id=item.id,
+                    elapsed_seconds=round(elapsed),
+                    remaining_seconds=round(remaining),
+                    message="Skipping remaining cases to exit gracefully",
+                )
+                break
+
         try:
             # Extract input from dataset item
             input_data = item.input
@@ -659,7 +677,7 @@ Include ALL cities from the selected regions in your itinerary."""
                     preferences=preferences,
                     quality_criteria=quality_criteria,
                     expected_output=expected_output,
-                    model_name="gemini-2.5-flash",
+                    model_name="gemini-2.5-flash-lite",
                     langfuse_trace_id=trace_id,
                     langfuse_client=langfuse_plugin.client,
                 )
@@ -759,6 +777,7 @@ async def run_all_evaluations(
     dataset_names: Optional[List[str]] = None,
     region_selection: str = "all",
     item_ids: Optional[List[str]] = None,
+    timeout_minutes: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """
     Run evaluations on specified or all available datasets.
@@ -824,8 +843,31 @@ async def run_all_evaluations(
             datasets = ["single_test", "storyland_eval"]
             logger.info("using_default_datasets", datasets=datasets)
 
+    start_time = time.monotonic()
+    timeout_seconds = timeout_minutes * 60 if timeout_minutes is not None else None
+
+    if timeout_seconds is not None:
+        logger.info(
+            "timeout_budget_set",
+            timeout_minutes=timeout_minutes,
+        )
+
     results = []
     for dataset_name in datasets:
+        # Check remaining budget before starting each dataset
+        if timeout_seconds is not None:
+            elapsed = time.monotonic() - start_time
+            remaining = timeout_seconds - elapsed
+            if remaining < 120:  # 2-minute safety margin
+                logger.warning(
+                    "timeout_budget_exhausted",
+                    elapsed_seconds=round(elapsed),
+                    remaining_seconds=round(remaining),
+                    skipping_datasets=datasets[datasets.index(dataset_name):],
+                    message="Skipping remaining datasets to exit gracefully",
+                )
+                break
+
         try:
             result = await run_evaluation_on_dataset(
                 dataset_name=dataset_name,
@@ -833,6 +875,8 @@ async def run_all_evaluations(
                 max_cases=max_cases_per_dataset,
                 region_selection=region_selection,
                 item_ids=item_ids,
+                start_time=start_time,
+                timeout_seconds=timeout_seconds,
             )
             results.append(result)
         except Exception as e:
@@ -900,6 +944,13 @@ def main():
         nargs='+',
         help='Specific item IDs to evaluate (e.g., query_013 query_014). Evaluates all items if not specified.',
     )
+    parser.add_argument(
+        '--timeout-minutes',
+        type=float,
+        default=None,
+        help='Maximum total runtime in minutes. Script exits gracefully before this limit, '
+             'saving results for all completed cases.',
+    )
 
     args = parser.parse_args()
 
@@ -911,6 +962,7 @@ def main():
             dataset_names=args.datasets,
             region_selection=args.region_selection,
             item_ids=args.item_ids,
+            timeout_minutes=args.timeout_minutes,
         )
     )
 

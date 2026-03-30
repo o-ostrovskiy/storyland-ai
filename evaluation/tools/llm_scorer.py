@@ -200,7 +200,7 @@ async def score_itinerary(
     preferences: Optional[Dict[str, Any]] = None,
     quality_criteria: Optional[Dict[str, str]] = None,
     expected_output: Optional[Dict[str, Any]] = None,
-    model_name: str = "gemini-2.5-flash",
+    model_name: str = "gemini-2.5-flash-lite",
     langfuse_trace_id: Optional[str] = None,
     langfuse_client: Optional[Any] = None,
 ) -> ItineraryScores:
@@ -218,7 +218,7 @@ async def score_itinerary(
         input_text: Original user input/prompt that generated the itinerary
         itinerary: Generated itinerary data (dict)
         preferences: User preferences used for itinerary generation (optional)
-        model_name: Gemini model to use for scoring (default: gemini-2.5-flash)
+        model_name: Gemini model to use for scoring (default: gemini-2.5-flash-lite)
         langfuse_trace_id: Optional Langfuse trace ID for execution tracing
         langfuse_client: Optional Langfuse client for creating observations
 
@@ -301,7 +301,7 @@ async def score_itinerary(
 
         # Call model requesting JSON output in prompt
         # Note: Using simple prompt-based JSON request instead of response_schema
-        # due to API compatibility issues with gemini-2.5-flash-lite
+        # for broader model compatibility
         json_instruction = """
 
 Respond with ONLY a valid JSON object (no markdown, no explanation) with these exact fields:
