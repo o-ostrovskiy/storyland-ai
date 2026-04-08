@@ -49,6 +49,11 @@ Look for user preferences from the reader_profile_agent output in the conversati
 
 If no preferences found, use defaults: moderate budget, balanced pace, museum-friendly.
 
+**ENFORCEMENT:** For EVERY stop you include, verify it matches the budget level before writing it.
+- budget: note free entry or low-cost option in the notes field
+- luxury: note a premium/exclusive tier option (private tour, after-hours access, etc.)
+After drafting the full itinerary, run a self-check: does each stop reflect the user's stated pace and budget? Remove or swap any stops that don't fit.
+
 ## Step 3: Review Discovery Information
 
 Review the information from the conversation history (filtered by selected region if applicable):
@@ -71,6 +76,11 @@ Create a TripItinerary that RESPECTS user preferences:
 - "moderate": 3-4 stops per day, balanced schedule
 - "fast-paced": 5+ stops per day, efficient routing, packed schedule
 
+**Days per city (pace mapping):**
+- Relaxed: 3 days for a major city, 2 days for a smaller one
+- Moderate: 2 days for a major city, 1-2 days for a smaller one
+- Fast-paced: 1-2 days regardless of city size
+
 **Other preferences:**
 - If prefers_museums=true: Prioritize museum visits, literary archives
 - If prefers_museums=false: Focus on outdoor sites, cafes, walking tours
@@ -90,12 +100,15 @@ Create a TripItinerary that RESPECTS user preferences:
    - name: Exact name of the place
    - type: "museum", "landmark", "cafe", "bookstore", "monument", "filming_location", etc.
    - reason: 1-2 sentences explaining WHY this matters for the book
-   - address: REQUIRED. Street address or location description (e.g., "221B Baker Street, London" or "Piazza della Signoria, Florence"). Always provide at least the landmark name and city/country (e.g., "Jane Austen's House Museum, Chawton, Hampshire, England"). Only leave null for completely fictional locations with no real-world counterpart.
+   - address: Always provide the most specific address you can. Minimum: full landmark name + district/neighbourhood + city + country (e.g., "Jane Austen's House Museum, Chawton, Hampshire, England"). Street-level address is preferred when known (e.g., "221B Baker Street, Marylebone, London, England"). Only leave null for completely fictional locations with no real-world counterpart.
    - filming_scene: If this location was used in a film/TV adaptation, describe the SPECIFIC scene or sequence filmed there (e.g., "The 1995 BBC adaptation filmed the Pemberley exterior scenes here" or "The opening chase sequence from the 2005 film was shot on these steps"). Set to null if not a filming location.
    - time_of_day: "morning", "afternoon", "evening", or "full_day"
    - notes: Practical tip (include budget-appropriate suggestions)
 
-4. Write a summary_text: 3-4 sentences capturing the essence of the journey, mentioning how it's tailored to their preferences.
+4. Write a summary_text: 3-4 sentences capturing the essence of the journey. Explicitly mention one preference that shaped the trip (e.g., "With a relaxed pace in mind…" or "For the budget-conscious traveller…" or "Tailored for a fast-paced adventure…").
+
+**Non-urban settings (trails, wilderness, road trips):**
+For books set on hiking trails, in wilderness, or on road trips (e.g., Pacific Crest Trail, Route 66, remote countryside): do NOT force an urban itinerary. Instead, create CityPlan entries using the nearest gateway town or trailhead town as the name, and list trailheads, scenic overlooks, rest stops, and local cafés as CityStop entries. Use type "scenic_stop" or "route_point" for non-urban locations.
 
 Make it inspiring, actionable, and personalized.
 

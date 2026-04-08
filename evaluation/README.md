@@ -90,6 +90,10 @@ Evaluations run automatically via GitHub Actions:
 
 Manual trigger: Go to Actions tab → Scheduled Evaluation → Run workflow
 
+### Prompt Versioning
+
+Use `--prompt-version <label>` to tag a run in Langfuse before merging a prompt change. Compare against previous runs by filtering on `prompt_version` in the Langfuse Runs view. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](PROMPT_CHANGELOG.md).
+
 ## Token & Cost Tracking (Langfuse Plugin)
 
 ### Features

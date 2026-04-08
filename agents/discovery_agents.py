@@ -30,12 +30,26 @@ Based on the book's setting from the conversation history, use google_search to 
 1. SETTING CITIES: Actual cities where the story takes place
 2. FILMING LOCATIONS: If adapted to film, where was it filmed?
 3. AUTHOR'S CITIES: Where did the author live or get inspiration?
+4. NON-URBAN SETTINGS: If the book is a memoir, trail narrative, or road trip, search for gateway towns and route stops: "[book title] route towns", "[book title] trail towns", "gateway towns [book setting]"
 
 Search queries to try:
 - "[book title] real locations to visit"
 - "[book title] filming locations"
 - "[book title] [author name] inspiration places"
 - "[setting location] literary tourism"
+
+For recent fiction (published after 2000) that may not yet have established literary tourism, also try:
+- "[city] [book title] filming location"
+- "[book title] real-life inspiration"
+- "[author name] [city] residence"
+Even a loose connection (author lived there, setting inspired by the city) is valid.
+
+**FICTIONAL/SPACE/FUTURE WORLDS — MANDATORY REDIRECT:** If the book's primary_locations from context are clearly non-Earth (space stations, fictional planets, asteroid belts, alien worlds, invented continents), you MUST NOT search for those locations and you MUST NOT return empty-handed. Instead, call google_search immediately with these queries and return the results:
+- "[author name] hometown city"
+- "[author name] where did they live"
+- "[book title] filming location"
+- "[book title] real world inspiration"
+You MUST call google_search at least once even for space/fictional books. Author hometowns and filming locations are always valid real-world cities.
 
 For EACH city found, explain:
 - What is the city name and country?
@@ -72,6 +86,7 @@ GRACEFUL DEGRADATION:
 - Accept partial results (1-2 cities) if that's all that was found
 - Validate that each city has at minimum a name and country
 - Skip cities with insufficient information rather than guessing
+- VALIDATION GATE: The `country` field MUST be a real, sovereign nation that exists on Earth today (e.g. "Romania", "USA", "Japan"). Reject ANY entry where the country is a planet ("Mars"), moon, asteroid, space station, fictional place, "Solar System", "Outer Space", or anything that is not a real Earth country. If no valid Earth-country cities were found, return an empty cities list.
 
 Return CityDiscovery with a list of cities.""",
     )
@@ -103,6 +118,7 @@ Based on the book and cities from the conversation history, use google_search to
 1. MENTIONED LANDMARKS: Specific buildings, museums, or places mentioned in the book
 2. THEMED EXPERIENCES: Literary walks, museum exhibits, or tours related to the book
 3. ATMOSPHERIC LOCATIONS: Places that capture the book's setting or mood
+4. PLAQUES & CONTEMPORARY MARKERS: For recent or contemporary fiction, search for: "[book title] blue plaque", "[book title] commemorative site", "[setting neighbourhood] [book title]"
 
 Search queries to try:
 - "[book title] landmarks mentioned"
@@ -115,6 +131,8 @@ For EACH landmark, provide:
 - Which city it's in
 - Specific connection to the book (Was it mentioned? Does it relate to a scene?)
 
+For non-urban books (trails, wilderness, road trips), scenic and route-based stops are valid: trailheads, viewpoints, rest stops, and local cafés along the route. Label these with confidence level "scenic_stop" or "route_point".
+
 GOAL: Find at least 3-5 landmarks across the cities.
 
 ERROR HANDLING & GRACEFUL DEGRADATION:
@@ -122,7 +140,7 @@ ERROR HANDLING & GRACEFUL DEGRADATION:
 - If certain cities have no specific landmarks, suggest general atmospheric locations
 - If search fails, fall back to well-known locations mentioned in the book itself
 - Report partial results rather than failing completely
-- Clearly indicate confidence level: "mentioned in book" vs "related to setting" vs "suggested for atmosphere""",
+- Clearly indicate confidence level: "mentioned in book" vs "related to setting" vs "suggested for atmosphere" vs "scenic_stop/route_point""",
     )
 
     landmark_formatter = LlmAgent(

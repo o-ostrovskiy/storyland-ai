@@ -112,6 +112,7 @@ async def run_evaluation_on_dataset(
     item_ids: Optional[List[str]] = None,
     start_time: Optional[float] = None,
     timeout_seconds: Optional[float] = None,
+    prompt_version: str = "v2",
 ) -> Dict[str, Any]:
     """
     Run evaluation on a Langfuse dataset.
@@ -192,11 +193,12 @@ async def run_evaluation_on_dataset(
     )
 
     # Create run name for this evaluation batch
-    run_name = f"eval_run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_name = f"eval_run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{prompt_version}"
     run_metadata = {
         "dataset_name": dataset_name,
         "evaluation_type": "scheduled",
         "max_cases": max_cases,
+        "prompt_version": prompt_version,
     }
 
     # Evaluate each dataset item
@@ -235,6 +237,7 @@ async def run_evaluation_on_dataset(
                 run_description=f"Scheduled evaluation of {dataset_name}",
                 run_metadata=run_metadata,
             ) as root_span:
+                root_span.update(metadata={"prompt_version": prompt_version})
                 # Run the StoryLand workflow
                 # Note: This is a simplified evaluation - full workflow requires human interaction
                 # For automated evaluation, we would need to mock region selection
@@ -778,6 +781,7 @@ async def run_all_evaluations(
     region_selection: str = "all",
     item_ids: Optional[List[str]] = None,
     timeout_minutes: Optional[float] = None,
+    prompt_version: str = "v2",
 ) -> List[Dict[str, Any]]:
     """
     Run evaluations on specified or all available datasets.
@@ -877,6 +881,7 @@ async def run_all_evaluations(
                 item_ids=item_ids,
                 start_time=start_time,
                 timeout_seconds=timeout_seconds,
+                prompt_version=prompt_version,
             )
             results.append(result)
         except Exception as e:
@@ -951,6 +956,12 @@ def main():
         help='Maximum total runtime in minutes. Script exits gracefully before this limit, '
              'saving results for all completed cases.',
     )
+    parser.add_argument(
+        '--prompt-version',
+        default='v2',
+        help='Prompt version label for A/B comparison in Langfuse (e.g. v2, v3). '
+             'Included in the run name and metadata so runs can be filtered by version.',
+    )
 
     args = parser.parse_args()
 
@@ -963,6 +974,7 @@ def main():
             region_selection=args.region_selection,
             item_ids=args.item_ids,
             timeout_minutes=args.timeout_minutes,
+            prompt_version=args.prompt_version,
         )
     )
 
