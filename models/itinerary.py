@@ -4,7 +4,7 @@ Itinerary-related Pydantic models.
 Contains models for the final travel itinerary, including city plans and stops.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 
 
@@ -40,6 +40,11 @@ class CityPlan(BaseModel):
     days_suggested: int = Field(
         description="Suggested number of days to spend", ge=1, le=7
     )
+
+    @field_validator("days_suggested", mode="before")
+    @classmethod
+    def coerce_days_to_int(cls, v: object) -> int:
+        return round(float(v))
     overview: str = Field(description="Brief overview of what to expect in this city")
     stops: List[CityStop] = Field(description="Places to visit in this city")
 
