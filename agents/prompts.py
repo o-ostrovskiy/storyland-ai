@@ -16,7 +16,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_PROMPTS_VERSION = "v2"
+CURRENT_PROMPT_VERSION = "v2"
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _cache: dict[str, "AgentPrompts"] = {}
@@ -37,7 +37,7 @@ class AgentPrompts:
     region_analyzer: str
 
 
-def load_prompts(version: str = DEFAULT_PROMPTS_VERSION) -> AgentPrompts:
+def load_prompts(version: str = CURRENT_PROMPT_VERSION) -> AgentPrompts:
     """
     Load agent prompts for a given version from agents/prompts/{version}.json.
 
@@ -45,7 +45,7 @@ def load_prompts(version: str = DEFAULT_PROMPTS_VERSION) -> AgentPrompts:
 
     Args:
         version: Prompt version identifier, e.g. "v1", "v2". Defaults to
-                 DEFAULT_PROMPTS_VERSION ("v2").
+                 CURRENT_PROMPT_VERSION ("v2").
 
     Returns:
         AgentPrompts dataclass with all agent instruction strings.

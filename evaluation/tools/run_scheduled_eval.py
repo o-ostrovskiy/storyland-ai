@@ -24,7 +24,7 @@ from agents.orchestrator import (
     create_discovery_workflow,
     create_composition_workflow,
 )
-from agents.prompts import load_prompts
+from agents.prompts import load_prompts, CURRENT_PROMPT_VERSION
 from google.adk.models.google_llm import Gemini
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
@@ -113,7 +113,7 @@ async def run_evaluation_on_dataset(
     item_ids: Optional[List[str]] = None,
     start_time: Optional[float] = None,
     timeout_seconds: Optional[float] = None,
-    prompt_version: str = "v2",
+    prompt_version: str = CURRENT_PROMPT_VERSION,
 ) -> Dict[str, Any]:
     """
     Run evaluation on a Langfuse dataset.
@@ -787,7 +787,7 @@ async def run_all_evaluations(
     region_selection: str = "all",
     item_ids: Optional[List[str]] = None,
     timeout_minutes: Optional[float] = None,
-    prompt_version: str = "v2",
+    prompt_version: str = CURRENT_PROMPT_VERSION,
 ) -> List[Dict[str, Any]]:
     """
     Run evaluations on specified or all available datasets.
@@ -964,7 +964,7 @@ def main():
     )
     parser.add_argument(
         '--prompt-version',
-        default='v2',
+        default=CURRENT_PROMPT_VERSION,
         help='Prompt version label for A/B comparison in Langfuse (e.g. v2, v3). '
              'Included in the run name and metadata so runs can be filtered by version.',
     )

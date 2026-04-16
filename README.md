@@ -339,12 +339,12 @@ Agent prompts include reliability improvements:
 - **Error handling:** `"If the tool returns an error, report it clearly and explain what went wrong"`
 - **Disambiguation:** Book title and author injected into search queries to avoid confusion with similarly-named books
 
-**Versioned prompts** — all agent instructions live in `agents/prompts/v2.json` (and `v1.json` for history). To add a new prompt version, create `agents/prompts/v3.json` and pass `--prompt-version v3` to the eval runner. The default version (`v2`) is set in `agents/prompts.py`. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md).
+**Versioned prompts** — all agent instructions live in `agents/prompts/v2.json` (and `v1.json` for history). To add a new prompt version, create `agents/prompts/v3.json` and pass `--prompt-version v3` to the eval runner. The current version (`v2`) is controlled by `CURRENT_PROMPT_VERSION` in `agents/prompts.py`. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md).
 
 ## Testing
 
 ```bash
-make test                # Unit tests (264 tests)
+make test                # Unit tests (254 tests)
 make test-integration    # Integration tests with VCR cassettes
 make test-all            # Both
 make test-cov            # With coverage
