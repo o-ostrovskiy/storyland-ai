@@ -24,6 +24,7 @@ from agents.orchestrator import (
     create_discovery_workflow,
     create_composition_workflow,
 )
+from agents.prompts import load_prompts
 from google.adk.models.google_llm import Gemini
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
@@ -192,6 +193,9 @@ async def run_evaluation_on_dataset(
         max_cases=max_cases,
     )
 
+    # Load prompt set for this run
+    prompts = load_prompts(prompt_version)
+
     # Create run name for this evaluation batch
     run_name = f"eval_run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{prompt_version}"
     run_metadata = {
@@ -248,6 +252,7 @@ async def run_evaluation_on_dataset(
                     config=config,
                     root_span=root_span,
                     region_selection=region_selection,
+                    prompts=prompts,
                 )
 
                 # Log execution type for observability
@@ -346,6 +351,7 @@ async def _run_evaluation_case(
     config: Any,
     root_span: Any,
     region_selection: str = "all",
+    prompts=None,
 ) -> Dict[str, Any]:
     """
     Run evaluation for a single test case.
@@ -480,7 +486,7 @@ async def _run_evaluation_case(
 
         try:
             discovery_workflow = create_discovery_workflow(
-                model, book_title=exact_title, author=exact_author
+                model, book_title=exact_title, author=exact_author, prompts=prompts
             )
             discovery_runner = Runner(
                 agent=discovery_workflow,
@@ -572,7 +578,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
         )
 
         try:
-            composition_workflow = create_composition_workflow(model)
+            composition_workflow = create_composition_workflow(model, prompts=prompts)
             composition_runner = Runner(
                 agent=composition_workflow,
                 app_name="storyland",

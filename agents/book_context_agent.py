@@ -7,9 +7,16 @@ using Google Search.
 
 from google.adk.agents import LlmAgent, SequentialAgent
 from models.book import BookContext
+from agents.prompts import AgentPrompts, load_prompts
 
 
-def create_book_context_pipeline(model, google_search_tool, book_title: str = "", author: str = ""):
+def create_book_context_pipeline(
+    model,
+    google_search_tool,
+    book_title: str = "",
+    author: str = "",
+    prompts: AgentPrompts | None = None,
+):
     """
     Create the book context research pipeline.
 
@@ -18,10 +25,14 @@ def create_book_context_pipeline(model, google_search_tool, book_title: str = ""
         google_search_tool: The Google Search tool
         book_title: The exact book title from book_metadata (optional for eval workflow)
         author: The exact author name from book_metadata (optional for eval workflow)
+        prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
         SequentialAgent that researches and formats book context
     """
+    if prompts is None:
+        prompts = load_prompts()
+
     # When title is known at creation time, bake it in.
     # Otherwise (eval workflow), instruct the agent to read from prior context.
     normalized_title = (book_title or "").strip()
@@ -55,25 +66,9 @@ def create_book_context_pipeline(model, google_search_tool, book_title: str = ""
         name="book_context_researcher",
         model=model,
         tools=[google_search_tool],
-        instruction=f"""You are a literary research specialist. Research the book's setting and themes.
-
-{book_ref}
-
-Use google_search to find:
-1. PRIMARY LOCATIONS: Where does the story take place? (cities, countries, regions)
-2. TIME PERIOD: When does it take place? (specific year, era, or historical period)
-3. MAIN THEMES: What are the central themes? (war, love, survival, etc.)
-
-{search_hint}
-
-Provide detailed findings with specific locations and time periods.
-
-ERROR HANDLING & GRACEFUL DEGRADATION:
-- If search returns limited results, report what you found
-- If certain aspects (location, time, themes) are unclear, note this explicitly
-- If search fails, acknowledge the error and provide any context you can infer
-- Prioritize factual information over completeness
-- Clearly distinguish verified facts from inferences""",
+        instruction=prompts.book_context_researcher.format(
+            book_ref=book_ref, search_hint=search_hint
+        ),
     )
 
     book_context_formatter = LlmAgent(
@@ -81,23 +76,7 @@ ERROR HANDLING & GRACEFUL DEGRADATION:
         model=model,
         output_schema=BookContext,
         output_key="book_context",
-        instruction="""Format the research into a validated BookContext object.
-
-IMPORTANT:
-- If the research found no context information, return empty lists/null fields - do not hallucinate
-- Include only information actually found in the research results
-- Accept partial information if complete context is unavailable
-
-Extract:
-- primary_locations: List of specific locations (cities, countries, regions)
-- time_period: The historical era or specific timeframe
-- themes: List of main themes from the book
-
-GRACEFUL DEGRADATION:
-- If locations are unclear, use broader regions (e.g., "Europe" instead of specific city)
-- If time period is unknown, leave as null rather than guessing
-- Accept any number of themes (even 1-2 if that's all that was found)
-- Be specific and factual with what information IS available""",
+        instruction=prompts.book_context_formatter,
     )
 
     return SequentialAgent(
