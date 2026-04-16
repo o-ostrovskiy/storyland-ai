@@ -20,6 +20,7 @@ from agents import (
     create_discovery_workflow,
     create_composition_workflow,
 )
+from agents.prompts import load_prompts, AgentPrompts
 
 
 # =============================================================================
@@ -373,3 +374,26 @@ class TestBookContextDynamicInstruction:
         )
         researcher = pipeline.sub_agents[0]
         assert '"[Pygmalion]" by George Bernard Shaw' in researcher.instruction
+
+
+# =============================================================================
+# Prompt Loader Tests
+# =============================================================================
+
+class TestLoadPrompts:
+    """Tests for the versioned prompt loader."""
+
+    def test_load_prompts_default_returns_agent_prompts(self):
+        """load_prompts() with no args returns an AgentPrompts instance."""
+        prompts = load_prompts()
+        assert isinstance(prompts, AgentPrompts)
+        assert prompts.trip_composer  # non-empty string
+
+    def test_load_prompts_caches_same_object(self):
+        """Repeated calls for the same version return the identical cached object."""
+        assert load_prompts("v2") is load_prompts("v2")
+
+    def test_load_prompts_missing_version_raises(self):
+        """Requesting a non-existent version raises FileNotFoundError."""
+        with pytest.raises(FileNotFoundError, match="v99"):
+            load_prompts("v99")
