@@ -24,7 +24,7 @@ from agents.orchestrator import (
     create_discovery_workflow,
     create_composition_workflow,
 )
-from agents.prompts import load_prompts, CURRENT_PROMPT_VERSION
+from agents.prompts import load_prompts, CURRENT_PROMPT_VERSION, AgentPrompts
 from google.adk.models.google_llm import Gemini
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
@@ -351,7 +351,7 @@ async def _run_evaluation_case(
     config: Any,
     root_span: Any,
     region_selection: str = "all",
-    prompts=None,
+    prompts: AgentPrompts | None = None,
 ) -> Dict[str, Any]:
     """
     Run evaluation for a single test case.

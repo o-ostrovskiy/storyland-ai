@@ -4,6 +4,34 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 
 ---
 
+## v2-patch — 2026-04-16
+
+**Branch:** #63 (same PR, post-review fixes)
+
+### Motivation
+
+Code review of the v2 prompt changes revealed three layered failures for non-urban books (trail memoirs, wilderness narratives):
+
+1. **Label silently dropped** — `landmark_researcher` was told to label stops as `scenic_stop`/`route_point`, but `LandmarkInfo` had no field to store the label; it was discarded by the formatter
+2. **Required `city` blocked valid stops** — trailheads, viewpoints, and rest stops have no city; the formatter either rejected them or the LLM hallucinated a city to satisfy the required field
+3. **Validation gate over-broad** — `city_formatter` gate used "sovereign nation" as the exclusion criterion, which would also reject England, Scotland, Wales, Hong Kong, and other valid travel destinations
+
+### Changes
+
+| Component | File | Change |
+|---|---|---|
+| `LandmarkInfo` schema | `models/discovery.py` | `city` made `Optional[str]`; added `region: Optional[str]` for non-urban area descriptions; added `landmark_type: Optional[str]` for scenic_stop/route_point labels |
+| `landmark_formatter` | `agents/prompts/v2.json` | Updated to populate `landmark_type` from researcher labels; allows null `city` with `region` as fallback; validation gate now accepts name + connection + (city OR region) |
+| `city_formatter` | `agents/prompts/v2.json` | Validation gate rewritten: blocks non-Earth fictional locations only (planets, asteroid belts, invented worlds). Explicitly allows constituent countries (England, Scotland, Wales), territories (Hong Kong, Puerto Rico), and regional names (Catalonia, Provence) |
+
+### Impact
+
+- *Leviathan Wakes* fix from v2 preserved: "Mars" and "The Asteroid Belt" still blocked
+- *Dracula* fix improved: "England" (Whitby/London) no longer at risk of rejection
+- *Wild* (PCT memoir) non-urban stops can now flow through discovery → composition without hallucinated cities
+
+---
+
 ## v2 — 2026-04-08
 
 **Merged PR:** #63

@@ -22,7 +22,7 @@ _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _cache: dict[str, "AgentPrompts"] = {}
 
 
-@dataclass
+@dataclass(frozen=True)
 class AgentPrompts:
     trip_composer: str
     city_researcher: str
