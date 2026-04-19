@@ -6,9 +6,10 @@ Reads user preferences from session state to personalize travel itineraries.
 
 from google.adk.agents import LlmAgent
 from tools.preferences import get_preferences_tool
+from agents.prompts import AgentPrompts, load_prompts
 
 
-def create_reader_profile_agent(model):
+def create_reader_profile_agent(model, prompts: AgentPrompts | None = None):
     """
     Create the reader profile agent.
 
@@ -17,38 +18,17 @@ def create_reader_profile_agent(model):
 
     Args:
         model: The LLM model to use
+        prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
         LlmAgent that reads preferences and provides personalization context
     """
+    if prompts is None:
+        prompts = load_prompts()
     return LlmAgent(
         name="reader_profile_agent",
         model=model,
         output_key="reader_profile",
         tools=[get_preferences_tool],
-        instruction="""You are a reader profile specialist focused on personalization.
-
-FIRST, call the get_user_preferences tool to retrieve user preferences from session state.
-
-The preferences may include:
-- budget: "budget", "moderate", or "luxury"
-- preferred_pace: "relaxed", "moderate", or "fast-paced"
-- prefers_museums: true/false
-- travels_with_kids: true/false
-- favorite_genres: list of genres
-
-Based on the tool response, provide a summary for the trip composer:
-
-1. If preferences exist (found=true), summarize them clearly:
-   "User prefers [budget] budget, [pace] pace, [does/doesn't] like museums..."
-
-2. If no preferences found (found=false), state:
-   "No user preferences found. Using defaults: moderate budget, balanced pace, museum-friendly."
-
-Keep your response concise - just summarize the preferences for the trip composer to use.
-
-ERROR HANDLING:
-- If the preferences tool fails or returns an error, gracefully default to standard preferences
-- Acknowledge any tool errors but continue with defaults rather than failing
-- If preferences are partially available, use what you have and note what's missing""",
+        instruction=prompts.reader_profile,
     )

@@ -6,7 +6,7 @@ the research phase of itinerary creation.
 """
 
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 
 
 class CityInfo(BaseModel):
@@ -27,8 +27,19 @@ class LandmarkInfo(BaseModel):
     """Information about a landmark"""
 
     name: str = Field(description="Landmark or place name")
-    city: str = Field(description="City where landmark is located")
+    city: Optional[str] = Field(
+        default=None,
+        description="City where landmark is located. Null for non-urban stops (trailheads, scenic overlooks, route stops)."
+    )
+    region: Optional[str] = Field(
+        default=None,
+        description="Region or area for non-urban stops (e.g., 'Sierra Nevada, California', 'Pacific Crest Trail, Section C')."
+    )
     connection: str = Field(description="How this landmark relates to the book")
+    landmark_type: Optional[str] = Field(
+        default=None,
+        description="Type of stop: 'mentioned in book', 'related to setting', 'suggested for atmosphere', 'scenic_stop', 'route_point'."
+    )
 
 
 class LandmarkDiscovery(BaseModel):

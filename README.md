@@ -274,6 +274,10 @@ storyland-ai/
 │   ├── reader_profile_agent.py   # Preferences-based personalization
 │   ├── region_analyzer_agent.py  # Geographic region grouping
 │   ├── orchestrator.py           # Two-phase workflow coordination
+│   ├── prompts.py                # AgentPrompts dataclass + versioned loader
+│   └── prompts/                  # Versioned prompt sets
+│       ├── v1.json               # Original prompts (git ref 4c6fdc9)
+│       └── v2.json               # Current prompts (PR #63)
 │
 ├── api/                 # FastAPI SSE streaming API
 │   ├── app.py           # Application factory with lifespan
@@ -335,10 +339,12 @@ Agent prompts include reliability improvements:
 - **Error handling:** `"If the tool returns an error, report it clearly and explain what went wrong"`
 - **Disambiguation:** Book title and author injected into search queries to avoid confusion with similarly-named books
 
+**Versioned prompts** — all agent instructions live in `agents/prompts/v2.json` (and `v1.json` for history). To add a new prompt version, create `agents/prompts/v3.json` and pass `--prompt-version v3` to the eval runner. The current version (`v2`) is controlled by `CURRENT_PROMPT_VERSION` in `agents/prompts.py`. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md).
+
 ## Testing
 
 ```bash
-make test                # Unit tests (264 tests)
+make test                # Unit tests (254 tests)
 make test-integration    # Integration tests with VCR cassettes
 make test-all            # Both
 make test-cov            # With coverage

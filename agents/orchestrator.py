@@ -31,9 +31,15 @@ from .discovery_agents import (
 from .trip_composer_agent import create_trip_composer_agent
 from .reader_profile_agent import create_reader_profile_agent
 from .region_analyzer_agent import create_region_analyzer_agent
+from .prompts import AgentPrompts, load_prompts
 
 
-def create_discovery_workflow(model, book_title: str, author: str):
+def create_discovery_workflow(
+    model,
+    book_title: str,
+    author: str,
+    prompts: AgentPrompts | None = None,
+):
     """
     Create the discovery workflow that finds locations and analyzes regions.
 
@@ -55,21 +61,25 @@ def create_discovery_workflow(model, book_title: str, author: str):
         model: The LLM model to use
         book_title: Exact book title (pre-confirmed by caller)
         author: Exact author name (pre-confirmed by caller)
+        prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
         SequentialAgent orchestrating the discovery workflow
     """
+    if prompts is None:
+        prompts = load_prompts()
+
     # Create pipelines with exact book info
     book_context_pipeline = create_book_context_pipeline(
-        model, google_search, book_title=book_title, author=author
+        model, google_search, book_title=book_title, author=author, prompts=prompts
     )
 
-    city_pipeline = create_city_pipeline(model, google_search)
-    landmark_pipeline = create_landmark_pipeline(model, google_search)
-    author_pipeline = create_author_pipeline(model, google_search)
+    city_pipeline = create_city_pipeline(model, google_search, prompts=prompts)
+    landmark_pipeline = create_landmark_pipeline(model, google_search, prompts=prompts)
+    author_pipeline = create_author_pipeline(model, google_search, prompts=prompts)
 
-    reader_profile = create_reader_profile_agent(model)
-    region_analyzer = create_region_analyzer_agent(model)
+    reader_profile = create_reader_profile_agent(model, prompts=prompts)
+    region_analyzer = create_region_analyzer_agent(model, prompts=prompts)
 
     # Create parallel discovery agent for concurrent execution
     # WHY PARALLEL: Running city/landmark/author agents concurrently provides 3x speedup
@@ -98,7 +108,7 @@ def create_discovery_workflow(model, book_title: str, author: str):
     )
 
 
-def create_composition_workflow(model):
+def create_composition_workflow(model, prompts: AgentPrompts | None = None):
     """
     Create the composition workflow that generates the final itinerary.
 
@@ -111,15 +121,17 @@ def create_composition_workflow(model):
 
     Args:
         model: The LLM model to use
+        prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
         SequentialAgent orchestrating the composition workflow
     """
-    trip_composer = create_trip_composer_agent(model)
+    if prompts is None:
+        prompts = load_prompts()
+
+    trip_composer = create_trip_composer_agent(model, prompts=prompts)
 
     return SequentialAgent(
         name="composition_workflow",
         sub_agents=[trip_composer],
     )
-
-

@@ -165,13 +165,34 @@ class TestLandmarkDiscovery:
         assert "Chatsworth" in sample_landmark_discovery.landmarks[0].name
 
     def test_landmark_info_required_fields(self):
-        """Test LandmarkInfo requires all fields."""
+        """Test LandmarkInfo requires name and connection."""
         with pytest.raises(ValidationError):
             LandmarkInfo(
                 name="Tower",
                 city="London"
                 # Missing connection
             )
+
+    def test_landmark_info_non_urban_stop(self):
+        """Test LandmarkInfo accepts non-urban stops with region instead of city."""
+        stop = LandmarkInfo(
+            name="Forester Pass Trailhead",
+            region="Sierra Nevada, California",
+            connection="Key waypoint on Cheryl Strayed's PCT route in Wild"
+        )
+        assert stop.city is None
+        assert stop.region == "Sierra Nevada, California"
+        assert stop.landmark_type is None
+
+    def test_landmark_info_with_landmark_type(self):
+        """Test LandmarkInfo captures landmark_type for scenic/route stops."""
+        stop = LandmarkInfo(
+            name="Kennedy Meadows",
+            region="Sequoia National Forest, California",
+            connection="Resupply stop mentioned in Wild",
+            landmark_type="route_point"
+        )
+        assert stop.landmark_type == "route_point"
 
 
 # =============================================================================

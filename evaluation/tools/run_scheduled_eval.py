@@ -24,6 +24,7 @@ from agents.orchestrator import (
     create_discovery_workflow,
     create_composition_workflow,
 )
+from agents.prompts import load_prompts, CURRENT_PROMPT_VERSION, AgentPrompts
 from google.adk.models.google_llm import Gemini
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
@@ -112,6 +113,7 @@ async def run_evaluation_on_dataset(
     item_ids: Optional[List[str]] = None,
     start_time: Optional[float] = None,
     timeout_seconds: Optional[float] = None,
+    prompt_version: str = CURRENT_PROMPT_VERSION,
 ) -> Dict[str, Any]:
     """
     Run evaluation on a Langfuse dataset.
@@ -191,12 +193,16 @@ async def run_evaluation_on_dataset(
         max_cases=max_cases,
     )
 
+    # Load prompt set for this run
+    prompts = load_prompts(prompt_version)
+
     # Create run name for this evaluation batch
-    run_name = f"eval_run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_name = f"eval_run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{prompt_version}"
     run_metadata = {
         "dataset_name": dataset_name,
         "evaluation_type": "scheduled",
         "max_cases": max_cases,
+        "prompt_version": prompt_version,
     }
 
     # Evaluate each dataset item
@@ -235,6 +241,7 @@ async def run_evaluation_on_dataset(
                 run_description=f"Scheduled evaluation of {dataset_name}",
                 run_metadata=run_metadata,
             ) as root_span:
+                root_span.update(metadata={"prompt_version": prompt_version})
                 # Run the StoryLand workflow
                 # Note: This is a simplified evaluation - full workflow requires human interaction
                 # For automated evaluation, we would need to mock region selection
@@ -245,6 +252,7 @@ async def run_evaluation_on_dataset(
                     config=config,
                     root_span=root_span,
                     region_selection=region_selection,
+                    prompts=prompts,
                 )
 
                 # Log execution type for observability
@@ -343,6 +351,7 @@ async def _run_evaluation_case(
     config: Any,
     root_span: Any,
     region_selection: str = "all",
+    prompts: AgentPrompts | None = None,
 ) -> Dict[str, Any]:
     """
     Run evaluation for a single test case.
@@ -477,7 +486,7 @@ async def _run_evaluation_case(
 
         try:
             discovery_workflow = create_discovery_workflow(
-                model, book_title=exact_title, author=exact_author
+                model, book_title=exact_title, author=exact_author, prompts=prompts
             )
             discovery_runner = Runner(
                 agent=discovery_workflow,
@@ -569,7 +578,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
         )
 
         try:
-            composition_workflow = create_composition_workflow(model)
+            composition_workflow = create_composition_workflow(model, prompts=prompts)
             composition_runner = Runner(
                 agent=composition_workflow,
                 app_name="storyland",
@@ -778,6 +787,7 @@ async def run_all_evaluations(
     region_selection: str = "all",
     item_ids: Optional[List[str]] = None,
     timeout_minutes: Optional[float] = None,
+    prompt_version: str = CURRENT_PROMPT_VERSION,
 ) -> List[Dict[str, Any]]:
     """
     Run evaluations on specified or all available datasets.
@@ -877,6 +887,7 @@ async def run_all_evaluations(
                 item_ids=item_ids,
                 start_time=start_time,
                 timeout_seconds=timeout_seconds,
+                prompt_version=prompt_version,
             )
             results.append(result)
         except Exception as e:
@@ -951,6 +962,12 @@ def main():
         help='Maximum total runtime in minutes. Script exits gracefully before this limit, '
              'saving results for all completed cases.',
     )
+    parser.add_argument(
+        '--prompt-version',
+        default=CURRENT_PROMPT_VERSION,
+        help='Prompt version label for A/B comparison in Langfuse (e.g. v2, v3). '
+             'Included in the run name and metadata so runs can be filtered by version.',
+    )
 
     args = parser.parse_args()
 
@@ -963,6 +980,7 @@ def main():
             region_selection=args.region_selection,
             item_ids=args.item_ids,
             timeout_minutes=args.timeout_minutes,
+            prompt_version=args.prompt_version,
         )
     )
 
