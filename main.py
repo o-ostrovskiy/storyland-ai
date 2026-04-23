@@ -20,8 +20,6 @@ from google.adk.runners import Runner
 
 from common.config import load_config
 from common.logging import configure_logging, get_logger
-from common.langfuse_init import initialize_langfuse, is_enabled
-from langfuse import Langfuse
 from services.session_service import create_session_service
 from services.context_manager import ContextManager
 from models.book import BookMetadata
@@ -164,36 +162,8 @@ async def create_itinerary(
     log_level = "DEBUG" if verbose else config.log_level
     configure_logging(level=log_level, enable_adk_debug=verbose or config.enable_adk_debug)
 
-    # Initialize Langfuse tracing if configured
-    langfuse_enabled = initialize_langfuse(
-        secret_key=config.langfuse_secret_key,
-        public_key=config.langfuse_public_key,
-        host=config.langfuse_host,
-    )
-
     logger = get_logger("storyland.main")
     logger.info("itinerary_request", book_title=book_title, author=author)
-
-    # Create Langfuse trace for this itinerary request
-    langfuse_client = None
-    trace = None
-    if langfuse_enabled:
-        try:
-            from langfuse import get_client
-            langfuse_client = get_client()
-            trace = langfuse_client.trace(
-                name="generate-itinerary",
-                metadata={
-                    "book": book_title,
-                    "author": author,
-                    "user_id": user_id,
-                    "preferences": preferences or {},
-                },
-                tags=["itinerary", "adk-workflow", config.environment],
-            )
-            logger.info("langfuse_trace_created", trace_id=trace.id)
-        except Exception as e:
-            logger.warning("langfuse_trace_creation_failed", error=str(e))
 
     # Configure model with retry logic (see ARCHITECTURE.md ADR #4)
     # Also handles transient server errors (500, 503, 504).

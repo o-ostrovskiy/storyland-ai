@@ -17,7 +17,6 @@ from google.adk.agents import LlmAgent, SequentialAgent
 from google.genai import types
 
 from plugins.langfuse_plugin import LangfusePlugin
-from common.langfuse_init import initialize_langfuse, is_enabled
 from services.session_service import create_session_service
 
 
@@ -190,60 +189,6 @@ class TestLangfusePluginIntegration:
                 event_count += 1
 
         assert event_count > 0, "Workflow should complete despite plugin errors"
-
-
-class TestLangfuseInitialization:
-    """Test Langfuse initialization with OpenTelemetry."""
-
-    @pytest.mark.integration
-    def test_initialize_langfuse_with_credentials(self):
-        """Test Langfuse initialization with valid credentials."""
-        secret_key = os.getenv("LANGFUSE_SECRET_KEY")
-        public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
-        host = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
-
-        if not secret_key or not public_key:
-            pytest.skip("LANGFUSE credentials not set - skipping initialization test")
-
-        # Test initialization
-        result = initialize_langfuse(
-            secret_key=secret_key,
-            public_key=public_key,
-            host=host,
-        )
-
-        # Should return a boolean (True if successful, or could be True if already initialized)
-        assert isinstance(result, bool), "Should return a boolean"
-
-    @pytest.mark.integration
-    def test_initialize_langfuse_without_credentials(self):
-        """Test that initialization fails gracefully without credentials."""
-        with patch.dict(os.environ, {}, clear=True):
-            result = initialize_langfuse(
-                secret_key=None,
-                public_key=None,
-                host=None,
-            )
-
-            # Should return boolean but not crash
-            assert isinstance(result, bool), "Should return a boolean value"
-
-    @pytest.mark.integration
-    def test_initialize_langfuse_idempotent(self):
-        """Test that calling initialize_langfuse multiple times is safe."""
-        secret_key = os.getenv("LANGFUSE_SECRET_KEY")
-        public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
-        host = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
-
-        if not secret_key or not public_key:
-            pytest.skip("LANGFUSE credentials not set")
-
-        # Initialize multiple times should not crash
-        result1 = initialize_langfuse(secret_key, public_key, host)
-        result2 = initialize_langfuse(secret_key, public_key, host)
-
-        assert isinstance(result1, bool), "First call should return boolean"
-        assert isinstance(result2, bool), "Second call should return boolean"
 
 
 class TestLangfuseWithRealWorkflow:

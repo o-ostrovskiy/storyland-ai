@@ -234,17 +234,13 @@ async def run_evaluation_on_dataset(
                 item_id=item.id,
             )
 
-            # Create a Langfuse run for this dataset item
-            # Using the context manager pattern from Langfuse SDK
-            with item.run(
-                run_name=run_name,
-                run_description=f"Scheduled evaluation of {dataset_name}",
-                run_metadata=run_metadata,
-            ) as root_span:
-                root_span.update(metadata={"prompt_version": prompt_version})
-                # Run the StoryLand workflow
-                # Note: This is a simplified evaluation - full workflow requires human interaction
-                # For automated evaluation, we would need to mock region selection
+            # Create a Langfuse run for this dataset item (v4: manual span + dataset run item link)
+            root_span = langfuse.start_observation(
+                as_type="span",
+                name=run_name,
+                metadata={"prompt_version": prompt_version, **run_metadata},
+            )
+            try:
                 result = await _run_evaluation_case(
                     input_data=input_data,
                     expected_output=expected_output,
@@ -266,6 +262,16 @@ async def run_evaluation_on_dataset(
                         item_id=item.id,
                         note="Workflow execution not implemented (see issue #95)",
                     )
+            finally:
+                root_span.end()
+                langfuse.api.dataset_run_items.create(
+                    run_name=run_name,
+                    run_description=f"Scheduled evaluation of {dataset_name}",
+                    metadata=run_metadata,
+                    dataset_item_id=item.id,
+                    trace_id=root_span.trace_id,
+                    observation_id=root_span.id,
+                )
 
             # Track full result including scores
             case_result = {
@@ -797,7 +803,7 @@ async def run_all_evaluations(
         max_cases_per_dataset: Maximum cases to evaluate per dataset
         dataset_names: List of dataset names to evaluate. If None, evaluates
                       datasets found in evaluation/langfuse_datasets.json or
-                      defaults to ["single_test", "storyland_eval"]
+                      defaults to ["storyland_eval", "books_v1"]
 
     Returns:
         List of evaluation result summaries
@@ -847,7 +853,7 @@ async def run_all_evaluations(
                     error=str(e),
                 )
                 # Fall back to defaults
-                datasets = ["single_test", "storyland_eval"]
+                datasets = ["storyland_eval", "books_v1"]
         else:
             # Default datasets if no config file exists
             datasets = ["single_test", "storyland_eval"]

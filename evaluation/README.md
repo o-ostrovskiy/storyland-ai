@@ -39,8 +39,8 @@ make eval-setup
 ```
 
 This creates two datasets in Langfuse:
-- `single_test` — 1 test case (Pride & Prejudice) for quick validation
 - `storyland_eval` — 8 diverse scenarios for comprehensive testing
+- `books_v1` — 10 cases with expected outputs and book-specific scoring criteria
 
 ## Quality Evaluation
 
@@ -205,8 +205,8 @@ evaluation/
 │   ├── langfuse_eval.py           # Dataset creation pipeline
 │   ├── llm_scorer.py              # LLM-as-judge quality scoring
 │   └── setup_langfuse_eval.sh     # Setup script
-├── single_test.evalset.json       # Test dataset (1 case: Pride & Prejudice)
-├── storyland_eval.evalset.json    # Main dataset (8 diverse books)
+├── storyland_eval.evalset.json    # Dataset (8 diverse books)
+├── books_v1.evalset.json          # Dataset (10 books with expected output + criteria)
 ├── langfuse_datasets.json         # Dataset registry (gitignored)
 ├── results/                       # Evaluation run results (gitignored)
 ├── trend_report.md                # Generated trend report (tracked)

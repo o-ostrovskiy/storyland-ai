@@ -12,7 +12,6 @@ from fastapi import Depends, Header, HTTPException, Request
 
 from common.config import Config, load_config
 from common.logging import configure_logging, get_logger
-from common.langfuse_init import initialize_langfuse
 from core.executor import WorkflowExecutor
 from core.types import ExecutorConfig
 
@@ -37,13 +36,6 @@ async def initialize() -> AppState:
         level=config.log_level, enable_adk_debug=config.enable_adk_debug
     )
     logger = get_logger("storyland.api")
-
-    # Initialize Langfuse tracing
-    initialize_langfuse(
-        secret_key=config.langfuse_secret_key,
-        public_key=config.langfuse_public_key,
-        host=config.langfuse_host,
-    )
 
     # Create executor with config
     executor_config = ExecutorConfig.from_config(config)
