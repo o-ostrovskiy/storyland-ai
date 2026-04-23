@@ -67,27 +67,9 @@ cp .env.example .env
 ### Run
 
 ```bash
-# Basic usage (--author is required)
-python main.py "Gone with the Wind" --author "Margaret Mitchell"
-
-# With preferences
-python main.py "Pride and Prejudice" --author "Jane Austen" --budget luxury --pace relaxed --museums
-
-# Family trip
-python main.py "Harry Potter" --author "J.K. Rowling" --with-kids --budget moderate
-
-# With database persistence and user ID
-python main.py "1984" --author "George Orwell" --database --user-id alice
-
-# Custom timeout (default: 300s)
-python main.py "War and Peace" --author "Leo Tolstoy" --timeout 600
-
-# FastAPI SSE API server
+# Start the FastAPI SSE API server
 make run-api
 # curl http://localhost:8080/api/v1/health
-
-# Streamlit demo
-streamlit run streamlit_demo.py
 ```
 
 **What you get:**
@@ -97,17 +79,7 @@ streamlit run streamlit_demo.py
 - Author-related sites (birthplace, museums, etc.)
 - Practical travel details and tips
 
-See [Configuration](#configuration) for environment variables. Run `python main.py --help` for all CLI options.
-
-## Screenshots
-
-### Web Interface (Streamlit)
-
-![Region Selection](docs/images/region%20selection.png)
-*Interactive region selection with geographic grouping*
-
-![Complete Itinerary](docs/images/trip%20iternary.png)
-*Detailed itinerary with literary context and practical travel info*
+See [Configuration](#configuration) for environment variables.
 
 ## Architecture
 
@@ -287,8 +259,7 @@ storyland-ai/
 │   └── dependencies.py  # Shared app state & dependency injection
 │
 ├── services/            # Core services
-│   ├── session_service.py   # Session management (InMemory/SQLite)
-│   └── context_manager.py   # Context engineering
+│   └── session_service.py   # Session management (InMemory/SQLite)
 │
 ├── common/              # Shared utilities
 │   ├── config.py        # Configuration management
@@ -301,8 +272,6 @@ storyland-ai/
 │   ├── unit/            # Unit tests (no API calls)
 │   └── integration/     # Integration tests (VCR cassettes)
 │
-├── main.py              # CLI entry point
-├── streamlit_demo.py    # Streamlit web UI
 ├── pyproject.toml       # Dependencies & pytest config
 └── .env.example         # Environment template
 ```
@@ -344,7 +313,7 @@ Agent prompts include reliability improvements:
 ## Testing
 
 ```bash
-make test                # Unit tests (254 tests)
+make test                # Unit tests (245 tests)
 make test-integration    # Integration tests with VCR cassettes
 make test-all            # Both
 make test-cov            # With coverage
@@ -355,20 +324,12 @@ make test-cov            # With coverage
 | `test_models.py` | 46 | Pydantic model validation |
 | `test_tools.py` | 4 | Preferences tool |
 | `test_agents.py` | 32 | Agent factory functions |
-| `test_services.py` | 16 | Session service, context manager |
-| `test_workflow_timeout.py` | 6 | Workflow timeout behavior |
+| `test_services.py` | 10 | Session service |
 | `test_llm_scorer.py` | 18 | LLM scoring models and prompts |
 | `test_core.py` | 49 | Events, session state, extraction, regions |
 | `test_api.py` | 70 | API models, endpoints, SSE streaming, failure-status |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).
-
-### Observability
-
-| Mode | Logging | Use Case |
-|------|---------|----------|
-| `python main.py "book"` | LoggingPlugin (INFO) | Production |
-| `python main.py "book" -v` | LoggingPlugin (DEBUG) | Troubleshooting |
 
 ## Troubleshooting
 
@@ -381,7 +342,7 @@ Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay H
 
 ## Database Reference
 
-When using `--database`, ADK's `DatabaseSessionService` creates a `sessions` table:
+When `USE_DATABASE=true`, ADK's `DatabaseSessionService` creates a `sessions` table:
 
 ```sql
 CREATE TABLE sessions (

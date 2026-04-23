@@ -1,7 +1,7 @@
 # StoryLand AI - Makefile
 # Common commands for development and demo
 
-.PHONY: help install install-dev test test-cov test-agents test-models test-tools test-services test-api test-integration test-integration-live test-integration-vcr-record test-all eval eval-setup eval-setup-one eval-run eval-summary eval-report eval-export run run-api run-1984 run-gatsby run-nightingale run-luxury run-family run-verbose run-db run-dev db-reset db-show db-users clean check-env notebook lab
+.PHONY: help install install-dev test test-cov test-agents test-models test-tools test-services test-api test-integration test-integration-live test-integration-vcr-record test-all eval eval-setup eval-setup-one eval-run eval-summary eval-report eval-export run-api db-reset db-show db-users clean check-env
 
 # Default target
 help:
@@ -32,10 +32,6 @@ help:
 	@echo ""
 	@echo "Running:"
 	@echo "  make run-api       Start FastAPI SSE server"
-	@echo "  make run           Run demo (Pride and Prejudice)"
-	@echo "  make run-1984      Run demo (1984 by George Orwell)"
-	@echo "  make run-gatsby    Run demo (The Great Gatsby)"
-	@echo "  make run-verbose   Run with verbose logging"
 	@echo ""
 	@echo "Database:"
 	@echo "  make db-reset      Delete SQLite database"
@@ -125,32 +121,6 @@ eval-export:
 run-api:
 	.venv/bin/uvicorn api.app:create_app --factory --host 0.0.0.0 --port 8080 --reload
 
-run:
-	.venv/bin/python main.py "Pride and Prejudice" --author "Jane Austen"
-
-run-1984:
-	.venv/bin/python main.py "1984" --author "George Orwell"
-
-run-gatsby:
-	.venv/bin/python main.py "The Great Gatsby" --author "F. Scott Fitzgerald"
-
-run-nightingale:
-	.venv/bin/python main.py "The Nightingale" --author "Kristin Hannah"
-
-run-luxury:
-	.venv/bin/python main.py "Pride and Prejudice" --author "Jane Austen" \
-		--budget luxury --pace relaxed --museums
-
-run-family:
-	.venv/bin/python main.py "Harry Potter" --author "J.K. Rowling" \
-		--with-kids --budget moderate
-
-run-verbose:
-	.venv/bin/python main.py "Pride and Prejudice" --author "Jane Austen" -v
-
-run-db:
-	.venv/bin/python main.py "Pride and Prejudice" --author "Jane Austen" --database
-
 
 # =============================================================================
 # Database
@@ -178,7 +148,7 @@ clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
-	rm -rf .coverage htmlcov/ 2>/dev/null || true
+	rm -rf build/ storyland_ai.egg-info/ .coverage htmlcov/ 2>/dev/null || true
 	@echo "Cache cleaned"
 
 check-env:
@@ -188,12 +158,3 @@ check-env:
 	@.venv/bin/python -c "import google.genai; print('google-genai:', 'OK')"
 	@echo "Environment OK"
 
-# =============================================================================
-# Jupyter
-# =============================================================================
-
-notebook:
-	jupyter notebook
-
-lab:
-	jupyter lab

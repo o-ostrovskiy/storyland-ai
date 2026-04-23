@@ -422,13 +422,7 @@ def create_session_service(connection_string, use_database):
 
 ### Usage
 ```bash
-# Development (in-memory)
-python main.py "1984"
-
-# Production (SQLite)
-python main.py "1984" --database
-
-# Or set in .env
+# Set in .env to use SQLite backend
 USE_DATABASE=true
 ```
 
@@ -591,7 +585,7 @@ Split the codebase into two distinct layers: a transport-agnostic **Core SDK** (
 Two consumption patterns — same business logic:
 
 Pattern A: Library (direct import)
-  streamlit_demo.py
+  Tests / Evaluation tools
     └── from core.executor import WorkflowExecutor
          └── executor.discover("1984")  → yields DomainEvent (in-process)
 
@@ -634,9 +628,9 @@ case RegionsReady(job_id=j, regions=r, analysis_note=n):
 **Problem:** The three-phase workflow was originally built for CLI/Streamlit use (direct Python calls). Adding a web API shouldn't require rewriting the workflow logic — and the API shouldn't be the only way to use the system.
 
 **Why transport-agnostic core matters:**
-- `streamlit_demo.py` imports `WorkflowExecutor` directly — no HTTP, no serialization, no service to run
-- Unit tests mock the executor without starting a web server
-- Future consumers (CLI, WebSocket, gRPC) can reuse the same executor without touching `api/`
+- Evaluation tools import `WorkflowExecutor` directly — no HTTP, no serialization, no service to run
+- Unit tests instantiate the executor without starting a web server
+- Future consumers (WebSocket, gRPC, batch runner) can reuse the same executor without touching `api/`
 - The executor can be published as a standalone Python package if needed
 
 **Why a thin adapter (not a fat controller):**
@@ -647,14 +641,13 @@ case RegionsReady(job_id=j, regions=r, analysis_note=n):
 ### Trade-offs
 
 **Benefits:**
-- **Two consumption modes:** Streamlit uses library mode (zero latency, single process); web frontend uses API mode (language-agnostic, independently scalable)
+- **Two consumption modes:** Evaluation tools use library mode (zero latency, single process); web frontend uses API mode (language-agnostic, independently scalable)
 - **Single source of truth:** `core/executor.py` is the authoritative implementation — no duplicate logic
 - **Testability:** `WorkflowExecutor` is directly instantiable in tests without spinning up FastAPI
 - **Future-proof:** Adding WebSocket or gRPC transport is a new thin adapter, not a rewrite
 
 **Costs:**
 - **Interface drift risk:** The backend gateway (`backend/`) calls the agent API via hand-written `httpx` calls. If `api/models.py` renames a field, the backend silently sends wrong data (no compile-time check). Mitigation: keep a typed `AgentClient` wrapper in the gateway that uses the Pydantic request models.
-- **Two deployment modes to support:** Streamlit and API layer both need to work, meaning changes to `core/` must not break either consumer.
 - **Domain event → SSE mapping is manual:** `domain_event_to_sse()` in `api/streaming.py` must be updated whenever a new `DomainEvent` type is added. Missing a case silently drops the event.
 
 ### Files
@@ -663,7 +656,6 @@ case RegionsReady(job_id=j, regions=r, analysis_note=n):
 - `core/types.py` — `ExecutorConfig` (plain dataclass, no env coupling)
 - `api/streaming.py` — `domain_event_to_sse()`: the only place domain events become HTTP
 - `api/routes.py` — thin wiring, no business logic
-- `streamlit_demo.py` — reference implementation of the library consumption pattern
 
 ---
 
@@ -798,8 +790,6 @@ storyland-ai: POST /discover { book_title: "1984", author: "George Orwell" }
 - `core/executor.py` — Phase 1 replaced with direct `BookMetadata` construction
 - `api/models.py` — `author` field made required (both `book_title` and `author` required)
 - `agents/book_metadata_agent.py` — deleted (no longer needed; see ADR #13)
-- CLI (`main.py`) — `--author` made required argument
-- Streamlit (`streamlit_demo.py`) — author field required, book-selection screen removed
 
 ### Trade-offs
 

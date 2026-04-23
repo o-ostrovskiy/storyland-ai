@@ -12,6 +12,7 @@ import json
 from datetime import datetime
 from typing import Dict, Any, Optional
 
+from langfuse import get_client, observe
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
@@ -191,6 +192,7 @@ Provide scores only (no explanations). Use the structured output format.
     return prompt
 
 
+@observe(name="llm_score_itinerary", as_type="generation")
 async def score_itinerary(
     api_key: str,
     book_title: str,
@@ -201,33 +203,8 @@ async def score_itinerary(
     quality_criteria: Optional[Dict[str, str]] = None,
     expected_output: Optional[Dict[str, Any]] = None,
     model_name: str = "gemini-2.5-flash-lite",
-    langfuse_trace_id: Optional[str] = None,
-    langfuse_client: Optional[Any] = None,
 ) -> ItineraryScores:
-    """
-    Score an itinerary using LLM-as-judge with structured output.
-
-    This function uses Gemini to evaluate a travel itinerary across
-    6 quality dimensions: book relevance, preference adherence, completeness,
-    actionability, geographical accuracy, and engagement.
-
-    Args:
-        api_key: Google API key for authentication
-        book_title: Title of the book the itinerary is based on
-        author: Author of the book
-        input_text: Original user input/prompt that generated the itinerary
-        itinerary: Generated itinerary data (dict)
-        preferences: User preferences used for itinerary generation (optional)
-        model_name: Gemini model to use for scoring (default: gemini-2.5-flash-lite)
-        langfuse_trace_id: Optional Langfuse trace ID for execution tracing
-        langfuse_client: Optional Langfuse client for creating observations
-
-    Returns:
-        ItineraryScores with scores 1-5 for each dimension
-
-    Raises:
-        Exception: If scoring fails (API error, invalid response, etc.)
-    """
+    """Score an itinerary using LLM-as-judge with structured output (6 dimensions, 1-5 scale)."""
     logger.info(
         "llm_scoring_start",
         book_title=book_title,
@@ -265,35 +242,14 @@ async def score_itinerary(
                 message="These dimensions will use generic scoring criteria",
             )
 
-    # Create Langfuse generation for execution tracing
-    generation_id = None
-    if langfuse_client and langfuse_trace_id:
-        try:
-            generation = langfuse_client.generation(
-                trace_id=langfuse_trace_id,
-                name="llm_judge_scoring",
-                model=model_name,
-                input={
-                    "book_title": book_title,
-                    "author": author,
-                    "has_preferences": preferences is not None,
-                },
-                metadata={
-                    "scoring_method": "llm_judge",
-                    "dimensions": [
-                        "book_relevance",
-                        "preference_adherence",
-                        "completeness",
-                        "actionability",
-                        "geographical_accuracy",
-                        "engagement",
-                    ],
-                },
-            )
-            generation_id = generation.id
-            logger.debug("langfuse_generation_created", generation_id=generation_id)
-        except Exception as e:
-            logger.warning("failed_to_create_langfuse_generation", error=str(e))
+    get_client().update_current_generation(
+        model=model_name,
+        input={"book_title": book_title, "author": author, "has_preferences": preferences is not None},
+        metadata={
+            "scoring_method": "llm_judge",
+            "dimensions": list(SCORING_CRITERIA.keys()),
+        },
+    )
 
     try:
         # Create GenAI client
@@ -336,23 +292,17 @@ Respond with ONLY a valid JSON object (no markdown, no explanation) with these e
 
         scores = ItineraryScores.model_validate_json(response_text)
 
-        # Update Langfuse generation with output and usage
-        if langfuse_client and generation_id:
-            try:
-                langfuse_client.generation(
-                    id=generation_id,
-                    output=scores.model_dump(),
-                    usage={
-                        "input": len(prompt + json_instruction),
-                        "output": len(response_text),
-                        "unit": "CHARACTERS",
-                    },
-                    level="DEFAULT",
-                    status_message="Scoring completed successfully",
-                )
-                logger.debug("langfuse_generation_updated", generation_id=generation_id)
-            except Exception as e:
-                logger.warning("failed_to_update_langfuse_generation", error=str(e))
+        usage = response.usage_metadata
+        get_client().update_current_generation(
+            output=scores.model_dump(),
+            usage_details={
+                "input": usage.prompt_token_count or 0,
+                "output": usage.candidates_token_count or 0,
+                "total": usage.total_token_count or 0,
+            } if usage else None,
+            level="DEFAULT",
+            status_message="Scoring completed successfully",
+        )
 
         logger.info(
             "llm_scoring_complete",
@@ -368,17 +318,10 @@ Respond with ONLY a valid JSON object (no markdown, no explanation) with these e
         return scores
 
     except Exception as e:
-        # Update Langfuse generation with error
-        if langfuse_client and generation_id:
-            try:
-                langfuse_client.generation(
-                    id=generation_id,
-                    level="ERROR",
-                    status_message=f"Scoring failed: {str(e)}",
-                )
-            except Exception as update_error:
-                logger.warning("failed_to_update_langfuse_error", error=str(update_error))
-
+        get_client().update_current_generation(
+            level="ERROR",
+            status_message=f"Scoring failed: {str(e)}",
+        )
         logger.error(
             "llm_scoring_failed",
             error=str(e),

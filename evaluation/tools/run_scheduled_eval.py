@@ -234,37 +234,43 @@ async def run_evaluation_on_dataset(
                 item_id=item.id,
             )
 
-            # Create a Langfuse run for this dataset item
-            # Using the context manager pattern from Langfuse SDK
-            with item.run(
-                run_name=run_name,
-                run_description=f"Scheduled evaluation of {dataset_name}",
-                run_metadata=run_metadata,
+            # Create a Langfuse run for this dataset item (v4: manual span + dataset run item link)
+            # start_as_current_observation sets OTel context so @observe in score_itinerary nests here
+            with langfuse.start_as_current_observation(
+                as_type="span",
+                name=run_name,
+                metadata={"prompt_version": prompt_version, **run_metadata},
             ) as root_span:
-                root_span.update(metadata={"prompt_version": prompt_version})
-                # Run the StoryLand workflow
-                # Note: This is a simplified evaluation - full workflow requires human interaction
-                # For automated evaluation, we would need to mock region selection
-                result = await _run_evaluation_case(
-                    input_data=input_data,
-                    expected_output=expected_output,
-                    item_metadata=item_metadata,
-                    config=config,
-                    root_span=root_span,
-                    region_selection=region_selection,
-                    prompts=prompts,
-                )
+                try:
+                    result = await _run_evaluation_case(
+                        input_data=input_data,
+                        expected_output=expected_output,
+                        item_metadata=item_metadata,
+                        config=config,
+                        root_span=root_span,
+                        region_selection=region_selection,
+                        prompts=prompts,
+                    )
 
-                # Log execution type for observability
-                # LLM-as-judge quality scores are added in Phase 4 (lines 765-794)
-                case_status = result.get("status", "unknown")
+                    # Log execution type for observability
+                    # LLM-as-judge quality scores are added in Phase 4 (lines 765-794)
+                    case_status = result.get("status", "unknown")
 
-                if case_status == "placeholder":
-                    # Placeholder execution - log for tracking
-                    logger.info(
-                        "placeholder_execution",
-                        item_id=item.id,
-                        note="Workflow execution not implemented (see issue #95)",
+                    if case_status == "placeholder":
+                        # Placeholder execution - log for tracking
+                        logger.info(
+                            "placeholder_execution",
+                            item_id=item.id,
+                            note="Workflow execution not implemented (see issue #95)",
+                        )
+                finally:
+                    langfuse.api.dataset_run_items.create(
+                        run_name=run_name,
+                        run_description=f"Scheduled evaluation of {dataset_name}",
+                        metadata=run_metadata,
+                        dataset_item_id=item.id,
+                        trace_id=root_span.trace_id,
+                        observation_id=root_span.id,
                     )
 
             # Track full result including scores
@@ -671,12 +677,6 @@ Include ALL cities from the selected regions in your itinerary."""
                 # Get user preferences from session state
                 preferences = session.state.get("user:preferences", {})
 
-                # Score the itinerary using LLM-as-judge with Langfuse tracing
-                # Pass Langfuse context for execution tracing and observability
-                trace_id = langfuse_plugin._current_trace.id if (
-                    langfuse_plugin._current_trace and hasattr(langfuse_plugin._current_trace, 'id')
-                ) else None
-
                 scores = await score_itinerary(
                     api_key=config.google_api_key,
                     book_title=exact_title,
@@ -687,8 +687,6 @@ Include ALL cities from the selected regions in your itinerary."""
                     quality_criteria=quality_criteria,
                     expected_output=expected_output,
                     model_name="gemini-2.5-flash-lite",
-                    langfuse_trace_id=trace_id,
-                    langfuse_client=langfuse_plugin.client,
                 )
 
                 # Store scores in Langfuse
@@ -797,7 +795,7 @@ async def run_all_evaluations(
         max_cases_per_dataset: Maximum cases to evaluate per dataset
         dataset_names: List of dataset names to evaluate. If None, evaluates
                       datasets found in evaluation/langfuse_datasets.json or
-                      defaults to ["single_test", "storyland_eval"]
+                      defaults to ["storyland_eval", "books_v1"]
 
     Returns:
         List of evaluation result summaries
@@ -847,10 +845,10 @@ async def run_all_evaluations(
                     error=str(e),
                 )
                 # Fall back to defaults
-                datasets = ["single_test", "storyland_eval"]
+                datasets = ["storyland_eval", "books_v1"]
         else:
             # Default datasets if no config file exists
-            datasets = ["single_test", "storyland_eval"]
+            datasets = ["storyland_eval", "books_v1"]
             logger.info("using_default_datasets", datasets=datasets)
 
     start_time = time.monotonic()
@@ -941,7 +939,7 @@ def main():
     parser.add_argument(
         '--datasets',
         nargs='+',
-        help='Specific datasets to evaluate (e.g., single_test storyland_eval). '
+        help='Specific datasets to evaluate (e.g., storyland_eval books_v1). '
              'If not specified, evaluates all configured datasets.',
     )
     parser.add_argument(

@@ -22,7 +22,7 @@ from common.logging import get_logger
 logger = get_logger(__name__)
 
 try:
-    from langfuse import Langfuse
+    from langfuse import Langfuse, propagate_attributes
     LANGFUSE_AVAILABLE = True
 except ImportError:
     LANGFUSE_AVAILABLE = False
@@ -97,6 +97,7 @@ class LangfusePlugin(BasePlugin):
         self._current_generation = None
         self._agent_stack = []  # Track nested agent calls
         self._current_span = None
+        self._propagation_cm = None
 
         if not LANGFUSE_AVAILABLE:
             logger.info("langfuse_unavailable", reason="package_not_installed")
@@ -130,20 +131,28 @@ class LangfusePlugin(BasePlugin):
             return None
 
         try:
-            # Create a top-level span (auto-creates a trace in Langfuse v3)
             agent_name = getattr(invocation_context.agent, 'name', 'unknown_agent')
             user_id = invocation_context.user_id
-            self._current_trace = self.client.start_span(
+            session_id = invocation_context.session.id if invocation_context.session else None
+
+            # Propagate trace-level attributes to root span and all children
+            self._propagation_cm = propagate_attributes(
+                user_id=user_id,
+                session_id=session_id,
+                trace_name=f"{agent_name}_invocation",
+            )
+            self._propagation_cm.__enter__()
+
+            self._current_trace = self.client.start_observation(
+                as_type="span",
                 name=f"{agent_name}_invocation",
                 metadata={
                     "invocation_id": invocation_context.invocation_id,
-                    "session_id": invocation_context.session.id if invocation_context.session else None,
+                    "session_id": session_id,
                     "agent_type": "google_adk",
                 },
                 input=str(user_message),
             )
-            # Set user_id on the trace so it appears as the Langfuse User field
-            self._current_trace.update_trace(user_id=user_id)
             logger.debug("langfuse_trace_created", trace_id=self._current_trace.trace_id, user_id=user_id)
         except Exception as e:
             logger.warning("langfuse_trace_error", error=str(e), error_type=type(e).__name__)
@@ -161,7 +170,8 @@ class LangfusePlugin(BasePlugin):
             agent_name = getattr(agent, 'name', 'unknown_agent')
 
             # Create child span for agent under the current trace span
-            span = self._current_trace.start_span(
+            span = self._current_trace.start_observation(
+                as_type="span",
                 name=agent_name,
                 metadata={
                     "agent_type": type(agent).__name__,
@@ -243,14 +253,15 @@ class LangfusePlugin(BasePlugin):
                 # Update generation with token usage and cost
                 self._current_generation.update(
                     output=str(llm_response),
-                    usage={
+                    usage_details={
                         "input": usage.input_tokens,
                         "output": usage.output_tokens,
                         "total": usage.total_tokens,
-                        "unit": "TOKENS",
+                    },
+                    cost_details={
+                        "total_cost": usage.cost_usd,
                     },
                     metadata={
-                        "cost_usd": usage.cost_usd,
                         "model_pricing": {
                             "input_per_1m": 0.075,
                             "output_per_1m": 0.30,
@@ -324,7 +335,8 @@ class LangfusePlugin(BasePlugin):
         try:
             tool_name = getattr(tool, 'name', 'unknown_tool')
             parent = self._agent_stack[-1][1] if self._agent_stack else self._current_trace
-            self._current_span = parent.start_span(
+            self._current_span = parent.start_observation(
+                as_type="span",
                 name=f"tool_{tool_name}",
                 metadata={
                     "tool_type": "adk_tool",
@@ -387,6 +399,10 @@ class LangfusePlugin(BasePlugin):
             self._current_trace = None
         except Exception as e:
             logger.warning("langfuse_finalize_error", error=str(e), error_type=type(e).__name__)
+        finally:
+            if self._propagation_cm:
+                self._propagation_cm.__exit__(None, None, None)
+                self._propagation_cm = None
 
     def get_session_stats(self) -> dict[str, Any]:
         """
