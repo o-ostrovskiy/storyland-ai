@@ -34,6 +34,8 @@ from google.adk.models.google_llm import Gemini
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
 
+from langfuse import observe
+
 from agents.orchestrator import create_discovery_workflow, create_composition_workflow
 from common.logging import get_logger
 from models.book import BookMetadata
@@ -134,6 +136,7 @@ class WorkflowExecutor:
             host=self._config.langfuse_host,
         )
 
+    @observe(name="discover")
     async def discover(
         self,
         book_title: str,
@@ -293,6 +296,7 @@ class WorkflowExecutor:
             )
             yield WorkflowComplete(job_id=job_id)
 
+    @observe(name="compose")
     async def compose(
         self,
         job_id: str,

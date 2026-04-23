@@ -677,12 +677,6 @@ Include ALL cities from the selected regions in your itinerary."""
                 # Get user preferences from session state
                 preferences = session.state.get("user:preferences", {})
 
-                # Score the itinerary using LLM-as-judge with Langfuse tracing
-                # Pass Langfuse context for execution tracing and observability
-                trace_id = langfuse_plugin._current_trace.id if (
-                    langfuse_plugin._current_trace and hasattr(langfuse_plugin._current_trace, 'id')
-                ) else None
-
                 scores = await score_itinerary(
                     api_key=config.google_api_key,
                     book_title=exact_title,
@@ -693,8 +687,6 @@ Include ALL cities from the selected regions in your itinerary."""
                     quality_criteria=quality_criteria,
                     expected_output=expected_output,
                     model_name="gemini-2.5-flash-lite",
-                    langfuse_trace_id=trace_id,
-                    langfuse_client=langfuse_plugin.client,
                 )
 
                 # Store scores in Langfuse
@@ -856,7 +848,7 @@ async def run_all_evaluations(
                 datasets = ["storyland_eval", "books_v1"]
         else:
             # Default datasets if no config file exists
-            datasets = ["single_test", "storyland_eval"]
+            datasets = ["storyland_eval", "books_v1"]
             logger.info("using_default_datasets", datasets=datasets)
 
     start_time = time.monotonic()
@@ -947,7 +939,7 @@ def main():
     parser.add_argument(
         '--datasets',
         nargs='+',
-        help='Specific datasets to evaluate (e.g., single_test storyland_eval). '
+        help='Specific datasets to evaluate (e.g., storyland_eval books_v1). '
              'If not specified, evaluates all configured datasets.',
     )
     parser.add_argument(
