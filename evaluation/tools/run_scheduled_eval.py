@@ -235,43 +235,43 @@ async def run_evaluation_on_dataset(
             )
 
             # Create a Langfuse run for this dataset item (v4: manual span + dataset run item link)
-            root_span = langfuse.start_observation(
+            # start_as_current_observation sets OTel context so @observe in score_itinerary nests here
+            with langfuse.start_as_current_observation(
                 as_type="span",
                 name=run_name,
                 metadata={"prompt_version": prompt_version, **run_metadata},
-            )
-            try:
-                result = await _run_evaluation_case(
-                    input_data=input_data,
-                    expected_output=expected_output,
-                    item_metadata=item_metadata,
-                    config=config,
-                    root_span=root_span,
-                    region_selection=region_selection,
-                    prompts=prompts,
-                )
-
-                # Log execution type for observability
-                # LLM-as-judge quality scores are added in Phase 4 (lines 765-794)
-                case_status = result.get("status", "unknown")
-
-                if case_status == "placeholder":
-                    # Placeholder execution - log for tracking
-                    logger.info(
-                        "placeholder_execution",
-                        item_id=item.id,
-                        note="Workflow execution not implemented (see issue #95)",
+            ) as root_span:
+                try:
+                    result = await _run_evaluation_case(
+                        input_data=input_data,
+                        expected_output=expected_output,
+                        item_metadata=item_metadata,
+                        config=config,
+                        root_span=root_span,
+                        region_selection=region_selection,
+                        prompts=prompts,
                     )
-            finally:
-                root_span.end()
-                langfuse.api.dataset_run_items.create(
-                    run_name=run_name,
-                    run_description=f"Scheduled evaluation of {dataset_name}",
-                    metadata=run_metadata,
-                    dataset_item_id=item.id,
-                    trace_id=root_span.trace_id,
-                    observation_id=root_span.id,
-                )
+
+                    # Log execution type for observability
+                    # LLM-as-judge quality scores are added in Phase 4 (lines 765-794)
+                    case_status = result.get("status", "unknown")
+
+                    if case_status == "placeholder":
+                        # Placeholder execution - log for tracking
+                        logger.info(
+                            "placeholder_execution",
+                            item_id=item.id,
+                            note="Workflow execution not implemented (see issue #95)",
+                        )
+                finally:
+                    langfuse.api.dataset_run_items.create(
+                        run_name=run_name,
+                        run_description=f"Scheduled evaluation of {dataset_name}",
+                        metadata=run_metadata,
+                        dataset_item_id=item.id,
+                        trace_id=root_span.trace_id,
+                        observation_id=root_span.id,
+                    )
 
             # Track full result including scores
             case_result = {
