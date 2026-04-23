@@ -99,11 +99,10 @@ Use `--prompt-version <label>` to tag a run in Langfuse before merging a prompt 
 ### Features
 
 - **Input/Output Tokens**: Accurate counts from Gemini API responses
-- **Per-Agent Metrics**: Track token usage for each agent call
-- **Real-time Monitoring**: View token consumption as workflows execute
+- **Per-Agent Metrics**: Token usage per agent call
 - **Cost Calculation**: Automatic cost estimation based on Gemini pricing
-- **Trace Hierarchy**: Top-level traces for workflows, spans for nested agents
-- **Tool Tracking**: Monitor tool execution within agent calls
+- **Trace Hierarchy**: Nested spans for agents, generations, and tools
+- **Fast Preview**: Enable the "Fast (Preview)" toggle in Langfuse for real-time ingestion (requires Langfuse SDK v4)
 
 ### Current Gemini Pricing
 
@@ -113,13 +112,10 @@ Gemini 2.0 Flash (as of Jan 2026):
 
 ### Enabling the Plugin
 
-The plugin is automatically initialized if credentials are provided:
+The plugin is automatically initialized if credentials are provided. It auto-disables if credentials are missing:
 
 ```python
 from plugins.langfuse_plugin import LangfusePlugin
-from common.config import load_config
-
-config = load_config()
 
 langfuse_plugin = LangfusePlugin(
     secret_key=config.langfuse_secret_key,
@@ -133,18 +129,6 @@ runner = Runner(
 )
 ```
 
-Auto-disables if credentials are missing.
-
-### CLI Output
-
-Token stats are displayed at the end of each run:
-
-```
-📊 Context: 45 events, ~12000 tokens
-💰 Token Usage: 8,432 tokens (input: 5,123, output: 3,309)
-   Estimated cost: $0.001378
-```
-
 ### Programmatic Access
 
 ```python
@@ -152,21 +136,24 @@ stats = langfuse_plugin.get_session_stats()
 print(f"Total tokens: {stats['total_tokens']}")
 print(f"Cost: ${stats['cost_usd']:.6f}")
 
-langfuse_plugin.reset_stats()
 await langfuse_plugin.flush()
 ```
 
 ### Architecture
 
+The plugin uses Google ADK's callback system to hook into the agent lifecycle. It runs alongside the ADK runner and receives events at each stage:
+
 ```
-ADK Runner
+ADK Runner (runner.run_async)
     ↓
-Plugin.on_event()
-    ↓
-AgentStartEvent → Create Langfuse trace/span
-ModelRequestEvent → Start generation tracking
-ModelResponseEvent → Extract token usage, calculate cost
-AgentCompleteEvent → Finalize trace with totals
+on_user_message_callback    → opens root span, sets user_id/session_id via
+                              propagate_attributes() (Langfuse v4 OTel context)
+before_agent_callback       → opens child span per agent
+before_model_callback       → opens generation span (LLM call)
+after_model_callback        → records token counts + cost via usage_details/cost_details
+after_tool_callback         → closes tool span
+after_agent_callback        → closes agent span
+after_run_callback          → closes root span, flushes stats
 ```
 
 Token extraction from Gemini responses:
@@ -175,6 +162,36 @@ response.usage_metadata.prompt_token_count      # Input tokens
 response.usage_metadata.candidates_token_count  # Output tokens
 response.usage_metadata.total_token_count       # Total tokens
 ```
+
+### Trace Structure in Langfuse
+
+A complete evaluation run produces this span hierarchy:
+
+```
+eval_run_YYYYMMDD_v2  (dataset run root — from start_as_current_observation)
+├── discovery_workflow_invocation  (plugin root span)
+│   └── discovery_workflow
+│       ├── book_context_pipeline
+│       │   ├── book_context_researcher
+│       │   │   └── gemini-2.5-flash_call  (generation, with token counts)
+│       │   └── book_context_formatter
+│       │       └── gemini-2.5-flash_call
+│       ├── reader_profile_agent
+│       │   ├── gemini-2.5-flash_call
+│       │   └── tool_get_user_preferences
+│       ├── parallel_discovery  (city/landmark/author agents in parallel)
+│       │   └── ...
+│       └── region_analyzer
+│           └── gemini-2.5-flash_call
+├── composition_workflow_invocation  (plugin root span)
+│   └── ...
+└── llm_score_itinerary  (generation — from @observe in llm_scorer.py)
+    model: gemini-2.5-flash-lite, input/output tokens, scores as output
+```
+
+**Two tracing mechanisms used:**
+- **ADK plugin callbacks** — everything inside `runner.run_async()`: agents, model calls, tools. This is the only way to hook into ADK's internal lifecycle.
+- **`@observe` decorator** — `score_itinerary()` in `llm_scorer.py`. Used for standalone LLM calls outside the ADK runner. Note: `@observe` is not used on `discover()`/`compose()` because those are async generators — OTel context is lost after each `yield` (Langfuse issue [#8447](https://github.com/langfuse/langfuse/issues/8447)).
 
 ### Disabling the Plugin
 
@@ -189,10 +206,11 @@ runner = Runner(agent=my_agent, plugins=[LoggingPlugin()])
 
 1. Log in to [cloud.langfuse.com](https://cloud.langfuse.com)
 2. Select your project
-3. **Traces** — One per workflow execution (metadata_extraction, discovery, composition)
-4. **Generations** — Individual LLM calls with token counts and costs
-5. **Spans** — Tool executions and nested agent calls
-6. **Datasets** — Evaluation runs, scores, and individual test cases
+3. Enable **"Fast (Preview)"** toggle (top-right) for real-time ingestion — requires Langfuse SDK v4 ✓
+4. **Traces** — One trace per eval case; contains the full span tree above
+5. **Observations** — Filterable list of all spans and generations across all traces
+6. **Datasets** — Open `storyland_eval` or `books_v1`, select a Run to see per-item scores and trace links
+7. **Scores** — Quality scores (book_relevance, completeness, etc.) attached to each trace
 
 ## Directory Structure
 
