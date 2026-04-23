@@ -125,32 +125,6 @@ eval-export:
 run-api:
 	.venv/bin/uvicorn api.app:create_app --factory --host 0.0.0.0 --port 8080 --reload
 
-run:
-	.venv/bin/python main.py "Pride and Prejudice" --author "Jane Austen"
-
-run-1984:
-	.venv/bin/python main.py "1984" --author "George Orwell"
-
-run-gatsby:
-	.venv/bin/python main.py "The Great Gatsby" --author "F. Scott Fitzgerald"
-
-run-nightingale:
-	.venv/bin/python main.py "The Nightingale" --author "Kristin Hannah"
-
-run-luxury:
-	.venv/bin/python main.py "Pride and Prejudice" --author "Jane Austen" \
-		--budget luxury --pace relaxed --museums
-
-run-family:
-	.venv/bin/python main.py "Harry Potter" --author "J.K. Rowling" \
-		--with-kids --budget moderate
-
-run-verbose:
-	.venv/bin/python main.py "Pride and Prejudice" --author "Jane Austen" -v
-
-run-db:
-	.venv/bin/python main.py "Pride and Prejudice" --author "Jane Austen" --database
-
 
 # =============================================================================
 # Database
@@ -178,7 +152,7 @@ clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
-	rm -rf .coverage htmlcov/ 2>/dev/null || true
+	rm -rf build/ storyland_ai.egg-info/ .coverage htmlcov/ 2>/dev/null || true
 	@echo "Cache cleaned"
 
 check-env:
