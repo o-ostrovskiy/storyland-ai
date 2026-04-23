@@ -12,7 +12,7 @@ import json
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-from langfuse import observe
+from langfuse import get_client, observe
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
@@ -192,7 +192,7 @@ Provide scores only (no explanations). Use the structured output format.
     return prompt
 
 
-@observe(name="llm_score_itinerary")
+@observe(name="llm_score_itinerary", as_type="generation")
 async def score_itinerary(
     api_key: str,
     book_title: str,
@@ -242,6 +242,15 @@ async def score_itinerary(
                 message="These dimensions will use generic scoring criteria",
             )
 
+    get_client().update_current_generation(
+        model=model_name,
+        input={"book_title": book_title, "author": author, "has_preferences": preferences is not None},
+        metadata={
+            "scoring_method": "llm_judge",
+            "dimensions": list(SCORING_CRITERIA.keys()),
+        },
+    )
+
     try:
         # Create GenAI client
         client = genai.Client(api_key=api_key)
@@ -283,6 +292,18 @@ Respond with ONLY a valid JSON object (no markdown, no explanation) with these e
 
         scores = ItineraryScores.model_validate_json(response_text)
 
+        usage = response.usage_metadata
+        get_client().update_current_generation(
+            output=scores.model_dump(),
+            usage_details={
+                "input": usage.prompt_token_count or 0,
+                "output": usage.candidates_token_count or 0,
+                "total": usage.total_token_count or 0,
+            } if usage else None,
+            level="DEFAULT",
+            status_message="Scoring completed successfully",
+        )
+
         logger.info(
             "llm_scoring_complete",
             book_relevance=scores.book_relevance,
@@ -297,6 +318,10 @@ Respond with ONLY a valid JSON object (no markdown, no explanation) with these e
         return scores
 
     except Exception as e:
+        get_client().update_current_generation(
+            level="ERROR",
+            status_message=f"Scoring failed: {str(e)}",
+        )
         logger.error(
             "llm_scoring_failed",
             error=str(e),
