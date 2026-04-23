@@ -302,18 +302,18 @@ class LangfusePlugin(BasePlugin):
             if hasattr(response, 'usage_metadata'):
                 metadata = response.usage_metadata
                 return TokenUsage(
-                    input_tokens=getattr(metadata, 'prompt_token_count', 0),
-                    output_tokens=getattr(metadata, 'candidates_token_count', 0),
-                    total_tokens=getattr(metadata, 'total_token_count', 0),
+                    input_tokens=getattr(metadata, 'prompt_token_count', 0) or 0,
+                    output_tokens=getattr(metadata, 'candidates_token_count', 0) or 0,
+                    total_tokens=getattr(metadata, 'total_token_count', 0) or 0,
                 )
 
             # Alternative: Try dict-like access
             if isinstance(response, dict) and 'usage_metadata' in response:
                 metadata = response['usage_metadata']
                 return TokenUsage(
-                    input_tokens=metadata.get('prompt_token_count', 0),
-                    output_tokens=metadata.get('candidates_token_count', 0),
-                    total_tokens=metadata.get('total_token_count', 0),
+                    input_tokens=metadata.get('prompt_token_count') or 0,
+                    output_tokens=metadata.get('candidates_token_count') or 0,
+                    total_tokens=metadata.get('total_token_count') or 0,
                 )
 
             return None
