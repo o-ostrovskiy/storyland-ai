@@ -69,6 +69,7 @@ async def health_check() -> HealthResponse:
             "content": {
                 "text/event-stream": {
                     "example": (
+                        'event: started\ndata: {"event":"started","job_id":"abc-123"}\n\n'
                         'event: progress\ndata: {"event":"progress","phase":1,"step":"Searching Google Books API"}\n\n'
                         'event: metadata\ndata: {"event":"metadata","book_title":"1984","author":"George Orwell"}\n\n'
                         'event: regions\ndata: {"event":"regions","job_id":"abc-123","regions":[...]}\n\n'
@@ -84,6 +85,7 @@ async def discover(request: DiscoverRequest, user_id: str = Depends(get_gateway_
     Run book search and location discovery (phases 1-2).
 
     Streams SSE events as the workflow progresses:
+    - **started** — Emitted first; carries `job_id` so a client whose connection drops mid-run can recover via `GET /itinerary/{job_id}/status`
     - **progress** — Step-by-step updates during each phase
     - **metadata** — Resolved book metadata from Google Books API
     - **regions** — Discovered travel regions for user selection (includes `job_id`)
@@ -162,6 +164,7 @@ async def compose(job_id: str, request: ComposeRequest, user_id: str = Depends(g
             "content": {
                 "text/event-stream": {
                     "example": (
+                        'event: started\ndata: {"event":"started","job_id":"abc-123"}\n\n'
                         'event: progress\ndata: {"event":"progress","phase":3,"step":"Building local-atmosphere itinerary"}\n\n'
                         'event: metadata\ndata: {"event":"metadata","book_title":"Wuthering Heights","author":"Emily Brontë"}\n\n'
                         'event: itinerary\ndata: {"event":"itinerary","itinerary":{...}}\n\n'
@@ -181,6 +184,7 @@ async def local_atmosphere(
     character evoke the chosen book.
 
     Single-phase flow — no region selection. Streams SSE events:
+    - **started** — Emitted first; carries `job_id` so a client whose connection drops mid-run can recover via `GET /itinerary/{job_id}/status`
     - **progress** — Step-by-step updates
     - **metadata** — Confirmed book metadata
     - **itinerary** — Final TripItinerary of nearby atmospheric stops

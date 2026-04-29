@@ -9,6 +9,7 @@ from typing import AsyncGenerator, List, Optional
 
 from api.models import (
     SSEProgressEvent,
+    SSEStartedEvent,
     SSEMetadataEvent,
     SSERegionsEvent,
     SSEItineraryEvent,
@@ -18,6 +19,7 @@ from api.models import (
 from core.events import (
     DomainEvent,
     ProgressEvent,
+    JobStarted,
     MetadataReady,
     RegionsReady,
     ItineraryReady,
@@ -39,6 +41,11 @@ def domain_event_to_sse(event: DomainEvent) -> dict:
             return _sse(
                 "progress",
                 SSEProgressEvent(phase=int(p), step=s, detail=d).model_dump_json(),
+            )
+        case JobStarted(job_id=j):
+            return _sse(
+                "started",
+                SSEStartedEvent(job_id=j).model_dump_json(),
             )
         case MetadataReady(metadata=m):
             return _sse(

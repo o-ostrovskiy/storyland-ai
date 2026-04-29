@@ -48,6 +48,7 @@ from .events import (
     DomainEvent,
     Phase,
     ProgressEvent,
+    JobStarted,
     MetadataReady,
     RegionsReady,
     ItineraryReady,
@@ -199,6 +200,8 @@ class WorkflowExecutor:
             )
             yield WorkflowComplete(job_id=job_id)
             return
+
+        yield JobStarted(job_id=job_id)
 
         try:
             async with timeout(self._config.workflow_timeout):
@@ -550,6 +553,8 @@ class WorkflowExecutor:
             )
             yield WorkflowComplete(job_id=job_id)
             return
+
+        yield JobStarted(job_id=job_id)
 
         try:
             async with timeout(self._config.workflow_timeout):

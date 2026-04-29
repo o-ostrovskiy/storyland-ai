@@ -17,6 +17,7 @@ from api.models import (
     LocalAtmosphereRequest,
     UserLocation,
     SSEProgressEvent,
+    SSEStartedEvent,
     SSEMetadataEvent,
     SSERegionsEvent,
     SSEItineraryEvent,
@@ -30,6 +31,7 @@ from api.streaming import _sse, domain_event_to_sse
 from core.events import (
     Phase,
     ProgressEvent,
+    JobStarted,
     MetadataReady,
     RegionsReady,
     ItineraryReady,
@@ -388,6 +390,14 @@ class TestDomainEventToSSE:
         data = json.loads(result["data"])
         assert data["phase"] == 2
         assert data["step"] == "Finding cities"
+
+    def test_job_started(self):
+        event = JobStarted(job_id="abc-123")
+        result = domain_event_to_sse(event)
+        assert result["event"] == "started"
+        data = json.loads(result["data"])
+        assert data["job_id"] == "abc-123"
+        assert data["event"] == "started"
 
     def test_metadata_ready(self):
         event = MetadataReady(

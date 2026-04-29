@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 from core.events import (
     Phase,
     ProgressEvent,
+    JobStarted,
     MetadataReady,
     RegionsReady,
     ItineraryReady,
@@ -62,6 +63,17 @@ class TestProgressEvent:
         event = ProgressEvent(phase=Phase.DISCOVERY, step="test")
         with pytest.raises(AttributeError):
             event.step = "modified"
+
+
+class TestJobStarted:
+    def test_construction(self):
+        event = JobStarted(job_id="abc-123")
+        assert event.job_id == "abc-123"
+
+    def test_frozen(self):
+        event = JobStarted(job_id="abc-123")
+        with pytest.raises(AttributeError):
+            event.job_id = "other"
 
 
 class TestMetadataReady:

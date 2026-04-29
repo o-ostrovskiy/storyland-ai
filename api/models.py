@@ -171,6 +171,17 @@ class SSEProgressEvent(BaseModel):
     )
 
 
+class SSEStartedEvent(BaseModel):
+    """Job has been registered with a session and has a stable job_id.
+
+    Emitted as early as possible so a client whose SSE connection drops mid-run
+    can recover the job via GET /itinerary/{job_id}/status.
+    """
+
+    event: Literal["started"] = "started"
+    job_id: str
+
+
 class SSEMetadataEvent(BaseModel):
     """Book metadata confirmed from the upstream service."""
 
