@@ -23,6 +23,7 @@ class SessionStateKeys:
     SELECTED_REGIONS = "selected_regions"
     FINAL_ITINERARY = "final_itinerary"
     USER_PREFERENCES = "user:preferences"
+    USER_LOCATION = "user_location"
     JOB_FAILED = "job_failed"
 
 

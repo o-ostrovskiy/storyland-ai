@@ -804,6 +804,33 @@ storyland-ai: POST /discover { book_title: "1984", author: "George Orwell" }
 
 ---
 
+## 13. Local Atmosphere Mode (Single-Phase, No HITL)
+
+### Decision
+Add a **separate single-phase endpoint** (`POST /api/v1/itinerary/local-atmosphere`) for users who want to feel a book's atmosphere near their current location, instead of retrofitting the existing two-phase discover/compose flow.
+
+### Rationale
+- The two-phase HITL design (ADR #1) exists because discovery returns multiple candidate regions and the user must pick one. When the user is already pinned to a single geographic point, region selection is meaningless — there is one region (the area around them) by construction.
+- Forking `discover()` to skip region selection conditionally would tangle two distinct workflows into one orchestrator. A separate endpoint keeps the original flow untouched and makes the "near me" semantics explicit at the API boundary.
+- The pipeline reuses `book_context_pipeline` (so the composer has themes/era/mood) but **deliberately skips** `city_pipeline`, `landmark_pipeline`, and `author_pipeline` — those agents discover the book's *actual* geography, which is irrelevant when the goal is to find atmospheric matches *elsewhere*.
+
+### Implementation
+- New agent `local_atmosphere_pipeline` follows the **two-stage researcher → formatter pattern** (ADR #2): a `google_search`-enabled researcher locates candidate places near the user, then a structured-output formatter validates them into a `TripItinerary`. Reuses the same model class, same session state, and the existing `extract_itinerary_from_response` helper.
+- The user's `{lat, lng, label}` is stored under a new `USER_LOCATION` session state key. `radius_km` is enforced soft-side via the prompt (no routing API).
+- Frontend collects the location via Nominatim (browser geolocation, ZIP/city lookup, or a saved home location on the User row); the server only sees the resolved coords.
+
+### Trade-offs
+**Benefits:**
+- Original two-phase flow untouched — no regressions in the travel mode.
+- Reuses the validated researcher/formatter pattern; no new model architecture risk.
+- Single endpoint = single quota class (counts toward `discover_count`); no schema change needed for accounting.
+
+**Costs:**
+- A second top-level endpoint to maintain alongside `discover` + `compose`.
+- Radius enforcement is LLM-side only (no routing/distance API), so very sparse rural locations may yield fewer-than-ideal results. Acceptable for v1.
+
+---
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -819,5 +846,6 @@ storyland-ai: POST /discover { book_title: "1984", author: "George Orwell" }
 | **Transport-agnostic core SDK** | Library or HTTP consumption, same logic | Interface drift risk between gateway and API layer |
 | **Failure status flag** | Terminal failures visible via /status, retryable | State must be persisted via `append_event`, not in-place mutation |
 | **Gateway secret** | Blocks direct access when deployed behind a gateway | Health endpoint intentionally excluded; leave secret empty for standalone dev |
+| **Local-atmosphere mode** | Lets readers feel a book without traveling; reuses pipeline pattern | Separate endpoint to maintain; LLM-side radius enforcement only |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.

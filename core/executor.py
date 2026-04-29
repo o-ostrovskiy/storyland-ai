@@ -34,7 +34,11 @@ from google.adk.models.google_llm import Gemini
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
 
-from agents.orchestrator import create_discovery_workflow, create_composition_workflow
+from agents.orchestrator import (
+    create_discovery_workflow,
+    create_composition_workflow,
+    create_local_atmosphere_workflow,
+)
 from common.logging import get_logger
 from models.book import BookMetadata
 from plugins.langfuse_plugin import LangfusePlugin
@@ -51,7 +55,11 @@ from .events import (
     WorkflowComplete,
 )
 from .extraction import extract_itinerary_from_response
-from .prompts import build_discovery_prompt, build_composition_prompt
+from .prompts import (
+    build_discovery_prompt,
+    build_composition_prompt,
+    build_local_atmosphere_prompt,
+)
 from .regions import get_valid_region_ids, validate_region_selection
 from .session_state import SessionStateAccessor, SessionStateKeys
 from .types import ExecutorConfig
@@ -75,6 +83,17 @@ DISCOVERY_AGENT_STEPS: dict[str, str] = {
     "author_formatter": "Formatting author sites",
     "author_pipeline": "Discovering author sites",
     "region_analyzer": "Analyzing geographic regions",
+}
+
+# Agent name -> human-readable progress descriptions for the local-atmosphere flow
+LOCAL_ATMOSPHERE_AGENT_STEPS: dict[str, str] = {
+    "book_context_researcher": "Researching book mood and themes",
+    "book_context_formatter": "Capturing book atmosphere",
+    "book_context_pipeline": "Analyzing book atmosphere",
+    "reader_profile_agent": "Reading user preferences",
+    "local_atmosphere_researcher": "Finding atmospheric places near you",
+    "local_atmosphere_formatter": "Composing your local outing",
+    "local_atmosphere_pipeline": "Building local-atmosphere itinerary",
 }
 
 APP_NAME = "storyland"
@@ -463,6 +482,191 @@ class WorkflowExecutor:
         except Exception as e:
             logger.error(
                 "compose_error", error=str(e), error_type=type(e).__name__
+            )
+            await self._mark_session_failed(job_id, user_id)
+            yield WorkflowError(
+                message=str(e),
+                error_type=type(e).__name__,
+                phase=Phase.COMPOSITION,
+            )
+            yield WorkflowComplete(job_id=job_id)
+
+    async def local_atmosphere(
+        self,
+        book_title: str,
+        author: str,
+        location_label: str,
+        lat: float,
+        lng: float,
+        radius_km: int = 80,
+        preferences: Optional[dict] = None,
+        user_id: str = "default",
+    ) -> AsyncGenerator[DomainEvent, None]:
+        """Run the single-phase local-atmosphere workflow.
+
+        Yields a ``MetadataReady`` event followed by progress events, an
+        ``ItineraryReady`` (or ``WorkflowError``) event, and a final
+        ``WorkflowComplete``.
+
+        Args:
+            book_title: Exact book title.
+            author: Exact author name.
+            location_label: Human-readable user location (e.g. "New York, NY").
+            lat: Latitude (-90..90).
+            lng: Longitude (-180..180).
+            radius_km: Travel radius in km (defaults to 80, ≈ 1 hour driving).
+            preferences: Optional travel preferences dict.
+            user_id: User identifier for session isolation.
+        """
+        job_id = str(uuid.uuid4())
+
+        initial_state = {
+            SessionStateKeys.BOOK_TITLE: book_title,
+            SessionStateKeys.AUTHOR: author,
+            SessionStateKeys.USER_LOCATION: {
+                "label": location_label,
+                "lat": lat,
+                "lng": lng,
+                "radius_km": radius_km,
+            },
+        }
+        if preferences:
+            initial_state[SessionStateKeys.USER_PREFERENCES] = preferences
+
+        try:
+            await self._session_service.create_session(
+                app_name=APP_NAME,
+                user_id=user_id,
+                session_id=job_id,
+                state=initial_state,
+            )
+        except Exception as e:
+            logger.error(
+                "session_create_failed", error=str(e), error_type=type(e).__name__
+            )
+            yield WorkflowError(
+                message="Failed to initialize session",
+                error_type="SessionError",
+            )
+            yield WorkflowComplete(job_id=job_id)
+            return
+
+        try:
+            async with timeout(self._config.workflow_timeout):
+                book_metadata = BookMetadata(
+                    book_title=book_title,
+                    author=author,
+                    book_found=True,
+                )
+                yield MetadataReady(metadata=book_metadata.model_dump())
+
+                session = await self._session_service.get_session(
+                    app_name=APP_NAME, user_id=user_id, session_id=job_id
+                )
+                state = SessionStateAccessor(session.state)
+                state.book_metadata = book_metadata.model_dump()
+
+                yield ProgressEvent(
+                    phase=Phase.COMPOSITION,
+                    step="Building local-atmosphere itinerary",
+                    detail=f"within ~{radius_km} km of {location_label}",
+                )
+
+                langfuse_plugin = self._create_langfuse_plugin()
+                workflow = create_local_atmosphere_workflow(
+                    self._model,
+                    book_title=book_title,
+                    author=author,
+                    location_label=location_label,
+                    radius_km=radius_km,
+                )
+                runner = Runner(
+                    agent=workflow,
+                    app_name=APP_NAME,
+                    session_service=self._session_service,
+                    plugins=[LoggingPlugin(), langfuse_plugin],
+                )
+
+                prompt = build_local_atmosphere_prompt(
+                    book_title, author, location_label, radius_km
+                )
+                message = types.Content(
+                    role="user", parts=[types.Part(text=prompt)]
+                )
+
+                final_response = None
+                reported_agents = set()
+                async with runner:
+                    async for event in runner.run_async(
+                        user_id=user_id,
+                        session_id=job_id,
+                        new_message=message,
+                    ):
+                        if (
+                            event.author
+                            and event.author in LOCAL_ATMOSPHERE_AGENT_STEPS
+                            and event.author not in reported_agents
+                        ):
+                            reported_agents.add(event.author)
+                            yield ProgressEvent(
+                                phase=Phase.COMPOSITION,
+                                step=LOCAL_ATMOSPHERE_AGENT_STEPS[event.author],
+                                detail=event.author,
+                            )
+                        if event.is_final_response():
+                            final_response = event
+
+                refreshed = await self._session_service.get_session(
+                    app_name=APP_NAME, user_id=user_id, session_id=job_id
+                )
+                if refreshed is not None:
+                    session = refreshed
+
+                state = SessionStateAccessor(session.state)
+                result_data = extract_itinerary_from_response(
+                    final_response, state
+                )
+
+                if result_data:
+                    yield ItineraryReady(itinerary=result_data)
+                else:
+                    await self._mark_session_failed(job_id, user_id)
+                    yield WorkflowError(
+                        message="Failed to extract local-atmosphere itinerary",
+                        error_type="ExtractionError",
+                        phase=Phase.COMPOSITION,
+                    )
+                    yield WorkflowComplete(job_id=job_id)
+                    return
+
+                token_usage = None
+                if langfuse_plugin.enabled:
+                    token_usage = langfuse_plugin.get_session_stats()
+                    await langfuse_plugin.flush()
+
+                yield WorkflowComplete(job_id=job_id, token_usage=token_usage)
+
+        except TimeoutError:
+            logger.error("local_atmosphere_timeout", job_id=job_id)
+            await self._mark_session_failed(job_id, user_id)
+            yield WorkflowError(
+                message=(
+                    f"Local-atmosphere flow timed out after "
+                    f"{self._config.workflow_timeout}s"
+                ),
+                error_type="WorkflowTimeoutError",
+                phase=Phase.COMPOSITION,
+            )
+            yield WorkflowComplete(job_id=job_id)
+        except asyncio.CancelledError:
+            logger.warning("local_atmosphere_cancelled", job_id=job_id)
+            await self._mark_session_failed(job_id, user_id)
+            raise
+        except Exception as e:
+            logger.error(
+                "local_atmosphere_error",
+                error=str(e),
+                error_type=type(e).__name__,
             )
             await self._mark_session_failed(job_id, user_id)
             yield WorkflowError(

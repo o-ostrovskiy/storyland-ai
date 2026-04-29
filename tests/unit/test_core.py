@@ -19,7 +19,11 @@ from core.events import (
 )
 from core.types import ExecutorConfig
 from core.session_state import SessionStateKeys, SessionStateAccessor
-from core.prompts import build_discovery_prompt, build_composition_prompt
+from core.prompts import (
+    build_discovery_prompt,
+    build_composition_prompt,
+    build_local_atmosphere_prompt,
+)
 from core.extraction import (
     validate_trip_itinerary,
     extract_json_from_text,
@@ -173,6 +177,7 @@ class TestSessionStateKeys:
         assert SessionStateKeys.REGION_ANALYSIS == "region_analysis"
         assert SessionStateKeys.FINAL_ITINERARY == "final_itinerary"
         assert SessionStateKeys.USER_PREFERENCES == "user:preferences"
+        assert SessionStateKeys.USER_LOCATION == "user_location"
 
 
 class TestSessionStateAccessor:
@@ -270,6 +275,17 @@ class TestPrompts:
         assert "George Orwell" in prompt
         assert "England" in prompt
         assert "ONLY" in prompt
+
+    def test_local_atmosphere_prompt(self):
+        prompt = build_local_atmosphere_prompt(
+            "Wuthering Heights", "Emily Brontë", "New York, NY 10013", 80
+        )
+        assert "Wuthering Heights" in prompt
+        assert "Emily Brontë" in prompt
+        assert "New York, NY 10013" in prompt
+        assert "80" in prompt
+        # The flow's defining instruction is to skip the actual setting.
+        assert "atmospheric" in prompt.lower()
 
 
 # =============================================================================

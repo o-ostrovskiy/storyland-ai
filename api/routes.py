@@ -12,11 +12,12 @@ from api.dependencies import get_app_state, get_gateway_user_id, verify_gateway_
 from api.models import (
     DiscoverRequest,
     ComposeRequest,
+    LocalAtmosphereRequest,
     HealthResponse,
     JobStatusResponse,
     JobStatus,
 )
-from api.streaming import discover_stream, compose_stream
+from api.streaming import discover_stream, compose_stream, local_atmosphere_stream
 from common.logging import get_logger
 from core.session_state import SessionStateAccessor
 
@@ -145,6 +146,64 @@ async def compose(job_id: str, request: ComposeRequest, user_id: str = Depends(g
     generator = compose_stream(
         job_id=job_id,
         region_ids=request.region_ids,
+        user_id=user_id,
+        executor=app_state.executor,
+    )
+
+    return EventSourceResponse(generator, media_type="text/event-stream")
+
+
+@router.post(
+    "/itinerary/local-atmosphere",
+    summary="Build a local-atmosphere itinerary near the user",
+    responses={
+        200: {
+            "description": "SSE event stream (text/event-stream)",
+            "content": {
+                "text/event-stream": {
+                    "example": (
+                        'event: progress\ndata: {"event":"progress","phase":3,"step":"Building local-atmosphere itinerary"}\n\n'
+                        'event: metadata\ndata: {"event":"metadata","book_title":"Wuthering Heights","author":"Emily Brontë"}\n\n'
+                        'event: itinerary\ndata: {"event":"itinerary","itinerary":{...}}\n\n'
+                        'event: done\ndata: {"event":"done","job_id":"abc-123"}\n\n'
+                    )
+                }
+            },
+        }
+    },
+)
+async def local_atmosphere(
+    request: LocalAtmosphereRequest,
+    user_id: str = Depends(get_gateway_user_id),
+):
+    """
+    Build an itinerary near the user's current location whose mood and sensory
+    character evoke the chosen book.
+
+    Single-phase flow — no region selection. Streams SSE events:
+    - **progress** — Step-by-step updates
+    - **metadata** — Confirmed book metadata
+    - **itinerary** — Final TripItinerary of nearby atmospheric stops
+    - **error** — If something goes wrong during processing
+    - **done** — Stream complete (includes `job_id`)
+    """
+    app_state = get_app_state()
+    logger.info(
+        "local_atmosphere_request",
+        book_title=request.book_title,
+        author=request.author,
+        location_label=request.user_location.label,
+        radius_km=request.radius_km,
+    )
+
+    generator = local_atmosphere_stream(
+        book_title=request.book_title,
+        author=request.author,
+        location_label=request.user_location.label,
+        lat=request.user_location.lat,
+        lng=request.user_location.lng,
+        radius_km=request.radius_km,
+        preferences=request.preferences,
         user_id=user_id,
         executor=app_state.executor,
     )

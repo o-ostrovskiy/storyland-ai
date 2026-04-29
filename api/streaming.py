@@ -115,3 +115,28 @@ async def compose_stream(
         user_id=user_id,
     ):
         yield domain_event_to_sse(event)
+
+
+async def local_atmosphere_stream(
+    book_title: str,
+    author: str,
+    location_label: str,
+    lat: float,
+    lng: float,
+    radius_km: int,
+    preferences: Optional[dict],
+    user_id: str,
+    executor: WorkflowExecutor,
+) -> AsyncGenerator[dict, None]:
+    """Run the local-atmosphere flow via executor and yield SSE events."""
+    async for event in executor.local_atmosphere(
+        book_title=book_title,
+        author=author,
+        location_label=location_label,
+        lat=lat,
+        lng=lng,
+        radius_km=radius_km,
+        preferences=preferences,
+        user_id=user_id,
+    ):
+        yield domain_event_to_sse(event)

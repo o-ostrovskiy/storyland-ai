@@ -131,6 +131,7 @@ flowchart TB
 - **Region Analyzer** - Groups cities by geographic proximity using LLM world knowledge
 - **Trip Composer** - Creates personalized itinerary based on user preferences
 - **Reader Profile Agent** - Accesses user preferences from session state
+- **Local Atmosphere Pipeline** - Single-phase researcher → formatter that finds nearby places (within ~80 km of the user) whose mood and aesthetic evoke the book, for readers who can't travel to the actual setting
 
 **Session State Keys:**
 
@@ -156,7 +157,7 @@ flowchart TB
 
 ### API (FastAPI SSE)
 
-StoryLand AI includes a FastAPI server with Server-Sent Events streaming for web/mobile clients. The API splits the workflow into two streaming endpoints:
+StoryLand AI includes a FastAPI server with Server-Sent Events streaming for web/mobile clients. The API offers a two-phase travel-planning flow plus a single-phase **local-atmosphere** mode for users who can't travel:
 
 ```bash
 # Start the API server
@@ -176,11 +177,21 @@ curl -N -X POST http://localhost:8080/api/v1/itinerary/{job_id}/compose \
   -H "Content-Type: application/json" \
   -d '{"region_ids": [1]}'
 
+# Local atmosphere (single-phase) — places near the user that match the book's mood
+curl -N -X POST http://localhost:8080/api/v1/itinerary/local-atmosphere \
+  -H "Content-Type: application/json" \
+  -d '{
+        "book_title": "Wuthering Heights",
+        "author": "Emily Brontë",
+        "user_location": {"label": "New York, NY", "lat": 40.7128, "lng": -74.0060},
+        "radius_km": 80
+      }'
+
 # Check job status
 curl http://localhost:8080/api/v1/itinerary/{job_id}/status
 ```
 
-SSE event types: `progress`, `metadata`, `regions`, `itinerary`, `error`, `done`.
+SSE event types: `progress`, `metadata`, `regions`, `itinerary`, `error`, `done`. The local-atmosphere endpoint emits `progress → metadata → itinerary → done` (no `regions` event — there is no region-selection step).
 
 **Job status states** (`GET /api/v1/itinerary/{job_id}/status`):
 
@@ -243,9 +254,10 @@ storyland-ai/
 │   ├── book_context_agent.py     # Book setting research
 │   ├── discovery_agents.py       # City/landmark/author discovery
 │   ├── trip_composer_agent.py    # Itinerary composition
+│   ├── local_atmosphere_agent.py # Researcher+formatter for "near me" mode
 │   ├── reader_profile_agent.py   # Preferences-based personalization
 │   ├── region_analyzer_agent.py  # Geographic region grouping
-│   ├── orchestrator.py           # Two-phase workflow coordination
+│   ├── orchestrator.py           # Two-phase + local-atmosphere workflows
 │   ├── prompts.py                # AgentPrompts dataclass + versioned loader
 │   └── prompts/                  # Versioned prompt sets
 │       ├── v1.json               # Original prompts (git ref 4c6fdc9)
@@ -253,7 +265,7 @@ storyland-ai/
 │
 ├── api/                 # FastAPI SSE streaming API
 │   ├── app.py           # Application factory with lifespan
-│   ├── routes.py        # HTTP endpoints (discover, compose, status, health)
+│   ├── routes.py        # HTTP endpoints (discover, compose, local-atmosphere, status, health)
 │   ├── streaming.py     # SSE async generators wrapping ADK Runner
 │   ├── models.py        # Request/response/SSE event Pydantic models
 │   └── dependencies.py  # Shared app state & dependency injection
@@ -313,7 +325,7 @@ Agent prompts include reliability improvements:
 ## Testing
 
 ```bash
-make test                # Unit tests (245 tests)
+make test                # Unit tests (263 tests)
 make test-integration    # Integration tests with VCR cassettes
 make test-all            # Both
 make test-cov            # With coverage
@@ -323,11 +335,11 @@ make test-cov            # With coverage
 |--------|-------|-------------|
 | `test_models.py` | 46 | Pydantic model validation |
 | `test_tools.py` | 4 | Preferences tool |
-| `test_agents.py` | 32 | Agent factory functions |
+| `test_agents.py` | 40 | Agent factory functions (incl. local-atmosphere) |
 | `test_services.py` | 10 | Session service |
 | `test_llm_scorer.py` | 18 | LLM scoring models and prompts |
-| `test_core.py` | 49 | Events, session state, extraction, regions |
-| `test_api.py` | 70 | API models, endpoints, SSE streaming, failure-status |
+| `test_core.py` | 57 | Events, session state, extraction, regions, prompts |
+| `test_api.py` | 81 | API models, endpoints, SSE streaming, failure-status (incl. local-atmosphere) |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).
 

@@ -14,6 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.models import (
     DiscoverRequest,
     ComposeRequest,
+    LocalAtmosphereRequest,
+    UserLocation,
     SSEProgressEvent,
     SSEMetadataEvent,
     SSERegionsEvent,
@@ -109,6 +111,99 @@ class TestComposeRequest:
     def test_missing_region_ids_raises(self):
         with pytest.raises(ValidationError):
             ComposeRequest()
+
+
+class TestUserLocation:
+    """Tests for UserLocation model."""
+
+    def test_valid_location(self):
+        loc = UserLocation(lat=40.7128, lng=-74.0060, label="New York, NY")
+        assert loc.lat == 40.7128
+        assert loc.label == "New York, NY"
+
+    def test_lat_out_of_range(self):
+        with pytest.raises(ValidationError):
+            UserLocation(lat=91.0, lng=0.0, label="X")
+
+    def test_lng_out_of_range(self):
+        with pytest.raises(ValidationError):
+            UserLocation(lat=0.0, lng=181.0, label="X")
+
+    def test_blank_label_raises(self):
+        with pytest.raises(ValidationError):
+            UserLocation(lat=0.0, lng=0.0, label="   ")
+
+    def test_label_is_trimmed(self):
+        loc = UserLocation(lat=0.0, lng=0.0, label="  Boston  ")
+        assert loc.label == "Boston"
+
+
+class TestLocalAtmosphereRequest:
+    """Tests for LocalAtmosphereRequest model."""
+
+    def _location(self) -> UserLocation:
+        return UserLocation(lat=40.7128, lng=-74.0060, label="New York, NY")
+
+    def test_minimal_request(self):
+        req = LocalAtmosphereRequest(
+            book_title="Wuthering Heights",
+            author="Emily Brontë",
+            user_location=self._location(),
+        )
+        assert req.radius_km == 80
+        assert req.preferences is None
+
+    def test_full_request(self):
+        req = LocalAtmosphereRequest(
+            book_title="Wuthering Heights",
+            author="Emily Brontë",
+            user_location=self._location(),
+            radius_km=120,
+            preferences={"budget": "luxury"},
+        )
+        assert req.radius_km == 120
+        assert req.preferences["budget"] == "luxury"
+
+    def test_radius_below_min_rejected(self):
+        with pytest.raises(ValidationError):
+            LocalAtmosphereRequest(
+                book_title="X",
+                author="Y",
+                user_location=self._location(),
+                radius_km=5,
+            )
+
+    def test_radius_above_max_rejected(self):
+        with pytest.raises(ValidationError):
+            LocalAtmosphereRequest(
+                book_title="X",
+                author="Y",
+                user_location=self._location(),
+                radius_km=500,
+            )
+
+    def test_blank_book_title_rejected(self):
+        with pytest.raises(ValidationError):
+            LocalAtmosphereRequest(
+                book_title="   ",
+                author="Y",
+                user_location=self._location(),
+            )
+
+    def test_missing_user_location_rejected(self):
+        with pytest.raises(ValidationError):
+            LocalAtmosphereRequest(book_title="X", author="Y")
+
+    def test_serialization_roundtrip(self):
+        req = LocalAtmosphereRequest(
+            book_title="X",
+            author="Y",
+            user_location=self._location(),
+        )
+        data = json.loads(req.model_dump_json())
+        restored = LocalAtmosphereRequest(**data)
+        assert restored.book_title == "X"
+        assert restored.user_location.lat == 40.7128
 
 
 # =============================================================================
