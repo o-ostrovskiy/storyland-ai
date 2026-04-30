@@ -1,20 +1,20 @@
 # StoryLand AI - Evaluation Trends
 
-**Report Generated:** 2026-04-23 19:42:13
+**Report Generated:** 2026-04-30 18:29:43
 **Period:** Last 30 days
 **Total Evaluation Runs:** 1
 
 ## Overview
 
 - **Total Test Cases Evaluated:** 14
-- **Latest Evaluation:** 2026-04-23T19:42:13.406697
+- **Latest Evaluation:** 2026-04-30T18:29:42.598359
 
 ## Recent Evaluations
 
 | Date | Dataset | Cases | Status |
 |------|---------|-------|--------|
-| 2026-04-23 | books_v1 | 7 | ✅ Complete |
-| 2026-04-23 | storyland_eval | 7 | ✅ Complete |
+| 2026-04-30 | books_v1 | 7 | ✅ Complete |
+| 2026-04-30 | storyland_eval | 7 | ✅ Complete |
 
 ## Viewing Results
 
