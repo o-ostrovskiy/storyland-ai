@@ -78,6 +78,85 @@ class ComposeRequest(BaseModel):
     )
 
 
+class UserLocation(BaseModel):
+    """User's current location for the local-atmosphere flow."""
+
+    lat: float = Field(ge=-90, le=90, description="Latitude in decimal degrees")
+    lng: float = Field(ge=-180, le=180, description="Longitude in decimal degrees")
+    label: str = Field(
+        min_length=1,
+        max_length=200,
+        description="Human-readable location (e.g., 'New York, NY 10013')",
+    )
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("label must not be empty")
+        return normalized
+
+
+class LocalAtmosphereRequest(BaseModel):
+    """Request body for POST /api/v1/itinerary/local-atmosphere.
+
+    Single-phase flow: caller supplies a book and a current location, the
+    workflow returns a TripItinerary of nearby places that match the book's
+    atmosphere — no region selection step.
+    """
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "book_title": "Wuthering Heights",
+                    "author": "Emily Brontë",
+                    "user_location": {
+                        "lat": 40.7128,
+                        "lng": -74.0060,
+                        "label": "New York, NY 10013",
+                    },
+                    "radius_km": 80,
+                    "preferences": {
+                        "budget": "moderate",
+                        "preferred_pace": "relaxed",
+                    },
+                },
+            ]
+        }
+    }
+
+    book_title: str = Field(min_length=1, description="Title of the book")
+    author: str = Field(min_length=1, description="Author name (required)")
+    user_location: UserLocation = Field(description="User's current location")
+    radius_km: int = Field(
+        default=80,
+        ge=10,
+        le=200,
+        description="Search radius in km from the user's location",
+    )
+    preferences: Optional[dict] = Field(
+        default=None, description="User travel preferences"
+    )
+
+    @field_validator("book_title")
+    @classmethod
+    def validate_book_title(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("book_title must not be empty")
+        return normalized
+
+    @field_validator("author")
+    @classmethod
+    def validate_author(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("author must not be empty")
+        return normalized
+
+
 # --- SSE Event Models ---
 
 
@@ -90,6 +169,17 @@ class SSEProgressEvent(BaseModel):
     detail: Optional[str] = Field(
         default=None, description="Additional detail"
     )
+
+
+class SSEStartedEvent(BaseModel):
+    """Job has been registered with a session and has a stable job_id.
+
+    Emitted as early as possible so a client whose SSE connection drops mid-run
+    can recover the job via GET /itinerary/{job_id}/status.
+    """
+
+    event: Literal["started"] = "started"
+    job_id: str
 
 
 class SSEMetadataEvent(BaseModel):

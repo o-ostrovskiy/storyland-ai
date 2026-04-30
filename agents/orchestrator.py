@@ -28,6 +28,7 @@ from .discovery_agents import (
     create_landmark_pipeline,
     create_author_pipeline,
 )
+from .local_atmosphere_agent import create_local_atmosphere_pipeline
 from .trip_composer_agent import create_trip_composer_agent
 from .reader_profile_agent import create_reader_profile_agent
 from .region_analyzer_agent import create_region_analyzer_agent
@@ -105,6 +106,62 @@ def create_discovery_workflow(
     return SequentialAgent(
         name="discovery_workflow",
         sub_agents=sub_agents,
+    )
+
+
+def create_local_atmosphere_workflow(
+    model,
+    book_title: str,
+    author: str,
+    location_label: str,
+    radius_km: int,
+    prompts: AgentPrompts | None = None,
+):
+    """
+    Create the local-atmosphere workflow (single-phase).
+
+    Used when the reader cannot travel to the book's actual setting and wants
+    an itinerary near their current location whose mood and sensory character
+    evoke the book.
+
+    Architecture:
+        SequentialAgent (local_atmosphere_workflow)
+        ├─ book_context_pipeline [research → format] → state["book_context"]
+        ├─ reader_profile_agent → state["reader_profile"]
+        └─ local_atmosphere_pipeline [research → format] → state["final_itinerary"]
+
+    There is no city/landmark/author/region discovery: those agents look at the
+    book's geography, which is irrelevant here.
+
+    Args:
+        model: The LLM model to use.
+        book_title: Exact book title.
+        author: Exact author name.
+        location_label: Human-readable user location (e.g. "New York, NY 10013").
+        radius_km: Maximum distance in km from the user's location.
+        prompts: Optional AgentPrompts instance. Loads default version if not provided.
+
+    Returns:
+        SequentialAgent orchestrating the local-atmosphere workflow.
+    """
+    if prompts is None:
+        prompts = load_prompts()
+
+    book_context_pipeline = create_book_context_pipeline(
+        model, google_search, book_title=book_title, author=author, prompts=prompts
+    )
+    reader_profile = create_reader_profile_agent(model, prompts=prompts)
+    local_pipeline = create_local_atmosphere_pipeline(
+        model,
+        google_search,
+        location_label=location_label,
+        radius_km=radius_km,
+        prompts=prompts,
+    )
+
+    return SequentialAgent(
+        name="local_atmosphere_workflow",
+        sub_agents=[book_context_pipeline, reader_profile, local_pipeline],
     )
 
 

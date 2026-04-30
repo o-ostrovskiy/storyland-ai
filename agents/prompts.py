@@ -35,6 +35,8 @@ class AgentPrompts:
     book_context_formatter: str
     reader_profile: str
     region_analyzer: str
+    local_atmosphere_researcher: str  # template with {location_label} and {radius_km} placeholders
+    local_atmosphere_formatter: str  # template with {location_label} and {radius_km} placeholders
 
 
 def load_prompts(version: str = CURRENT_PROMPT_VERSION) -> AgentPrompts:

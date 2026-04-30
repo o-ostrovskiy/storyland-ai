@@ -9,6 +9,7 @@ from typing import AsyncGenerator, List, Optional
 
 from api.models import (
     SSEProgressEvent,
+    SSEStartedEvent,
     SSEMetadataEvent,
     SSERegionsEvent,
     SSEItineraryEvent,
@@ -18,6 +19,7 @@ from api.models import (
 from core.events import (
     DomainEvent,
     ProgressEvent,
+    JobStarted,
     MetadataReady,
     RegionsReady,
     ItineraryReady,
@@ -39,6 +41,11 @@ def domain_event_to_sse(event: DomainEvent) -> dict:
             return _sse(
                 "progress",
                 SSEProgressEvent(phase=int(p), step=s, detail=d).model_dump_json(),
+            )
+        case JobStarted(job_id=j):
+            return _sse(
+                "started",
+                SSEStartedEvent(job_id=j).model_dump_json(),
             )
         case MetadataReady(metadata=m):
             return _sse(
@@ -112,6 +119,31 @@ async def compose_stream(
     async for event in executor.compose(
         job_id=job_id,
         region_ids=region_ids,
+        user_id=user_id,
+    ):
+        yield domain_event_to_sse(event)
+
+
+async def local_atmosphere_stream(
+    book_title: str,
+    author: str,
+    location_label: str,
+    lat: float,
+    lng: float,
+    radius_km: int,
+    preferences: Optional[dict],
+    user_id: str,
+    executor: WorkflowExecutor,
+) -> AsyncGenerator[dict, None]:
+    """Run the local-atmosphere flow via executor and yield SSE events."""
+    async for event in executor.local_atmosphere(
+        book_title=book_title,
+        author=author,
+        location_label=location_label,
+        lat=lat,
+        lng=lng,
+        radius_km=radius_km,
+        preferences=preferences,
         user_id=user_id,
     ):
         yield domain_event_to_sse(event)

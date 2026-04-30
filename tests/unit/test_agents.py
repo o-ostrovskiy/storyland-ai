@@ -14,11 +14,13 @@ from agents import (
     create_city_pipeline,
     create_landmark_pipeline,
     create_author_pipeline,
+    create_local_atmosphere_pipeline,
     create_trip_composer_agent,
     create_reader_profile_agent,
     create_region_analyzer_agent,
     create_discovery_workflow,
     create_composition_workflow,
+    create_local_atmosphere_workflow,
 )
 from agents.prompts import load_prompts, AgentPrompts
 
@@ -140,6 +142,79 @@ class TestAuthorPipeline:
         pipeline = create_author_pipeline(model_name, mock_google_search_tool)
 
         assert pipeline.name == "author_pipeline"
+
+
+# =============================================================================
+# Local Atmosphere Pipeline Tests
+# =============================================================================
+
+class TestLocalAtmospherePipeline:
+    """Tests for create_local_atmosphere_pipeline."""
+
+    def test_creates_sequential_agent(self, model_name, mock_google_search_tool):
+        pipeline = create_local_atmosphere_pipeline(
+            model_name,
+            mock_google_search_tool,
+            location_label="New York, NY",
+            radius_km=80,
+        )
+        assert isinstance(pipeline, SequentialAgent)
+        assert pipeline.name == "local_atmosphere_pipeline"
+
+    def test_has_two_sub_agents(self, model_name, mock_google_search_tool):
+        pipeline = create_local_atmosphere_pipeline(
+            model_name,
+            mock_google_search_tool,
+            location_label="New York, NY",
+            radius_km=80,
+        )
+        assert len(pipeline.sub_agents) == 2
+        assert pipeline.sub_agents[0].name == "local_atmosphere_researcher"
+        assert pipeline.sub_agents[1].name == "local_atmosphere_formatter"
+
+    def test_location_baked_into_instructions(self, model_name, mock_google_search_tool):
+        pipeline = create_local_atmosphere_pipeline(
+            model_name,
+            mock_google_search_tool,
+            location_label="Salem, MA",
+            radius_km=60,
+        )
+        researcher, formatter = pipeline.sub_agents
+        assert "Salem, MA" in researcher.instruction
+        assert "60" in researcher.instruction
+        assert "Salem, MA" in formatter.instruction
+        assert "60" in formatter.instruction
+
+
+class TestLocalAtmosphereWorkflow:
+    """Tests for create_local_atmosphere_workflow."""
+
+    def test_creates_sequential_agent(self, model_name):
+        workflow = create_local_atmosphere_workflow(
+            model_name,
+            book_title="Wuthering Heights",
+            author="Emily Brontë",
+            location_label="New York, NY",
+            radius_km=80,
+        )
+        assert isinstance(workflow, SequentialAgent)
+        assert workflow.name == "local_atmosphere_workflow"
+
+    def test_three_stage_pipeline(self, model_name):
+        """book_context_pipeline → reader_profile → local_atmosphere_pipeline."""
+        workflow = create_local_atmosphere_workflow(
+            model_name,
+            book_title="X",
+            author="Y",
+            location_label="Boston, MA",
+            radius_km=80,
+        )
+        names = [a.name for a in workflow.sub_agents]
+        assert names == [
+            "book_context_pipeline",
+            "reader_profile_agent",
+            "local_atmosphere_pipeline",
+        ]
 
 
 # =============================================================================

@@ -29,6 +29,17 @@ class ProgressEvent:
 
 
 @dataclass(frozen=True)
+class JobStarted:
+    """A workflow has been registered with a session and has a job_id.
+
+    Emitted as early as possible so a client that disconnects mid-stream can
+    still recover the run via /status.
+    """
+
+    job_id: str
+
+
+@dataclass(frozen=True)
 class MetadataReady:
     """Book metadata resolved from Google Books API."""
 
@@ -71,6 +82,7 @@ class WorkflowComplete:
 # Union type for consumers
 DomainEvent = (
     ProgressEvent
+    | JobStarted
     | MetadataReady
     | RegionsReady
     | ItineraryReady

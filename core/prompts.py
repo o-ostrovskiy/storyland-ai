@@ -32,3 +32,27 @@ def build_composition_prompt(
         f"and the selected region(s).\n"
         f"Include ALL cities from the selected regions in your itinerary."
     )
+
+
+def build_local_atmosphere_prompt(
+    book_title: str,
+    author: str,
+    location_label: str,
+    radius_km: int,
+) -> str:
+    """Build the user prompt for the local-atmosphere flow.
+
+    The detailed instructions live on the agent (see
+    ``local_atmosphere_researcher`` / ``local_atmosphere_formatter`` in
+    ``agents/prompts/v2.json``); this prompt just frames the task and pins
+    the user's location and radius into the conversation history.
+    """
+    return (
+        f'The reader cannot travel to the actual setting of "{book_title}" by '
+        f'{author}. Build an atmospheric local outing instead.\n\n'
+        f"User location: {location_label}\n"
+        f"Search radius: ~{radius_km} km from that location (≈ 1 hour drive).\n\n"
+        f"Find real places near the user whose mood, era, and sensory feel "
+        f"evoke the book. Group them into 1-3 nearby towns and return a "
+        f"TripItinerary that respects the user's preferences."
+    )
