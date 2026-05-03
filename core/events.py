@@ -6,7 +6,7 @@ HTTP, SSE, or any specific delivery mechanism. Consumers (API adapter,
 CLI, backend) decide how to serialize and deliver them.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, List
 from enum import IntEnum
 
@@ -60,6 +60,16 @@ class ItineraryReady:
     """Composition complete, validated itinerary available."""
 
     itinerary: dict
+    suggestions: List[dict] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ExpansionReady:
+    """Expansion complete: new places added to an existing city."""
+
+    parent_city: str
+    places: List[dict]
+    suggestions: List[dict] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -86,6 +96,7 @@ DomainEvent = (
     | MetadataReady
     | RegionsReady
     | ItineraryReady
+    | ExpansionReady
     | WorkflowError
     | WorkflowComplete
 )

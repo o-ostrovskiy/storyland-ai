@@ -28,6 +28,7 @@ from .discovery_agents import (
     create_landmark_pipeline,
     create_author_pipeline,
 )
+from .expansion_agent import create_expansion_pipeline
 from .local_atmosphere_agent import create_local_atmosphere_pipeline
 from .trip_composer_agent import create_trip_composer_agent
 from .reader_profile_agent import create_reader_profile_agent
@@ -162,6 +163,61 @@ def create_local_atmosphere_workflow(
     return SequentialAgent(
         name="local_atmosphere_workflow",
         sub_agents=[book_context_pipeline, reader_profile, local_pipeline],
+    )
+
+
+def create_expansion_workflow(
+    model,
+    google_search_tool,
+    book_title: str,
+    author: str,
+    parent_city: str,
+    action_prompt: str,
+    existing_places: str,
+    prompts: AgentPrompts | None = None,
+):
+    """
+    Create the expansion workflow that adds new places to an existing itinerary city.
+
+    Called after composition when the user clicks a suggestion chip. Runs a
+    researcher → formatter pipeline scoped to the chosen city and action.
+
+    Architecture:
+        SequentialAgent (expansion_workflow)
+        └─ expansion_pipeline
+           ├─ expansion_researcher [google_search] → research notes
+           └─ expansion_formatter [output_schema=ExpansionResult] → state["last_expansion"]
+
+    Args:
+        model: The LLM model to use.
+        google_search_tool: The Google Search tool.
+        book_title: Exact book title.
+        author: Exact author name.
+        parent_city: City where new places should be located.
+        action_prompt: The expansion instruction from the suggestion chip.
+        existing_places: Newline-separated "Name (City)" strings to avoid repeating.
+        prompts: Optional AgentPrompts instance. Loads default version if not provided.
+
+    Returns:
+        SequentialAgent orchestrating the expansion pipeline.
+    """
+    if prompts is None:
+        prompts = load_prompts()
+
+    expansion_pipeline = create_expansion_pipeline(
+        model,
+        google_search_tool,
+        book_title=book_title,
+        author=author,
+        parent_city=parent_city,
+        action_prompt=action_prompt,
+        existing_places=existing_places,
+        prompts=prompts,
+    )
+
+    return SequentialAgent(
+        name="expansion_workflow",
+        sub_agents=[expansion_pipeline],
     )
 
 

@@ -78,6 +78,25 @@ class ComposeRequest(BaseModel):
     )
 
 
+class ExpandRequest(BaseModel):
+    """Request body for POST /api/v1/itinerary/{job_id}/expand."""
+
+    action_id: str = Field(
+        min_length=1,
+        description="ID of the suggestion chip that was clicked (server-issued uuid4)",
+    )
+    action_label: str = Field(
+        min_length=1,
+        max_length=100,
+        description="Human-readable chip label (for logging only)",
+    )
+    action_prompt: str = Field(
+        min_length=1,
+        max_length=500,
+        description="Expansion instruction carried by the chip",
+    )
+
+
 class UserLocation(BaseModel):
     """User's current location for the local-atmosphere flow."""
 
@@ -208,6 +227,22 @@ class SSEItineraryEvent(BaseModel):
 
     event: Literal["itinerary"] = "itinerary"
     itinerary: dict = Field(description="TripItinerary as dict")
+    suggestions: List[dict] = Field(
+        default_factory=list,
+        description="Contextual suggestion chips for follow-up expansions",
+    )
+
+
+class SSEExpansionEvent(BaseModel):
+    """Expansion result: new places added to an existing city."""
+
+    event: Literal["expansion"] = "expansion"
+    parent_city: str = Field(description="City where new places were added")
+    places: List[dict] = Field(description="New CityStop entries")
+    suggestions: List[dict] = Field(
+        default_factory=list,
+        description="Fresh contextual suggestion chips",
+    )
 
 
 class SSEErrorEvent(BaseModel):

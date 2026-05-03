@@ -5,7 +5,7 @@ Contains models for the final travel itinerary, including city plans and stops.
 """
 
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List
+from typing import Literal, Optional, List
 
 
 class CityStop(BaseModel):
@@ -29,6 +29,10 @@ class CityStop(BaseModel):
     )
     notes: Optional[str] = Field(
         default=None, description="Practical tips for visiting"
+    )
+    source: Literal["composed", "expansion"] = Field(
+        default="composed",
+        description="Whether this stop was part of the original itinerary or added via expansion",
     )
 
 
@@ -54,3 +58,43 @@ class TripItinerary(BaseModel):
 
     cities: List[CityPlan] = Field(description="City-by-city travel plans")
     summary_text: str = Field(description="Engaging overview of the entire trip")
+
+
+class SuggestionChip(BaseModel):
+    """A contextual suggestion chip shown to the user after receiving an itinerary."""
+
+    id: str = Field(
+        default="",
+        description="Server-assigned stable identifier (uuid4). Leave empty — the server stamps this.",
+    )
+    label: str = Field(
+        description="Short chip label shown in the UI (2-4 words, e.g. 'Add restaurants nearby')"
+    )
+    action_prompt: str = Field(
+        description="Instruction passed to the expansion agent when this chip is clicked (10-30 words)"
+    )
+
+
+class ComposerEnvelope(BaseModel):
+    """Wrapper returned by composer/formatter agents. Split by executor before persisting."""
+
+    itinerary: TripItinerary = Field(description="The full trip itinerary")
+    suggestions: List[SuggestionChip] = Field(
+        default_factory=list,
+        description="2-4 contextual suggestion chips for follow-up expansions",
+    )
+
+
+class ExpansionResult(BaseModel):
+    """Result from the expansion agent: new places + follow-up suggestions."""
+
+    parent_city: str = Field(
+        description="Name of the city these new places belong to (must match a city in the existing itinerary)"
+    )
+    places: List[CityStop] = Field(
+        description="3-5 new places to add to the itinerary"
+    )
+    suggestions: List[SuggestionChip] = Field(
+        default_factory=list,
+        description="2-4 contextual follow-up suggestion chips",
+    )

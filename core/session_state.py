@@ -22,6 +22,12 @@ class SessionStateKeys:
     REGION_ANALYSIS = "region_analysis"
     SELECTED_REGIONS = "selected_regions"
     FINAL_ITINERARY = "final_itinerary"
+    COMPOSER_ENVELOPE = "composer_envelope"
+    LAST_SUGGESTIONS = "last_suggestions"
+    EXPANSIONS = "expansions"
+    EXPANSION_COUNT = "expansion_count"
+    EXPANSION_IN_PROGRESS = "expansion_in_progress"
+    LAST_EXPANSION = "last_expansion"
     USER_PREFERENCES = "user:preferences"
     USER_LOCATION = "user_location"
     JOB_FAILED = "job_failed"
@@ -92,9 +98,33 @@ class SessionStateAccessor:
     @property
     def book_title(self) -> str:
         bm = self.book_metadata or {}
-        return bm.get("book_title", "")
+        return bm.get("book_title", "") or self._state.get(SessionStateKeys.BOOK_TITLE, "")
 
     @property
     def author(self) -> str:
         bm = self.book_metadata or {}
-        return bm.get("author", "")
+        return bm.get("author", "") or self._state.get(SessionStateKeys.AUTHOR, "")
+
+    @property
+    def composer_envelope(self) -> Optional[dict]:
+        return self._state.get(SessionStateKeys.COMPOSER_ENVELOPE)
+
+    @property
+    def last_suggestions(self) -> List[dict]:
+        return self._state.get(SessionStateKeys.LAST_SUGGESTIONS, [])
+
+    @property
+    def expansions(self) -> List[dict]:
+        return self._state.get(SessionStateKeys.EXPANSIONS, [])
+
+    @property
+    def expansion_count(self) -> int:
+        return int(self._state.get(SessionStateKeys.EXPANSION_COUNT, 0))
+
+    @property
+    def expansion_in_progress(self) -> bool:
+        return bool(self._state.get(SessionStateKeys.EXPANSION_IN_PROGRESS, False))
+
+    @property
+    def last_expansion(self) -> Optional[dict]:
+        return self._state.get(SessionStateKeys.LAST_EXPANSION)

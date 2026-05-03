@@ -5,7 +5,7 @@ Synthesizes all discovery results into a complete, cohesive travel itinerary.
 """
 
 from google.adk.agents import LlmAgent
-from models.itinerary import TripItinerary
+from models.itinerary import ComposerEnvelope
 from agents.prompts import AgentPrompts, load_prompts
 
 
@@ -18,14 +18,14 @@ def create_trip_composer_agent(model, prompts: AgentPrompts | None = None):
         prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
-        LlmAgent that composes the final travel itinerary
+        LlmAgent that composes the final travel itinerary wrapped in a ComposerEnvelope
     """
     if prompts is None:
         prompts = load_prompts()
     return LlmAgent(
         name="trip_composer",
         model=model,
-        output_schema=TripItinerary,
-        output_key="final_itinerary",
+        output_schema=ComposerEnvelope,
+        output_key="composer_envelope",
         instruction=prompts.trip_composer,
     )

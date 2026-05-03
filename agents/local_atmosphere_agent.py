@@ -8,7 +8,7 @@ cannot travel to the book's actual setting.
 
 from google.adk.agents import LlmAgent, SequentialAgent
 
-from models.itinerary import TripItinerary
+from models.itinerary import ComposerEnvelope
 from agents.prompts import AgentPrompts, load_prompts
 
 
@@ -55,8 +55,8 @@ def create_local_atmosphere_pipeline(
     formatter = LlmAgent(
         name="local_atmosphere_formatter",
         model=model,
-        output_schema=TripItinerary,
-        output_key="final_itinerary",
+        output_schema=ComposerEnvelope,
+        output_key="composer_envelope",
         instruction=formatter_instruction,
     )
 
