@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.models import (
     DiscoverRequest,
     ComposeRequest,
+    ExpandRequest,
     LocalAtmosphereRequest,
     UserLocation,
     SSEProgressEvent,
@@ -21,6 +22,7 @@ from api.models import (
     SSEMetadataEvent,
     SSERegionsEvent,
     SSEItineraryEvent,
+    SSEExpansionEvent,
     SSEErrorEvent,
     SSEDoneEvent,
     HealthResponse,
@@ -35,6 +37,7 @@ from core.events import (
     MetadataReady,
     RegionsReady,
     ItineraryReady,
+    ExpansionReady,
     WorkflowError,
     WorkflowComplete,
 )
@@ -278,6 +281,29 @@ class TestSSERegionsEvent:
         assert data["regions"] == []
 
 
+class TestExpandRequest:
+    def test_valid_request(self):
+        req = ExpandRequest(
+            action_id="abc-123",
+            action_label="Add restaurants",
+            action_prompt="Find atmospheric restaurants near the stops.",
+        )
+        assert req.action_id == "abc-123"
+        assert req.action_label == "Add restaurants"
+
+    def test_missing_action_id_raises(self):
+        with pytest.raises(ValidationError):
+            ExpandRequest(action_label="Add restaurants", action_prompt="Find restaurants.")
+
+    def test_missing_action_prompt_raises(self):
+        with pytest.raises(ValidationError):
+            ExpandRequest(action_id="x", action_label="Add restaurants")
+
+    def test_action_prompt_max_length(self):
+        with pytest.raises(ValidationError):
+            ExpandRequest(action_id="x", action_label="Test", action_prompt="x" * 501)
+
+
 class TestSSEItineraryEvent:
     def test_itinerary_event(self):
         itinerary = {
@@ -288,6 +314,61 @@ class TestSSEItineraryEvent:
         data = json.loads(event.model_dump_json())
         assert data["event"] == "itinerary"
         assert data["itinerary"]["cities"][0]["name"] == "London"
+
+    def test_itinerary_event_with_suggestions(self):
+        chip = {"id": "x", "label": "Add restaurants", "action_prompt": "Find restaurants."}
+        event = SSEItineraryEvent(itinerary={"cities": [], "summary_text": "test"}, suggestions=[chip])
+        data = json.loads(event.model_dump_json())
+        assert len(data["suggestions"]) == 1
+        assert data["suggestions"][0]["label"] == "Add restaurants"
+
+    def test_itinerary_event_default_suggestions(self):
+        event = SSEItineraryEvent(itinerary={"cities": [], "summary_text": "test"})
+        data = json.loads(event.model_dump_json())
+        assert data["suggestions"] == []
+
+
+class TestSSEExpansionEvent:
+    def test_expansion_event(self):
+        event = SSEExpansionEvent(
+            parent_city="London",
+            places=[{"name": "The Ritz", "type": "restaurant"}],
+            suggestions=[{"id": "y", "label": "More cafés", "action_prompt": "Find cafés."}],
+        )
+        data = json.loads(event.model_dump_json())
+        assert data["event"] == "expansion"
+        assert data["parent_city"] == "London"
+        assert len(data["places"]) == 1
+        assert len(data["suggestions"]) == 1
+
+    def test_expansion_event_default_suggestions(self):
+        event = SSEExpansionEvent(parent_city="Paris", places=[])
+        data = json.loads(event.model_dump_json())
+        assert data["suggestions"] == []
+
+
+class TestDomainEventToSSEExpansion:
+    def test_expansion_ready_event(self):
+        event = ExpansionReady(
+            parent_city="London",
+            places=[{"name": "Café A"}],
+            suggestions=[{"id": "z", "label": "More spots", "action_prompt": "Find more."}],
+        )
+        sse = domain_event_to_sse(event)
+        assert sse["event"] == "expansion"
+        data = json.loads(sse["data"])
+        assert data["parent_city"] == "London"
+        assert len(data["places"]) == 1
+
+    def test_itinerary_ready_with_suggestions(self):
+        event = ItineraryReady(
+            itinerary={"cities": [], "summary_text": "test"},
+            suggestions=[{"id": "s", "label": "Add restaurants", "action_prompt": "Find places."}],
+        )
+        sse = domain_event_to_sse(event)
+        assert sse["event"] == "itinerary"
+        data = json.loads(sse["data"])
+        assert len(data["suggestions"]) == 1
 
 
 class TestSSEErrorEvent:

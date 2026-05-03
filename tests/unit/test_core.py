@@ -27,9 +27,13 @@ from core.prompts import (
 )
 from core.extraction import (
     validate_trip_itinerary,
+    validate_composer_envelope,
+    validate_expansion_result,
     extract_json_from_text,
     extract_itinerary_from_response,
+    extract_expansion_from_state,
 )
+from core.events import ExpansionReady
 from core.regions import get_valid_region_ids, validate_region_selection
 from evaluation.tools.run_scheduled_eval import select_first_region, select_all_regions
 
@@ -379,42 +383,39 @@ class TestExtractJsonFromText:
         assert result["outer"]["inner"] == 1
 
 
+_VALID_ITINERARY = {
+    "cities": [
+        {"name": "London", "country": "UK", "days_suggested": 2, "overview": "test", "stops": []}
+    ],
+    "summary_text": "test",
+}
+
+_VALID_CHIP = {"id": "x", "label": "Add restaurants", "action_prompt": "Find atmospheric restaurants."}
+
+
 class TestExtractItineraryFromResponse:
-    def test_from_session_state(self):
-        itinerary = {
-            "cities": [
-                {
-                    "name": "London",
-                    "country": "UK",
-                    "days_suggested": 2,
-                    "overview": "test",
-                    "stops": [],
-                }
-            ],
-            "summary_text": "test",
-        }
-        accessor = SessionStateAccessor({"final_itinerary": itinerary})
+    def test_from_envelope_in_state(self):
+        envelope = {"itinerary": _VALID_ITINERARY, "suggestions": [_VALID_CHIP]}
+        accessor = SessionStateAccessor({"composer_envelope": envelope})
         result = extract_itinerary_from_response(None, accessor)
         assert result is not None
-        assert result["cities"][0]["name"] == "London"
+        itinerary, suggestions = result
+        assert itinerary["cities"][0]["name"] == "London"
+        assert len(suggestions) == 1
+        assert suggestions[0]["label"] == "Add restaurants"
+
+    def test_from_bare_itinerary_state_fallback(self):
+        accessor = SessionStateAccessor({"final_itinerary": _VALID_ITINERARY})
+        result = extract_itinerary_from_response(None, accessor)
+        assert result is not None
+        itinerary, suggestions = result
+        assert itinerary["cities"][0]["name"] == "London"
+        assert suggestions == []
 
     def test_from_text_fallback(self):
-        accessor = SessionStateAccessor({})  # no final_itinerary
+        accessor = SessionStateAccessor({})
 
-        itinerary_json = json.dumps(
-            {
-                "cities": [
-                    {
-                        "name": "London",
-                        "country": "UK",
-                        "days_suggested": 2,
-                        "overview": "test",
-                        "stops": [],
-                    }
-                ],
-                "summary_text": "test",
-            }
-        )
+        itinerary_json = json.dumps(_VALID_ITINERARY)
         mock_part = MagicMock()
         mock_part.text = f"Result: {itinerary_json}"
         mock_response = MagicMock()
@@ -422,6 +423,8 @@ class TestExtractItineraryFromResponse:
 
         result = extract_itinerary_from_response(mock_response, accessor)
         assert result is not None
+        itinerary, suggestions = result
+        assert suggestions == []
 
     def test_no_itinerary_anywhere(self):
         accessor = SessionStateAccessor({})
@@ -432,6 +435,92 @@ class TestExtractItineraryFromResponse:
 
         result = extract_itinerary_from_response(mock_response, accessor)
         assert result is None
+
+
+class TestValidateComposerEnvelope:
+    def test_valid_envelope(self):
+        data = {"itinerary": _VALID_ITINERARY, "suggestions": [_VALID_CHIP]}
+        result = validate_composer_envelope(data)
+        assert result is not None
+        itinerary, suggestions = result
+        assert itinerary["summary_text"] == "test"
+        assert len(suggestions) == 1
+
+    def test_envelope_no_suggestions(self):
+        data = {"itinerary": _VALID_ITINERARY}
+        result = validate_composer_envelope(data)
+        assert result is not None
+        _, suggestions = result
+        assert suggestions == []
+
+    def test_invalid_envelope_missing_itinerary(self):
+        data = {"suggestions": [_VALID_CHIP]}
+        assert validate_composer_envelope(data) is None
+
+    def test_invalid_input(self):
+        assert validate_composer_envelope(None) is None
+        assert validate_composer_envelope("not json") is None
+        assert validate_composer_envelope({"bad": "data"}) is None
+
+
+class TestValidateExpansionResult:
+    def _stop(self, name="The Ritz"):
+        return {"name": name, "type": "restaurant", "reason": "Mood", "time_of_day": "evening", "source": "expansion"}
+
+    def test_valid_result(self):
+        data = {"parent_city": "London", "places": [self._stop()], "suggestions": [_VALID_CHIP]}
+        result = validate_expansion_result(data)
+        assert result is not None
+        assert result["parent_city"] == "London"
+        assert len(result["places"]) == 1
+
+    def test_result_missing_parent_city(self):
+        data = {"places": [self._stop()]}
+        assert validate_expansion_result(data) is None
+
+    def test_result_missing_places(self):
+        data = {"parent_city": "London"}
+        assert validate_expansion_result(data) is None
+
+    def test_result_none(self):
+        assert validate_expansion_result(None) is None
+
+
+class TestExtractExpansionFromState:
+    def _stop(self):
+        return {"name": "Brasserie Zédel", "type": "restaurant", "reason": "Mood", "time_of_day": "evening", "source": "expansion"}
+
+    def test_valid_expansion_in_state(self):
+        data = {"parent_city": "London", "places": [self._stop()]}
+        accessor = SessionStateAccessor({"last_expansion": data})
+        result = extract_expansion_from_state(accessor)
+        assert result is not None
+        assert result["parent_city"] == "London"
+
+    def test_no_expansion_in_state(self):
+        accessor = SessionStateAccessor({})
+        assert extract_expansion_from_state(accessor) is None
+
+
+class TestExpansionReadyEvent:
+    def test_construction(self):
+        event = ExpansionReady(
+            parent_city="London",
+            places=[{"name": "Café A"}],
+            suggestions=[{"id": "x", "label": "More cafés", "action_prompt": "Find more."}]
+        )
+        assert event.parent_city == "London"
+        assert len(event.places) == 1
+        assert len(event.suggestions) == 1
+
+    def test_default_suggestions(self):
+        event = ExpansionReady(parent_city="Paris", places=[])
+        assert event.suggestions == []
+
+    def test_frozen(self):
+        event = ExpansionReady(parent_city="Rome", places=[])
+        with pytest.raises(AttributeError):
+            event.parent_city = "Milan"
 
 
 # =============================================================================

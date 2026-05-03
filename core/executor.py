@@ -37,8 +37,10 @@ from google.adk.plugins.logging_plugin import LoggingPlugin
 from agents.orchestrator import (
     create_discovery_workflow,
     create_composition_workflow,
+    create_expansion_workflow,
     create_local_atmosphere_workflow,
 )
+from google.adk.tools import google_search
 from common.logging import get_logger
 from models.book import BookMetadata
 from plugins.langfuse_plugin import LangfusePlugin
@@ -52,10 +54,11 @@ from .events import (
     MetadataReady,
     RegionsReady,
     ItineraryReady,
+    ExpansionReady,
     WorkflowError,
     WorkflowComplete,
 )
-from .extraction import extract_itinerary_from_response
+from .extraction import extract_itinerary_from_response, extract_expansion_from_state
 from .prompts import (
     build_discovery_prompt,
     build_composition_prompt,
@@ -96,6 +99,15 @@ LOCAL_ATMOSPHERE_AGENT_STEPS: dict[str, str] = {
     "local_atmosphere_formatter": "Composing your local outing",
     "local_atmosphere_pipeline": "Building local-atmosphere itinerary",
 }
+
+EXPANSION_AGENT_STEPS: dict[str, str] = {
+    "expansion_researcher": "Searching for new places",
+    "expansion_formatter": "Curating your additions",
+    "expansion_pipeline": "Finding new places to add",
+}
+
+SOFT_CHIP_CAP = 6
+HARD_EXPANSION_CAP = 20
 
 APP_NAME = "storyland"
 
@@ -394,6 +406,7 @@ class WorkflowExecutor:
                 state_delta={
                     SessionStateKeys.JOB_FAILED: False,
                     SessionStateKeys.FINAL_ITINERARY: None,
+                    SessionStateKeys.COMPOSER_ENVELOPE: None,
                     SessionStateKeys.SELECTED_REGIONS: selected_regions,
                 }
             ),
@@ -445,12 +458,15 @@ class WorkflowExecutor:
                     session = refreshed
 
                 state = SessionStateAccessor(session.state)
-                result_data = extract_itinerary_from_response(
+                result = extract_itinerary_from_response(
                     final_response, state
                 )
 
-                if result_data:
-                    yield ItineraryReady(itinerary=result_data)
+                if result is not None:
+                    itinerary_data, suggestions = result
+                    suggestions = self._stamp_suggestion_ids(suggestions)
+                    await self._persist_suggestions(job_id, user_id, suggestions, itinerary_data)
+                    yield ItineraryReady(itinerary=itinerary_data, suggestions=suggestions)
                 else:
                     await self._mark_session_failed(job_id, user_id)
                     yield WorkflowError(
@@ -628,12 +644,15 @@ class WorkflowExecutor:
                     session = refreshed
 
                 state = SessionStateAccessor(session.state)
-                result_data = extract_itinerary_from_response(
+                result = extract_itinerary_from_response(
                     final_response, state
                 )
 
-                if result_data:
-                    yield ItineraryReady(itinerary=result_data)
+                if result is not None:
+                    itinerary_data, suggestions = result
+                    suggestions = self._stamp_suggestion_ids(suggestions)
+                    await self._persist_suggestions(job_id, user_id, suggestions, itinerary_data)
+                    yield ItineraryReady(itinerary=itinerary_data, suggestions=suggestions)
                 else:
                     await self._mark_session_failed(job_id, user_id)
                     yield WorkflowError(
@@ -680,6 +699,379 @@ class WorkflowExecutor:
                 phase=Phase.COMPOSITION,
             )
             yield WorkflowComplete(job_id=job_id)
+
+    def _stamp_suggestion_ids(self, suggestions: list) -> list:
+        """Overwrite chip ids with fresh server-issued uuid4s."""
+        stamped = []
+        for chip in suggestions:
+            chip = dict(chip)
+            chip["id"] = str(uuid.uuid4())
+            stamped.append(chip)
+        return stamped
+
+    async def _persist_suggestions(
+        self,
+        job_id: str,
+        user_id: str,
+        suggestions: list,
+        itinerary_data: dict | None = None,
+    ) -> None:
+        """Persist suggestion chips (and optionally the resolved itinerary) to session state."""
+        try:
+            session = await self._session_service.get_session(
+                app_name=APP_NAME, user_id=user_id, session_id=job_id
+            )
+            if session is not None:
+                delta: dict = {SessionStateKeys.LAST_SUGGESTIONS: suggestions}
+                if itinerary_data is not None:
+                    delta[SessionStateKeys.FINAL_ITINERARY] = itinerary_data
+                event = Event(
+                    invocation_id="system",
+                    author="system",
+                    actions=EventActions(state_delta=delta),
+                )
+                await self._session_service.append_event(session, event)
+        except Exception:
+            logger.warning("persist_suggestions_error", job_id=job_id)
+
+    async def expand(
+        self,
+        job_id: str,
+        action_id: str,
+        action_label: str,
+        action_prompt: str,
+        user_id: str = "default",
+    ) -> AsyncGenerator[DomainEvent, None]:
+        """Expand the itinerary with new places based on a suggestion chip.
+
+        Requires a completed job_id (compose or local-atmosphere). Validates the
+        action_id against stored suggestion chips to prevent injection. Yields
+        ProgressEvent → ExpansionReady → WorkflowComplete.
+
+        Args:
+            job_id: Session ID from a completed compose/local-atmosphere call.
+            action_id: ID of the suggestion chip the user clicked.
+            action_label: Human-readable chip label (for logging only).
+            action_prompt: Expansion instruction carried by the chip.
+            user_id: User identifier (must match the original session).
+        """
+        try:
+            session = await self._session_service.get_session(
+                app_name=APP_NAME, user_id=user_id, session_id=job_id
+            )
+        except Exception as e:
+            logger.error(
+                "expand_session_lookup_failed",
+                job_id=job_id,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            yield WorkflowError(
+                message="Failed to retrieve session",
+                error_type="SessionError",
+            )
+            yield WorkflowComplete(job_id=job_id)
+            return
+
+        if session is None:
+            yield WorkflowError(
+                message=f"Job {job_id} not found.",
+                error_type="JobNotFound",
+            )
+            yield WorkflowComplete(job_id=job_id)
+            return
+
+        state = SessionStateAccessor(session.state)
+
+        if state.failed:
+            yield WorkflowError(
+                message="Job is in a failed state.",
+                error_type="JobFailed",
+            )
+            yield WorkflowComplete(job_id=job_id)
+            return
+
+        if state.final_itinerary is None:
+            yield WorkflowError(
+                message="Itinerary not yet composed. Run compose or local-atmosphere first.",
+                error_type="ItineraryNotReady",
+            )
+            yield WorkflowComplete(job_id=job_id)
+            return
+
+        # Hard cap: refuse if already at max expansions
+        expansion_count = state.expansion_count
+        if expansion_count >= HARD_EXPANSION_CAP:
+            yield WorkflowError(
+                message=f"Expansion limit reached ({HARD_EXPANSION_CAP} expansions per session).",
+                error_type="ExpansionLimitReached",
+            )
+            yield WorkflowComplete(job_id=job_id)
+            return
+
+        # Always validate action_id against stored suggestions.
+        # Empty last_suggestions (capped, missing, or legacy session) is also a rejection —
+        # the caller must present a server-issued chip id.
+        last_suggestions = state.last_suggestions
+        valid_ids = {chip.get("id") for chip in last_suggestions if chip.get("id")}
+        if action_id not in valid_ids:
+            yield WorkflowError(
+                message="Invalid action_id. It must match a suggestion chip from the last response.",
+                error_type="InvalidActionId",
+            )
+            yield WorkflowComplete(job_id=job_id)
+            return
+
+        # Concurrency guard: block if another expansion is in flight
+        if state.expansion_in_progress:
+            yield WorkflowError(
+                message="An expansion is already in progress for this session.",
+                error_type="ExpansionInProgress",
+            )
+            yield WorkflowComplete(job_id=job_id)
+            return
+
+        # Set the lock
+        lock_event = Event(
+            invocation_id="system",
+            author="system",
+            actions=EventActions(
+                state_delta={SessionStateKeys.EXPANSION_IN_PROGRESS: True}
+            ),
+        )
+        await self._session_service.append_event(session, lock_event)
+
+        try:
+            async with timeout(self._config.workflow_timeout):
+                yield ProgressEvent(
+                    phase=Phase.COMPOSITION,
+                    step=f"Finding places: {action_label}",
+                )
+
+                # Build dedupe list from current itinerary + prior expansions
+                itinerary = state.final_itinerary or {}
+                existing_names: list[str] = []
+                for city in itinerary.get("cities", []):
+                    city_name = city.get("name", "")
+                    for stop in city.get("stops", []):
+                        stop_name = stop.get("name", "")
+                        if stop_name:
+                            existing_names.append(f"{stop_name} ({city_name})")
+
+                existing_places = "\n".join(existing_names) if existing_names else "(none)"
+
+                # Determine target city: scan action_prompt for a known city name,
+                # fall back to the first city so single-city itineraries always work.
+                cities = itinerary.get("cities", [])
+                parent_city = cities[0].get("name", "") if cities else ""
+                action_prompt_lower = action_prompt.lower()
+                for city in cities:
+                    city_name = city.get("name", "")
+                    if city_name and city_name.lower() in action_prompt_lower:
+                        parent_city = city_name
+                        break
+
+                book_title = state.book_title
+                author = state.author
+
+                langfuse_plugin = self._create_langfuse_plugin()
+                expansion_wf = create_expansion_workflow(
+                    self._model,
+                    google_search,
+                    book_title=book_title,
+                    author=author,
+                    parent_city=parent_city,
+                    action_prompt=action_prompt,
+                    existing_places=existing_places,
+                )
+                runner = Runner(
+                    agent=expansion_wf,
+                    app_name=APP_NAME,
+                    session_service=self._session_service,
+                    plugins=[LoggingPlugin(), langfuse_plugin],
+                )
+
+                prompt = (
+                    f"Expand the itinerary for {book_title} by {author}. "
+                    f"Find new places in {parent_city} matching: {action_prompt}"
+                )
+                message = types.Content(
+                    role="user", parts=[types.Part(text=prompt)]
+                )
+
+                reported_agents: set[str] = set()
+                async with runner:
+                    async for event in runner.run_async(
+                        user_id=user_id,
+                        session_id=job_id,
+                        new_message=message,
+                    ):
+                        if (
+                            event.author
+                            and event.author in EXPANSION_AGENT_STEPS
+                            and event.author not in reported_agents
+                        ):
+                            reported_agents.add(event.author)
+                            yield ProgressEvent(
+                                phase=Phase.COMPOSITION,
+                                step=EXPANSION_AGENT_STEPS[event.author],
+                                detail=event.author,
+                            )
+
+                # Re-fetch session after agent run
+                refreshed = await self._session_service.get_session(
+                    app_name=APP_NAME, user_id=user_id, session_id=job_id
+                )
+                if refreshed is not None:
+                    session = refreshed
+
+                state = SessionStateAccessor(session.state)
+                expansion_data = extract_expansion_from_state(state)
+
+                if expansion_data is None:
+                    await self._clear_expansion_lock(job_id, user_id)
+                    yield WorkflowError(
+                        message="Failed to extract expansion result from agent response",
+                        error_type="ExtractionError",
+                        phase=Phase.COMPOSITION,
+                    )
+                    yield WorkflowComplete(job_id=job_id)
+                    return
+
+                # Post-filter: remove duplicates by case-insensitive name match
+                existing_lower = {n.split(" (")[0].lower() for n in existing_names}
+                new_places = [
+                    p for p in expansion_data.get("places", [])
+                    if p.get("name", "").lower() not in existing_lower
+                ]
+
+                # Force source="expansion" on all new stops
+                for place in new_places:
+                    place["source"] = "expansion"
+
+                # Determine actual parent city (match against itinerary cities)
+                returned_city = expansion_data.get("parent_city", parent_city)
+                matched_city = parent_city
+                for city in cities:
+                    if city.get("name", "").lower() == returned_city.lower():
+                        matched_city = city["name"]
+                        break
+
+                # Merge new places into final_itinerary in session state
+                updated_itinerary = dict(itinerary)
+                updated_cities = []
+                merged = False
+                for city in updated_itinerary.get("cities", []):
+                    city = dict(city)
+                    if city.get("name", "").lower() == matched_city.lower():
+                        city["stops"] = list(city.get("stops", [])) + new_places
+                        merged = True
+                    updated_cities.append(city)
+
+                if not merged and updated_cities:
+                    updated_cities[0] = dict(updated_cities[0])
+                    updated_cities[0]["stops"] = (
+                        list(updated_cities[0].get("stops", [])) + new_places
+                    )
+                    matched_city = updated_cities[0].get("name", parent_city)
+
+                updated_itinerary["cities"] = updated_cities
+
+                # Stamp new suggestion ids and apply soft cap
+                new_suggestions = expansion_data.get("suggestions", [])
+                new_expansion_count = expansion_count + 1
+                if new_expansion_count >= SOFT_CHIP_CAP:
+                    new_suggestions = []
+                else:
+                    new_suggestions = self._stamp_suggestion_ids(new_suggestions)
+
+                # Accumulate this expansion in session state
+                prior_expansions = state.expansions
+                this_expansion = {
+                    "parent_city": matched_city,
+                    "places": new_places,
+                    "action_label": action_label,
+                    "action_id": action_id,
+                }
+
+                persist_event = Event(
+                    invocation_id="system",
+                    author="system",
+                    actions=EventActions(
+                        state_delta={
+                            SessionStateKeys.FINAL_ITINERARY: updated_itinerary,
+                            SessionStateKeys.EXPANSIONS: prior_expansions + [this_expansion],
+                            SessionStateKeys.EXPANSION_COUNT: new_expansion_count,
+                            SessionStateKeys.LAST_SUGGESTIONS: new_suggestions,
+                            SessionStateKeys.EXPANSION_IN_PROGRESS: False,
+                        }
+                    ),
+                )
+                await self._session_service.append_event(session, persist_event)
+
+                token_usage = None
+                if langfuse_plugin.enabled:
+                    token_usage = langfuse_plugin.get_session_stats()
+                    await langfuse_plugin.flush()
+
+                logger.info(
+                    "expansion_complete",
+                    job_id=job_id[:8],
+                    matched_city=matched_city,
+                    new_places=len(new_places),
+                    expansion_count=new_expansion_count,
+                )
+
+                yield ExpansionReady(
+                    parent_city=matched_city,
+                    places=new_places,
+                    suggestions=new_suggestions,
+                )
+                yield WorkflowComplete(job_id=job_id, token_usage=token_usage)
+
+        except TimeoutError:
+            logger.error("expand_timeout", job_id=job_id)
+            await self._clear_expansion_lock(job_id, user_id)
+            await self._mark_session_failed(job_id, user_id)
+            yield WorkflowError(
+                message=f"Expansion timed out after {self._config.workflow_timeout}s",
+                error_type="WorkflowTimeoutError",
+                phase=Phase.COMPOSITION,
+            )
+            yield WorkflowComplete(job_id=job_id)
+        except asyncio.CancelledError:
+            logger.warning("expand_cancelled", job_id=job_id)
+            await self._clear_expansion_lock(job_id, user_id)
+            raise
+        except Exception as e:
+            logger.error(
+                "expand_error", error=str(e), error_type=type(e).__name__
+            )
+            await self._clear_expansion_lock(job_id, user_id)
+            yield WorkflowError(
+                message=str(e),
+                error_type=type(e).__name__,
+                phase=Phase.COMPOSITION,
+            )
+            yield WorkflowComplete(job_id=job_id)
+
+    async def _clear_expansion_lock(self, job_id: str, user_id: str) -> None:
+        """Clear EXPANSION_IN_PROGRESS flag after error or cancellation."""
+        try:
+            session = await self._session_service.get_session(
+                app_name=APP_NAME, user_id=user_id, session_id=job_id
+            )
+            if session is not None:
+                event = Event(
+                    invocation_id="system",
+                    author="system",
+                    actions=EventActions(
+                        state_delta={SessionStateKeys.EXPANSION_IN_PROGRESS: False}
+                    ),
+                )
+                await self._session_service.append_event(session, event)
+        except Exception:
+            logger.warning("clear_expansion_lock_error", job_id=job_id)
 
     async def _mark_session_failed(self, job_id: str, user_id: str) -> None:
         """Persist a failure marker to session state so /status returns FAILED."""

@@ -14,7 +14,10 @@ from models.discovery import (
     AuthorSites, AuthorSiteInfo,
     RegionCity, RegionOption, RegionAnalysis,
 )
-from models.itinerary import TripItinerary, CityPlan, CityStop
+from models.itinerary import (
+    TripItinerary, CityPlan, CityStop,
+    SuggestionChip, ComposerEnvelope, ExpansionResult,
+)
 from models.preferences import TravelPreferences
 
 
@@ -538,3 +541,141 @@ class TestRegionAnalysis:
         restored = RegionAnalysis(**json_data)
         assert len(restored.regions) == 1
         assert restored.analysis_note == analysis.analysis_note
+
+
+# =============================================================================
+# CityStop source field Tests
+# =============================================================================
+
+class TestCityStopSource:
+    """Tests for CityStop.source field (expansion provenance)."""
+
+    def test_default_source_is_composed(self):
+        stop = CityStop(name="Place", type="museum", reason="Reason", time_of_day="morning")
+        assert stop.source == "composed"
+
+    def test_expansion_source(self):
+        stop = CityStop(name="Place", type="cafe", reason="Reason", time_of_day="afternoon", source="expansion")
+        assert stop.source == "expansion"
+
+    def test_invalid_source_raises(self):
+        with pytest.raises(ValidationError):
+            CityStop(name="Place", type="cafe", reason="R", time_of_day="morning", source="unknown")
+
+    def test_source_round_trips(self):
+        stop = CityStop(name="Place", type="cafe", reason="R", time_of_day="morning", source="expansion")
+        data = stop.model_dump()
+        restored = CityStop(**data)
+        assert restored.source == "expansion"
+
+
+# =============================================================================
+# SuggestionChip Tests
+# =============================================================================
+
+class TestSuggestionChip:
+    """Tests for SuggestionChip model."""
+
+    def test_minimal_chip(self):
+        chip = SuggestionChip(label="Add restaurants", action_prompt="Find atmospheric restaurants near the stops that evoke the book's mood.")
+        assert chip.label == "Add restaurants"
+        assert chip.id == ""
+
+    def test_chip_with_id(self):
+        chip = SuggestionChip(id="abc-123", label="Hidden gems", action_prompt="Find lesser-known spots.")
+        assert chip.id == "abc-123"
+
+    def test_chip_requires_label(self):
+        with pytest.raises(ValidationError):
+            SuggestionChip(action_prompt="Find places.")
+
+    def test_chip_requires_action_prompt(self):
+        with pytest.raises(ValidationError):
+            SuggestionChip(label="Add restaurants")
+
+    def test_chip_serialization(self):
+        chip = SuggestionChip(id="x", label="Bookshops", action_prompt="Find literary bookshops nearby.")
+        data = chip.model_dump()
+        assert data["id"] == "x"
+        assert data["label"] == "Bookshops"
+
+
+# =============================================================================
+# ComposerEnvelope Tests
+# =============================================================================
+
+class TestComposerEnvelope:
+    """Tests for ComposerEnvelope model."""
+
+    def _make_itinerary(self):
+        stop = CityStop(name="Baker St", type="landmark", reason="Holmes", time_of_day="morning")
+        city = CityPlan(name="London", country="England", days_suggested=2, overview="Great city", stops=[stop])
+        return TripItinerary(cities=[city], summary_text="A literary journey.")
+
+    def test_valid_envelope(self):
+        itinerary = self._make_itinerary()
+        chip = SuggestionChip(label="Add restaurants", action_prompt="Find restaurants near Baker Street.")
+        env = ComposerEnvelope(itinerary=itinerary, suggestions=[chip])
+        assert env.itinerary.summary_text == "A literary journey."
+        assert len(env.suggestions) == 1
+
+    def test_envelope_default_suggestions(self):
+        itinerary = self._make_itinerary()
+        env = ComposerEnvelope(itinerary=itinerary)
+        assert env.suggestions == []
+
+    def test_envelope_requires_itinerary(self):
+        with pytest.raises(ValidationError):
+            ComposerEnvelope(suggestions=[])
+
+    def test_envelope_round_trip(self):
+        itinerary = self._make_itinerary()
+        chip = SuggestionChip(id="x", label="Test", action_prompt="Test prompt.")
+        env = ComposerEnvelope(itinerary=itinerary, suggestions=[chip])
+        data = env.model_dump()
+        restored = ComposerEnvelope(**data)
+        assert restored.itinerary.summary_text == "A literary journey."
+        assert restored.suggestions[0].id == "x"
+
+
+# =============================================================================
+# ExpansionResult Tests
+# =============================================================================
+
+class TestExpansionResult:
+    """Tests for ExpansionResult model."""
+
+    def _make_stop(self, name="New Café"):
+        return CityStop(name=name, type="cafe", reason="Mood", time_of_day="afternoon", source="expansion")
+
+    def test_valid_result(self):
+        result = ExpansionResult(
+            parent_city="London",
+            places=[self._make_stop()],
+            suggestions=[SuggestionChip(label="More cafés", action_prompt="Find more atmospheric cafés.")]
+        )
+        assert result.parent_city == "London"
+        assert len(result.places) == 1
+        assert result.places[0].source == "expansion"
+
+    def test_result_default_suggestions(self):
+        result = ExpansionResult(parent_city="Paris", places=[self._make_stop()])
+        assert result.suggestions == []
+
+    def test_result_requires_parent_city(self):
+        with pytest.raises(ValidationError):
+            ExpansionResult(places=[self._make_stop()])
+
+    def test_result_requires_places(self):
+        with pytest.raises(ValidationError):
+            ExpansionResult(parent_city="London")
+
+    def test_result_round_trip(self):
+        result = ExpansionResult(
+            parent_city="Edinburgh",
+            places=[self._make_stop("The Elephant House")],
+        )
+        data = result.model_dump()
+        restored = ExpansionResult(**data)
+        assert restored.parent_city == "Edinburgh"
+        assert restored.places[0].name == "The Elephant House"

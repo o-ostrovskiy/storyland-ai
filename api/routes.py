@@ -12,12 +12,13 @@ from api.dependencies import get_app_state, get_gateway_user_id, verify_gateway_
 from api.models import (
     DiscoverRequest,
     ComposeRequest,
+    ExpandRequest,
     LocalAtmosphereRequest,
     HealthResponse,
     JobStatusResponse,
     JobStatus,
 )
-from api.streaming import discover_stream, compose_stream, local_atmosphere_stream
+from api.streaming import discover_stream, compose_stream, expand_stream, local_atmosphere_stream
 from common.logging import get_logger
 from core.session_state import SessionStateAccessor
 
@@ -208,6 +209,60 @@ async def local_atmosphere(
         lng=request.user_location.lng,
         radius_km=request.radius_km,
         preferences=request.preferences,
+        user_id=user_id,
+        executor=app_state.executor,
+    )
+
+    return EventSourceResponse(generator, media_type="text/event-stream")
+
+
+@router.post(
+    "/itinerary/{job_id}/expand",
+    summary="Expand itinerary with new places",
+    responses={
+        200: {
+            "description": "SSE event stream (text/event-stream)",
+            "content": {
+                "text/event-stream": {
+                    "example": (
+                        'event: progress\ndata: {"event":"progress","phase":3,"step":"Finding places: Add restaurants nearby"}\n\n'
+                        'event: expansion\ndata: {"event":"expansion","parent_city":"London","places":[...],"suggestions":[...]}\n\n'
+                        'event: done\ndata: {"event":"done","job_id":"abc-123"}\n\n'
+                    )
+                }
+            },
+        }
+    },
+)
+async def expand(
+    job_id: str,
+    request: ExpandRequest,
+    user_id: str = Depends(get_gateway_user_id),
+):
+    """
+    Expand the itinerary with 3-5 new places matching the selected suggestion chip.
+
+    Requires a `job_id` from a completed `/compose` or `/local-atmosphere` call.
+
+    Streams SSE events:
+    - **progress** — Step updates during expansion
+    - **expansion** — New places and follow-up suggestion chips
+    - **error** — If the job is not found, action_id is invalid, or expansion fails
+    - **done** — Stream complete
+    """
+    app_state = get_app_state()
+    logger.info(
+        "expand_request",
+        job_id=job_id,
+        action_id=request.action_id,
+        action_label=request.action_label,
+    )
+
+    generator = expand_stream(
+        job_id=job_id,
+        action_id=request.action_id,
+        action_label=request.action_label,
+        action_prompt=request.action_prompt,
         user_id=user_id,
         executor=app_state.executor,
     )
