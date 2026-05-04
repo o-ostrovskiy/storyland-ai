@@ -15,6 +15,7 @@ from api.models import (
     DiscoverRequest,
     ComposeRequest,
     ExpandRequest,
+    RecommendBooksRequest,
     LocalAtmosphereRequest,
     UserLocation,
     SSEProgressEvent,
@@ -23,6 +24,7 @@ from api.models import (
     SSERegionsEvent,
     SSEItineraryEvent,
     SSEExpansionEvent,
+    SSEBookRecommendationsEvent,
     SSEErrorEvent,
     SSEDoneEvent,
     HealthResponse,
@@ -38,6 +40,7 @@ from core.events import (
     RegionsReady,
     ItineraryReady,
     ExpansionReady,
+    BookRecommendationsReady,
     WorkflowError,
     WorkflowComplete,
 )
@@ -327,6 +330,21 @@ class TestSSEItineraryEvent:
         data = json.loads(event.model_dump_json())
         assert data["suggestions"] == []
 
+    def test_itinerary_event_book_recommendation_chip(self):
+        chip = {"id": "books-1", "label": "Find books like this", "action_prompt": ""}
+        event = SSEItineraryEvent(
+            itinerary={"cities": [], "summary_text": "test"},
+            book_recommendation_chip=chip,
+        )
+        data = json.loads(event.model_dump_json())
+        assert data["book_recommendation_chip"]["id"] == "books-1"
+        assert data["book_recommendation_chip"]["label"] == "Find books like this"
+
+    def test_itinerary_event_default_book_recommendation_chip(self):
+        event = SSEItineraryEvent(itinerary={"cities": [], "summary_text": "test"})
+        data = json.loads(event.model_dump_json())
+        assert data["book_recommendation_chip"] is None
+
 
 class TestSSEExpansionEvent:
     def test_expansion_event(self):
@@ -345,6 +363,21 @@ class TestSSEExpansionEvent:
         event = SSEExpansionEvent(parent_city="Paris", places=[])
         data = json.loads(event.model_dump_json())
         assert data["suggestions"] == []
+
+    def test_expansion_event_book_recommendation_chip(self):
+        chip = {"id": "books-2", "label": "Find books like this", "action_prompt": ""}
+        event = SSEExpansionEvent(
+            parent_city="London",
+            places=[],
+            book_recommendation_chip=chip,
+        )
+        data = json.loads(event.model_dump_json())
+        assert data["book_recommendation_chip"]["id"] == "books-2"
+
+    def test_expansion_event_default_book_recommendation_chip(self):
+        event = SSEExpansionEvent(parent_city="Paris", places=[])
+        data = json.loads(event.model_dump_json())
+        assert data["book_recommendation_chip"] is None
 
 
 class TestDomainEventToSSEExpansion:
@@ -369,6 +402,29 @@ class TestDomainEventToSSEExpansion:
         assert sse["event"] == "itinerary"
         data = json.loads(sse["data"])
         assert len(data["suggestions"]) == 1
+
+    def test_itinerary_ready_book_recommendation_chip_passthrough(self):
+        chip = {"id": "books-3", "label": "Find books like this", "action_prompt": ""}
+        event = ItineraryReady(
+            itinerary={"cities": [], "summary_text": "test"},
+            suggestions=[],
+            book_recommendation_chip=chip,
+        )
+        sse = domain_event_to_sse(event)
+        data = json.loads(sse["data"])
+        assert data["book_recommendation_chip"]["id"] == "books-3"
+
+    def test_expansion_ready_book_recommendation_chip_passthrough(self):
+        chip = {"id": "books-4", "label": "Find books like this", "action_prompt": ""}
+        event = ExpansionReady(
+            parent_city="London",
+            places=[],
+            suggestions=[],
+            book_recommendation_chip=chip,
+        )
+        sse = domain_event_to_sse(event)
+        data = json.loads(sse["data"])
+        assert data["book_recommendation_chip"]["id"] == "books-4"
 
 
 class TestSSEErrorEvent:
@@ -1087,3 +1143,110 @@ def _parse_sse_response(text: str) -> list[dict]:
             pass
 
     return events
+
+
+# =============================================================================
+# RecommendBooksRequest Tests
+# =============================================================================
+
+
+class TestRecommendBooksRequest:
+    def test_valid_request(self):
+        req = RecommendBooksRequest(
+            action_id="chip-uuid-123",
+            action_label="Find books like this",
+            action_prompt="",
+        )
+        assert req.action_id == "chip-uuid-123"
+        assert req.action_label == "Find books like this"
+
+    def test_default_action_prompt(self):
+        req = RecommendBooksRequest(
+            action_id="chip-uuid-123",
+            action_label="Find books like this",
+        )
+        assert req.action_prompt == ""
+
+    def test_missing_action_id_raises(self):
+        with pytest.raises(ValidationError):
+            RecommendBooksRequest(action_label="Find books like this")
+
+    def test_blank_action_id_raises(self):
+        with pytest.raises(ValidationError):
+            RecommendBooksRequest(action_id="", action_label="Find books like this")
+
+    def test_action_label_max_length(self):
+        with pytest.raises(ValidationError):
+            RecommendBooksRequest(action_id="x", action_label="a" * 101)
+
+
+# =============================================================================
+# SSEBookRecommendationsEvent Tests
+# =============================================================================
+
+
+class TestSSEBookRecommendationsEvent:
+    def _make_rec(self, title="Book"):
+        return {
+            "title": title,
+            "author": "Author",
+            "reason": "A reason.",
+            "recommendation_basis": "themes",
+        }
+
+    def test_basic_event(self):
+        event = SSEBookRecommendationsEvent(
+            recommendations=[self._make_rec("1984"), self._make_rec("Brave New World")],
+            book_recommendation_count=1,
+        )
+        data = json.loads(event.model_dump_json())
+        assert data["event"] == "book_recommendations"
+        assert len(data["recommendations"]) == 2
+        assert data["book_recommendation_count"] == 1
+
+    def test_event_literal_is_fixed(self):
+        event = SSEBookRecommendationsEvent(recommendations=[], book_recommendation_count=0)
+        assert event.event == "book_recommendations"
+
+    def test_empty_recommendations(self):
+        event = SSEBookRecommendationsEvent(recommendations=[], book_recommendation_count=0)
+        data = json.loads(event.model_dump_json())
+        assert data["recommendations"] == []
+
+
+# =============================================================================
+# domain_event_to_sse - BookRecommendationsReady
+# =============================================================================
+
+
+class TestDomainEventToSSEBookRecommendations:
+    def _make_rec(self, title="Book"):
+        return {
+            "title": title,
+            "author": "Author",
+            "reason": "A reason.",
+            "recommendation_basis": "destination",
+        }
+
+    def test_book_recommendations_ready_event(self):
+        event = BookRecommendationsReady(
+            recommendations=[self._make_rec("The Remains of the Day")],
+            book_recommendation_count=1,
+        )
+        sse = domain_event_to_sse(event)
+        assert sse["event"] == "book_recommendations"
+        data = json.loads(sse["data"])
+        assert len(data["recommendations"]) == 1
+        assert data["recommendations"][0]["title"] == "The Remains of the Day"
+        assert data["book_recommendation_count"] == 1
+
+    def test_multiple_recommendations(self):
+        recs = [self._make_rec(f"Book {i}") for i in range(5)]
+        event = BookRecommendationsReady(
+            recommendations=recs,
+            book_recommendation_count=2,
+        )
+        sse = domain_event_to_sse(event)
+        data = json.loads(sse["data"])
+        assert len(data["recommendations"]) == 5
+        assert data["book_recommendation_count"] == 2

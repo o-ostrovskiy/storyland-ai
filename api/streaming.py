@@ -14,6 +14,7 @@ from api.models import (
     SSERegionsEvent,
     SSEItineraryEvent,
     SSEExpansionEvent,
+    SSEBookRecommendationsEvent,
     SSEErrorEvent,
     SSEDoneEvent,
 )
@@ -25,6 +26,7 @@ from core.events import (
     RegionsReady,
     ItineraryReady,
     ExpansionReady,
+    BookRecommendationsReady,
     WorkflowError,
     WorkflowComplete,
 )
@@ -68,15 +70,35 @@ def domain_event_to_sse(event: DomainEvent) -> dict:
                     job_id=j, regions=r, analysis_note=n
                 ).model_dump_json(),
             )
-        case ItineraryReady(itinerary=i, suggestions=s):
+        case ItineraryReady(
+            itinerary=i, suggestions=s, book_recommendation_chip=bc
+        ):
             return _sse(
                 "itinerary",
-                SSEItineraryEvent(itinerary=i, suggestions=s).model_dump_json(),
+                SSEItineraryEvent(
+                    itinerary=i,
+                    suggestions=s,
+                    book_recommendation_chip=bc,
+                ).model_dump_json(),
             )
-        case ExpansionReady(parent_city=c, places=p, suggestions=s):
+        case ExpansionReady(
+            parent_city=c, places=p, suggestions=s, book_recommendation_chip=bc
+        ):
             return _sse(
                 "expansion",
-                SSEExpansionEvent(parent_city=c, places=p, suggestions=s).model_dump_json(),
+                SSEExpansionEvent(
+                    parent_city=c,
+                    places=p,
+                    suggestions=s,
+                    book_recommendation_chip=bc,
+                ).model_dump_json(),
+            )
+        case BookRecommendationsReady(recommendations=r, book_recommendation_count=n):
+            return _sse(
+                "book_recommendations",
+                SSEBookRecommendationsEvent(
+                    recommendations=r, book_recommendation_count=n
+                ).model_dump_json(),
             )
         case WorkflowError(message=m, error_type=t, phase=p):
             return _sse(
@@ -166,6 +188,25 @@ async def expand_stream(
 ) -> AsyncGenerator[dict, None]:
     """Run the expansion flow via executor and yield SSE events."""
     async for event in executor.expand(
+        job_id=job_id,
+        action_id=action_id,
+        action_label=action_label,
+        action_prompt=action_prompt,
+        user_id=user_id,
+    ):
+        yield domain_event_to_sse(event)
+
+
+async def recommend_books_stream(
+    job_id: str,
+    action_id: str,
+    action_label: str,
+    action_prompt: str,
+    user_id: str,
+    executor: WorkflowExecutor,
+) -> AsyncGenerator[dict, None]:
+    """Run the book recommendation flow via executor and yield SSE events."""
+    async for event in executor.recommend_books(
         job_id=job_id,
         action_id=action_id,
         action_label=action_label,

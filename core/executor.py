@@ -35,6 +35,7 @@ from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
 
 from agents.orchestrator import (
+    create_book_recommendation_workflow,
     create_discovery_workflow,
     create_composition_workflow,
     create_expansion_workflow,
@@ -55,10 +56,15 @@ from .events import (
     RegionsReady,
     ItineraryReady,
     ExpansionReady,
+    BookRecommendationsReady,
     WorkflowError,
     WorkflowComplete,
 )
-from .extraction import extract_itinerary_from_response, extract_expansion_from_state
+from .extraction import (
+    extract_itinerary_from_response,
+    extract_expansion_from_state,
+    extract_book_recommendations_from_state,
+)
 from .prompts import (
     build_discovery_prompt,
     build_composition_prompt,
@@ -108,6 +114,12 @@ EXPANSION_AGENT_STEPS: dict[str, str] = {
 
 SOFT_CHIP_CAP = 6
 HARD_EXPANSION_CAP = 20
+BOOK_RECOMMENDATION_HARD_CAP = 5
+
+BOOK_RECOMMENDATION_AGENT_STEPS: dict[str, str] = {
+    "book_recommendation_agent": "Finding books for you",
+    "book_recommendation_workflow": "Searching for book recommendations",
+}
 
 APP_NAME = "storyland"
 
@@ -465,8 +477,16 @@ class WorkflowExecutor:
                 if result is not None:
                     itinerary_data, suggestions = result
                     suggestions = self._stamp_suggestion_ids(suggestions)
-                    await self._persist_suggestions(job_id, user_id, suggestions, itinerary_data)
-                    yield ItineraryReady(itinerary=itinerary_data, suggestions=suggestions)
+                    book_recommendation_chip = self._build_book_recommendation_chip()
+                    await self._persist_suggestions(
+                        job_id, user_id, suggestions, itinerary_data,
+                        book_recommendation_chip=book_recommendation_chip,
+                    )
+                    yield ItineraryReady(
+                        itinerary=itinerary_data,
+                        suggestions=suggestions,
+                        book_recommendation_chip=book_recommendation_chip,
+                    )
                 else:
                     await self._mark_session_failed(job_id, user_id)
                     yield WorkflowError(
@@ -651,8 +671,16 @@ class WorkflowExecutor:
                 if result is not None:
                     itinerary_data, suggestions = result
                     suggestions = self._stamp_suggestion_ids(suggestions)
-                    await self._persist_suggestions(job_id, user_id, suggestions, itinerary_data)
-                    yield ItineraryReady(itinerary=itinerary_data, suggestions=suggestions)
+                    book_recommendation_chip = self._build_book_recommendation_chip()
+                    await self._persist_suggestions(
+                        job_id, user_id, suggestions, itinerary_data,
+                        book_recommendation_chip=book_recommendation_chip,
+                    )
+                    yield ItineraryReady(
+                        itinerary=itinerary_data,
+                        suggestions=suggestions,
+                        book_recommendation_chip=book_recommendation_chip,
+                    )
                 else:
                     await self._mark_session_failed(job_id, user_id)
                     yield WorkflowError(
@@ -709,12 +737,25 @@ class WorkflowExecutor:
             stamped.append(chip)
         return stamped
 
+    def _build_book_recommendation_chip(self) -> dict:
+        """Build the deterministic 'Find books like this' chip.
+
+        The chip is kept separate from `last_suggestions` so the expand
+        endpoint never accepts its id and the FE can route on it directly.
+        """
+        return {
+            "id": str(uuid.uuid4()),
+            "label": "Find books like this",
+            "action_prompt": "",
+        }
+
     async def _persist_suggestions(
         self,
         job_id: str,
         user_id: str,
         suggestions: list,
         itinerary_data: dict | None = None,
+        book_recommendation_chip: dict | None = None,
     ) -> None:
         """Persist suggestion chips (and optionally the resolved itinerary) to session state."""
         try:
@@ -725,6 +766,9 @@ class WorkflowExecutor:
                 delta: dict = {SessionStateKeys.LAST_SUGGESTIONS: suggestions}
                 if itinerary_data is not None:
                     delta[SessionStateKeys.FINAL_ITINERARY] = itinerary_data
+                if book_recommendation_chip is not None:
+                    delta[SessionStateKeys.BOOK_RECOMMENDATION_CHIP] = book_recommendation_chip
+                    delta[SessionStateKeys.BOOK_RECOMMENDATION_CHIP_ID] = book_recommendation_chip["id"]
                 event = Event(
                     invocation_id="system",
                     author="system",
@@ -1026,6 +1070,7 @@ class WorkflowExecutor:
                     parent_city=matched_city,
                     places=new_places,
                     suggestions=new_suggestions,
+                    book_recommendation_chip=state.book_recommendation_chip,
                 )
                 yield WorkflowComplete(job_id=job_id, token_usage=token_usage)
 
@@ -1055,6 +1100,255 @@ class WorkflowExecutor:
             )
             yield WorkflowComplete(job_id=job_id)
 
+    async def recommend_books(
+        self,
+        job_id: str,
+        action_id: str,
+        action_label: str,
+        action_prompt: str,
+        user_id: str = "default",
+    ) -> AsyncGenerator[DomainEvent, None]:
+        """Recommend books based on the current book + destination itinerary.
+
+        Requires a completed job_id (compose or local-atmosphere). Validates
+        action_id against the stored book-recommendation chip id. Yields
+        ProgressEvent → BookRecommendationsReady → WorkflowComplete.
+
+        Args:
+            job_id: Session ID from a completed compose/local-atmosphere call.
+            action_id: ID of the 'Find books like this' chip.
+            action_label: Human-readable chip label (for logging only).
+            action_prompt: Unused for book recs; kept for interface symmetry with expand.
+            user_id: User identifier (must match the original session).
+        """
+        try:
+            session = await self._session_service.get_session(
+                app_name=APP_NAME, user_id=user_id, session_id=job_id
+            )
+        except Exception as e:
+            logger.error(
+                "recommend_books_session_lookup_failed",
+                job_id=job_id,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            yield WorkflowError(
+                message="Failed to retrieve session",
+                error_type="SessionError",
+            )
+            yield WorkflowComplete(job_id=job_id)
+            return
+
+        if session is None:
+            yield WorkflowError(
+                message=f"Job {job_id} not found.",
+                error_type="JobNotFound",
+            )
+            yield WorkflowComplete(job_id=job_id)
+            return
+
+        state = SessionStateAccessor(session.state)
+
+        if state.failed:
+            yield WorkflowError(
+                message="Job is in a failed state.",
+                error_type="JobFailed",
+            )
+            yield WorkflowComplete(job_id=job_id)
+            return
+
+        if state.final_itinerary is None:
+            yield WorkflowError(
+                message="Itinerary not yet composed. Run compose or local-atmosphere first.",
+                error_type="ItineraryNotReady",
+            )
+            yield WorkflowComplete(job_id=job_id)
+            return
+
+        # Hard cap
+        book_recommendation_count = state.book_recommendation_count
+        if book_recommendation_count >= BOOK_RECOMMENDATION_HARD_CAP:
+            yield WorkflowError(
+                message=f"Book recommendation limit reached ({BOOK_RECOMMENDATION_HARD_CAP} per session).",
+                error_type="BookRecommendationLimitReached",
+            )
+            yield WorkflowComplete(job_id=job_id)
+            return
+
+        # Validate action_id against stored books chip id
+        stored_chip_id = state.book_recommendation_chip_id
+        if not stored_chip_id or action_id != stored_chip_id:
+            yield WorkflowError(
+                message="Invalid action_id. Use the 'Find books like this' chip id from the itinerary response.",
+                error_type="InvalidActionId",
+            )
+            yield WorkflowComplete(job_id=job_id)
+            return
+
+        # Concurrency guard
+        if state.book_recs_in_progress:
+            yield WorkflowError(
+                message="A book recommendation request is already in progress for this session.",
+                error_type="BookRecsInProgress",
+            )
+            yield WorkflowComplete(job_id=job_id)
+            return
+
+        # Set lock
+        lock_event = Event(
+            invocation_id="system",
+            author="system",
+            actions=EventActions(
+                state_delta={SessionStateKeys.BOOK_RECS_IN_PROGRESS: True}
+            ),
+        )
+        await self._session_service.append_event(session, lock_event)
+
+        try:
+            async with timeout(self._config.workflow_timeout):
+                yield ProgressEvent(
+                    phase=Phase.COMPOSITION,
+                    step="Finding books like this",
+                )
+
+                book_title = state.book_title
+                author = state.author
+
+                # Extract destinations from itinerary cities
+                itinerary = state.final_itinerary or {}
+                destinations = ", ".join(
+                    city.get("name", "") for city in itinerary.get("cities", [])
+                    if city.get("name")
+                ) or "unknown"
+
+                # Extract themes from book context
+                book_context = state.book_context or {}
+                themes_list = book_context.get("themes", [])
+                themes = ", ".join(themes_list) if themes_list else "literary fiction"
+
+                langfuse_plugin = self._create_langfuse_plugin()
+                book_rec_wf = create_book_recommendation_workflow(
+                    self._model,
+                    google_search,
+                    book_title=book_title,
+                    author=author,
+                    destinations=destinations,
+                    themes=themes,
+                )
+                runner = Runner(
+                    agent=book_rec_wf,
+                    app_name=APP_NAME,
+                    session_service=self._session_service,
+                    plugins=[LoggingPlugin(), langfuse_plugin],
+                )
+
+                prompt = (
+                    f"Recommend 5 books for a reader who loved {book_title} by {author} "
+                    f"and is travelling to {destinations}."
+                )
+                message = types.Content(
+                    role="user", parts=[types.Part(text=prompt)]
+                )
+
+                reported_agents: set[str] = set()
+                async with runner:
+                    async for event in runner.run_async(
+                        user_id=user_id,
+                        session_id=job_id,
+                        new_message=message,
+                    ):
+                        if (
+                            event.author
+                            and event.author in BOOK_RECOMMENDATION_AGENT_STEPS
+                            and event.author not in reported_agents
+                        ):
+                            reported_agents.add(event.author)
+                            yield ProgressEvent(
+                                phase=Phase.COMPOSITION,
+                                step=BOOK_RECOMMENDATION_AGENT_STEPS[event.author],
+                                detail=event.author,
+                            )
+
+                # Re-fetch session after agent run
+                refreshed = await self._session_service.get_session(
+                    app_name=APP_NAME, user_id=user_id, session_id=job_id
+                )
+                if refreshed is not None:
+                    session = refreshed
+
+                state = SessionStateAccessor(session.state)
+                rec_data = extract_book_recommendations_from_state(state)
+
+                if rec_data is None:
+                    await self._clear_book_recs_lock(job_id, user_id)
+                    yield WorkflowError(
+                        message="Failed to extract book recommendations from agent response",
+                        error_type="ExtractionError",
+                        phase=Phase.COMPOSITION,
+                    )
+                    yield WorkflowComplete(job_id=job_id)
+                    return
+
+                recommendations = rec_data.get("recommendations", [])
+                new_count = book_recommendation_count + 1
+
+                persist_event = Event(
+                    invocation_id="system",
+                    author="system",
+                    actions=EventActions(
+                        state_delta={
+                            SessionStateKeys.LAST_BOOK_RECOMMENDATIONS: rec_data,
+                            SessionStateKeys.BOOK_RECOMMENDATION_COUNT: new_count,
+                            SessionStateKeys.BOOK_RECS_IN_PROGRESS: False,
+                        }
+                    ),
+                )
+                await self._session_service.append_event(session, persist_event)
+
+                token_usage = None
+                if langfuse_plugin.enabled:
+                    token_usage = langfuse_plugin.get_session_stats()
+                    await langfuse_plugin.flush()
+
+                logger.info(
+                    "book_recommendations_complete",
+                    job_id=job_id[:8],
+                    count=len(recommendations),
+                    book_recommendation_count=new_count,
+                )
+
+                yield BookRecommendationsReady(
+                    recommendations=recommendations,
+                    book_recommendation_count=new_count,
+                )
+                yield WorkflowComplete(job_id=job_id, token_usage=token_usage)
+
+        except TimeoutError:
+            logger.error("recommend_books_timeout", job_id=job_id)
+            await self._clear_book_recs_lock(job_id, user_id)
+            await self._mark_session_failed(job_id, user_id)
+            yield WorkflowError(
+                message=f"Book recommendation timed out after {self._config.workflow_timeout}s",
+                error_type="WorkflowTimeoutError",
+                phase=Phase.COMPOSITION,
+            )
+            yield WorkflowComplete(job_id=job_id)
+        except asyncio.CancelledError:
+            logger.warning("recommend_books_cancelled", job_id=job_id)
+            await self._clear_book_recs_lock(job_id, user_id)
+            raise
+        except Exception as e:
+            logger.error(
+                "recommend_books_error", error=str(e), error_type=type(e).__name__
+            )
+            await self._clear_book_recs_lock(job_id, user_id)
+            yield WorkflowError(
+                message=str(e),
+                error_type=type(e).__name__,
+                phase=Phase.COMPOSITION,
+            )
+            yield WorkflowComplete(job_id=job_id)
+
     async def _clear_expansion_lock(self, job_id: str, user_id: str) -> None:
         """Clear EXPANSION_IN_PROGRESS flag after error or cancellation."""
         try:
@@ -1072,6 +1366,24 @@ class WorkflowExecutor:
                 await self._session_service.append_event(session, event)
         except Exception:
             logger.warning("clear_expansion_lock_error", job_id=job_id)
+
+    async def _clear_book_recs_lock(self, job_id: str, user_id: str) -> None:
+        """Clear BOOK_RECS_IN_PROGRESS flag after error or cancellation."""
+        try:
+            session = await self._session_service.get_session(
+                app_name=APP_NAME, user_id=user_id, session_id=job_id
+            )
+            if session is not None:
+                event = Event(
+                    invocation_id="system",
+                    author="system",
+                    actions=EventActions(
+                        state_delta={SessionStateKeys.BOOK_RECS_IN_PROGRESS: False}
+                    ),
+                )
+                await self._session_service.append_event(session, event)
+        except Exception:
+            logger.warning("clear_book_recs_lock_error", job_id=job_id)
 
     async def _mark_session_failed(self, job_id: str, user_id: str) -> None:
         """Persist a failure marker to session state so /status returns FAILED."""

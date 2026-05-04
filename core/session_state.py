@@ -28,6 +28,11 @@ class SessionStateKeys:
     EXPANSION_COUNT = "expansion_count"
     EXPANSION_IN_PROGRESS = "expansion_in_progress"
     LAST_EXPANSION = "last_expansion"
+    LAST_BOOK_RECOMMENDATIONS = "last_book_recommendations"
+    BOOK_RECOMMENDATION_COUNT = "book_recommendation_count"
+    BOOK_RECS_IN_PROGRESS = "book_recs_in_progress"
+    BOOK_RECOMMENDATION_CHIP_ID = "book_recommendation_chip_id"
+    BOOK_RECOMMENDATION_CHIP = "book_recommendation_chip"
     USER_PREFERENCES = "user:preferences"
     USER_LOCATION = "user_location"
     JOB_FAILED = "job_failed"
@@ -128,3 +133,27 @@ class SessionStateAccessor:
     @property
     def last_expansion(self) -> Optional[dict]:
         return self._state.get(SessionStateKeys.LAST_EXPANSION)
+
+    @property
+    def book_context(self) -> Optional[dict]:
+        return self._state.get(SessionStateKeys.BOOK_CONTEXT)
+
+    @property
+    def last_book_recommendations(self) -> Optional[dict]:
+        return self._state.get(SessionStateKeys.LAST_BOOK_RECOMMENDATIONS)
+
+    @property
+    def book_recommendation_count(self) -> int:
+        return int(self._state.get(SessionStateKeys.BOOK_RECOMMENDATION_COUNT, 0))
+
+    @property
+    def book_recs_in_progress(self) -> bool:
+        return bool(self._state.get(SessionStateKeys.BOOK_RECS_IN_PROGRESS, False))
+
+    @property
+    def book_recommendation_chip_id(self) -> Optional[str]:
+        return self._state.get(SessionStateKeys.BOOK_RECOMMENDATION_CHIP_ID)
+
+    @property
+    def book_recommendation_chip(self) -> Optional[dict]:
+        return self._state.get(SessionStateKeys.BOOK_RECOMMENDATION_CHIP)

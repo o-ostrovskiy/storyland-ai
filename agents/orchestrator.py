@@ -28,6 +28,7 @@ from .discovery_agents import (
     create_landmark_pipeline,
     create_author_pipeline,
 )
+from .book_recommendation_agent import create_book_recommendation_agent
 from .expansion_agent import create_expansion_pipeline
 from .local_atmosphere_agent import create_local_atmosphere_pipeline
 from .trip_composer_agent import create_trip_composer_agent
@@ -218,6 +219,57 @@ def create_expansion_workflow(
     return SequentialAgent(
         name="expansion_workflow",
         sub_agents=[expansion_pipeline],
+    )
+
+
+def create_book_recommendation_workflow(
+    model,
+    google_search_tool,
+    book_title: str,
+    author: str,
+    destinations: str,
+    themes: str,
+    prompts: AgentPrompts | None = None,
+):
+    """
+    Create the book recommendation workflow.
+
+    Called after composition when the user clicks the "Find books like this" chip.
+    Runs a single agent that searches for and returns 5 book recommendations.
+
+    Architecture:
+        SequentialAgent (book_recommendation_workflow)
+        └─ book_recommendation_agent [google_search, output_schema=BookRecommendationsResult]
+           → state["last_book_recommendations"]
+
+    Args:
+        model: The LLM model to use.
+        google_search_tool: The Google Search tool.
+        book_title: Exact book title.
+        author: Exact author name.
+        destinations: Comma-separated city names from the user's itinerary.
+        themes: Comma-separated themes from the book context.
+        prompts: Optional AgentPrompts instance. Loads default version if not provided.
+
+    Returns:
+        SequentialAgent orchestrating the book recommendation agent.
+    """
+    if prompts is None:
+        prompts = load_prompts()
+
+    agent = create_book_recommendation_agent(
+        model,
+        google_search_tool,
+        book_title=book_title,
+        author=author,
+        destinations=destinations,
+        themes=themes,
+        prompts=prompts,
+    )
+
+    return SequentialAgent(
+        name="book_recommendation_workflow",
+        sub_agents=[agent],
     )
 
 

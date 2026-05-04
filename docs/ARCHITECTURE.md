@@ -831,6 +831,37 @@ Add a **separate single-phase endpoint** (`POST /api/v1/itinerary/local-atmosphe
 
 ---
 
+## 14. Book Recommendation Agent (On-Demand, Single-Agent, Server-Stamped Chip)
+
+### Context
+
+After generating a travel itinerary based on a book, readers often want to know what to read next — books set in the same destination, books with similar themes, or other works by the same author. This feature adds on-demand book recommendations triggered by clicking a "Find books like this" chip in the UI.
+
+### Decision
+
+**Single-agent pipeline (not two-stage researcher → formatter):** Books are well-known entities to the LLM. A single `LlmAgent` with `google_search` and `output_schema=BookRecommendationsResult` is enough to search, validate, and structure results in one pass. This contrasts with the expansion and local-atmosphere flows, which use two-stage pipelines because addresses and place details benefit from a dedicated research pass followed by strict formatting.
+
+**Server-stamped chip (not LLM-generated):** The "Find books like this" chip is created deterministically by the executor after composition (`_build_book_recommendation_chip`) — not by the LLM. The chip dict is stored in session state under `BOOK_RECOMMENDATION_CHIP` (and its UUID under `BOOK_RECOMMENDATION_CHIP_ID`), and surfaced as a dedicated `book_recommendation_chip` field on the `itinerary` and `expansion` SSE events (separate from `suggestions[]`, which is reserved for expansion chips). The `/recommend-books` endpoint validates the incoming `action_id` against the stored id. This eliminates LLM flake risk and provides clean routing: expansion chips go to `/expand`; the books chip goes to `/recommend-books`.
+
+**Separate lock and counter from expansion:** `BOOK_RECS_IN_PROGRESS` and `BOOK_RECOMMENDATION_COUNT` are distinct from expansion's equivalents, allowing concurrent expand + recommend-books without false conflicts.
+
+**No follow-up chips:** Book recommendations are a terminal action. The hard cap is 5 requests per session.
+
+### Files Affected
+
+- `agents/book_recommendation_agent.py`, `agents/orchestrator.py`, `agents/prompts/v2.json`, `agents/prompts.py`
+- `models/book.py` — `BookRecommendation`, `BookRecommendationsResult`
+- `core/events.py`, `core/session_state.py`, `core/extraction.py`, `core/executor.py`
+- `api/models.py`, `api/streaming.py`, `api/routes.py` — `POST /api/v1/itinerary/{job_id}/recommend-books`
+
+### Trade-offs
+
+**Benefits:** Zero LLM flake for chip routing; single-agent avoids 2x LLM cost; save infrastructure requires no changes; independent lock allows concurrency with expansion.
+
+**Costs:** New endpoint to maintain; image_url may be null (covers resolved by frontend); single-agent is less hallucination-resistant than two-stage, acceptable for book titles.
+
+---
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |

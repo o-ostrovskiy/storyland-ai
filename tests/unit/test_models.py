@@ -7,7 +7,7 @@ Tests validation, serialization, and edge cases for all data models.
 import pytest
 from pydantic import ValidationError
 
-from models.book import BookMetadata, BookContext, BookInfo
+from models.book import BookMetadata, BookContext, BookInfo, BookRecommendation, BookRecommendationsResult
 from models.discovery import (
     CityDiscovery, CityInfo,
     LandmarkDiscovery, LandmarkInfo,
@@ -679,3 +679,101 @@ class TestExpansionResult:
         restored = ExpansionResult(**data)
         assert restored.parent_city == "Edinburgh"
         assert restored.places[0].name == "The Elephant House"
+
+
+# =============================================================================
+# BookRecommendation Tests
+# =============================================================================
+
+
+class TestBookRecommendation:
+    """Tests for BookRecommendation model."""
+
+    def _make_rec(self, **kwargs):
+        defaults = {
+            "title": "A Tale of Two Cities",
+            "author": "Charles Dickens",
+            "reason": "Set in the same revolutionary Paris you will explore.",
+            "recommendation_basis": "destination",
+        }
+        defaults.update(kwargs)
+        return BookRecommendation(**defaults)
+
+    def test_valid_recommendation(self):
+        rec = self._make_rec()
+        assert rec.title == "A Tale of Two Cities"
+        assert rec.recommendation_basis == "destination"
+
+    def test_optional_fields_default_to_none(self):
+        rec = self._make_rec()
+        assert rec.description is None
+        assert rec.published_date is None
+        assert rec.image_url is None
+
+    def test_all_fields(self):
+        rec = BookRecommendation(
+            title="Les Misérables",
+            author="Victor Hugo",
+            description="Epic novel set in Paris.",
+            published_date="1862",
+            image_url="https://example.com/cover.jpg",
+            reason="Also set in Paris during a turbulent era.",
+            recommendation_basis="destination",
+        )
+        assert rec.description == "Epic novel set in Paris."
+        assert rec.image_url == "https://example.com/cover.jpg"
+
+    def test_invalid_recommendation_basis(self):
+        with pytest.raises(ValidationError):
+            self._make_rec(recommendation_basis="mood")
+
+    def test_all_valid_bases(self):
+        for basis in ("destination", "themes", "author"):
+            rec = self._make_rec(recommendation_basis=basis)
+            assert rec.recommendation_basis == basis
+
+    def test_missing_required_fields(self):
+        with pytest.raises(ValidationError):
+            BookRecommendation(title="Only Title")
+
+    def test_serialization_roundtrip(self):
+        rec = self._make_rec()
+        data = rec.model_dump()
+        restored = BookRecommendation(**data)
+        assert restored.title == rec.title
+        assert restored.recommendation_basis == rec.recommendation_basis
+
+
+class TestBookRecommendationsResult:
+    """Tests for BookRecommendationsResult model."""
+
+    def _make_rec(self, title="Book", basis="themes"):
+        return {
+            "title": title,
+            "author": "Author",
+            "reason": "A reason.",
+            "recommendation_basis": basis,
+        }
+
+    def test_valid_result(self):
+        result = BookRecommendationsResult(
+            recommendations=[self._make_rec(f"Book {i}") for i in range(5)]
+        )
+        assert len(result.recommendations) == 5
+        assert result.recommendations[0].title == "Book 0"
+
+    def test_empty_recommendations(self):
+        result = BookRecommendationsResult(recommendations=[])
+        assert result.recommendations == []
+
+    def test_missing_recommendations_raises(self):
+        with pytest.raises(ValidationError):
+            BookRecommendationsResult()
+
+    def test_round_trip(self):
+        result = BookRecommendationsResult(
+            recommendations=[self._make_rec("The Name of the Rose", "destination")]
+        )
+        data = result.model_dump()
+        restored = BookRecommendationsResult(**data)
+        assert restored.recommendations[0].title == "The Name of the Rose"

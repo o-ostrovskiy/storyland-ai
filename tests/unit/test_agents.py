@@ -18,6 +18,8 @@ from agents import (
     create_trip_composer_agent,
     create_reader_profile_agent,
     create_region_analyzer_agent,
+    create_book_recommendation_agent,
+    create_book_recommendation_workflow,
     create_discovery_workflow,
     create_composition_workflow,
     create_local_atmosphere_workflow,
@@ -472,3 +474,117 @@ class TestLoadPrompts:
         """Requesting a non-existent version raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError, match="v99"):
             load_prompts("v99")
+
+    def test_book_recommendation_prompt_exists(self):
+        """AgentPrompts includes the book_recommendation prompt field."""
+        prompts = load_prompts()
+        assert hasattr(prompts, "book_recommendation")
+        assert "{book_title}" in prompts.book_recommendation
+        assert "{destinations}" in prompts.book_recommendation
+        assert "{themes}" in prompts.book_recommendation
+
+
+# =============================================================================
+# BookRecommendationAgent Tests
+# =============================================================================
+
+
+class TestBookRecommendationAgent:
+    """Tests for create_book_recommendation_agent."""
+
+    def test_creates_llm_agent(self, model_name, mock_google_search_tool):
+        agent = create_book_recommendation_agent(
+            model_name,
+            mock_google_search_tool,
+            book_title="The Da Vinci Code",
+            author="Dan Brown",
+            destinations="Paris, London",
+            themes="mystery, art, religion",
+        )
+        assert isinstance(agent, LlmAgent)
+
+    def test_agent_name(self, model_name, mock_google_search_tool):
+        agent = create_book_recommendation_agent(
+            model_name,
+            mock_google_search_tool,
+            book_title="The Da Vinci Code",
+            author="Dan Brown",
+            destinations="Paris",
+            themes="mystery",
+        )
+        assert agent.name == "book_recommendation_agent"
+
+    def test_agent_has_output_schema(self, model_name, mock_google_search_tool):
+        from models.book import BookRecommendationsResult
+        agent = create_book_recommendation_agent(
+            model_name,
+            mock_google_search_tool,
+            book_title="1984",
+            author="George Orwell",
+            destinations="London",
+            themes="dystopia, surveillance",
+        )
+        assert agent.output_schema is BookRecommendationsResult
+
+    def test_agent_output_key(self, model_name, mock_google_search_tool):
+        agent = create_book_recommendation_agent(
+            model_name,
+            mock_google_search_tool,
+            book_title="1984",
+            author="George Orwell",
+            destinations="London",
+            themes="dystopia",
+        )
+        assert agent.output_key == "last_book_recommendations"
+
+    def test_prompt_interpolation(self, model_name, mock_google_search_tool):
+        agent = create_book_recommendation_agent(
+            model_name,
+            mock_google_search_tool,
+            book_title="Middlemarch",
+            author="George Eliot",
+            destinations="Coventry, London",
+            themes="social reform, marriage",
+        )
+        assert "Middlemarch" in agent.instruction
+        assert "George Eliot" in agent.instruction
+        assert "Coventry, London" in agent.instruction
+        assert "social reform, marriage" in agent.instruction
+
+
+class TestBookRecommendationWorkflow:
+    """Tests for create_book_recommendation_workflow."""
+
+    def test_creates_sequential_agent(self, model_name, mock_google_search_tool):
+        wf = create_book_recommendation_workflow(
+            model_name,
+            mock_google_search_tool,
+            book_title="1984",
+            author="George Orwell",
+            destinations="London",
+            themes="dystopia",
+        )
+        assert isinstance(wf, SequentialAgent)
+
+    def test_workflow_name(self, model_name, mock_google_search_tool):
+        wf = create_book_recommendation_workflow(
+            model_name,
+            mock_google_search_tool,
+            book_title="1984",
+            author="George Orwell",
+            destinations="London",
+            themes="dystopia",
+        )
+        assert wf.name == "book_recommendation_workflow"
+
+    def test_workflow_has_single_sub_agent(self, model_name, mock_google_search_tool):
+        wf = create_book_recommendation_workflow(
+            model_name,
+            mock_google_search_tool,
+            book_title="1984",
+            author="George Orwell",
+            destinations="London",
+            themes="dystopia",
+        )
+        assert len(wf.sub_agents) == 1
+        assert isinstance(wf.sub_agents[0], LlmAgent)

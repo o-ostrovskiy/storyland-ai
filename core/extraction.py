@@ -13,6 +13,7 @@ from typing import Optional, Tuple
 from pydantic import ValidationError
 
 from common.logging import get_logger
+from models.book import BookRecommendationsResult
 from models.itinerary import TripItinerary, ComposerEnvelope, ExpansionResult
 
 logger = get_logger("storyland.core.extraction")
@@ -150,3 +151,29 @@ def extract_itinerary_from_response(
 def extract_expansion_from_state(state_accessor) -> Optional[dict]:
     """Extract and validate the last expansion result from session state."""
     return validate_expansion_result(state_accessor.last_expansion)
+
+
+def validate_book_recommendations_result(value: object) -> Optional[dict]:
+    """Validate a BookRecommendationsResult payload.
+
+    Returns validated dict or None if invalid.
+    """
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+
+    if not isinstance(value, dict):
+        return None
+
+    try:
+        validated = BookRecommendationsResult.model_validate(value)
+        return validated.model_dump()
+    except ValidationError:
+        return None
+
+
+def extract_book_recommendations_from_state(state_accessor) -> Optional[dict]:
+    """Extract and validate the last book recommendations result from session state."""
+    return validate_book_recommendations_result(state_accessor.last_book_recommendations)
