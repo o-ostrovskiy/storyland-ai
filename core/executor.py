@@ -1292,6 +1292,10 @@ class WorkflowExecutor:
                     return
 
                 recommendations = rec_data.get("recommendations", [])
+                # LLM hallucinates Amazon image IDs despite the prompt saying "leave null".
+                # Strip them so BookCard renders gracefully without a broken img tag.
+                for rec in recommendations:
+                    rec["image_url"] = None
                 new_count = book_recommendation_count + 1
 
                 persist_event = Event(
