@@ -1,18 +1,23 @@
 """
 Book recommendation agent.
 
-Single-agent pipeline that recommends 5 books based on the current book,
-destination cities, and themes. Mirrors the expansion_agent pattern but uses
-one LlmAgent (books are well-known entities; two-stage pipeline not needed).
+Two-stage pipeline that recommends 5 books based on the current book,
+destination cities, and themes. Mirrors the expansion_agent pattern:
+researcher uses google_search, formatter emits structured output only.
+
+ADK forbids combining `tools` with `output_schema` on a single LlmAgent —
+the model can either reply with structured output OR call tools, not both.
+The split below lets us keep both: researcher does the searches, formatter
+shapes the results into BookRecommendationsResult.
 """
 
-from google.adk.agents import LlmAgent
+from google.adk.agents import LlmAgent, SequentialAgent
 
 from models.book import BookRecommendationsResult
 from agents.prompts import AgentPrompts, load_prompts
 
 
-def create_book_recommendation_agent(
+def create_book_recommendation_pipeline(
     model,
     google_search_tool,
     book_title: str,
@@ -20,11 +25,12 @@ def create_book_recommendation_agent(
     destinations: str,
     themes: str,
     prompts: AgentPrompts | None = None,
-) -> LlmAgent:
-    """Create the book recommendation agent.
+) -> SequentialAgent:
+    """Create the book recommendation pipeline.
 
-    Uses google_search to find 5 real books based on the source book + destinations
-    + themes, balanced across destination/themes/author recommendation bases.
+    Researcher uses google_search to find candidate books matching destination,
+    themes, and author bases; formatter shapes the result into a
+    BookRecommendationsResult with exactly 5 BookRecommendation entries.
 
     Args:
         model: The LLM model to use.
@@ -36,23 +42,40 @@ def create_book_recommendation_agent(
         prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
-        LlmAgent that researches and formats book recommendations.
+        SequentialAgent that researches and formats book recommendations.
     """
     if prompts is None:
         prompts = load_prompts()
 
-    instruction = prompts.book_recommendation.format(
+    researcher_instruction = prompts.book_recommendation_researcher.format(
+        book_title=book_title,
+        author=author,
+        destinations=destinations,
+        themes=themes,
+    )
+    formatter_instruction = prompts.book_recommendation_formatter.format(
         book_title=book_title,
         author=author,
         destinations=destinations,
         themes=themes,
     )
 
-    return LlmAgent(
-        name="book_recommendation_agent",
+    researcher = LlmAgent(
+        name="book_recommendation_researcher",
         model=model,
         tools=[google_search_tool],
+        instruction=researcher_instruction,
+    )
+
+    formatter = LlmAgent(
+        name="book_recommendation_formatter",
+        model=model,
         output_schema=BookRecommendationsResult,
         output_key="last_book_recommendations",
-        instruction=instruction,
+        instruction=formatter_instruction,
+    )
+
+    return SequentialAgent(
+        name="book_recommendation_pipeline",
+        sub_agents=[researcher, formatter],
     )

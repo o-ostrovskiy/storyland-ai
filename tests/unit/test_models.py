@@ -762,9 +762,21 @@ class TestBookRecommendationsResult:
         assert len(result.recommendations) == 5
         assert result.recommendations[0].title == "Book 0"
 
-    def test_empty_recommendations(self):
-        result = BookRecommendationsResult(recommendations=[])
-        assert result.recommendations == []
+    def test_empty_recommendations_rejected(self):
+        with pytest.raises(ValidationError):
+            BookRecommendationsResult(recommendations=[])
+
+    def test_fewer_than_five_rejected(self):
+        with pytest.raises(ValidationError):
+            BookRecommendationsResult(
+                recommendations=[self._make_rec(f"Book {i}") for i in range(4)]
+            )
+
+    def test_more_than_five_rejected(self):
+        with pytest.raises(ValidationError):
+            BookRecommendationsResult(
+                recommendations=[self._make_rec(f"Book {i}") for i in range(6)]
+            )
 
     def test_missing_recommendations_raises(self):
         with pytest.raises(ValidationError):
@@ -772,8 +784,11 @@ class TestBookRecommendationsResult:
 
     def test_round_trip(self):
         result = BookRecommendationsResult(
-            recommendations=[self._make_rec("The Name of the Rose", "destination")]
+            recommendations=[
+                self._make_rec(f"Book {i}", "destination") for i in range(5)
+            ]
         )
         data = result.model_dump()
         restored = BookRecommendationsResult(**data)
-        assert restored.recommendations[0].title == "The Name of the Rose"
+        assert len(restored.recommendations) == 5
+        assert restored.recommendations[0].title == "Book 0"

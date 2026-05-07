@@ -263,7 +263,7 @@ storyland-ai/
 │   ├── trip_composer_agent.py    # Itinerary composition
 │   ├── local_atmosphere_agent.py    # Researcher+formatter for "near me" mode
 │   ├── expansion_agent.py           # Researcher+formatter for place expansion chips
-│   ├── book_recommendation_agent.py # Single agent for "Find books like this" chip
+│   ├── book_recommendation_agent.py # Researcher+formatter for "Find books like this" chip
 │   ├── reader_profile_agent.py      # Preferences-based personalization
 │   ├── region_analyzer_agent.py     # Geographic region grouping
 │   ├── orchestrator.py              # Two-phase + local-atmosphere + expansion + book-rec workflows
@@ -334,7 +334,7 @@ Agent prompts include reliability improvements:
 ## Testing
 
 ```bash
-make test                # Unit tests (352 tests)
+make test                # Unit tests (362 tests)
 make test-integration    # Integration tests with VCR cassettes
 make test-all            # Both
 make test-cov            # With coverage
@@ -342,13 +342,13 @@ make test-cov            # With coverage
 
 | Module | Tests | Description |
 |--------|-------|-------------|
-| `test_models.py` | 62 | Pydantic model validation (incl. BookRecommendation) |
+| `test_models.py` | 79 | Pydantic model validation (incl. BookRecommendation) |
 | `test_tools.py` | 4 | Preferences tool |
-| `test_agents.py` | 52 | Agent factory functions (incl. book recommendation) |
+| `test_agents.py` | 49 | Agent factory functions (incl. book recommendation pipeline) |
 | `test_services.py` | 10 | Session service |
-| `test_llm_scorer.py` | 18 | LLM scoring models and prompts |
-| `test_core.py` | 85 | Events, session state, extraction, regions, prompts (incl. book recs) |
-| `test_api.py` | 101 | API models, endpoints, SSE streaming (incl. book recommendations) |
+| `test_llm_scorer.py` | 23 | LLM scoring models and prompts |
+| `test_core.py` | 89 | Events, session state, extraction, regions, prompts (incl. book recs) |
+| `test_api.py` | 108 | API models, endpoints, SSE streaming (incl. book recommendations) |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).
 

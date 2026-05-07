@@ -28,7 +28,7 @@ from .discovery_agents import (
     create_landmark_pipeline,
     create_author_pipeline,
 )
-from .book_recommendation_agent import create_book_recommendation_agent
+from .book_recommendation_agent import create_book_recommendation_pipeline
 from .expansion_agent import create_expansion_pipeline
 from .local_atmosphere_agent import create_local_atmosphere_pipeline
 from .trip_composer_agent import create_trip_composer_agent
@@ -239,8 +239,10 @@ def create_book_recommendation_workflow(
 
     Architecture:
         SequentialAgent (book_recommendation_workflow)
-        └─ book_recommendation_agent [google_search, output_schema=BookRecommendationsResult]
-           → state["last_book_recommendations"]
+        └─ book_recommendation_pipeline
+           ├─ book_recommendation_researcher [google_search] → research notes
+           └─ book_recommendation_formatter [output_schema=BookRecommendationsResult]
+              → state["last_book_recommendations"]
 
     Args:
         model: The LLM model to use.
@@ -252,12 +254,12 @@ def create_book_recommendation_workflow(
         prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
-        SequentialAgent orchestrating the book recommendation agent.
+        SequentialAgent orchestrating the book recommendation pipeline.
     """
     if prompts is None:
         prompts = load_prompts()
 
-    agent = create_book_recommendation_agent(
+    pipeline = create_book_recommendation_pipeline(
         model,
         google_search_tool,
         book_title=book_title,
@@ -269,7 +271,7 @@ def create_book_recommendation_workflow(
 
     return SequentialAgent(
         name="book_recommendation_workflow",
-        sub_agents=[agent],
+        sub_agents=[pipeline],
     )
 
 

@@ -39,7 +39,8 @@ class AgentPrompts:
     local_atmosphere_formatter: str  # template with {location_label} and {radius_km} placeholders
     expansion_researcher: str  # template with {book_title}, {author}, {parent_city}, {action_prompt}, {existing_places}
     expansion_formatter: str  # template with {parent_city}, {action_prompt}
-    book_recommendation: str  # template with {book_title}, {author}, {destinations}, {themes}
+    book_recommendation_researcher: str  # template with {book_title}, {author}, {destinations}, {themes}
+    book_recommendation_formatter: str   # template with {book_title}, {author}, {destinations}, {themes}
 
 
 def load_prompts(version: str = CURRENT_PROMPT_VERSION) -> AgentPrompts:

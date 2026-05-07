@@ -117,8 +117,10 @@ HARD_EXPANSION_CAP = 20
 BOOK_RECOMMENDATION_HARD_CAP = 5
 
 BOOK_RECOMMENDATION_AGENT_STEPS: dict[str, str] = {
-    "book_recommendation_agent": "Finding books for you",
-    "book_recommendation_workflow": "Searching for book recommendations",
+    "book_recommendation_researcher": "Searching for book recommendations",
+    "book_recommendation_formatter": "Curating your book picks",
+    "book_recommendation_pipeline": "Finding books for you",
+    "book_recommendation_workflow": "Finding books for you",
 }
 
 APP_NAME = "storyland"

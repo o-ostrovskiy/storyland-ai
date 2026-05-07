@@ -727,14 +727,22 @@ class TestValidateBookRecommendationsResult:
 
     def test_json_string_input(self):
         import json
-        data = json.dumps({"recommendations": [self._make_rec()]})
+        data = json.dumps({"recommendations": [self._make_rec(f"Book {i}") for i in range(5)]})
         result = validate_book_recommendations_result(data)
         assert result is not None
 
     def test_invalid_basis_returns_none(self):
-        data = {"recommendations": [
-            {"title": "X", "author": "Y", "reason": "R", "recommendation_basis": "bad_value"}
-        ]}
+        recs = [self._make_rec(f"Book {i}") for i in range(4)]
+        recs.append({"title": "X", "author": "Y", "reason": "R", "recommendation_basis": "bad_value"})
+        assert validate_book_recommendations_result({"recommendations": recs}) is None
+
+    def test_partial_recommendations_rejected(self):
+        """Fewer than 5 recommendations is not a successful response."""
+        data = {"recommendations": [self._make_rec(f"Book {i}") for i in range(3)]}
+        assert validate_book_recommendations_result(data) is None
+
+    def test_too_many_recommendations_rejected(self):
+        data = {"recommendations": [self._make_rec(f"Book {i}") for i in range(6)]}
         assert validate_book_recommendations_result(data) is None
 
     def test_none_input_returns_none(self):
@@ -754,11 +762,13 @@ class TestExtractBookRecommendationsFromState:
         }
 
     def test_extracts_from_state(self):
-        data = {"recommendations": [self._make_rec("Moby Dick")]}
-        accessor = SessionStateAccessor({"last_book_recommendations": data})
+        recs = [self._make_rec(f"Book {i}") for i in range(5)]
+        recs[0]["title"] = "Moby Dick"
+        accessor = SessionStateAccessor({"last_book_recommendations": {"recommendations": recs}})
         result = extract_book_recommendations_from_state(accessor)
         assert result is not None
         assert result["recommendations"][0]["title"] == "Moby Dick"
+        assert len(result["recommendations"]) == 5
 
     def test_returns_none_when_missing(self):
         accessor = SessionStateAccessor({})

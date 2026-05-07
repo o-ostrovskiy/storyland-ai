@@ -18,7 +18,7 @@ from agents import (
     create_trip_composer_agent,
     create_reader_profile_agent,
     create_region_analyzer_agent,
-    create_book_recommendation_agent,
+    create_book_recommendation_pipeline,
     create_book_recommendation_workflow,
     create_discovery_workflow,
     create_composition_workflow,
@@ -475,25 +475,27 @@ class TestLoadPrompts:
         with pytest.raises(FileNotFoundError, match="v99"):
             load_prompts("v99")
 
-    def test_book_recommendation_prompt_exists(self):
-        """AgentPrompts includes the book_recommendation prompt field."""
+    def test_book_recommendation_prompts_exist(self):
+        """AgentPrompts includes both book_recommendation prompt fields."""
         prompts = load_prompts()
-        assert hasattr(prompts, "book_recommendation")
-        assert "{book_title}" in prompts.book_recommendation
-        assert "{destinations}" in prompts.book_recommendation
-        assert "{themes}" in prompts.book_recommendation
+        for field in ("book_recommendation_researcher", "book_recommendation_formatter"):
+            assert hasattr(prompts, field)
+            template = getattr(prompts, field)
+            assert "{book_title}" in template
+            assert "{destinations}" in template
+            assert "{themes}" in template
 
 
 # =============================================================================
-# BookRecommendationAgent Tests
+# BookRecommendationPipeline Tests
 # =============================================================================
 
 
-class TestBookRecommendationAgent:
-    """Tests for create_book_recommendation_agent."""
+class TestBookRecommendationPipeline:
+    """Tests for create_book_recommendation_pipeline."""
 
-    def test_creates_llm_agent(self, model_name, mock_google_search_tool):
-        agent = create_book_recommendation_agent(
+    def test_creates_sequential_agent(self, model_name, mock_google_search_tool):
+        pipeline = create_book_recommendation_pipeline(
             model_name,
             mock_google_search_tool,
             book_title="The Da Vinci Code",
@@ -501,22 +503,11 @@ class TestBookRecommendationAgent:
             destinations="Paris, London",
             themes="mystery, art, religion",
         )
-        assert isinstance(agent, LlmAgent)
+        assert isinstance(pipeline, SequentialAgent)
+        assert pipeline.name == "book_recommendation_pipeline"
 
-    def test_agent_name(self, model_name, mock_google_search_tool):
-        agent = create_book_recommendation_agent(
-            model_name,
-            mock_google_search_tool,
-            book_title="The Da Vinci Code",
-            author="Dan Brown",
-            destinations="Paris",
-            themes="mystery",
-        )
-        assert agent.name == "book_recommendation_agent"
-
-    def test_agent_has_output_schema(self, model_name, mock_google_search_tool):
-        from models.book import BookRecommendationsResult
-        agent = create_book_recommendation_agent(
+    def test_pipeline_has_researcher_and_formatter(self, model_name, mock_google_search_tool):
+        pipeline = create_book_recommendation_pipeline(
             model_name,
             mock_google_search_tool,
             book_title="1984",
@@ -524,10 +515,16 @@ class TestBookRecommendationAgent:
             destinations="London",
             themes="dystopia, surveillance",
         )
-        assert agent.output_schema is BookRecommendationsResult
+        assert len(pipeline.sub_agents) == 2
+        researcher, formatter = pipeline.sub_agents
+        assert isinstance(researcher, LlmAgent)
+        assert isinstance(formatter, LlmAgent)
+        assert researcher.name == "book_recommendation_researcher"
+        assert formatter.name == "book_recommendation_formatter"
 
-    def test_agent_output_key(self, model_name, mock_google_search_tool):
-        agent = create_book_recommendation_agent(
+    def test_researcher_uses_search_tool_only(self, model_name, mock_google_search_tool):
+        """ADK forbids tools + output_schema. Researcher gets the tool, formatter gets the schema."""
+        pipeline = create_book_recommendation_pipeline(
             model_name,
             mock_google_search_tool,
             book_title="1984",
@@ -535,10 +532,27 @@ class TestBookRecommendationAgent:
             destinations="London",
             themes="dystopia",
         )
-        assert agent.output_key == "last_book_recommendations"
+        researcher, formatter = pipeline.sub_agents
+        assert researcher.tools and len(researcher.tools) == 1
+        assert researcher.output_schema is None
+        assert not formatter.tools
+
+    def test_formatter_has_output_schema(self, model_name, mock_google_search_tool):
+        from models.book import BookRecommendationsResult
+        pipeline = create_book_recommendation_pipeline(
+            model_name,
+            mock_google_search_tool,
+            book_title="1984",
+            author="George Orwell",
+            destinations="London",
+            themes="dystopia, surveillance",
+        )
+        formatter = pipeline.sub_agents[1]
+        assert formatter.output_schema is BookRecommendationsResult
+        assert formatter.output_key == "last_book_recommendations"
 
     def test_prompt_interpolation(self, model_name, mock_google_search_tool):
-        agent = create_book_recommendation_agent(
+        pipeline = create_book_recommendation_pipeline(
             model_name,
             mock_google_search_tool,
             book_title="Middlemarch",
@@ -546,10 +560,12 @@ class TestBookRecommendationAgent:
             destinations="Coventry, London",
             themes="social reform, marriage",
         )
-        assert "Middlemarch" in agent.instruction
-        assert "George Eliot" in agent.instruction
-        assert "Coventry, London" in agent.instruction
-        assert "social reform, marriage" in agent.instruction
+        researcher, formatter = pipeline.sub_agents
+        for agent in (researcher, formatter):
+            assert "Middlemarch" in agent.instruction
+            assert "George Eliot" in agent.instruction
+            assert "Coventry, London" in agent.instruction
+            assert "social reform, marriage" in agent.instruction
 
 
 class TestBookRecommendationWorkflow:
@@ -577,7 +593,7 @@ class TestBookRecommendationWorkflow:
         )
         assert wf.name == "book_recommendation_workflow"
 
-    def test_workflow_has_single_sub_agent(self, model_name, mock_google_search_tool):
+    def test_workflow_wraps_pipeline(self, model_name, mock_google_search_tool):
         wf = create_book_recommendation_workflow(
             model_name,
             mock_google_search_tool,
@@ -587,4 +603,6 @@ class TestBookRecommendationWorkflow:
             themes="dystopia",
         )
         assert len(wf.sub_agents) == 1
-        assert isinstance(wf.sub_agents[0], LlmAgent)
+        pipeline = wf.sub_agents[0]
+        assert isinstance(pipeline, SequentialAgent)
+        assert pipeline.name == "book_recommendation_pipeline"

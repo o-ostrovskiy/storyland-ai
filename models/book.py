@@ -60,7 +60,9 @@ class BookRecommendationsResult(BaseModel):
     """Result from the book recommendation agent: 5 recommended books."""
 
     recommendations: List[BookRecommendation] = Field(
-        description="Exactly 5 book recommendations, balanced across destination/themes/author bases"
+        min_length=5,
+        max_length=5,
+        description="Exactly 5 book recommendations, balanced across destination/themes/author bases",
     )
 
 
