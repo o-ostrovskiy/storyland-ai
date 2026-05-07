@@ -19,7 +19,9 @@ from .local_atmosphere_agent import create_local_atmosphere_pipeline
 from .trip_composer_agent import create_trip_composer_agent
 from .reader_profile_agent import create_reader_profile_agent
 from .region_analyzer_agent import create_region_analyzer_agent
+from .book_recommendation_agent import create_book_recommendation_pipeline
 from .orchestrator import (
+    create_book_recommendation_workflow,
     create_discovery_workflow,
     create_composition_workflow,
     create_local_atmosphere_workflow,
@@ -34,6 +36,8 @@ __all__ = [
     "create_trip_composer_agent",
     "create_reader_profile_agent",
     "create_region_analyzer_agent",
+    "create_book_recommendation_pipeline",
+    "create_book_recommendation_workflow",
     "create_discovery_workflow",
     "create_composition_workflow",
     "create_local_atmosphere_workflow",

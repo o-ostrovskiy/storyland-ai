@@ -97,6 +97,25 @@ class ExpandRequest(BaseModel):
     )
 
 
+class RecommendBooksRequest(BaseModel):
+    """Request body for POST /api/v1/itinerary/{job_id}/recommend-books."""
+
+    action_id: str = Field(
+        min_length=1,
+        description="ID of the 'Find books like this' chip (server-issued uuid4)",
+    )
+    action_label: str = Field(
+        min_length=1,
+        max_length=100,
+        description="Human-readable chip label (for logging only)",
+    )
+    action_prompt: str = Field(
+        default="",
+        max_length=500,
+        description="Unused for book recommendations; kept for interface symmetry with expand",
+    )
+
+
 class UserLocation(BaseModel):
     """User's current location for the local-atmosphere flow."""
 
@@ -231,6 +250,10 @@ class SSEItineraryEvent(BaseModel):
         default_factory=list,
         description="Contextual suggestion chips for follow-up expansions",
     )
+    book_recommendation_chip: Optional[dict] = Field(
+        default=None,
+        description="Server-stamped 'Find books like this' chip (separate from expansion chips)",
+    )
 
 
 class SSEExpansionEvent(BaseModel):
@@ -242,6 +265,20 @@ class SSEExpansionEvent(BaseModel):
     suggestions: List[dict] = Field(
         default_factory=list,
         description="Fresh contextual suggestion chips",
+    )
+    book_recommendation_chip: Optional[dict] = Field(
+        default=None,
+        description="Server-stamped 'Find books like this' chip (separate from expansion chips)",
+    )
+
+
+class SSEBookRecommendationsEvent(BaseModel):
+    """Book recommendations result: 5 books related to the current book + destinations."""
+
+    event: Literal["book_recommendations"] = "book_recommendations"
+    recommendations: List[dict] = Field(description="BookRecommendation entries")
+    book_recommendation_count: int = Field(
+        description="Total number of recommendation requests made this session"
     )
 
 

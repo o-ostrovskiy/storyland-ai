@@ -132,6 +132,8 @@ flowchart TB
 - **Trip Composer** - Creates personalized itinerary based on user preferences
 - **Reader Profile Agent** - Accesses user preferences from session state
 - **Local Atmosphere Pipeline** - Single-phase researcher → formatter that finds nearby places (within ~80 km of the user) whose mood and aesthetic evoke the book, for readers who can't travel to the actual setting
+- **Expansion Pipeline** - On-demand researcher → formatter that adds 3-5 new places to an existing city when the user clicks a suggestion chip
+- **Book Recommendation Agent** - On-demand single agent that recommends 5 books based on the source book, destination cities, and themes (triggered by the "Find books like this" chip)
 
 **Session State Keys:**
 
@@ -145,6 +147,11 @@ flowchart TB
 | `region_analysis` | 1 | Geographic region grouping |
 | `user:preferences` | All | User travel preferences (persists across sessions) |
 | `final_itinerary` | 2 | Complete travel plan |
+| `last_suggestions` | 2 | Current set of suggestion chips |
+| `expansion_count` | Post-2 | Number of place-expansion requests made |
+| `book_recommendation_chip_id` | 2 | ID of the server-stamped "Find books like this" chip |
+| `book_recommendation_count` | Post-2 | Number of book recommendation requests made |
+| `last_book_recommendations` | Post-2 | Most recent BookRecommendationsResult |
 | `job_failed` | All | Terminal failure marker (set on error, cleared on compose retry) |
 
 **Storage:** In-memory (default) or SQLite persistence. Multi-user support with isolated data. See [Configuration](#configuration) for options.
@@ -191,7 +198,7 @@ curl -N -X POST http://localhost:8080/api/v1/itinerary/local-atmosphere \
 curl http://localhost:8080/api/v1/itinerary/{job_id}/status
 ```
 
-SSE event types: `progress`, `metadata`, `regions`, `itinerary`, `error`, `done`. The local-atmosphere endpoint emits `progress → metadata → itinerary → done` (no `regions` event — there is no region-selection step).
+SSE event types: `progress`, `metadata`, `regions`, `itinerary`, `expansion`, `book_recommendations`, `error`, `done`. The local-atmosphere endpoint emits `progress → metadata → itinerary → done` (no `regions` event). The `/expand` endpoint emits `progress → expansion → done`. The `/recommend-books` endpoint emits `progress → book_recommendations → done`.
 
 **Job status states** (`GET /api/v1/itinerary/{job_id}/status`):
 
@@ -254,18 +261,20 @@ storyland-ai/
 │   ├── book_context_agent.py     # Book setting research
 │   ├── discovery_agents.py       # City/landmark/author discovery
 │   ├── trip_composer_agent.py    # Itinerary composition
-│   ├── local_atmosphere_agent.py # Researcher+formatter for "near me" mode
-│   ├── reader_profile_agent.py   # Preferences-based personalization
-│   ├── region_analyzer_agent.py  # Geographic region grouping
-│   ├── orchestrator.py           # Two-phase + local-atmosphere workflows
-│   ├── prompts.py                # AgentPrompts dataclass + versioned loader
+│   ├── local_atmosphere_agent.py    # Researcher+formatter for "near me" mode
+│   ├── expansion_agent.py           # Researcher+formatter for place expansion chips
+│   ├── book_recommendation_agent.py # Researcher+formatter for "Find books like this" chip
+│   ├── reader_profile_agent.py      # Preferences-based personalization
+│   ├── region_analyzer_agent.py     # Geographic region grouping
+│   ├── orchestrator.py              # Two-phase + local-atmosphere + expansion + book-rec workflows
+│   ├── prompts.py                   # AgentPrompts dataclass + versioned loader
 │   └── prompts/                  # Versioned prompt sets
 │       ├── v1.json               # Original prompts (git ref 4c6fdc9)
 │       └── v2.json               # Current prompts (PR #63)
 │
 ├── api/                 # FastAPI SSE streaming API
 │   ├── app.py           # Application factory with lifespan
-│   ├── routes.py        # HTTP endpoints (discover, compose, local-atmosphere, status, health)
+│   ├── routes.py        # HTTP endpoints (discover, compose, expand, recommend-books, local-atmosphere, status, health)
 │   ├── streaming.py     # SSE async generators wrapping ADK Runner
 │   ├── models.py        # Request/response/SSE event Pydantic models
 │   └── dependencies.py  # Shared app state & dependency injection
@@ -325,7 +334,7 @@ Agent prompts include reliability improvements:
 ## Testing
 
 ```bash
-make test                # Unit tests (263 tests)
+make test                # Unit tests (362 tests)
 make test-integration    # Integration tests with VCR cassettes
 make test-all            # Both
 make test-cov            # With coverage
@@ -333,13 +342,13 @@ make test-cov            # With coverage
 
 | Module | Tests | Description |
 |--------|-------|-------------|
-| `test_models.py` | 46 | Pydantic model validation |
+| `test_models.py` | 79 | Pydantic model validation (incl. BookRecommendation) |
 | `test_tools.py` | 4 | Preferences tool |
-| `test_agents.py` | 40 | Agent factory functions (incl. local-atmosphere) |
+| `test_agents.py` | 49 | Agent factory functions (incl. book recommendation pipeline) |
 | `test_services.py` | 10 | Session service |
-| `test_llm_scorer.py` | 18 | LLM scoring models and prompts |
-| `test_core.py` | 57 | Events, session state, extraction, regions, prompts |
-| `test_api.py` | 81 | API models, endpoints, SSE streaming, failure-status (incl. local-atmosphere) |
+| `test_llm_scorer.py` | 23 | LLM scoring models and prompts |
+| `test_core.py` | 89 | Events, session state, extraction, regions, prompts (incl. book recs) |
+| `test_api.py` | 108 | API models, endpoints, SSE streaming (incl. book recommendations) |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).
 

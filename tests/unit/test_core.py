@@ -15,6 +15,7 @@ from core.events import (
     MetadataReady,
     RegionsReady,
     ItineraryReady,
+    BookRecommendationsReady,
     WorkflowError,
     WorkflowComplete,
 )
@@ -29,9 +30,11 @@ from core.extraction import (
     validate_trip_itinerary,
     validate_composer_envelope,
     validate_expansion_result,
+    validate_book_recommendations_result,
     extract_json_from_text,
     extract_itinerary_from_response,
     extract_expansion_from_state,
+    extract_book_recommendations_from_state,
 )
 from core.events import ExpansionReady
 from core.regions import get_valid_region_ids, validate_region_selection
@@ -633,3 +636,144 @@ class TestSelectAllRegions:
 
     def test_missing_regions_key(self):
         assert select_all_regions({}) == []
+
+
+# =============================================================================
+# BookRecommendationsReady Event Tests
+# =============================================================================
+
+
+class TestBookRecommendationsReady:
+    def test_construction(self):
+        event = BookRecommendationsReady(
+            recommendations=[{"title": "Les Misérables", "author": "Victor Hugo"}],
+            book_recommendation_count=1,
+        )
+        assert len(event.recommendations) == 1
+        assert event.book_recommendation_count == 1
+
+    def test_frozen(self):
+        event = BookRecommendationsReady(recommendations=[], book_recommendation_count=0)
+        with pytest.raises(AttributeError):
+            event.book_recommendation_count = 2
+
+    def test_empty_recommendations(self):
+        event = BookRecommendationsReady(recommendations=[], book_recommendation_count=0)
+        assert event.recommendations == []
+
+
+# =============================================================================
+# Session State - Book Recommendations Keys
+# =============================================================================
+
+
+class TestBookRecommendationSessionState:
+    def test_new_keys_exist(self):
+        from core.session_state import SessionStateKeys
+        assert hasattr(SessionStateKeys, "LAST_BOOK_RECOMMENDATIONS")
+        assert hasattr(SessionStateKeys, "BOOK_RECOMMENDATION_COUNT")
+        assert hasattr(SessionStateKeys, "BOOK_RECS_IN_PROGRESS")
+        assert hasattr(SessionStateKeys, "BOOK_RECOMMENDATION_CHIP_ID")
+        assert hasattr(SessionStateKeys, "BOOK_RECOMMENDATION_CHIP")
+
+    def test_accessor_defaults(self):
+        accessor = SessionStateAccessor({})
+        assert accessor.book_recommendation_count == 0
+        assert accessor.book_recs_in_progress is False
+        assert accessor.last_book_recommendations is None
+        assert accessor.book_recommendation_chip_id is None
+        assert accessor.book_recommendation_chip is None
+        assert accessor.book_context is None
+
+    def test_accessor_reads_state(self):
+        chip_id = "test-chip-uuid"
+        chip = {"id": chip_id, "label": "Find books like this", "action_prompt": ""}
+        state = {
+            "book_recommendation_count": 3,
+            "book_recs_in_progress": True,
+            "book_recommendation_chip_id": chip_id,
+            "book_recommendation_chip": chip,
+            "book_context": {"themes": ["mystery"], "primary_locations": ["Paris"]},
+            "last_book_recommendations": {"recommendations": []},
+        }
+        accessor = SessionStateAccessor(state)
+        assert accessor.book_recommendation_count == 3
+        assert accessor.book_recs_in_progress is True
+        assert accessor.book_recommendation_chip_id == chip_id
+        assert accessor.book_recommendation_chip == chip
+        assert accessor.book_context["themes"] == ["mystery"]
+        assert accessor.last_book_recommendations == {"recommendations": []}
+
+
+# =============================================================================
+# Extraction - Book Recommendations
+# =============================================================================
+
+
+class TestValidateBookRecommendationsResult:
+    def _make_rec(self, title="Book"):
+        return {
+            "title": title,
+            "author": "Author",
+            "reason": "A reason.",
+            "recommendation_basis": "themes",
+        }
+
+    def test_valid_payload(self):
+        data = {"recommendations": [self._make_rec() for _ in range(5)]}
+        result = validate_book_recommendations_result(data)
+        assert result is not None
+        assert len(result["recommendations"]) == 5
+
+    def test_json_string_input(self):
+        import json
+        data = json.dumps({"recommendations": [self._make_rec(f"Book {i}") for i in range(5)]})
+        result = validate_book_recommendations_result(data)
+        assert result is not None
+
+    def test_invalid_basis_returns_none(self):
+        recs = [self._make_rec(f"Book {i}") for i in range(4)]
+        recs.append({"title": "X", "author": "Y", "reason": "R", "recommendation_basis": "bad_value"})
+        assert validate_book_recommendations_result({"recommendations": recs}) is None
+
+    def test_partial_recommendations_rejected(self):
+        """Fewer than 5 recommendations is not a successful response."""
+        data = {"recommendations": [self._make_rec(f"Book {i}") for i in range(3)]}
+        assert validate_book_recommendations_result(data) is None
+
+    def test_too_many_recommendations_rejected(self):
+        data = {"recommendations": [self._make_rec(f"Book {i}") for i in range(6)]}
+        assert validate_book_recommendations_result(data) is None
+
+    def test_none_input_returns_none(self):
+        assert validate_book_recommendations_result(None) is None
+
+    def test_empty_string_returns_none(self):
+        assert validate_book_recommendations_result("not-json") is None
+
+
+class TestExtractBookRecommendationsFromState:
+    def _make_rec(self, title="Book"):
+        return {
+            "title": title,
+            "author": "Author",
+            "reason": "A reason.",
+            "recommendation_basis": "destination",
+        }
+
+    def test_extracts_from_state(self):
+        recs = [self._make_rec(f"Book {i}") for i in range(5)]
+        recs[0]["title"] = "Moby Dick"
+        accessor = SessionStateAccessor({"last_book_recommendations": {"recommendations": recs}})
+        result = extract_book_recommendations_from_state(accessor)
+        assert result is not None
+        assert result["recommendations"][0]["title"] == "Moby Dick"
+        assert len(result["recommendations"]) == 5
+
+    def test_returns_none_when_missing(self):
+        accessor = SessionStateAccessor({})
+        assert extract_book_recommendations_from_state(accessor) is None
+
+    def test_returns_none_for_invalid_data(self):
+        accessor = SessionStateAccessor({"last_book_recommendations": {"bad": "data"}})
+        assert extract_book_recommendations_from_state(accessor) is None

@@ -61,6 +61,7 @@ class ItineraryReady:
 
     itinerary: dict
     suggestions: List[dict] = field(default_factory=list)
+    book_recommendation_chip: Optional[dict] = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,15 @@ class ExpansionReady:
     parent_city: str
     places: List[dict]
     suggestions: List[dict] = field(default_factory=list)
+    book_recommendation_chip: Optional[dict] = None
+
+
+@dataclass(frozen=True)
+class BookRecommendationsReady:
+    """Book recommendations ready: 5 books for the reader based on book + destinations."""
+
+    recommendations: List[dict]
+    book_recommendation_count: int
 
 
 @dataclass(frozen=True)
@@ -97,6 +107,7 @@ DomainEvent = (
     | RegionsReady
     | ItineraryReady
     | ExpansionReady
+    | BookRecommendationsReady
     | WorkflowError
     | WorkflowComplete
 )

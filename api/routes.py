@@ -13,12 +13,19 @@ from api.models import (
     DiscoverRequest,
     ComposeRequest,
     ExpandRequest,
+    RecommendBooksRequest,
     LocalAtmosphereRequest,
     HealthResponse,
     JobStatusResponse,
     JobStatus,
 )
-from api.streaming import discover_stream, compose_stream, expand_stream, local_atmosphere_stream
+from api.streaming import (
+    discover_stream,
+    compose_stream,
+    expand_stream,
+    recommend_books_stream,
+    local_atmosphere_stream,
+)
 from common.logging import get_logger
 from core.session_state import SessionStateAccessor
 
@@ -259,6 +266,61 @@ async def expand(
     )
 
     generator = expand_stream(
+        job_id=job_id,
+        action_id=request.action_id,
+        action_label=request.action_label,
+        action_prompt=request.action_prompt,
+        user_id=user_id,
+        executor=app_state.executor,
+    )
+
+    return EventSourceResponse(generator, media_type="text/event-stream")
+
+
+@router.post(
+    "/itinerary/{job_id}/recommend-books",
+    summary="Get book recommendations based on book and destinations",
+    responses={
+        200: {
+            "description": "SSE event stream (text/event-stream)",
+            "content": {
+                "text/event-stream": {
+                    "example": (
+                        'event: progress\ndata: {"event":"progress","phase":3,"step":"Finding books for you"}\n\n'
+                        'event: book_recommendations\ndata: {"event":"book_recommendations","recommendations":[...],"book_recommendation_count":1}\n\n'
+                        'event: done\ndata: {"event":"done","job_id":"abc-123"}\n\n'
+                    )
+                }
+            },
+        }
+    },
+)
+async def recommend_books(
+    job_id: str,
+    request: RecommendBooksRequest,
+    user_id: str = Depends(get_gateway_user_id),
+):
+    """
+    Recommend 5 books based on the current book and destination itinerary.
+
+    Requires a `job_id` from a completed `/compose` or `/local-atmosphere` call.
+    The `action_id` must match the 'Find books like this' chip id returned with the itinerary.
+
+    Streams SSE events:
+    - **progress** — Step updates during recommendation search
+    - **book_recommendations** — 5 recommended books with title, author, reason, and recommendation basis
+    - **error** — If the job is not found, action_id is invalid, or the limit is reached
+    - **done** — Stream complete
+    """
+    app_state = get_app_state()
+    logger.info(
+        "recommend_books_request",
+        job_id=job_id,
+        action_id=request.action_id,
+        action_label=request.action_label,
+    )
+
+    generator = recommend_books_stream(
         job_id=job_id,
         action_id=request.action_id,
         action_label=request.action_label,

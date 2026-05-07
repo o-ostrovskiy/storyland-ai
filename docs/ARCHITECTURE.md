@@ -831,6 +831,37 @@ Add a **separate single-phase endpoint** (`POST /api/v1/itinerary/local-atmosphe
 
 ---
 
+## 14. Book Recommendation Agent (On-Demand, Single-Agent, Server-Stamped Chip)
+
+### Context
+
+After generating a travel itinerary based on a book, readers often want to know what to read next — books set in the same destination, books with similar themes, or other works by the same author. This feature adds on-demand book recommendations triggered by clicking a "Find books like this" chip in the UI.
+
+### Decision
+
+**Two-stage researcher → formatter pipeline:** Mirrors the expansion and local-atmosphere flows. ADK's `LlmAgent` forbids combining `tools=[...]` with `output_schema=...` on the same agent (the model can either reply with structured output OR call tools, not both). The researcher uses `google_search` to find candidate books and capture their facts; the formatter has no tools and applies `output_schema=BookRecommendationsResult` to produce exactly 5 balanced entries. Even though books are well-known LLM entities, web search is essential for fresh recommendations and accurate metadata, so the second stage is necessary.
+
+**Server-stamped chip (not LLM-generated):** The "Find books like this" chip is created deterministically by the executor after composition (`_build_book_recommendation_chip`) — not by the LLM. The chip dict is stored in session state under `BOOK_RECOMMENDATION_CHIP` (and its UUID under `BOOK_RECOMMENDATION_CHIP_ID`), and surfaced as a dedicated `book_recommendation_chip` field on the `itinerary` and `expansion` SSE events (separate from `suggestions[]`, which is reserved for expansion chips). The `/recommend-books` endpoint validates the incoming `action_id` against the stored id. This eliminates LLM flake risk and provides clean routing: expansion chips go to `/expand`; the books chip goes to `/recommend-books`.
+
+**Separate lock and counter from expansion:** `BOOK_RECS_IN_PROGRESS` and `BOOK_RECOMMENDATION_COUNT` are distinct from expansion's equivalents, allowing concurrent expand + recommend-books without false conflicts.
+
+**No follow-up chips:** Book recommendations are a terminal action. The hard cap is 5 requests per session.
+
+### Files Affected
+
+- `agents/book_recommendation_agent.py`, `agents/orchestrator.py`, `agents/prompts/v2.json`, `agents/prompts.py`
+- `models/book.py` — `BookRecommendation`, `BookRecommendationsResult`
+- `core/events.py`, `core/session_state.py`, `core/extraction.py`, `core/executor.py`
+- `api/models.py`, `api/streaming.py`, `api/routes.py` — `POST /api/v1/itinerary/{job_id}/recommend-books`
+
+### Trade-offs
+
+**Benefits:** Zero LLM flake for chip routing; researcher → formatter split satisfies ADK's "tools XOR output_schema" constraint while preserving structured output; save infrastructure requires no changes; independent lock allows concurrency with expansion.
+
+**Costs:** New endpoint to maintain; image_url may be null (covers resolved by frontend); two LLM hops per recommendation request (consistent with expansion/local-atmosphere flows).
+
+---
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
