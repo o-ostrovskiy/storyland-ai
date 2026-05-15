@@ -38,14 +38,14 @@ class TokenUsage:
     @property
     def cost_usd(self) -> float:
         """
-        Calculate cost in USD based on Gemini 2.0 Flash pricing.
+        Calculate cost in USD based on Gemini 2.5 Flash pricing.
 
-        Pricing (as of Jan 2026):
-        - Input: $0.075 per 1M tokens
-        - Output: $0.30 per 1M tokens
+        Pricing (as of May 2026):
+        - Input: $0.15 per 1M tokens
+        - Output: $0.60 per 1M tokens
         """
-        input_cost = (self.input_tokens / 1_000_000) * 0.075
-        output_cost = (self.output_tokens / 1_000_000) * 0.30
+        input_cost = (self.input_tokens / 1_000_000) * 0.15
+        output_cost = (self.output_tokens / 1_000_000) * 0.60
         return input_cost + output_cost
 
 
@@ -263,8 +263,8 @@ class LangfusePlugin(BasePlugin):
                     },
                     metadata={
                         "model_pricing": {
-                            "input_per_1m": 0.075,
-                            "output_per_1m": 0.30,
+                            "input_per_1m": 0.15,
+                            "output_per_1m": 0.60,
                         },
                     },
                 )

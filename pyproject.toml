@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 license = {text = "MIT"}
 
 dependencies = [
-    "google-adk[eval]>=1.19.0",
+    "google-adk[eval]>=1.33.0",
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
     "requests>=2.31.0",
