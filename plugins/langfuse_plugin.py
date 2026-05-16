@@ -28,25 +28,42 @@ except ImportError:
     LANGFUSE_AVAILABLE = False
 
 
+# Gemini standard (non-batch) pricing per 1M tokens (as of May 2026).
+# Source: https://ai.google.dev/gemini-api/docs/pricing
+_GEMINI_PRICING: dict[str, tuple[float, float]] = {
+    # (input_per_1m, output_per_1m)
+    "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-2.5-flash-lite": (0.10, 0.40),
+    "gemini-2.0-flash": (0.10, 0.40),
+    "gemini-1.5-flash": (0.075, 0.30),
+    "gemini-1.5-pro": (1.25, 5.00),
+}
+_GEMINI_DEFAULT_PRICING = (0.30, 2.50)  # fall back to gemini-2.5-flash rates
+
+
+def _pricing_for(model_name: str) -> tuple[float, float]:
+    """Return (input_per_1m, output_per_1m) for the given model name."""
+    if not model_name:
+        return _GEMINI_DEFAULT_PRICING
+    lower = model_name.lower()
+    for key, rates in _GEMINI_PRICING.items():
+        if key in lower:
+            return rates
+    return _GEMINI_DEFAULT_PRICING
+
+
+def _calculate_cost(input_tokens: int, output_tokens: int, model_name: str) -> float:
+    """Calculate cost in USD given token counts and model name."""
+    input_rate, output_rate = _pricing_for(model_name)
+    return (input_tokens / 1_000_000) * input_rate + (output_tokens / 1_000_000) * output_rate
+
+
 @dataclass
 class TokenUsage:
     """Token usage statistics."""
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
-
-    @property
-    def cost_usd(self) -> float:
-        """
-        Calculate cost in USD based on Gemini 2.0 Flash pricing.
-
-        Pricing (as of Jan 2026):
-        - Input: $0.075 per 1M tokens
-        - Output: $0.30 per 1M tokens
-        """
-        input_cost = (self.input_tokens / 1_000_000) * 0.075
-        output_cost = (self.output_tokens / 1_000_000) * 0.30
-        return input_cost + output_cost
 
 
 class LangfusePlugin(BasePlugin):
@@ -93,8 +110,10 @@ class LangfusePlugin(BasePlugin):
         self.enabled = enabled and LANGFUSE_AVAILABLE
         self.client: Optional[Langfuse] = None
         self._token_usage = TokenUsage()
+        self._total_cost_usd: float = 0.0
         self._current_trace = None
         self._current_generation = None
+        self._current_model: str = ""
         self._agent_stack = []  # Track nested agent calls
         self._current_span = None
         self._propagation_cm = None
@@ -210,7 +229,8 @@ class LangfusePlugin(BasePlugin):
             return None
 
         try:
-            model_name = getattr(llm_request, 'model', 'unknown_model')
+            model_name = getattr(llm_request, 'model', 'unknown_model') or 'unknown_model'
+            self._current_model = model_name
 
             # Create generation tracking under the current agent span or trace span
             parent = self._agent_stack[-1][1] if self._agent_stack else self._current_trace
@@ -250,7 +270,9 @@ class LangfusePlugin(BasePlugin):
                 self._token_usage.output_tokens += usage.output_tokens
                 self._token_usage.total_tokens += usage.total_tokens
 
-                # Update generation with token usage and cost
+                cost = _calculate_cost(usage.input_tokens, usage.output_tokens, self._current_model)
+                self._total_cost_usd += cost
+                input_rate, output_rate = _pricing_for(self._current_model)
                 self._current_generation.update(
                     output=str(llm_response),
                     usage_details={
@@ -259,12 +281,12 @@ class LangfusePlugin(BasePlugin):
                         "total": usage.total_tokens,
                     },
                     cost_details={
-                        "total_cost": usage.cost_usd,
+                        "total_cost": cost,
                     },
                     metadata={
                         "model_pricing": {
-                            "input_per_1m": 0.075,
-                            "output_per_1m": 0.30,
+                            "input_per_1m": input_rate,
+                            "output_per_1m": output_rate,
                         },
                     },
                 )
@@ -272,7 +294,7 @@ class LangfusePlugin(BasePlugin):
                     "langfuse_model_response",
                     input_tokens=usage.input_tokens,
                     output_tokens=usage.output_tokens,
-                    cost_usd=usage.cost_usd,
+                    cost_usd=cost,
                 )
 
             self._current_generation.end()
@@ -386,7 +408,7 @@ class LangfusePlugin(BasePlugin):
                 metadata={
                     "total_input_tokens": self._token_usage.input_tokens,
                     "total_output_tokens": self._token_usage.output_tokens,
-                    "total_cost_usd": self._token_usage.cost_usd,
+                    "total_cost_usd": self._total_cost_usd,
                 },
             )
             self._current_trace.end()
@@ -394,7 +416,7 @@ class LangfusePlugin(BasePlugin):
                 "langfuse_invocation_complete",
                 input_tokens=self._token_usage.input_tokens,
                 output_tokens=self._token_usage.output_tokens,
-                cost_usd=self._token_usage.cost_usd,
+                cost_usd=self._total_cost_usd,
             )
             self._current_trace = None
         except Exception as e:
@@ -415,12 +437,13 @@ class LangfusePlugin(BasePlugin):
             "input_tokens": self._token_usage.input_tokens,
             "output_tokens": self._token_usage.output_tokens,
             "total_tokens": self._token_usage.total_tokens,
-            "cost_usd": self._token_usage.cost_usd,
+            "cost_usd": self._total_cost_usd,
         }
 
     def reset_stats(self) -> None:
         """Reset token usage statistics."""
         self._token_usage = TokenUsage()
+        self._total_cost_usd = 0.0
 
     async def flush(self) -> None:
         """Flush pending Langfuse events."""

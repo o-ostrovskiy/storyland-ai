@@ -106,9 +106,17 @@ Use `--prompt-version <label>` to tag a run in Langfuse before merging a prompt 
 
 ### Current Gemini Pricing
 
-Gemini 2.0 Flash (as of Jan 2026):
-- Input: $0.075 per 1M tokens
-- Output: $0.30 per 1M tokens
+Pricing is model-aware (as of May 2026, standard non-batch rates):
+
+| Model | Input / 1M | Output / 1M |
+|---|---|---|
+| gemini-2.5-flash | $0.30 | $2.50 |
+| gemini-2.5-flash-lite | $0.10 | $0.40 |
+| gemini-2.0-flash | $0.10 | $0.40 |
+| gemini-1.5-flash | $0.075 | $0.30 |
+| gemini-1.5-pro | $1.25 | $5.00 |
+
+Unknown models fall back to gemini-2.5-flash rates. Source: [Google AI Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing).
 
 ### Enabling the Plugin
 
