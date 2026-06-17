@@ -29,6 +29,10 @@ class ExecutorConfig:
     # Result cache settings (carried through from common.config.Config).
     cache_ttl_seconds: int = 86400
     cache_max_entries: int = 500
+    # Bounded Gemini retry backoff (parity with the eval runner).
+    retry_exp_base: float = 2.0
+    retry_max_delay: float = 12.0
+    retry_attempts: int = 4
 
     @classmethod
     def from_config(cls, config) -> "ExecutorConfig":
@@ -45,4 +49,7 @@ class ExecutorConfig:
             environment=config.environment,
             cache_ttl_seconds=getattr(config, "cache_ttl_seconds", 86400),
             cache_max_entries=getattr(config, "cache_max_entries", 500),
+            retry_exp_base=getattr(config, "retry_exp_base", 2.0),
+            retry_max_delay=getattr(config, "retry_max_delay", 12.0),
+            retry_attempts=getattr(config, "retry_attempts", 4),
         )
