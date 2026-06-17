@@ -32,6 +32,7 @@ class Config:
     langfuse_host: Optional[str]
     environment: str
     internal_api_secret: str
+    analytics_enabled: bool
 
 
 def _require_env(key: str) -> str:
@@ -75,6 +76,7 @@ def load_config() -> Config:
         - LANGFUSE_PUBLIC_KEY: Langfuse public key
         - LANGFUSE_HOST: Langfuse host URL
         - ENVIRONMENT: deployment environment tag (default: "local")
+        - ANALYTICS_ENABLED: emit server-side funnel telemetry (default: "false")
 
     Returns:
         Config object
@@ -98,6 +100,9 @@ def load_config() -> Config:
         langfuse_host=os.getenv("LANGFUSE_HOST"),
         environment=os.getenv("ENVIRONMENT", "local"),
         internal_api_secret=os.getenv("INTERNAL_API_SECRET", ""),
+        # Optional, additive: server-side funnel telemetry. Off by default so
+        # wiring it in is a no-op until explicitly enabled.
+        analytics_enabled=os.getenv("ANALYTICS_ENABLED", "false").lower() == "true",
     )
 
 

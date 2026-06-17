@@ -31,6 +31,23 @@ from core.events import (
     WorkflowComplete,
 )
 from core.executor import WorkflowExecutor
+from core.telemetry import (
+    FunnelTelemetry,
+    SearchEntry,
+    get_funnel_telemetry,
+    track_funnel,
+)
+from functools import lru_cache
+
+
+@lru_cache(maxsize=1)
+def _funnel_telemetry() -> FunnelTelemetry:
+    """Build funnel telemetry once from app config; disabled on any failure."""
+    try:
+        from common.config import get_config
+        return get_funnel_telemetry(get_config())
+    except Exception:
+        return FunnelTelemetry(enabled=False)
 
 
 def _sse(event_type: str, data: str) -> dict:
@@ -129,12 +146,20 @@ async def discover_stream(
     executor: WorkflowExecutor,
 ) -> AsyncGenerator[dict, None]:
     """Run phases 1-2 via executor and yield SSE events."""
-    async for event in executor.discover(
-        book_title=book_title,
-        author=author,
-        preferences=preferences,
+    tracked = track_funnel(
+        executor.discover(
+            book_title=book_title,
+            author=author,
+            preferences=preferences,
+            user_id=user_id,
+        ),
+        telemetry=_funnel_telemetry(),
+        entry=SearchEntry.BOOK,
         user_id=user_id,
-    ):
+        result_types=(RegionsReady,),
+        is_empty=lambda e: not getattr(e, "regions", None),
+    )
+    async for event in tracked:
         yield domain_event_to_sse(event)
 
 
@@ -165,16 +190,24 @@ async def local_atmosphere_stream(
     executor: WorkflowExecutor,
 ) -> AsyncGenerator[dict, None]:
     """Run the local-atmosphere flow via executor and yield SSE events."""
-    async for event in executor.local_atmosphere(
-        book_title=book_title,
-        author=author,
-        location_label=location_label,
-        lat=lat,
-        lng=lng,
-        radius_km=radius_km,
-        preferences=preferences,
+    tracked = track_funnel(
+        executor.local_atmosphere(
+            book_title=book_title,
+            author=author,
+            location_label=location_label,
+            lat=lat,
+            lng=lng,
+            radius_km=radius_km,
+            preferences=preferences,
+            user_id=user_id,
+        ),
+        telemetry=_funnel_telemetry(),
+        entry=SearchEntry.PLACE,
         user_id=user_id,
-    ):
+        result_types=(ItineraryReady,),
+        is_empty=lambda e: not getattr(e, "itinerary", None),
+    )
+    async for event in tracked:
         yield domain_event_to_sse(event)
 
 
