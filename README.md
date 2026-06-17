@@ -334,10 +334,11 @@ Agent prompts include reliability improvements:
 ## Testing
 
 ```bash
-make test                # Unit tests (362 tests)
-make test-integration    # Integration tests with VCR cassettes
-make test-all            # Both
-make test-cov            # With coverage
+make test                  # Unit tests (376 tests)
+make test-integration      # Integration tests with VCR cassettes (excludes real_api)
+make test-integration-live # Live tests that hit real APIs (real_api marker; uses quota)
+make test-all              # Both
+make test-cov              # With coverage
 ```
 
 | Module | Tests | Description |
@@ -347,10 +348,24 @@ make test-cov            # With coverage
 | `test_agents.py` | 49 | Agent factory functions (incl. book recommendation pipeline) |
 | `test_services.py` | 10 | Session service |
 | `test_llm_scorer.py` | 23 | LLM scoring models and prompts |
+| `test_cache.py` | 14 | Discovery result cache (TTL/LRU, key normalization, cache-hit short-circuit) |
 | `test_core.py` | 89 | Events, session state, extraction, regions, prompts (incl. book recs) |
 | `test_api.py` | 108 | API models, endpoints, SSE streaming (incl. book recommendations) |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).
+
+### Live cache verification (`real_api`)
+
+`tests/integration/test_cache_real_api.py` is the live counterpart to the mocked
+cache-hit unit test. With `ENABLE_RESULT_CACHE` on, it calls `discover()` twice
+with an identical book/author and meters `Gemini.generate_content_async`
+directly (call count + summed `usage_metadata.total_token_count`) to prove the
+**second call is a cache hit that makes zero new Gemini calls and consumes zero
+new Gemini tokens** while returning the same regions. It is marked `real_api`, so
+it is excluded from the default `make test-integration` run and only fires via
+`make test-integration-live`. It hits the live API (no VCR — recorded responses
+would defeat token counting), so it needs `GOOGLE_API_KEY` and uses a small
+amount of quota; it skips when the key is absent.
 
 ## Troubleshooting
 
