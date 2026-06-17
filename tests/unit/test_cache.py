@@ -105,11 +105,10 @@ class TestDiscoveryCacheKey:
 
 
 class TestExecutorConfigCacheDefaults:
-    def test_cache_off_by_default(self):
+    def test_cache_config_defaults(self):
         config = ExecutorConfig(
             model_name="gemini-2.0-flash", google_api_key="test-key"
         )
-        assert config.enable_result_cache is False
         assert config.cache_ttl_seconds == 86400
         assert config.cache_max_entries == 500
 
@@ -133,7 +132,6 @@ class TestExecutorCacheHit:
         config = ExecutorConfig(
             model_name="gemini-2.0-flash",
             google_api_key="test-key",
-            enable_result_cache=True,
         )
         executor = WorkflowExecutor(
             config=config,
@@ -161,7 +159,8 @@ class TestExecutorCacheHit:
         assert regions_events[0].analysis_note == "cached note"
         assert any(isinstance(e, WorkflowComplete) for e in events)
 
-    async def test_cache_disabled_has_no_cache(self):
+    async def test_cache_always_enabled(self):
+        from core.cache import TTLCache
         from core.executor import WorkflowExecutor
         from services.session_service import create_session_service
 
@@ -173,4 +172,4 @@ class TestExecutorCacheHit:
             session_service=create_session_service(use_database=False),
             model=object(),
         )
-        assert executor._discovery_cache is None
+        assert isinstance(executor._discovery_cache, TTLCache)

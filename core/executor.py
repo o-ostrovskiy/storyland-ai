@@ -150,16 +150,12 @@ class WorkflowExecutor:
             use_database=config.use_database,
         )
         self._model = model or self._create_model()
-        # Optional in-process result cache for the Discovery chain.
-        # Disabled unless ENABLE_RESULT_CACHE is set, so default behavior
-        # is byte-for-byte unchanged.
-        self._discovery_cache = (
-            TTLCache(
-                ttl_seconds=config.cache_ttl_seconds,
-                max_entries=config.cache_max_entries,
-            )
-            if getattr(config, "enable_result_cache", False)
-            else None
+        # In-process result cache for the Discovery chain (always on;
+        # validated in prod 2026-06-17). Replays prior validated discovery
+        # results verbatim, so it cannot introduce new hallucinations.
+        self._discovery_cache = TTLCache(
+            ttl_seconds=config.cache_ttl_seconds,
+            max_entries=config.cache_max_entries,
         )
 
     @property
@@ -308,21 +304,19 @@ class WorkflowExecutor:
         # the previously computed (already validated) regions and makes ZERO
         # Gemini calls. Only non-empty region sets are ever cached, so a hit
         # cannot introduce a new fabrication; staleness is bounded by the TTL.
-        cache_key = None
-        if self._discovery_cache is not None:
-            cache_key = self._discovery_cache_key(book_title, author, preferences)
-            cached_region_analysis = await self._discovery_cache.get(cache_key)
-            if cached_region_analysis:
-                logger.info("discovery_cache_hit", job_id=job_id[:8])
-                async for ev in self._emit_cached_discovery(
-                    job_id=job_id,
-                    user_id=user_id,
-                    book_title=book_title,
-                    author=author,
-                    region_analysis=cached_region_analysis,
-                ):
-                    yield ev
-                return
+        cache_key = self._discovery_cache_key(book_title, author, preferences)
+        cached_region_analysis = await self._discovery_cache.get(cache_key)
+        if cached_region_analysis:
+            logger.info("discovery_cache_hit", job_id=job_id[:8])
+            async for ev in self._emit_cached_discovery(
+                job_id=job_id,
+                user_id=user_id,
+                book_title=book_title,
+                author=author,
+                region_analysis=cached_region_analysis,
+            ):
+                yield ev
+            return
 
         try:
             async with timeout(self._config.workflow_timeout):
@@ -399,11 +393,7 @@ class WorkflowExecutor:
 
                 # Store on miss: cache only non-empty, schema-validated region
                 # sets so a future hit can safely short-circuit the chain.
-                if (
-                    self._discovery_cache is not None
-                    and cache_key is not None
-                    and state.regions
-                ):
+                if state.regions:
                     await self._discovery_cache.set(cache_key, state.region_analysis)
 
                 yield RegionsReady(
