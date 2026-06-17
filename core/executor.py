@@ -29,6 +29,8 @@ from typing import AsyncGenerator, List, Optional
 
 from async_timeout import timeout
 from google.genai import types
+
+from core.retry import build_retry_options
 from google.adk.events import Event
 from google.adk.events.event_actions import EventActions
 from google.adk.models.google_llm import Gemini
@@ -169,11 +171,11 @@ class WorkflowExecutor:
         return self._config
 
     def _create_model(self) -> Gemini:
-        retry_config = types.HttpRetryOptions(
-            attempts=5,
-            exp_base=7,
+        retry_config = build_retry_options(
+            attempts=self._config.retry_attempts,
+            exp_base=self._config.retry_exp_base,
             initial_delay=1,
-            http_status_codes=[429, 500, 503, 504],
+            max_delay=self._config.retry_max_delay,
         )
         return Gemini(
             model=self._config.model_name,

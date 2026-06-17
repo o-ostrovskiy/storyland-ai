@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from common.logging import get_logger, configure_logging
 from common.config import load_config
+from core.retry import build_retry_options
 from services.session_service import create_session_service
 from agents.orchestrator import (
     create_discovery_workflow,
@@ -394,11 +395,11 @@ async def _run_evaluation_case(
         )
 
         # Initialize model with retry config (same as main.py)
-        retry_config = types.HttpRetryOptions(
-            attempts=5,
-            exp_base=7,
+        retry_config = build_retry_options(
+            attempts=config.retry_attempts,
+            exp_base=config.retry_exp_base,
             initial_delay=1,
-            http_status_codes=[429, 500, 503, 504]
+            max_delay=config.retry_max_delay,
         )
         model = Gemini(
             model=config.model_name,

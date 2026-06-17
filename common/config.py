@@ -35,6 +35,10 @@ class Config:
     # Result cache for the Discovery chain (always on; validated in prod 2026-06-17).
     cache_ttl_seconds: int
     cache_max_entries: int
+    # Bounded Gemini retry backoff (keeps worst-case schedule < workflow_timeout).
+    retry_exp_base: float
+    retry_max_delay: float
+    retry_attempts: int
 
 
 def _require_env(key: str) -> str:
@@ -61,6 +65,14 @@ def _env_int(key: str, default: int) -> int:
     if value is None:
         return default
     return int(value)
+
+
+def _env_float(key: str, default: float) -> float:
+    """Get optional float environment variable with a default."""
+    value = os.getenv(key)
+    if value is None:
+        return default
+    return float(value)
 
 
 def load_config() -> Config:
@@ -111,6 +123,9 @@ def load_config() -> Config:
         internal_api_secret=os.getenv("INTERNAL_API_SECRET", ""),
         cache_ttl_seconds=_env_int("CACHE_TTL_SECONDS", 86400),
         cache_max_entries=_env_int("CACHE_MAX_ENTRIES", 500),
+        retry_exp_base=_env_float("RETRY_EXP_BASE", 2.0),
+        retry_max_delay=_env_float("RETRY_MAX_DELAY", 12.0),
+        retry_attempts=_env_int("RETRY_ATTEMPTS", 4),
     )
 
 
