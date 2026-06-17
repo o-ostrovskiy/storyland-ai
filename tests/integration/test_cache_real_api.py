@@ -78,7 +78,6 @@ async def test_second_discover_is_cache_hit_with_zero_new_gemini_tokens(
         model_name=os.getenv("MODEL_NAME", "gemini-2.5-flash"),
         google_api_key=real_api_key,
         use_database=False,
-        enable_result_cache=True,
         langfuse_secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
         langfuse_public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
         langfuse_host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),

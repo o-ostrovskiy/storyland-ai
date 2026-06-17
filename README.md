@@ -357,8 +357,9 @@ Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay H
 ### Live cache verification (`real_api`)
 
 `tests/integration/test_cache_real_api.py` is the live counterpart to the mocked
-cache-hit unit test. With `ENABLE_RESULT_CACHE` on, it calls `discover()` twice
-with an identical book/author and meters `Gemini.generate_content_async`
+cache-hit unit test. The Discovery result cache is always on, so it calls
+`discover()` twice with an identical book/author and meters
+`Gemini.generate_content_async`
 directly (call count + summed `usage_metadata.total_token_count`) to prove the
 **second call is a cache hit that makes zero new Gemini calls and consumes zero
 new Gemini tokens** while returning the same regions. It is marked `real_api`, so
