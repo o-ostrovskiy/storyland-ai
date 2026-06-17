@@ -32,6 +32,11 @@ class Config:
     langfuse_host: Optional[str]
     environment: str
     internal_api_secret: str
+    # Result cache (opportunity: cache expensive recommendation calls).
+    # Defaults keep the cache OFF so existing deploys are byte-for-byte unchanged.
+    enable_result_cache: bool
+    cache_ttl_seconds: int
+    cache_max_entries: int
 
 
 def _require_env(key: str) -> str:
@@ -50,6 +55,22 @@ def _require_env_int(key: str) -> int:
 def _require_env_bool(key: str) -> bool:
     """Get required boolean environment variable."""
     return _require_env(key).lower() == "true"
+
+
+def _env_bool(key: str, default: bool) -> bool:
+    """Get optional boolean environment variable with a default."""
+    value = os.getenv(key)
+    if value is None:
+        return default
+    return value.lower() == "true"
+
+
+def _env_int(key: str, default: int) -> int:
+    """Get optional integer environment variable with a default."""
+    value = os.getenv(key)
+    if value is None:
+        return default
+    return int(value)
 
 
 def load_config() -> Config:
@@ -98,6 +119,9 @@ def load_config() -> Config:
         langfuse_host=os.getenv("LANGFUSE_HOST"),
         environment=os.getenv("ENVIRONMENT", "local"),
         internal_api_secret=os.getenv("INTERNAL_API_SECRET", ""),
+        enable_result_cache=_env_bool("ENABLE_RESULT_CACHE", False),
+        cache_ttl_seconds=_env_int("CACHE_TTL_SECONDS", 86400),
+        cache_max_entries=_env_int("CACHE_MAX_ENTRIES", 500),
     )
 
 

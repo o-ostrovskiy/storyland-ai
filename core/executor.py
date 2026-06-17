@@ -23,6 +23,7 @@ Usage (HTTP adapter):
 """
 
 import asyncio
+import hashlib
 import uuid
 from typing import AsyncGenerator, List, Optional
 
@@ -70,6 +71,7 @@ from .prompts import (
     build_composition_prompt,
     build_local_atmosphere_prompt,
 )
+from .cache import TTLCache
 from .regions import get_valid_region_ids, validate_region_selection
 from .session_state import SessionStateAccessor, SessionStateKeys
 from .types import ExecutorConfig
@@ -148,6 +150,17 @@ class WorkflowExecutor:
             use_database=config.use_database,
         )
         self._model = model or self._create_model()
+        # Optional in-process result cache for the Discovery chain.
+        # Disabled unless ENABLE_RESULT_CACHE is set, so default behavior
+        # is byte-for-byte unchanged.
+        self._discovery_cache = (
+            TTLCache(
+                ttl_seconds=config.cache_ttl_seconds,
+                max_entries=config.cache_max_entries,
+            )
+            if getattr(config, "enable_result_cache", False)
+            else None
+        )
 
     @property
     def session_service(self):
@@ -179,6 +192,68 @@ class WorkflowExecutor:
             public_key=self._config.langfuse_public_key,
             host=self._config.langfuse_host,
         )
+
+    async def _emit_cached_discovery(
+        self,
+        job_id: str,
+        user_id: str,
+        book_title: str,
+        author: str,
+        region_analysis: dict,
+    ) -> AsyncGenerator[DomainEvent, None]:
+        """Replay a cached discovery result without invoking Gemini.
+
+        The session already exists (created by ``discover`` before the cache
+        lookup). This writes the confirmed book metadata and the cached
+        region analysis into session state via ``append_event`` so the
+        downstream discover->compose handoff (which reads ``state.regions``)
+        behaves identically to a fresh run.
+        """
+        book_metadata = BookMetadata(
+            book_title=book_title,
+            author=author,
+            book_found=True,
+        )
+        yield MetadataReady(metadata=book_metadata.model_dump())
+
+        session = await self._session_service.get_session(
+            app_name=APP_NAME, user_id=user_id, session_id=job_id
+        )
+        cache_event = Event(
+            invocation_id="system",
+            author="system",
+            actions=EventActions(
+                state_delta={
+                    SessionStateKeys.BOOK_METADATA: book_metadata.model_dump(),
+                    SessionStateKeys.REGION_ANALYSIS: region_analysis,
+                }
+            ),
+        )
+        await self._session_service.append_event(session, cache_event)
+
+        yield RegionsReady(
+            job_id=job_id,
+            regions=region_analysis.get("regions", []),
+            analysis_note=region_analysis.get("analysis_note", ""),
+        )
+        yield WorkflowComplete(job_id=job_id)
+
+    @staticmethod
+    def _discovery_cache_key(
+        book_title: str, author: str, preferences: Optional[dict]
+    ) -> str:
+        """Build a normalized, versioned cache key for a discovery request.
+
+        Versioned prefix ('v1') lets a logic change invalidate cleanly.
+        """
+        norm_title = (book_title or "").strip().lower()
+        norm_author = (author or "").strip().lower()
+        # Stable hash of preferences regardless of key ordering.
+        pref_items = sorted((preferences or {}).items(), key=lambda kv: str(kv[0]))
+        pref_sig = hashlib.sha1(
+            repr(pref_items).encode("utf-8")
+        ).hexdigest()
+        return f"discover:v1:{norm_title}|{norm_author}|{pref_sig}"
 
     async def discover(
         self,
@@ -228,6 +303,26 @@ class WorkflowExecutor:
             return
 
         yield JobStarted(job_id=job_id)
+
+        # Cache fast-path: an identical book/author/preferences request reuses
+        # the previously computed (already validated) regions and makes ZERO
+        # Gemini calls. Only non-empty region sets are ever cached, so a hit
+        # cannot introduce a new fabrication; staleness is bounded by the TTL.
+        cache_key = None
+        if self._discovery_cache is not None:
+            cache_key = self._discovery_cache_key(book_title, author, preferences)
+            cached_region_analysis = await self._discovery_cache.get(cache_key)
+            if cached_region_analysis:
+                logger.info("discovery_cache_hit", job_id=job_id[:8])
+                async for ev in self._emit_cached_discovery(
+                    job_id=job_id,
+                    user_id=user_id,
+                    book_title=book_title,
+                    author=author,
+                    region_analysis=cached_region_analysis,
+                ):
+                    yield ev
+                return
 
         try:
             async with timeout(self._config.workflow_timeout):
@@ -301,6 +396,15 @@ class WorkflowExecutor:
                     job_id=job_id[:8],
                     num_regions=len(state.regions),
                 )
+
+                # Store on miss: cache only non-empty, schema-validated region
+                # sets so a future hit can safely short-circuit the chain.
+                if (
+                    self._discovery_cache is not None
+                    and cache_key is not None
+                    and state.regions
+                ):
+                    await self._discovery_cache.set(cache_key, state.region_analysis)
 
                 yield RegionsReady(
                     job_id=job_id,

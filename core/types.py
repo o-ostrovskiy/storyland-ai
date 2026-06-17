@@ -26,6 +26,10 @@ class ExecutorConfig:
     langfuse_public_key: Optional[str] = None
     langfuse_host: Optional[str] = None
     environment: str = "local"
+    # Result cache settings (carried through from common.config.Config).
+    enable_result_cache: bool = False
+    cache_ttl_seconds: int = 86400
+    cache_max_entries: int = 500
 
     @classmethod
     def from_config(cls, config) -> "ExecutorConfig":
@@ -40,4 +44,7 @@ class ExecutorConfig:
             langfuse_public_key=config.langfuse_public_key,
             langfuse_host=config.langfuse_host,
             environment=config.environment,
+            enable_result_cache=getattr(config, "enable_result_cache", False),
+            cache_ttl_seconds=getattr(config, "cache_ttl_seconds", 86400),
+            cache_max_entries=getattr(config, "cache_max_entries", 500),
         )
