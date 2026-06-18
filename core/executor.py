@@ -393,6 +393,26 @@ class WorkflowExecutor:
                     num_regions=len(state.regions),
                 )
 
+                # Empty-discovery guard: when discovery yields zero regions
+                # (obscure book, failed/empty google_search, extraction miss),
+                # emit a clean NoRegions error instead of a silent, empty-but-
+                # "successful" RegionsReady that dead-ends the user at the
+                # activation moment and is recorded as a success in the funnel.
+                # Mirrors the existing compose() NoRegions guard.
+                if not state.regions:
+                    logger.info("discovery_empty_regions", job_id=job_id[:8])
+                    await self._mark_session_failed(job_id, user_id)
+                    yield WorkflowError(
+                        message=(
+                            "We couldn't map locations for this book. "
+                            "Try another title or check the spelling."
+                        ),
+                        error_type="NoRegions",
+                        phase=Phase.DISCOVERY,
+                    )
+                    yield WorkflowComplete(job_id=job_id)
+                    return
+
                 # Store on miss: cache only non-empty, schema-validated region
                 # sets so a future hit can safely short-circuit the chain.
                 if state.regions:
