@@ -56,13 +56,40 @@ class BookRecommendation(BaseModel):
     )
 
 
+def _rec_min_results() -> int:
+    """Minimum number of recommendations the formatter schema accepts.
+
+    Lowered from a hard 5 to a tunable floor (default 3) so the tool-less
+    formatter is never forced to invent a book to satisfy ``min_length`` when
+    the grounded researcher returns fewer than 5 real candidates. Read from
+    ``REC_MIN_RESULTS`` (env-driven, safe default), clamped to 1..5.
+    """
+    import os
+
+    try:
+        value = int(os.getenv("REC_MIN_RESULTS", "3"))
+    except (TypeError, ValueError):
+        value = 3
+    return max(1, min(value, 5))
+
+
+REC_MIN_RESULTS = _rec_min_results()
+
+
 class BookRecommendationsResult(BaseModel):
-    """Result from the book recommendation agent: 5 recommended books."""
+    """Result from the book recommendation agent: 3-5 recommended books.
+
+    The floor is ``REC_MIN_RESULTS`` (default 3) rather than a hard 5: a few
+    grounded recommendations are better than padding with an invented book.
+    """
 
     recommendations: List[BookRecommendation] = Field(
-        min_length=5,
+        min_length=REC_MIN_RESULTS,
         max_length=5,
-        description="Exactly 5 book recommendations, balanced across destination/themes/author bases",
+        description=(
+            f"{REC_MIN_RESULTS}-5 book recommendations, balanced across "
+            "destination/themes/author bases; never pad with invented books"
+        ),
     )
 
 

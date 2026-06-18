@@ -766,10 +766,19 @@ class TestBookRecommendationsResult:
         with pytest.raises(ValidationError):
             BookRecommendationsResult(recommendations=[])
 
-    def test_fewer_than_five_rejected(self):
+    def test_three_to_five_accepted(self):
+        # Floor relaxed from a hard 5 to REC_MIN_RESULTS (default 3): 3-5 valid,
+        # so the tool-less formatter is never forced to invent a 5th book.
+        for n in (3, 4, 5):
+            result = BookRecommendationsResult(
+                recommendations=[self._make_rec(f"Book {i}") for i in range(n)]
+            )
+            assert len(result.recommendations) == n
+
+    def test_below_floor_rejected(self):
         with pytest.raises(ValidationError):
             BookRecommendationsResult(
-                recommendations=[self._make_rec(f"Book {i}") for i in range(4)]
+                recommendations=[self._make_rec(f"Book {i}") for i in range(2)]
             )
 
     def test_more_than_five_rejected(self):

@@ -33,6 +33,8 @@ class ExecutorConfig:
     retry_exp_base: float = 2.0
     retry_max_delay: float = 12.0
     retry_attempts: int = 4
+    # Book-recommendation floor (parity with common.config.Config).
+    rec_min_results: int = 3
 
     @classmethod
     def from_config(cls, config) -> "ExecutorConfig":
@@ -52,4 +54,5 @@ class ExecutorConfig:
             retry_exp_base=getattr(config, "retry_exp_base", 2.0),
             retry_max_delay=getattr(config, "retry_max_delay", 12.0),
             retry_attempts=getattr(config, "retry_attempts", 4),
+            rec_min_results=getattr(config, "rec_min_results", 3),
         )

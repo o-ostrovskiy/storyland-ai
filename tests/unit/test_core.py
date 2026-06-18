@@ -736,9 +736,16 @@ class TestValidateBookRecommendationsResult:
         recs.append({"title": "X", "author": "Y", "reason": "R", "recommendation_basis": "bad_value"})
         assert validate_book_recommendations_result({"recommendations": recs}) is None
 
-    def test_partial_recommendations_rejected(self):
-        """Fewer than 5 recommendations is not a successful response."""
+    def test_floor_three_accepted(self):
+        """Three recommendations now satisfy the relaxed floor (was hard 5)."""
         data = {"recommendations": [self._make_rec(f"Book {i}") for i in range(3)]}
+        result = validate_book_recommendations_result(data)
+        assert result is not None
+        assert len(result["recommendations"]) == 3
+
+    def test_below_floor_rejected(self):
+        """Fewer than the floor (default 3) is still not a successful response."""
+        data = {"recommendations": [self._make_rec(f"Book {i}") for i in range(2)]}
         assert validate_book_recommendations_result(data) is None
 
     def test_too_many_recommendations_rejected(self):
