@@ -34,6 +34,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      - name: Assert google-adk pinned to the tested 1.x line
+        run: |
+          python -c "import importlib.metadata as m, sys; v = m.version('google-adk'); print('resolved google-adk', v); sys.exit(0 if v.split('.')[0] == '1' else 'ERROR: google-adk resolved to %s; expected the pinned 1.x major (>=1.33.0,<2)' % v)"
+
       - name: Create .env file for unit tests
         run: |
           echo "GOOGLE_API_KEY=test-key" > .env
