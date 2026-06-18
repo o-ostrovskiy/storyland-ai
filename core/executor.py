@@ -67,6 +67,7 @@ from .extraction import (
     extract_itinerary_from_response,
     extract_expansion_from_state,
     extract_book_recommendations_from_state,
+    filter_grounded_recommendations,
 )
 from .prompts import (
     build_discovery_prompt,
@@ -1369,12 +1370,24 @@ class WorkflowExecutor:
                 )
 
                 reported_agents: set[str] = set()
+                researcher_text_parts: list[str] = []
                 async with runner:
                     async for event in runner.run_async(
                         user_id=user_id,
                         session_id=job_id,
                         new_message=message,
                     ):
+                        # Capture the grounded researcher output so we can
+                        # post-validate the formatter's titles against it.
+                        if (
+                            event.author == "book_recommendation_researcher"
+                            and event.content
+                            and event.content.parts
+                        ):
+                            for part in event.content.parts:
+                                text = getattr(part, "text", None)
+                                if text:
+                                    researcher_text_parts.append(text)
                         if (
                             event.author
                             and event.author in BOOK_RECOMMENDATION_AGENT_STEPS
@@ -1397,6 +1410,14 @@ class WorkflowExecutor:
                 state = SessionStateAccessor(session.state)
                 rec_data = extract_book_recommendations_from_state(state)
 
+                # Output-side grounding guard: drop any formatter title that
+                # is not present in the grounded researcher candidates. Pairs
+                # with the relaxed schema floor (min REC_MIN_RESULTS, not a hard
+                # 5) so a thin researcher result yields fewer honest picks rather
+                # than an invented book. Fail-open (see filter docstring).
+                researcher_text = "\n".join(researcher_text_parts)
+                rec_data = filter_grounded_recommendations(rec_data, researcher_text)
+
                 if rec_data is None:
                     await self._clear_book_recs_lock(job_id, user_id)
                     yield WorkflowError(
@@ -1408,6 +1429,13 @@ class WorkflowExecutor:
                     return
 
                 recommendations = rec_data.get("recommendations", [])
+                floor = getattr(self._config, "rec_min_results", 3)
+                if len(recommendations) < floor:
+                    logger.info(
+                        "book_recommendations_below_floor",
+                        count=len(recommendations),
+                        floor=floor,
+                    )
                 # LLM sometimes hallucinates Amazon image IDs. Strip them so BookCard
                 # renders gracefully without a broken img tag; leave other valid URLs.
                 for rec in recommendations:

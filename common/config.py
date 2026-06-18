@@ -39,6 +39,10 @@ class Config:
     retry_exp_base: float
     retry_max_delay: float
     retry_attempts: int
+    # Book-recommendation floor: minimum recommendations the formatter may
+    # return (default 3) so a thin researcher result never forces an invented
+    # 5th book. Tunable via REC_MIN_RESULTS.
+    rec_min_results: int
 
 
 def _require_env(key: str) -> str:
@@ -126,6 +130,7 @@ def load_config() -> Config:
         retry_exp_base=_env_float("RETRY_EXP_BASE", 2.0),
         retry_max_delay=_env_float("RETRY_MAX_DELAY", 12.0),
         retry_attempts=_env_int("RETRY_ATTEMPTS", 4),
+        rec_min_results=_env_int("REC_MIN_RESULTS", 3),
     )
 
 

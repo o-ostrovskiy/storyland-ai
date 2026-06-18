@@ -8,6 +8,7 @@ Extracted from api/streaming.py lines 89-104 and 564-598.
 """
 
 import json
+import re
 from typing import Optional, Tuple
 
 from pydantic import ValidationError
@@ -177,3 +178,58 @@ def validate_book_recommendations_result(value: object) -> Optional[dict]:
 def extract_book_recommendations_from_state(state_accessor) -> Optional[dict]:
     """Extract and validate the last book recommendations result from session state."""
     return validate_book_recommendations_result(state_accessor.last_book_recommendations)
+
+
+def _normalize_text(text: object) -> str:
+    """Lowercase + collapse whitespace for tolerant substring matching."""
+    if not isinstance(text, str):
+        return ""
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def filter_grounded_recommendations(
+    rec_data: Optional[dict], researcher_text: str
+) -> Optional[dict]:
+    """Drop recommendations whose title is not grounded in the researcher's text.
+
+    The book-recommendation formatter is tool-less and instructed never to
+    invent books, but as a defensive post-validation we drop any recommendation
+    whose title does not appear in the grounded researcher candidate text. This
+    is the output-side complement to relaxing the schema floor: relaxing the
+    floor removes the *pressure* to fabricate; this removes any title that was
+    fabricated anyway.
+
+    Conservative and fail-open by design (it must never make results worse):
+      * No researcher text captured -> return ``rec_data`` unchanged (we cannot
+        prove anything is ungrounded, so we never drop on missing evidence).
+      * Filtering that would drop *every* recommendation -> return ``rec_data``
+        unchanged (treat as a capture/formatting mismatch, never surface empty).
+      * Otherwise return the grounded subset with ``limited_matches=True`` so the
+        caller can signal an honest "fewer real matches" state instead of padding.
+    """
+    if rec_data is None:
+        return None
+
+    recs = rec_data.get("recommendations") or []
+    haystack = _normalize_text(researcher_text)
+    if not haystack:
+        return rec_data
+
+    grounded = [
+        rec
+        for rec in recs
+        if _normalize_text(rec.get("title")) and _normalize_text(rec.get("title")) in haystack
+    ]
+
+    if not grounded or len(grounded) == len(recs):
+        return rec_data
+
+    result = dict(rec_data)
+    result["recommendations"] = grounded
+    result["limited_matches"] = True
+    logger.info(
+        "book_recommendations_grounding_filtered",
+        kept=len(grounded),
+        dropped=len(recs) - len(grounded),
+    )
+    return result
