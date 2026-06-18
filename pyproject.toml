@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 license = {text = "MIT"}
 
 dependencies = [
-    "google-adk[eval,db]>=1.33.0",
+    "google-adk[eval]>=1.33.0,<2",  # pin to tested 1.x line; <2 prevents non-reproducible jump to ADK 2.x. "db" extra dropped: not provided on 1.x (sqlalchemy ships as a core dep, so DatabaseSessionService still works).
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
     "requests>=2.31.0",
