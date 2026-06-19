@@ -1,0 +1,90 @@
+{
+  "eval_set_id": "place_to_book_v1",
+  "name": "Place→Book reverse-routing grounding eval v1",
+  "description": "Grounding test set for the place→book reverse-routing capability (storyland-ai PlaceToBookResolver). Each case asserts that a known literary destination returns grounded, correctly-labelled candidates (literal = genuinely set there, with a real maps_to; vibe = atmosphere only, maps_to null), and that ungroundable/fictional places return the clean not-found state — never a fabricated list. Mirrors the BE place→book seed set so the AI candidates can be diffed against the curated baseline (place→book→place).",
+  "version": "1.0",
+  "scoring": {
+    "grounding_pass": "Every returned candidate is a real book; every 'literal' candidate is genuinely set in the place and names a real maps_to; every 'vibe' candidate is honestly atmosphere-only with maps_to=null.",
+    "not_found_pass": "Fictional/ungroundable places return found=false with an empty candidate list and never a fabricated book."
+  },
+  "eval_cases": [
+    {
+      "eval_id": "p2b_lisbon",
+      "place": "Lisbon",
+      "expect": "found",
+      "expected_literal_examples": ["The Book of Disquiet (Fernando Pessoa)"],
+      "min_literal": 1,
+      "notes": "Literal anchors should map to real Lisbon locations (e.g. Baixa)."
+    },
+    {
+      "eval_id": "p2b_paris",
+      "place": "Paris, France",
+      "expect": "found",
+      "expected_literal_examples": ["A Moveable Feast (Ernest Hemingway)", "Les Misérables (Victor Hugo)"],
+      "min_literal": 1,
+      "notes": "Trailing ', France' must normalize to the same key as 'Paris'."
+    },
+    {
+      "eval_id": "p2b_tokyo",
+      "place": "Tokyo",
+      "expect": "found",
+      "expected_literal_examples": ["Norwegian Wood (Haruki Murakami)"],
+      "min_literal": 1
+    },
+    {
+      "eval_id": "p2b_dublin",
+      "place": "Dublin",
+      "expect": "found",
+      "expected_literal_examples": ["Ulysses (James Joyce)", "Dubliners (James Joyce)"],
+      "min_literal": 1
+    },
+    {
+      "eval_id": "p2b_st_petersburg",
+      "place": "Saint Petersburg",
+      "expect": "found",
+      "expected_literal_examples": ["Crime and Punishment (Fyodor Dostoevsky)"],
+      "min_literal": 1
+    },
+    {
+      "eval_id": "p2b_rome",
+      "place": "Rome",
+      "expect": "found",
+      "expected_literal_examples": ["The Talented Mr. Ripley (Patricia Highsmith)"],
+      "min_literal": 1
+    },
+    {
+      "eval_id": "p2b_scottish_highlands",
+      "place": "the Scottish Highlands",
+      "expect": "found",
+      "expected_literal_examples": ["Outlander (Diana Gabaldon)"],
+      "min_literal": 1
+    },
+    {
+      "eval_id": "p2b_new_york",
+      "place": "New York",
+      "expect": "found",
+      "expected_literal_examples": ["The Great Gatsby (F. Scott Fitzgerald)", "The Catcher in the Rye (J.D. Salinger)"],
+      "min_literal": 1
+    },
+    {
+      "eval_id": "p2b_vibe_only_check",
+      "place": "Barcelona",
+      "expect": "found",
+      "expected_literal_examples": ["The Shadow of the Wind (Carlos Ruiz Zafón)"],
+      "min_literal": 1,
+      "notes": "Any 'vibe' candidate returned here MUST have maps_to=null and read as atmosphere, not setting."
+    },
+    {
+      "eval_id": "p2b_notfound_wakanda",
+      "place": "Wakanda",
+      "expect": "not_found",
+      "notes": "Fictional place — must return found=false, empty candidates, never a fabricated list."
+    },
+    {
+      "eval_id": "p2b_notfound_gibberish",
+      "place": "Zxqwerty Nonexistent Township",
+      "expect": "not_found",
+      "notes": "Ungroundable string — clean not-found state."
+    }
+  ]
+}

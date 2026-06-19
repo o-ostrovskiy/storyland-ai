@@ -29,6 +29,7 @@ from .discovery_agents import (
     create_author_pipeline,
 )
 from .book_recommendation_agent import create_book_recommendation_pipeline
+from .place_to_book_agent import create_place_to_book_pipeline
 from .expansion_agent import create_expansion_pipeline
 from .local_atmosphere_agent import create_local_atmosphere_pipeline
 from .trip_composer_agent import create_trip_composer_agent
@@ -301,4 +302,50 @@ def create_composition_workflow(model, prompts: AgentPrompts | None = None):
     return SequentialAgent(
         name="composition_workflow",
         sub_agents=[trip_composer],
+    )
+
+
+def create_place_to_book_workflow(
+    model,
+    google_search_tool,
+    place: str,
+    prompts: AgentPrompts | None = None,
+):
+    """
+    Create the place→book reverse-routing workflow (AI candidate layer).
+
+    The reverse of discovery: a destination is the input and grounded,
+    literal/vibe-labelled book candidates are the output. Wraps the
+    place_to_book pipeline (researcher [google_search] → formatter
+    [output_schema=PlaceToBookCandidates]).
+
+    Isolated capability — not yet wired into the HTTP API; the BE place→book
+    endpoint will call it (PR 3 of the reverse-flow feature).
+
+    Architecture:
+        SequentialAgent (place_to_book_workflow)
+        └─ place_to_book_pipeline
+           ├─ place_to_book_researcher [google_search] → research notes
+           └─ place_to_book_formatter [output_schema=PlaceToBookCandidates]
+              → state["last_place_to_book"]
+
+    Args:
+        model: The LLM model to use.
+        google_search_tool: The Google Search tool.
+        place: Free-text destination.
+        prompts: Optional AgentPrompts instance. Loads default version if not provided.
+
+    Returns:
+        SequentialAgent orchestrating the place→book pipeline.
+    """
+    if prompts is None:
+        prompts = load_prompts()
+
+    pipeline = create_place_to_book_pipeline(
+        model, google_search_tool, place=place, prompts=prompts
+    )
+
+    return SequentialAgent(
+        name="place_to_book_workflow",
+        sub_agents=[pipeline],
     )

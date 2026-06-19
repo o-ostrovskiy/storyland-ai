@@ -41,6 +41,7 @@ make eval-setup
 This creates two datasets in Langfuse:
 - `storyland_eval` — 8 diverse scenarios for comprehensive testing
 - `books_v1` — 10 cases with expected outputs and book-specific scoring criteria
+- `place_to_book_v1` — 11 cases for the **place→book reverse-routing** grounding gate (literal/vibe labelling + not-found state). Register with `make eval-setup-one EVALSET_FILE=evaluation/place_to_book_v1.evalset.json`.
 
 ## Quality Evaluation
 
