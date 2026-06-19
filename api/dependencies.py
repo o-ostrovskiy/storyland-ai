@@ -13,6 +13,7 @@ from fastapi import Depends, Header, HTTPException, Request
 from common.config import Config, load_config
 from common.logging import configure_logging, get_logger
 from core.executor import WorkflowExecutor
+from core.place_to_book import PlaceToBookResolver
 from core.types import ExecutorConfig
 
 
@@ -25,6 +26,7 @@ class AppState:
 
 
 _app_state: Optional[AppState] = None
+_place_to_book_resolver: Optional[PlaceToBookResolver] = None
 
 
 async def initialize() -> AppState:
@@ -49,10 +51,11 @@ async def initialize() -> AppState:
 
 async def shutdown() -> None:
     """Cleanup on application shutdown."""
-    global _app_state
+    global _app_state, _place_to_book_resolver
     if _app_state:
         await _app_state.executor.close()
     _app_state = None
+    _place_to_book_resolver = None
 
 
 def get_app_state() -> AppState:
@@ -60,6 +63,21 @@ def get_app_state() -> AppState:
     if _app_state is None:
         raise RuntimeError("Application not initialized. Call initialize() first.")
     return _app_state
+
+
+def get_place_to_book_resolver() -> PlaceToBookResolver:
+    """Return the process-wide place→book resolver (lazy singleton).
+
+    Reuses the executor's already-constructed model so we don't spin up a second
+    Gemini client, and keeps the resolver's in-process cache warm across
+    requests. The resolver keeps its own (in-memory) session service, isolated
+    from the discovery/compose session lifecycle.
+    """
+    global _place_to_book_resolver
+    if _place_to_book_resolver is None:
+        app_state = get_app_state()
+        _place_to_book_resolver = PlaceToBookResolver(model=app_state.executor.model)
+    return _place_to_book_resolver
 
 
 def verify_gateway_secret(request: Request) -> None:

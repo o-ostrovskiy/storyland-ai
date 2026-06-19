@@ -116,6 +116,40 @@ class RecommendBooksRequest(BaseModel):
     )
 
 
+class PlaceToBookRequest(BaseModel):
+    """Request body for POST /api/v1/place-to-book (internal: gateway → AI).
+
+    Reverse-discovery input: a free-text destination resolved to grounded,
+    literal/vibe-labelled book candidates. The gateway (storyland-services)
+    calls this endpoint, then runs the authoritative Google Books existence
+    check on each returned candidate.
+    """
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {"place": "Lisbon"},
+                {"place": "the Scottish Highlands"},
+            ]
+        }
+    }
+
+    place: str = Field(
+        min_length=1,
+        max_length=120,
+        description="Free-text destination (e.g. 'Lisbon', 'Tokyo, Japan')",
+    )
+
+    @field_validator("place")
+    @classmethod
+    def validate_place(cls, value: str) -> str:
+        """Require a non-empty, non-whitespace place string."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("place must not be empty")
+        return normalized
+
+
 class UserLocation(BaseModel):
     """User's current location for the local-atmosphere flow."""
 
