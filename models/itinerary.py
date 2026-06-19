@@ -34,6 +34,28 @@ class CityStop(BaseModel):
         default="composed",
         description="Whether this stop was part of the original itinerary or added via expansion",
     )
+    match_type: Literal["literal", "historical", "thematic", "vibe"] = Field(
+        default="vibe",
+        description=(
+            "How this place connects to the book, so the user can calibrate trust: "
+            "'literal' = the book explicitly names this exact place; "
+            "'historical' = a real place tied to the book's documented history, author, or "
+            "real-world events it depicts; "
+            "'thematic' = a real place that strongly embodies the book's themes/setting but is "
+            "not named in it; "
+            "'vibe' = an atmospheric/'similar feel' suggestion. "
+            "When unsure, choose the WEAKER claim (prefer 'vibe' over 'literal') — never overstate. "
+            "Defaults to 'vibe' so an unlabelled payload degrades to the weakest, safest claim."
+        ),
+    )
+    grounding_source: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional citation/evidence for a 'literal' or 'historical' match — e.g. a chapter "
+            "reference, the documented fact, or the source that ties this place to the book. "
+            "Leave null for 'thematic'/'vibe' matches or when no specific source is available."
+        ),
+    )
 
 
 class CityPlan(BaseModel):

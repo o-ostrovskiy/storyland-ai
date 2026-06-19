@@ -253,6 +253,67 @@ class TestCityStop:
             )
             assert stop.time_of_day == time
 
+    def test_city_stop_match_type_defaults_to_vibe(self):
+        """Unlabelled stops degrade to the weakest claim ('vibe')."""
+        stop = CityStop(
+            name="Some Cafe",
+            type="cafe",
+            reason="A cosy spot that fits the book's mood",
+            time_of_day="afternoon",
+        )
+        assert stop.match_type == "vibe"
+        assert stop.grounding_source is None
+
+    def test_city_stop_accepts_all_match_types(self):
+        """All four match_type values are valid."""
+        for mt in ["literal", "historical", "thematic", "vibe"]:
+            stop = CityStop(
+                name="Place",
+                type="landmark",
+                reason="Reason",
+                time_of_day="morning",
+                match_type=mt,
+            )
+            assert stop.match_type == mt
+
+    def test_city_stop_rejects_invalid_match_type(self):
+        """An out-of-enum match_type is rejected."""
+        with pytest.raises(ValidationError):
+            CityStop(
+                name="Place",
+                type="landmark",
+                reason="Reason",
+                time_of_day="morning",
+                match_type="exact",
+            )
+
+    def test_city_stop_grounding_source_optional(self):
+        """grounding_source can carry a citation for literal/historical matches."""
+        stop = CityStop(
+            name="221B Baker Street",
+            type="landmark",
+            reason="The address Sherlock Holmes is said to live at",
+            time_of_day="morning",
+            match_type="literal",
+            grounding_source="Named explicitly throughout the Sherlock Holmes canon",
+        )
+        assert stop.match_type == "literal"
+        assert "Sherlock" in stop.grounding_source
+
+    def test_city_stop_serialization_includes_new_fields(self):
+        """model_dump exposes the new fields so be/fe can forward and render them."""
+        stop = CityStop(
+            name="Place",
+            type="museum",
+            reason="Reason",
+            time_of_day="evening",
+            match_type="thematic",
+        )
+        dumped = stop.model_dump()
+        assert dumped["match_type"] == "thematic"
+        assert "grounding_source" in dumped
+        assert dumped["grounding_source"] is None
+
 
 # =============================================================================
 # CityPlan Tests
