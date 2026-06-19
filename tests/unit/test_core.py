@@ -35,6 +35,7 @@ from core.extraction import (
     extract_itinerary_from_response,
     extract_expansion_from_state,
     extract_book_recommendations_from_state,
+    downgrade_ungrounded_match_types,
 )
 from core.events import ExpansionReady
 from core.regions import get_valid_region_ids, validate_region_selection
@@ -784,3 +785,143 @@ class TestExtractBookRecommendationsFromState:
     def test_returns_none_for_invalid_data(self):
         accessor = SessionStateAccessor({"last_book_recommendations": {"bad": "data"}})
         assert extract_book_recommendations_from_state(accessor) is None
+
+
+# =============================================================================
+# Hallucination guardrail — match_type grounding assertion (PR 2 of 4)
+# =============================================================================
+
+
+def _itinerary_with_stops(stops):
+    return {
+        "cities": [
+            {
+                "name": "Atlanta",
+                "country": "United States",
+                "days_suggested": 2,
+                "overview": "test",
+                "stops": stops,
+            }
+        ],
+        "summary_text": "test",
+    }
+
+
+def _stop(name, match_type, grounding_source=None):
+    return {
+        "name": name,
+        "type": "landmark",
+        "reason": "test",
+        "time_of_day": "morning",
+        "source": "composed",
+        "match_type": match_type,
+        "grounding_source": grounding_source,
+    }
+
+
+# Grounded research that names a real, sourced place but NOT the fabricated one.
+_RESEARCH = "Margaret Mitchell House is the author's home in Atlanta where she wrote the novel."
+
+
+class TestDowngradeUngroundedMatchTypes:
+    def test_ungrounded_literal_downgraded_to_vibe(self):
+        itin = _itinerary_with_stops(
+            [_stop("Faulkner Invented Manor", "literal", grounding_source="chapter 3")]
+        )
+        out = downgrade_ungrounded_match_types(itin, _RESEARCH)
+        stop = out["cities"][0]["stops"][0]
+        assert stop["match_type"] == "vibe"
+        # the cited source did not hold up -> cleared
+        assert stop["grounding_source"] is None
+
+    def test_grounded_literal_preserved(self):
+        itin = _itinerary_with_stops(
+            [_stop("Margaret Mitchell House", "literal", grounding_source="author's home")]
+        )
+        out = downgrade_ungrounded_match_types(itin, _RESEARCH)
+        stop = out["cities"][0]["stops"][0]
+        assert stop["match_type"] == "literal"
+        assert stop["grounding_source"] == "author's home"
+
+    def test_ungrounded_historical_downgraded(self):
+        itin = _itinerary_with_stops([_stop("Nonexistent Battlefield", "historical")])
+        out = downgrade_ungrounded_match_types(itin, _RESEARCH)
+        assert out["cities"][0]["stops"][0]["match_type"] == "vibe"
+
+    def test_thematic_and_vibe_untouched(self):
+        itin = _itinerary_with_stops(
+            [_stop("Some Atmospheric Cafe", "thematic"), _stop("A Moody Park", "vibe")]
+        )
+        out = downgrade_ungrounded_match_types(itin, _RESEARCH)
+        assert out["cities"][0]["stops"][0]["match_type"] == "thematic"
+        assert out["cities"][0]["stops"][1]["match_type"] == "vibe"
+
+    def test_never_drops_stops(self):
+        itin = _itinerary_with_stops(
+            [
+                _stop("Margaret Mitchell House", "literal"),
+                _stop("Invented Place", "literal"),
+                _stop("Mood Cafe", "vibe"),
+            ]
+        )
+        out = downgrade_ungrounded_match_types(itin, _RESEARCH)
+        assert len(out["cities"][0]["stops"]) == 3
+
+    def test_fail_open_when_no_research(self):
+        itin = _itinerary_with_stops([_stop("Invented Place", "literal", grounding_source="x")])
+        out = downgrade_ungrounded_match_types(itin, "")
+        stop = out["cities"][0]["stops"][0]
+        # cannot prove ungrounded -> labels untouched
+        assert stop["match_type"] == "literal"
+        assert stop["grounding_source"] == "x"
+
+    def test_matching_is_case_insensitive(self):
+        itin = _itinerary_with_stops([_stop("margaret mitchell HOUSE", "literal")])
+        out = downgrade_ungrounded_match_types(itin, _RESEARCH)
+        assert out["cities"][0]["stops"][0]["match_type"] == "literal"
+
+    def test_none_itinerary_returns_none(self):
+        assert downgrade_ungrounded_match_types(None, _RESEARCH) is None
+
+
+class TestGroundingResearchText:
+    def test_concatenates_discovery_keys(self):
+        accessor = SessionStateAccessor(
+            {
+                "book_context": {"themes": ["war"]},
+                "landmark_discovery": "Margaret Mitchell House, Atlanta",
+                "city_discovery": {"cities": ["Atlanta"]},
+            }
+        )
+        text = accessor.grounding_research_text
+        assert "Margaret Mitchell House" in text
+        assert "Atlanta" in text
+        assert "war" in text
+
+    def test_empty_when_no_discovery(self):
+        assert SessionStateAccessor({}).grounding_research_text == ""
+
+
+class TestExtractItineraryAppliesDowngrade:
+    def test_envelope_path_downgrades_ungrounded_literal(self):
+        itin = _itinerary_with_stops([_stop("Invented Place", "literal", grounding_source="x")])
+        envelope = {"itinerary": itin, "suggestions": []}
+        accessor = SessionStateAccessor(
+            {
+                "composer_envelope": envelope,
+                "landmark_discovery": "Margaret Mitchell House is in Atlanta.",
+            }
+        )
+        result = extract_itinerary_from_response(None, accessor)
+        assert result is not None
+        itinerary, _ = result
+        stop = itinerary["cities"][0]["stops"][0]
+        assert stop["match_type"] == "vibe"
+        assert stop["grounding_source"] is None
+
+    def test_envelope_path_fail_open_without_discovery(self):
+        itin = _itinerary_with_stops([_stop("Invented Place", "literal")])
+        envelope = {"itinerary": itin, "suggestions": []}
+        accessor = SessionStateAccessor({"composer_envelope": envelope})
+        itinerary, _ = extract_itinerary_from_response(None, accessor)
+        assert itinerary["cities"][0]["stops"][0]["match_type"] == "literal"
