@@ -8,7 +8,12 @@ All business logic lives in core.executor — routes are thin wiring.
 from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
-from api.dependencies import get_app_state, get_gateway_user_id, verify_gateway_secret
+from api.dependencies import (
+    get_app_state,
+    get_gateway_user_id,
+    get_place_to_book_resolver,
+    verify_gateway_secret,
+)
 from api.models import (
     DiscoverRequest,
     ComposeRequest,
@@ -18,6 +23,7 @@ from api.models import (
     HealthResponse,
     JobStatusResponse,
     JobStatus,
+    PlaceToBookRequest,
 )
 from api.streaming import (
     discover_stream,
@@ -27,7 +33,9 @@ from api.streaming import (
     local_atmosphere_stream,
 )
 from common.logging import get_logger
+from core.place_to_book import PlaceToBookResolver
 from core.session_state import SessionStateAccessor
+from models.place_to_book import PlaceToBookResult
 
 logger = get_logger("storyland.api.routes")
 
@@ -384,3 +392,28 @@ async def get_status(job_id: str, user_id: str = Depends(get_gateway_user_id)):
         has_regions=bool(state.get("region_analysis", {}).get("regions")),
         has_itinerary=status == JobStatus.COMPLETED,
     )
+
+
+@router.post(
+    "/place-to-book",
+    response_model=PlaceToBookResult,
+    tags=["place-to-book"],
+    summary="Resolve a destination to grounded book candidates (reverse discovery)",
+)
+async def place_to_book(
+    request: PlaceToBookRequest,
+    resolver: PlaceToBookResolver = Depends(get_place_to_book_resolver),
+) -> PlaceToBookResult:
+    """
+    Reverse-discovery: a free-text destination → grounded, labelled book
+    candidates (books *set there* = ``literal``; books that *evoke* the place =
+    ``vibe``). Returns a clean ``found=false`` envelope with an empty candidate
+    list when the place can't be grounded — never a fabricated list.
+
+    Internal endpoint (gateway secret enforced): the storyland-services gateway
+    calls this, then runs the authoritative Google Books existence check and
+    decorates each candidate with the user-facing grounding object. Non-streaming
+    JSON — the resolver is a single bounded, in-process-cached lookup.
+    """
+    logger.info("place_to_book_request", place=request.place)
+    return await resolver.resolve(request.place)

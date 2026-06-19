@@ -1250,3 +1250,152 @@ class TestDomainEventToSSEBookRecommendations:
         data = json.loads(sse["data"])
         assert len(data["recommendations"]) == 5
         assert data["book_recommendation_count"] == 2
+
+
+# =============================================================================
+# Place→Book reverse-discovery endpoint (internal: gateway → AI)
+# =============================================================================
+
+from api.models import PlaceToBookRequest
+from models.place_to_book import PlaceBookCandidate, PlaceToBookResult
+
+
+class TestPlaceToBookRequest:
+    """Validation for the POST /api/v1/place-to-book request body."""
+
+    def test_minimal_request(self):
+        req = PlaceToBookRequest(place="Lisbon")
+        assert req.place == "Lisbon"
+
+    def test_place_is_trimmed(self):
+        req = PlaceToBookRequest(place="  Tokyo  ")
+        assert req.place == "Tokyo"
+
+    def test_blank_place_raises(self):
+        with pytest.raises(ValidationError):
+            PlaceToBookRequest(place="   ")
+
+    def test_missing_place_raises(self):
+        with pytest.raises(ValidationError):
+            PlaceToBookRequest()
+
+    def test_overlong_place_raises(self):
+        with pytest.raises(ValidationError):
+            PlaceToBookRequest(place="x" * 121)
+
+
+class _FakeResolver:
+    """Stand-in for PlaceToBookResolver: records calls, returns a fixed result."""
+
+    def __init__(self, result: PlaceToBookResult) -> None:
+        self._result = result
+        self.calls: list[str] = []
+
+    async def resolve(self, place: str) -> PlaceToBookResult:
+        self.calls.append(place)
+        return self._result
+
+
+@pytest.fixture
+def reset_p2b_singleton():
+    """Ensure the module-level resolver singleton doesn't leak across tests."""
+    import api.dependencies as deps
+    deps._place_to_book_resolver = None
+    yield
+    deps._place_to_book_resolver = None
+
+
+class TestPlaceToBookEndpoint:
+    """Tests for POST /api/v1/place-to-book (resolver mocked, no network)."""
+
+    @pytest.mark.asyncio
+    async def test_found_returns_labelled_candidates(
+        self, test_client, reset_p2b_singleton
+    ):
+        import api.dependencies as deps
+
+        result = PlaceToBookResult(
+            place="Lisbon",
+            query="lisbon",
+            found=True,
+            message=None,
+            candidates=[
+                PlaceBookCandidate(
+                    title="The Book of Disquiet",
+                    author="Fernando Pessoa",
+                    description="A real book.",
+                    why_it_fits="Pessoa's Lisbon, street by street.",
+                    match_type="literal",
+                    maps_to="Baixa, Lisbon",
+                ),
+                PlaceBookCandidate(
+                    title="The Shadow of the Wind",
+                    author="Carlos Ruiz Zafón",
+                    why_it_fits="Same old-European, melancholy mood.",
+                    match_type="vibe",
+                    maps_to=None,
+                ),
+            ],
+        )
+        fake = _FakeResolver(result)
+        deps._place_to_book_resolver = fake
+
+        response = await test_client.post(
+            "/api/v1/place-to-book", json={"place": "Lisbon"}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["found"] is True
+        assert data["place"] == "Lisbon"
+        assert len(data["candidates"]) == 2
+        assert data["candidates"][0]["match_type"] == "literal"
+        assert data["candidates"][0]["maps_to"] == "Baixa, Lisbon"
+        assert data["candidates"][1]["match_type"] == "vibe"
+        assert data["candidates"][1]["maps_to"] is None
+        assert fake.calls == ["Lisbon"]
+
+    @pytest.mark.asyncio
+    async def test_not_found_returns_empty_envelope(
+        self, test_client, reset_p2b_singleton
+    ):
+        import api.dependencies as deps
+
+        result = PlaceToBookResult(
+            place="Gotham",
+            query="gotham",
+            found=False,
+            message="We haven't mapped Gotham yet.",
+            candidates=[],
+        )
+        deps._place_to_book_resolver = _FakeResolver(result)
+
+        response = await test_client.post(
+            "/api/v1/place-to-book", json={"place": "Gotham"}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["found"] is False
+        assert data["candidates"] == []
+        assert "Gotham" in data["message"]
+
+    @pytest.mark.asyncio
+    async def test_blank_place_rejected_before_resolver(
+        self, test_client, reset_p2b_singleton
+    ):
+        import api.dependencies as deps
+
+        fake = _FakeResolver(
+            PlaceToBookResult(place="x", query="x", found=False, candidates=[])
+        )
+        deps._place_to_book_resolver = fake
+
+        response = await test_client.post(
+            "/api/v1/place-to-book", json={"place": "   "}
+        )
+        assert response.status_code == 422
+        assert fake.calls == []  # validation short-circuits before the resolver
+
+    @pytest.mark.asyncio
+    async def test_missing_place_rejected(self, test_client, reset_p2b_singleton):
+        response = await test_client.post("/api/v1/place-to-book", json={})
+        assert response.status_code == 422

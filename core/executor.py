@@ -171,6 +171,11 @@ class WorkflowExecutor:
         """Expose config for health checks."""
         return self._config
 
+    @property
+    def model(self):
+        """Expose the shared LLM model (e.g. for the place→book resolver)."""
+        return self._model
+
     def _create_model(self) -> Gemini:
         retry_config = build_retry_options(
             attempts=self._config.retry_attempts,
