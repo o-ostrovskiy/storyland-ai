@@ -13,6 +13,7 @@ Usage:
 """
 
 from .executor import WorkflowExecutor
+from .place_to_book import PlaceToBookResolver
 from .types import ExecutorConfig
 from .events import (
     DomainEvent,
@@ -28,6 +29,7 @@ from .events import (
 
 __all__ = [
     "WorkflowExecutor",
+    "PlaceToBookResolver",
     "ExecutorConfig",
     "DomainEvent",
     "Phase",

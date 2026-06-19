@@ -252,6 +252,7 @@ storyland-ai/
 │   ├── discovery.py     # CityDiscovery, LandmarkDiscovery, AuthorSites,
 │   │                    # RegionCity, RegionOption, RegionAnalysis
 │   ├── itinerary.py     # TripItinerary, CityPlan, CityStop
+│   ├── place_to_book.py # PlaceBookCandidate/PlaceToBookCandidates/Result (reverse discovery)
 │   └── preferences.py   # TravelPreferences
 │
 ├── tools/               # ADK tool integrations
@@ -264,13 +265,20 @@ storyland-ai/
 │   ├── local_atmosphere_agent.py    # Researcher+formatter for "near me" mode
 │   ├── expansion_agent.py           # Researcher+formatter for place expansion chips
 │   ├── book_recommendation_agent.py # Researcher+formatter for "Find books like this" chip
+│   ├── place_to_book_agent.py        # Researcher+formatter for place→book reverse discovery
 │   ├── reader_profile_agent.py      # Preferences-based personalization
 │   ├── region_analyzer_agent.py     # Geographic region grouping
-│   ├── orchestrator.py              # Two-phase + local-atmosphere + expansion + book-rec workflows
+│   ├── orchestrator.py              # Two-phase + local-atmosphere + expansion + book-rec + place→book workflows
 │   ├── prompts.py                   # AgentPrompts dataclass + versioned loader
 │   └── prompts/                  # Versioned prompt sets
 │       ├── v1.json               # Original prompts (git ref 4c6fdc9)
 │       └── v2.json               # Current prompts (PR #63)
+│
+├── core/                # Transport-agnostic orchestration & SDK
+│   ├── executor.py      # WorkflowExecutor (discover/compose/expand/recommend)
+│   ├── place_to_book.py # PlaceToBookResolver (place→book reverse routing, isolated capability)
+│   ├── cache.py         # In-process TTL/LRU result cache
+│   └── session_state.py # Typed session-state accessor
 │
 ├── api/                 # FastAPI SSE streaming API
 │   ├── app.py           # Application factory with lifespan
@@ -334,7 +342,7 @@ Agent prompts include reliability improvements:
 ## Testing
 
 ```bash
-make test                  # Unit tests (376 tests)
+make test                  # Unit tests (442 tests)
 make test-integration      # Integration tests with VCR cassettes (excludes real_api)
 make test-integration-live # Live tests that hit real APIs (real_api marker; uses quota)
 make test-all              # Both
@@ -351,6 +359,7 @@ make test-cov              # With coverage
 | `test_cache.py` | 14 | Discovery result cache (TTL/LRU, key normalization, cache-hit short-circuit) |
 | `test_core.py` | 89 | Events, session state, extraction, regions, prompts (incl. book recs) |
 | `test_api.py` | 108 | API models, endpoints, SSE streaming (incl. book recommendations) |
+| `test_place_to_book.py` | 33 | Place→book reverse routing: normalization, grounding filter, label invariants, resolver |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).
 

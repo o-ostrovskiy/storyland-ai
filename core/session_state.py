@@ -29,6 +29,7 @@ class SessionStateKeys:
     EXPANSION_IN_PROGRESS = "expansion_in_progress"
     LAST_EXPANSION = "last_expansion"
     LAST_BOOK_RECOMMENDATIONS = "last_book_recommendations"
+    LAST_PLACE_TO_BOOK = "last_place_to_book"
     BOOK_RECOMMENDATION_COUNT = "book_recommendation_count"
     BOOK_RECS_IN_PROGRESS = "book_recs_in_progress"
     BOOK_RECOMMENDATION_CHIP_ID = "book_recommendation_chip_id"
@@ -141,6 +142,10 @@ class SessionStateAccessor:
     @property
     def last_book_recommendations(self) -> Optional[dict]:
         return self._state.get(SessionStateKeys.LAST_BOOK_RECOMMENDATIONS)
+
+    @property
+    def last_place_to_book(self) -> Optional[dict]:
+        return self._state.get(SessionStateKeys.LAST_PLACE_TO_BOOK)
 
     @property
     def book_recommendation_count(self) -> int:

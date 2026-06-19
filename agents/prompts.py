@@ -41,6 +41,8 @@ class AgentPrompts:
     expansion_formatter: str  # template with {parent_city}, {action_prompt}
     book_recommendation_researcher: str  # template with {book_title}, {author}, {destinations}, {themes}
     book_recommendation_formatter: str   # template with {book_title}, {author}, {destinations}, {themes}
+    place_to_book_researcher: str  # template with {place}
+    place_to_book_formatter: str  # template with {place}
 
 
 def load_prompts(version: str = CURRENT_PROMPT_VERSION) -> AgentPrompts:
