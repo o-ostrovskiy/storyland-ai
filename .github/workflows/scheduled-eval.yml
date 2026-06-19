@@ -1,10 +1,6 @@
 name: Scheduled Evaluation
 
 on:
-  push:
-    branches:
-      - main
-      - master
   workflow_dispatch: # Allow manual trigger
     inputs:
       datasets:
