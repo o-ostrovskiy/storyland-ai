@@ -5,6 +5,7 @@ Wraps the ADK session.state dict with typed properties, eliminating
 magic string key access scattered across the codebase.
 """
 
+import json
 from typing import Optional, List
 
 
@@ -138,6 +139,47 @@ class SessionStateAccessor:
     @property
     def book_context(self) -> Optional[dict]:
         return self._state.get(SessionStateKeys.BOOK_CONTEXT)
+
+    @property
+    def city_discovery(self) -> Optional[object]:
+        return self._state.get(SessionStateKeys.CITY_DISCOVERY)
+
+    @property
+    def landmark_discovery(self) -> Optional[object]:
+        return self._state.get(SessionStateKeys.LANDMARK_DISCOVERY)
+
+    @property
+    def author_sites(self) -> Optional[object]:
+        return self._state.get(SessionStateKeys.AUTHOR_SITES)
+
+    @property
+    def grounding_research_text(self) -> str:
+        """Concatenate the grounded discovery research into one text blob.
+
+        Joins the book-context, city, landmark, and author-site discovery
+        outputs (the grounded research the composer draws from) into a single
+        string so itinerary claims can be checked against what the grounding
+        chain actually found. Returns "" when no discovery research is present
+        (e.g. the local-atmosphere path), which callers treat as "cannot prove
+        anything ungrounded" and leave labels unchanged.
+        """
+        parts: List[str] = []
+        for value in (
+            self.book_context,
+            self.city_discovery,
+            self.landmark_discovery,
+            self.author_sites,
+        ):
+            if not value:
+                continue
+            if isinstance(value, str):
+                parts.append(value)
+            else:
+                try:
+                    parts.append(json.dumps(value, ensure_ascii=False, default=str))
+                except (TypeError, ValueError):
+                    parts.append(str(value))
+        return "\n".join(parts)
 
     @property
     def last_book_recommendations(self) -> Optional[dict]:

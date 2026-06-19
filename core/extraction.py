@@ -95,6 +95,60 @@ def extract_json_from_text(text: str) -> Optional[dict]:
     return None
 
 
+# Match types that assert a grounded, verifiable book<->place connection and
+# therefore must trace to the grounded discovery research. The other two
+# ("thematic", "vibe") are explicitly weaker/atmospheric claims that need no
+# source, so they are never touched here.
+_GROUNDED_MATCH_TYPES = ("literal", "historical")
+
+# The weakest, safest claim. An ungroundable strong claim is downgraded to this
+# (never dropped, never upgraded), mirroring the schema default and the org
+# "choose the weaker claim when unsure" guardrail.
+_DOWNGRADE_TARGET = "vibe"
+
+
+def downgrade_ungrounded_match_types(
+    itinerary_dict: Optional[dict], grounding_text: str
+) -> Optional[dict]:
+    """Downgrade literal/historical stops that don't trace to grounded research.
+
+    The trust core of the hallucination guardrail: the formatter self-labels each
+    stop's ``match_type``, but a self-label is not evidence. Here we *derive* the
+    label server-side from a real check — any stop the formatter marked
+    ``literal``/``historical`` whose name does not appear in the grounded
+    discovery research (city/landmark/author/context) is downgraded to the
+    weakest claim (``vibe``) and has its ``grounding_source`` cleared, since the
+    cited evidence didn't hold up. Stops are never dropped and never upgraded.
+
+    Conservative and fail-open by design (it must never make results worse):
+      * No grounding text captured -> return unchanged (we cannot prove anything
+        is ungrounded, e.g. the local-atmosphere path has no discovery research).
+      * ``thematic``/``vibe`` stops are left untouched (no source required).
+    """
+    if not itinerary_dict:
+        return itinerary_dict
+
+    haystack = _normalize_text(grounding_text)
+    if not haystack:
+        return itinerary_dict
+
+    downgraded = 0
+    for city in itinerary_dict.get("cities") or []:
+        for stop in city.get("stops") or []:
+            if stop.get("match_type") not in _GROUNDED_MATCH_TYPES:
+                continue
+            name = _normalize_text(stop.get("name"))
+            if name and name in haystack:
+                continue
+            stop["match_type"] = _DOWNGRADE_TARGET
+            stop["grounding_source"] = None
+            downgraded += 1
+
+    if downgraded:
+        logger.info("itinerary_match_type_downgraded", downgraded=downgraded)
+    return itinerary_dict
+
+
 def extract_itinerary_from_response(
     final_response, state_accessor
 ) -> Optional[Tuple[dict, list]]:
@@ -110,20 +164,25 @@ def extract_itinerary_from_response(
     Returns:
         (itinerary_dict, suggestions_list) tuple or None
     """
+    grounding_text = state_accessor.grounding_research_text
+
+    def _finalize(itinerary_dict, suggestions):
+        return downgrade_ungrounded_match_types(itinerary_dict, grounding_text), suggestions
+
     # Primary: composer_envelope from session state (set by output_key="composer_envelope")
     envelope_data = state_accessor.composer_envelope
     if envelope_data is not None:
         result = validate_composer_envelope(envelope_data)
         if result is not None:
             logger.info("itinerary_from_envelope")
-            return result
+            return _finalize(*result)
 
     # Legacy fallback: bare TripItinerary from state (set by output_key="final_itinerary")
     state_itinerary = state_accessor.final_itinerary
     itinerary_result = validate_trip_itinerary(state_itinerary)
     if itinerary_result is not None:
         logger.info("itinerary_from_state")
-        return itinerary_result, []
+        return _finalize(itinerary_result, [])
 
     # Text fallback: parse from final response text
     if (
@@ -139,12 +198,12 @@ def extract_itinerary_from_response(
                     env_result = validate_composer_envelope(candidate)
                     if env_result is not None:
                         logger.info("itinerary_from_text_envelope_fallback")
-                        return env_result
+                        return _finalize(*env_result)
                     # Then bare itinerary
                     itinerary_result = validate_trip_itinerary(candidate)
                     if itinerary_result is not None:
                         logger.info("itinerary_from_text_fallback")
-                        return itinerary_result, []
+                        return _finalize(itinerary_result, [])
 
     return None
 
