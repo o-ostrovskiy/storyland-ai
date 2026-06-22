@@ -48,12 +48,33 @@ This creates two datasets in Langfuse:
 ### Run Evaluations
 
 ```bash
-# Using Makefile
+# Itinerary (book→place) — LLM-as-judge scoring on the storyland_eval / books_v1 datasets
 make eval-run
-
-# Or directly
+# Or directly:
 python evaluation/tools/run_scheduled_eval.py
 ```
+
+### Place→Book grounding eval (reverse routing)
+
+The `place_to_book_v1` dataset is **not** scored by the itinerary judge — it is a
+deterministic grounding gate for the reverse-routing capability (`PlaceToBookResolver`):
+a real destination must return at least `min_literal` grounded `literal` candidates
+(each naming a real `maps_to`), and a fictional/ungroundable place must return the clean
+not-found state with no fabricated list. It has its own runner:
+
+```bash
+make eval-place-to-book
+# Or directly (re-registers the dataset items from the evalset, then runs all cases):
+python evaluation/tools/run_place_to_book_eval.py [--max-cases N] [--no-register]
+```
+
+Each case logs a Langfuse dataset run (`p2b_eval_YYYYMMDD_HHMMSS`) under `place_to_book_v1`
+with scores: `case_pass` (0/1), `found_classification` (0/1), `literal_grounded` (count),
+and `grounding_clean` (0/1 — every `literal` has a `maps_to`, every `vibe` has none).
+
+> Note: `_extract_input_from_case` stores `{place}` (not `{book_title, author}`) for
+> place→book cases, and carries the grounding expectations (`expect`, `min_literal`,
+> `expected_literal_examples`) into item metadata so the runner has a target to score.
 
 ### View Results
 
@@ -227,13 +248,15 @@ runner = Runner(agent=my_agent, plugins=[LoggingPlugin()])
 evaluation/
 ├── README.md                      # This file
 ├── tools/                         # Evaluation scripts
-│   ├── run_scheduled_eval.py      # Main evaluation runner
+│   ├── run_scheduled_eval.py      # Itinerary (book→place) eval runner — LLM-as-judge
+│   ├── run_place_to_book_eval.py  # Place→book reverse-routing grounding eval runner
 │   ├── eval_dashboard.py          # Dashboard and reporting
 │   ├── langfuse_eval.py           # Dataset creation pipeline
 │   ├── llm_scorer.py              # LLM-as-judge quality scoring
 │   └── setup_langfuse_eval.sh     # Setup script
 ├── storyland_eval.evalset.json    # Dataset (8 diverse books)
 ├── books_v1.evalset.json          # Dataset (10 books with expected output + criteria)
+├── place_to_book_v1.evalset.json  # Dataset (11 place→book reverse-routing grounding cases)
 ├── langfuse_datasets.json         # Dataset registry (gitignored)
 ├── results/                       # Evaluation run results (gitignored)
 ├── trend_report.md                # Generated trend report (tracked)

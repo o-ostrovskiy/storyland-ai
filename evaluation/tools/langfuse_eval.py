@@ -144,6 +144,13 @@ class LangfuseEvalPipeline:
                 'creation_timestamp': case.get('creation_timestamp'),
                 'quality_criteria': quality_criteria,
             }
+            # Reverse-routing (place→book) grounding expectations, when present.
+            # These drive run_place_to_book_eval.py's pass/fail scoring; without
+            # them the item carries no usable target (the generic itinerary
+            # extractor would otherwise store an empty {book_title, author}).
+            for key in ('expect', 'min_literal', 'expected_literal_examples', 'notes'):
+                if key in case:
+                    metadata[key] = case[key]
 
             self.client.create_dataset_item(
                 dataset_name=dataset_name,
@@ -157,7 +164,15 @@ class LangfuseEvalPipeline:
         return dataset_name
 
     def _extract_input_from_case(self, case: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract input data from eval case."""
+        """Extract input data from eval case.
+
+        Supports both evalset shapes:
+        - itinerary (book→place): ``{book_title, author}``
+        - reverse-routing (place→book): ``{place}`` — the resolver input for
+          ``run_place_to_book_eval.py``.
+        """
+        if case.get('place'):
+            return {'place': case['place']}
         return {
             'book_title': case.get('book_title', ''),
             'author': case.get('author', ''),
