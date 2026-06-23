@@ -9,9 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
 from api.dependencies import (
+    enforce_rate_limit,
     get_app_state,
     get_gateway_user_id,
     get_place_to_book_resolver,
+    limit_inflight,
     verify_gateway_secret,
 )
 from api.models import (
@@ -43,7 +45,10 @@ logger = get_logger("storyland.api.routes")
 # and for standalone testing without the gateway.
 system_router = APIRouter(tags=["system"])
 
-router = APIRouter(tags=["itinerary"], dependencies=[Depends(verify_gateway_secret)])
+router = APIRouter(
+    tags=["itinerary"],
+    dependencies=[Depends(verify_gateway_secret), Depends(enforce_rate_limit)],
+)
 
 
 def _derive_job_status(state: dict) -> JobStatus:
@@ -78,6 +83,7 @@ async def health_check() -> HealthResponse:
 
 @router.post(
     "/itinerary/discover",
+    dependencies=[Depends(limit_inflight)],
     summary="Discover locations for a book",
     responses={
         200: {
@@ -128,6 +134,7 @@ async def discover(request: DiscoverRequest, user_id: str = Depends(get_gateway_
 
 @router.post(
     "/itinerary/{job_id}/compose",
+    dependencies=[Depends(limit_inflight)],
     summary="Compose itinerary for selected regions",
     responses={
         200: {
@@ -173,6 +180,7 @@ async def compose(job_id: str, request: ComposeRequest, user_id: str = Depends(g
 
 @router.post(
     "/itinerary/local-atmosphere",
+    dependencies=[Depends(limit_inflight)],
     summary="Build a local-atmosphere itinerary near the user",
     responses={
         200: {
@@ -233,6 +241,7 @@ async def local_atmosphere(
 
 @router.post(
     "/itinerary/{job_id}/expand",
+    dependencies=[Depends(limit_inflight)],
     summary="Expand itinerary with new places",
     responses={
         200: {
@@ -287,6 +296,7 @@ async def expand(
 
 @router.post(
     "/itinerary/{job_id}/recommend-books",
+    dependencies=[Depends(limit_inflight)],
     summary="Get book recommendations based on book and destinations",
     responses={
         200: {
@@ -396,6 +406,7 @@ async def get_status(job_id: str, user_id: str = Depends(get_gateway_user_id)):
 
 @router.post(
     "/place-to-book",
+    dependencies=[Depends(limit_inflight)],
     response_model=PlaceToBookResult,
     tags=["place-to-book"],
     summary="Resolve a destination to grounded book candidates (reverse discovery)",

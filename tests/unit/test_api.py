@@ -600,11 +600,19 @@ def mock_executor():
 def mock_app_state(mock_executor):
     """Create a mock AppState for testing."""
     from api.dependencies import AppState
+    from api.ratelimit import InFlightLimiter, SlidingWindowRateLimiter
 
     mock_config = MagicMock()
     mock_config.model_name = "gemini-2.0-flash-lite"
 
-    return AppState(config=mock_config, executor=mock_executor)
+    # Load-shedding guards default to disabled (limit 0) so endpoint tests
+    # exercise the handlers without rate-limit/concurrency interference.
+    return AppState(
+        config=mock_config,
+        executor=mock_executor,
+        rate_limiter=SlidingWindowRateLimiter(max_requests=0, window_seconds=60),
+        inflight_limiter=InFlightLimiter(max_in_flight=0),
+    )
 
 
 @pytest.fixture

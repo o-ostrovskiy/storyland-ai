@@ -43,6 +43,12 @@ class Config:
     # return (default 3) so a thin researcher result never forces an invented
     # 5th book. Tunable via REC_MIN_RESULTS.
     rec_min_results: int
+    # Load-shedding guards for the expensive discovery chain (api/ratelimit.py).
+    # Both DISABLED by default (value <= 0) so prod behaviour is unchanged until
+    # an operator opts in; additive and reversible.
+    rate_limit_requests: int
+    rate_limit_window_seconds: int
+    max_inflight_requests: int
 
 
 def _require_env(key: str) -> str:
@@ -102,6 +108,11 @@ def load_config() -> Config:
         - LANGFUSE_PUBLIC_KEY: Langfuse public key
         - LANGFUSE_HOST: Langfuse host URL
         - ENVIRONMENT: deployment environment tag (default: "local")
+        - RATE_LIMIT_REQUESTS: max requests per window per user/IP on the
+          expensive endpoints; 0 disables (default: 0)
+        - RATE_LIMIT_WINDOW_SECONDS: rate-limit window length (default: 60)
+        - MAX_INFLIGHT_REQUESTS: max concurrent in-flight heavy requests;
+          0 disables (default: 0)
 
     Returns:
         Config object
@@ -131,6 +142,9 @@ def load_config() -> Config:
         retry_max_delay=_env_float("RETRY_MAX_DELAY", 12.0),
         retry_attempts=_env_int("RETRY_ATTEMPTS", 4),
         rec_min_results=_env_int("REC_MIN_RESULTS", 3),
+        rate_limit_requests=_env_int("RATE_LIMIT_REQUESTS", 0),
+        rate_limit_window_seconds=_env_int("RATE_LIMIT_WINDOW_SECONDS", 60),
+        max_inflight_requests=_env_int("MAX_INFLIGHT_REQUESTS", 0),
     )
 
 
