@@ -159,7 +159,6 @@ temp/
 .terraform/
 
 # Docker
-.dockerignore
 docker-compose.override.yml
 
 # ========================================
