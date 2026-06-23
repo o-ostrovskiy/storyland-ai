@@ -1,0 +1,83 @@
+# .dockerignore — keep the image build context minimal and free of secrets.
+# IMPORTANT: README.md and pyproject.toml are intentionally NOT excluded —
+# `pip install .` (setuptools, readme = "README.md") needs both at build time.
+
+# Version control
+.git
+.gitignore
+.github
+
+# Python caches / build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Secrets & local env (must never be baked into image layers)
+.env
+.env.*
+*.pem
+*.key
+service-account*.json
+credentials.json
+
+# Tests & coverage artifacts (not part of the runtime package)
+tests/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.cache
+
+# Docs & project meta not needed at runtime (README.md kept on purpose)
+docs/
+claude.md
+AGENTS.md
+
+# Evaluation: package source is kept; only generated outputs are excluded
+evaluation/results/
+evaluation/langfuse_datasets.json
+evaluation/metrics.json
+
+# Local databases / caches / logs
+*.db
+*.sqlite
+*.sqlite3
+.adk/
+.agent_cache/
+.session_cache/
+logs/
+*.log
+
+# IDE / editor
+.vscode/
+.idea/
+*.iml
+*.swp
+
+# OS cruft
+.DS_Store
+._*
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Backups / archives
+*.bak
+*.backup
+*.zip
+*.tar.gz
