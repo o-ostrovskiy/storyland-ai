@@ -15,6 +15,7 @@ from common.logging import configure_logging, get_logger
 from core.executor import WorkflowExecutor
 from core.place_to_book import PlaceToBookResolver
 from core.types import ExecutorConfig
+from api.ratelimit import InFlightLimiter, SlidingWindowRateLimiter
 
 
 @dataclass
@@ -23,6 +24,8 @@ class AppState:
 
     config: Config
     executor: WorkflowExecutor
+    rate_limiter: SlidingWindowRateLimiter
+    inflight_limiter: InFlightLimiter
 
 
 _app_state: Optional[AppState] = None
@@ -43,7 +46,18 @@ async def initialize() -> AppState:
     executor_config = ExecutorConfig.from_config(config)
     executor = WorkflowExecutor(executor_config)
 
-    _app_state = AppState(config=config, executor=executor)
+    rate_limiter = SlidingWindowRateLimiter(
+        max_requests=config.rate_limit_requests,
+        window_seconds=config.rate_limit_window_seconds,
+    )
+    inflight_limiter = InFlightLimiter(max_in_flight=config.max_inflight_requests)
+
+    _app_state = AppState(
+        config=config,
+        executor=executor,
+        rate_limiter=rate_limiter,
+        inflight_limiter=inflight_limiter,
+    )
 
     logger.info("api_initialized", model=config.model_name)
     return _app_state
@@ -122,3 +136,52 @@ def get_gateway_user_id(
     if not x_user_id:
         raise HTTPException(status_code=403, detail="X-User-ID header is required")
     return x_user_id
+
+
+def _rate_limit_key(request: Request, x_user_id: str | None) -> str:
+    """Identify the caller for rate limiting: user id when known, else client IP."""
+    if x_user_id:
+        return f"user:{x_user_id}"
+    client = request.client
+    return f"ip:{client.host}" if client else "ip:unknown"
+
+
+def enforce_rate_limit(
+    request: Request,
+    x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+) -> None:
+    """Per-identity request-rate cap on the expensive endpoints.
+
+    No-op unless RATE_LIMIT_REQUESTS is configured (> 0). Raises HTTP 429 with a
+    Retry-After hint when a user/IP exceeds its window budget.
+    """
+    limiter = get_app_state().rate_limiter
+    if not limiter.enabled:
+        return
+    if not limiter.allow(_rate_limit_key(request, x_user_id)):
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded. Please slow down and retry shortly.",
+            headers={"Retry-After": str(get_app_state().config.rate_limit_window_seconds)},
+        )
+
+
+async def limit_inflight():
+    """Bounded concurrency guard for one expensive request.
+
+    No-op unless MAX_INFLIGHT_REQUESTS is configured (> 0). Acquires a slot for
+    the duration of the request (held across SSE streaming via the yield) and
+    releases it when the response completes. Sheds load with HTTP 503 when the
+    box is already at capacity rather than queueing work onto the single loop.
+    """
+    limiter = get_app_state().inflight_limiter
+    if not limiter.try_acquire():
+        raise HTTPException(
+            status_code=503,
+            detail="Server is busy processing other requests. Please retry shortly.",
+            headers={"Retry-After": "5"},
+        )
+    try:
+        yield
+    finally:
+        limiter.release()
