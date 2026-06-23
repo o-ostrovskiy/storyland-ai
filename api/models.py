@@ -15,6 +15,36 @@ from pydantic import BaseModel, Field, field_validator
 
 # --- Request Models ---
 
+# Input-size bounds: reject oversized payloads with a 422 BEFORE any prompt is
+# built or Gemini is called (cost + prompt-injection-surface guard). 200 matches
+# the existing UserLocation.label / ExpandRequest caps.
+MAX_TITLE_LENGTH = 200
+MAX_AUTHOR_LENGTH = 200
+MAX_PREFERENCES_KEYS = 30
+MAX_PREFERENCE_KEY_LENGTH = 100
+MAX_PREFERENCE_VALUE_LENGTH = 500
+
+
+def _bound_preferences(value):
+    """Bound the free-form preferences dict (key count + per-key/value length)."""
+    if value is None:
+        return value
+    if len(value) > MAX_PREFERENCES_KEYS:
+        raise ValueError(
+            f"preferences may contain at most {MAX_PREFERENCES_KEYS} keys"
+        )
+    for key, val in value.items():
+        if not isinstance(key, str) or len(key) > MAX_PREFERENCE_KEY_LENGTH:
+            raise ValueError(
+                "preferences keys must be strings of at most "
+                f"{MAX_PREFERENCE_KEY_LENGTH} characters"
+            )
+        if len(str(val)) > MAX_PREFERENCE_VALUE_LENGTH:
+            raise ValueError(
+                f"preferences values must be at most {MAX_PREFERENCE_VALUE_LENGTH} characters"
+            )
+    return value
+
 
 class DiscoverRequest(BaseModel):
     """Request body for POST /api/v1/itinerary/discover."""
@@ -35,8 +65,12 @@ class DiscoverRequest(BaseModel):
         }
     }
 
-    book_title: str = Field(min_length=1, description="Title of the book")
-    author: str = Field(min_length=1, description="Author name (required)")
+    book_title: str = Field(
+        min_length=1, max_length=MAX_TITLE_LENGTH, description="Title of the book"
+    )
+    author: str = Field(
+        min_length=1, max_length=MAX_AUTHOR_LENGTH, description="Author name (required)"
+    )
     preferences: Optional[dict] = Field(
         default=None, description="User travel preferences"
     )
@@ -58,6 +92,12 @@ class DiscoverRequest(BaseModel):
         if not normalized:
             raise ValueError("author must not be empty")
         return normalized
+
+    @field_validator("preferences")
+    @classmethod
+    def validate_preferences(cls, value):
+        """Bound preferences size before it flows into the prompt."""
+        return _bound_preferences(value)
 
 
 class ComposeRequest(BaseModel):
@@ -199,8 +239,12 @@ class LocalAtmosphereRequest(BaseModel):
         }
     }
 
-    book_title: str = Field(min_length=1, description="Title of the book")
-    author: str = Field(min_length=1, description="Author name (required)")
+    book_title: str = Field(
+        min_length=1, max_length=MAX_TITLE_LENGTH, description="Title of the book"
+    )
+    author: str = Field(
+        min_length=1, max_length=MAX_AUTHOR_LENGTH, description="Author name (required)"
+    )
     user_location: UserLocation = Field(description="User's current location")
     radius_km: int = Field(
         default=80,
@@ -227,6 +271,11 @@ class LocalAtmosphereRequest(BaseModel):
         if not normalized:
             raise ValueError("author must not be empty")
         return normalized
+
+    @field_validator("preferences")
+    @classmethod
+    def validate_preferences(cls, value):
+        return _bound_preferences(value)
 
 
 # --- SSE Event Models ---
