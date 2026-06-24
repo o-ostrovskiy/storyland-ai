@@ -35,9 +35,11 @@ jobs:
       LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
       LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
 
-# NOTE: Auto build+deploy removed. The app now runs on a single Lightsail box
-# (self-hosted, see storyland-infrastructure/deploy/). The old ECR build + ECS
-# deploy targets were decommissioned. Deploy with:
+# NOTE: This pipeline is a compile/test check only — it does NOT deploy. The app
+# runs on a single Lightsail box (self-hosted, see storyland-infrastructure/deploy/);
+# the old ECR build + ECS deploy targets were decommissioned and their dormant
+# build.yml / deploy.yml have been removed. Production releases run through the
+# G5-gated `deploy-ai-prod.yml` workflow (workflow_dispatch + `production`
+# environment approval), which calls the reusable SSH-deploy workflow in
+# storyland-infrastructure. The manual fallback is still
 #   KEY=~/.ssh/storyland.pem storyland-infrastructure/deploy/deploy.sh storyland-ai
-# The dormant build.yml / deploy.yml in this folder target the removed AWS infra
-# and should not be dispatched until reworked for the box.

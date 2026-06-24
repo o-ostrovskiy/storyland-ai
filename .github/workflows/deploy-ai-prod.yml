@@ -1,0 +1,64 @@
+name: Deploy AI (prod)
+
+# G5-gated production release for the AI service (storyland-ai).
+#
+# This is the per-service CALLER for the reusable SSH-deploy workflow in
+# storyland-infrastructure (.github/workflows/deploy-service.yml). It is
+# workflow_dispatch-only, so it is INERT until a human runs it from the Actions
+# tab — merging it changes nothing in prod.
+#
+# The G5 approval gate is the `production` GitHub Environment: the `approve` job
+# below references it, so the run PAUSES for the environment's required reviewer
+# (Olga) before any deploy step executes. Only after approval does `deploy` run
+# and invoke the reusable workflow. NOTE: a job that calls a reusable workflow
+# (`uses:`) cannot also set `environment:`, so the gate lives in a separate
+# `approve` job that `deploy` depends on.
+#
+# OUT-OF-BAND founder/Release-Engineer setup (NOT part of this PR, no values are
+# committed here):
+#   - Repo secrets: LIGHTSAIL_SSH_KEY (Lightsail deploy key) + BOX_IP (box host/IP)
+#   - A `production` Environment with Olga as a required reviewer
+# Runtime config (.env.prod: GOOGLE_API_KEY, INTERNAL_API_SECRET, LANGFUSE_*,
+# CACHE_TTL_SECONDS, CACHE_MAX_ENTRIES) lives ONLY on the box and is deliberately
+# excluded from the rsync upstream, so a rebuild never clobbers it — the acute
+# config-drift area for AI.
+#
+# This action is POST-MERGE RELEASE ONLY: it does not run tests and MUST NEVER
+# trigger an eval (eval = real Gemini spend, founder-gated). The existing
+# QA factual-grounding / Langfuse eval-before-merge gate stays in CI.
+#
+# DEPENDENCY NOTE: on the box, restarting `storyland-ai` via docker compose can
+# also recreate its depends_on services. This mirrors deploy.sh's existing
+# behaviour; the `--no-deps` refinement is tracked separately.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref of storyland-ai to deploy (default: the branch this run was dispatched from)."
+        required: false
+        default: ""
+
+concurrency:
+  group: deploy-ai-prod
+  cancel-in-progress: false
+
+jobs:
+  approve:
+    name: Await G5 production approval
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Record approval
+        run: echo "G5 production deploy approved — proceeding to deploy storyland-ai (ref='${{ inputs.ref || github.ref_name }}')."
+
+  deploy:
+    name: Deploy storyland-ai to the Lightsail box
+    needs: approve
+    uses: o-ostrovskiy/storyland-infrastructure/.github/workflows/deploy-service.yml@main
+    with:
+      service: storyland-ai
+      ref: ${{ inputs.ref }}
+    secrets:
+      LIGHTSAIL_SSH_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+      BOX_IP: ${{ secrets.BOX_IP }}
