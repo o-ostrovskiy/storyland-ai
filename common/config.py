@@ -49,6 +49,14 @@ class Config:
     rate_limit_requests: int
     rate_limit_window_seconds: int
     max_inflight_requests: int
+    # Bounded session retention sweep (services/session_retention.py).
+    # Periodically evicts discover->compose job sessions older than the TTL and
+    # caps the in-memory store size, so RAM (in-memory) / the SQLite sessions
+    # table stop growing unbounded on the single box. SESSION_TTL_SECONDS=0
+    # disables the sweep (config kill-switch). All additive / reversible.
+    session_ttl_seconds: int
+    session_max_entries: int
+    session_sweep_interval_seconds: int
 
 
 def _require_env(key: str) -> str:
@@ -113,6 +121,12 @@ def load_config() -> Config:
         - RATE_LIMIT_WINDOW_SECONDS: rate-limit window length (default: 60)
         - MAX_INFLIGHT_REQUESTS: max concurrent in-flight heavy requests;
           0 disables (default: 0)
+        - SESSION_TTL_SECONDS: evict sessions older than this many seconds;
+          0 disables the retention sweep (default: 86400 = 24h)
+        - SESSION_MAX_ENTRIES: in-memory session count cap, oldest evicted
+          first once exceeded (default: 10000)
+        - SESSION_SWEEP_INTERVAL_SECONDS: how often the sweep runs
+          (default: 300)
 
     Returns:
         Config object
@@ -145,6 +159,11 @@ def load_config() -> Config:
         rate_limit_requests=_env_int("RATE_LIMIT_REQUESTS", 0),
         rate_limit_window_seconds=_env_int("RATE_LIMIT_WINDOW_SECONDS", 60),
         max_inflight_requests=_env_int("MAX_INFLIGHT_REQUESTS", 0),
+        session_ttl_seconds=_env_int("SESSION_TTL_SECONDS", 86400),
+        session_max_entries=_env_int("SESSION_MAX_ENTRIES", 10000),
+        session_sweep_interval_seconds=_env_int(
+            "SESSION_SWEEP_INTERVAL_SECONDS", 300
+        ),
     )
 
 
