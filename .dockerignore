@@ -32,6 +32,8 @@ ENV/
 *.key
 service-account*.json
 credentials.json
+.claude/
+.mcp.json
 
 # Tests & coverage artifacts (not part of the runtime package)
 tests/
