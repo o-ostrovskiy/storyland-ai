@@ -12,14 +12,47 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.dependencies import initialize, shutdown
 from api.routes import router, system_router
+from services.session_retention import SessionSweeper
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize on startup, cleanup on shutdown."""
-    await initialize()
-    yield
-    await shutdown()
+    """Initialize on startup, cleanup on shutdown.
+
+    Also starts the bounded session-retention sweep so the in-memory /
+    SQLite session store does not grow unbounded on the single box (evicts
+    discover->compose job state older than SESSION_TTL_SECONDS; disabled when
+    SESSION_TTL_SECONDS=0).
+    """
+    state = await initialize()
+
+    def _live_session_services():
+        # The executor's store is the discover->compose leak source. The
+        # place->book resolver keeps its own isolated in-memory store, created
+        # lazily on first request - include it once it exists.
+        services = [state.executor.session_service]
+        import api.dependencies as deps
+
+        resolver = getattr(deps, "_place_to_book_resolver", None)
+        if resolver is not None:
+            svc = getattr(resolver, "_session_service", None)
+            if svc is not None:
+                services.append(svc)
+        return services
+
+    sweeper = SessionSweeper(
+        services=_live_session_services,
+        ttl_seconds=state.config.session_ttl_seconds,
+        max_entries=state.config.session_max_entries,
+        interval_seconds=state.config.session_sweep_interval_seconds,
+    )
+    sweeper.start()
+    app.state.session_sweeper = sweeper
+    try:
+        yield
+    finally:
+        await sweeper.stop()
+        await shutdown()
 
 
 def create_app() -> FastAPI:
