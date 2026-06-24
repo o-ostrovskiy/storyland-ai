@@ -339,6 +339,30 @@ Agent prompts include reliability improvements:
 
 **Versioned prompts** — all agent instructions live in `agents/prompts/v2.json` (and `v1.json` for history). To add a new prompt version, create `agents/prompts/v3.json` and pass `--prompt-version v3` to the eval runner. The current version (`v2`) is controlled by `CURRENT_PROMPT_VERSION` in `agents/prompts.py`. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md).
 
+## Deployment
+
+Production runs on a single self-hosted Lightsail box via docker compose (see
+`storyland-infrastructure/deploy/`). Releases go through the **G5-gated
+`Deploy AI (prod)`** GitHub Action (`.github/workflows/deploy-ai-prod.yml`):
+
+- It is `workflow_dispatch`-only, so it never fires automatically.
+- The run pauses on the `production` GitHub Environment for the required
+  reviewer's (Olga's) approval — that pause **is** the G5 gate.
+- After approval it calls the reusable SSH-deploy workflow in
+  `storyland-infrastructure` (`deploy-service.yml`, `service: storyland-ai`),
+  which rsyncs the source to the box and rebuilds/restarts the `storyland-ai`
+  service.
+
+On-box runtime config (`.env.prod`: `GOOGLE_API_KEY`, `INTERNAL_API_SECRET`,
+`LANGFUSE_*`, `CACHE_TTL_SECONDS`, `CACHE_MAX_ENTRIES`) is the source of truth and
+is excluded from the rsync, so a rebuild never clobbers it. The release action is
+post-merge only and never triggers an eval (eval = real Gemini spend). Manual
+fallback: `KEY=~/.ssh/storyland.pem storyland-infrastructure/deploy/deploy.sh storyland-ai`.
+
+One-time setup (out-of-band, not in the repo): add the `LIGHTSAIL_SSH_KEY` and
+`BOX_IP` repo secrets and create a `production` Environment with a required
+reviewer.
+
 ## Testing
 
 ```bash
