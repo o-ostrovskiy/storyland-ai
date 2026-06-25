@@ -2,30 +2,34 @@ name: Deploy AI (prod)
 
 # G5-gated production release for the AI service (storyland-ai).
 #
-# This is the per-service CALLER for the reusable SSH-deploy workflow in
-# storyland-infrastructure (.github/workflows/deploy-service.yml). It is
-# workflow_dispatch-only, so it is INERT until a human runs it from the Actions
-# tab — merging it changes nothing in prod.
+# SELF-CONTAINED on purpose: storyland-ai is a PUBLIC repo, and a public repo
+# cannot call a reusable workflow that lives in a PRIVATE repo
+# (storyland-infrastructure). So unlike the frontend/backend callers, this
+# workflow inlines the SSH-deploy steps instead of `uses:`-ing
+# infra/.github/workflows/deploy-service.yml. The deploy logic mirrors that
+# reusable workflow (and deploy.sh) exactly for service=storyland-ai.
 #
-# The G5 approval gate is the `production` GitHub Environment: the `approve` job
-# below references it, so the run PAUSES for the environment's required reviewer
-# (Olga) before any deploy step executes. Only after approval does `deploy` run
-# and invoke the reusable workflow. NOTE: a job that calls a reusable workflow
-# (`uses:`) cannot also set `environment:`, so the gate lives in a separate
-# `approve` job that `deploy` depends on.
+# workflow_dispatch-ONLY, so it is INERT until a human runs it from the Actions
+# tab — merging it changes nothing in prod. There is no pull_request trigger, so
+# fork PRs can neither run it nor reach the secrets.
 #
-# OUT-OF-BAND founder/Release-Engineer setup (NOT part of this PR, no values are
-# committed here):
-#   - Repo secrets: LIGHTSAIL_SSH_KEY (Lightsail deploy key) + BOX_IP (box host/IP)
-#   - A `production` Environment with Olga as a required reviewer
+# The G5 approval gate is the `production` GitHub Environment set on the deploy
+# job: the job PAUSES for that environment's required reviewer (Olga) before any
+# step runs. Only after approval do the deploy steps execute.
+#
+# Because this file is public, it contains NO secret values — only
+# `${{ secrets.* }}` references (LIGHTSAIL_SSH_KEY, BOX_IP), provisioned
+# out-of-band in repo settings. The key is written to a file with `printf` and is
+# never echoed; GitHub also masks secret values in logs.
+#
 # Runtime config (.env.prod: GOOGLE_API_KEY, INTERNAL_API_SECRET, LANGFUSE_*,
 # CACHE_TTL_SECONDS, CACHE_MAX_ENTRIES) lives ONLY on the box and is deliberately
-# excluded from the rsync upstream, so a rebuild never clobbers it — the acute
+# excluded from the rsync, so a rebuild never clobbers it — the acute
 # config-drift area for AI.
 #
-# This action is POST-MERGE RELEASE ONLY: it does not run tests and MUST NEVER
-# trigger an eval (eval = real Gemini spend, founder-gated). The existing
-# QA factual-grounding / Langfuse eval-before-merge gate stays in CI.
+# POST-MERGE RELEASE ONLY: it does not run tests and MUST NEVER trigger an eval
+# (eval = real Gemini spend, founder-gated). The QA factual-grounding /
+# Langfuse eval-before-merge gate stays in CI.
 #
 # DEPENDENCY NOTE: on the box, restarting `storyland-ai` via docker compose can
 # also recreate its depends_on services. This mirrors deploy.sh's existing
@@ -43,22 +47,64 @@ concurrency:
   group: deploy-ai-prod
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
-  approve:
-    name: Await G5 production approval
+  deploy:
+    name: Deploy storyland-ai to the Lightsail box
     runs-on: ubuntu-latest
+    # The G5 gate: this environment has Olga as a required reviewer, so the job
+    # pauses for her approval before any step runs.
     environment: production
     steps:
       - name: Record approval
         run: echo "G5 production deploy approved — proceeding to deploy storyland-ai (ref='${{ inputs.ref || github.ref_name }}')."
 
-  deploy:
-    name: Deploy storyland-ai to the Lightsail box
-    needs: approve
-    uses: o-ostrovskiy/storyland-infrastructure/.github/workflows/deploy-service.yml@main
-    with:
-      service: storyland-ai
-      ref: ${{ inputs.ref }}
-    secrets:
-      LIGHTSAIL_SSH_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
-      BOX_IP: ${{ secrets.BOX_IP }}
+      - name: Checkout caller repo source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Set up SSH key + pinned known_hosts
+        env:
+          LIGHTSAIL_SSH_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          BOX_IP: ${{ secrets.BOX_IP }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$LIGHTSAIL_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pin the box host key (scanned once over the network), then strict-verify against it.
+          ssh-keyscan -H "$BOX_IP" >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Rsync source to the box
+        env:
+          BOX_IP: ${{ secrets.BOX_IP }}
+        run: |
+          # storyland-ai source -> ~/storyland/storyland-ai/ (the compose build context).
+          SSH_CMD="ssh -i ~/.ssh/deploy_key -o ServerAliveInterval=30"
+          $SSH_CMD "ubuntu@$BOX_IP" "mkdir -p ~/storyland/storyland-ai"
+          # Excludes mirror deploy.sh; .env/.env.prod are excluded so the box's
+          # runtime config (source of truth) is never clobbered. .claude/.mcp.json
+          # are excluded so no local agent config / credentials can ride to the box.
+          rsync -az \
+            --exclude '.git' --exclude 'node_modules' --exclude '__pycache__' --exclude '*.pyc' \
+            --exclude 'dist' --exclude 'build' --exclude '.venv' --exclude 'venv' \
+            --exclude '.terraform' --exclude '*.tfstate*' --exclude '.env' --exclude '.env.prod' \
+            --exclude '.claude' --exclude '.mcp.json' --exclude '.DS_Store' \
+            -e "$SSH_CMD" \
+            ./ "ubuntu@$BOX_IP:~/storyland/storyland-ai/"
+
+      - name: Build + restart storyland-ai on the box
+        env:
+          BOX_IP: ${{ secrets.BOX_IP }}
+        run: |
+          # Mirrors deploy.sh's per-service compose path exactly (build context +
+          # --env-file .env.prod live on the box). Like deploy.sh, this can recreate
+          # depends_on services; the `--no-deps` refinement is tracked separately.
+          ssh -i ~/.ssh/deploy_key -o ServerAliveInterval=30 "ubuntu@$BOX_IP" \
+            "cd ~/storyland/storyland-infrastructure/deploy && \
+             docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build storyland-ai && \
+             docker compose -f docker-compose.prod.yml ps storyland-ai"
