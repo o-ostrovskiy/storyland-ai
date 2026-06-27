@@ -101,41 +101,33 @@ def verify_gateway_secret(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
-def _user_from_jwt(authorization: str | None) -> str | None:
-    """Extract email/sub from a Bearer JWT payload without verifying the signature."""
-    if not authorization or not authorization.startswith("Bearer "):
-        return None
-    try:
-        import base64
-        import json
-        payload_b64 = authorization.split(" ", 1)[1].split(".")[1]
-        payload_b64 += "=" * (4 - len(payload_b64) % 4)
-        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
-        return payload.get("email") or payload.get("sub") or None
-    except Exception:
-        return None
-
-
 def get_gateway_user_id(
     x_user_id: str | None = Header(default=None, alias="X-User-ID"),
-    authorization: str | None = Header(default=None),
 ) -> str:
     """
-    Extract the authenticated user_id.
+    Resolve the authenticated user_id from the trusted X-User-ID header.
 
-    Priority:
-    1. X-User-ID header (set by the backend proxy after JWT validation)
-    2. JWT payload from Authorization header (when frontend calls AI directly)
-    3. 'dev_user' fallback for local development
+    The backend gateway sets X-User-ID only AFTER it has validated the caller's
+    JWT, so this service trusts X-User-ID and nothing else. It deliberately does
+    NOT inspect or trust the raw Authorization JWT: this service cannot verify
+    the token's signature, and trusting an unverified claim would let a forged
+    token impersonate any user (sessions/itineraries are scoped by user_id).
 
-    Raises HTTP 403 if INTERNAL_API_SECRET is configured but X-User-ID is absent.
+    Resolution:
+    1. X-User-ID present                          -> that user_id.
+    2. Absent + ALLOW_DEV_USER=true (local dev)   -> shared 'dev_user'.
+    3. Absent otherwise                           -> fail closed, HTTP 403.
+
+    Failing closed removes the previous foot-gun: whenever INTERNAL_API_SECRET
+    was unset, identity silently fell back to an unverified JWT claim (or a
+    shared 'dev_user'), so a single misconfigured deploy could open cross-tenant
+    access. Identity now requires the trusted header regardless of that secret.
     """
-    secret = get_app_state().config.internal_api_secret
-    if not secret:
-        return x_user_id or _user_from_jwt(authorization) or "dev_user"
-    if not x_user_id:
-        raise HTTPException(status_code=403, detail="X-User-ID header is required")
-    return x_user_id
+    if x_user_id:
+        return x_user_id
+    if get_app_state().config.allow_dev_user:
+        return "dev_user"
+    raise HTTPException(status_code=403, detail="X-User-ID header is required")
 
 
 def _rate_limit_key(request: Request, x_user_id: str | None) -> str:

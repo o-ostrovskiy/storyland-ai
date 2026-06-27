@@ -32,6 +32,11 @@ class Config:
     langfuse_host: Optional[str]
     environment: str
     internal_api_secret: str
+    # Local-dev only escape hatch. When ALLOW_DEV_USER=true and no trusted
+    # X-User-ID header is present, identity falls back to the shared
+    # 'dev_user'. Default false so non-local deploys fail closed (403)
+    # instead of silently collapsing callers into one session namespace.
+    allow_dev_user: bool
     # Result cache for the Discovery chain (always on; validated in prod 2026-06-17).
     cache_ttl_seconds: int
     cache_max_entries: int
@@ -93,6 +98,14 @@ def _env_float(key: str, default: float) -> float:
     return float(value)
 
 
+def _env_bool(key: str, default: bool) -> bool:
+    """Get optional boolean environment variable with a default."""
+    value = os.getenv(key)
+    if value is None:
+        return default
+    return value.lower() == "true"
+
+
 def load_config() -> Config:
     """
     Load configuration from environment variables.
@@ -116,6 +129,9 @@ def load_config() -> Config:
         - LANGFUSE_PUBLIC_KEY: Langfuse public key
         - LANGFUSE_HOST: Langfuse host URL
         - ENVIRONMENT: deployment environment tag (default: "local")
+        - ALLOW_DEV_USER: local-dev only; when "true", a request with no
+          trusted X-User-ID header resolves to the shared "dev_user".
+          Default false (production fails closed with 403). (default: false)
         - RATE_LIMIT_REQUESTS: max requests per window per user/IP on the
           expensive endpoints; 0 disables (default: 0)
         - RATE_LIMIT_WINDOW_SECONDS: rate-limit window length (default: 60)
@@ -150,6 +166,7 @@ def load_config() -> Config:
         langfuse_host=os.getenv("LANGFUSE_HOST"),
         environment=os.getenv("ENVIRONMENT", "local"),
         internal_api_secret=os.getenv("INTERNAL_API_SECRET", ""),
+        allow_dev_user=_env_bool("ALLOW_DEV_USER", False),
         cache_ttl_seconds=_env_int("CACHE_TTL_SECONDS", 86400),
         cache_max_entries=_env_int("CACHE_MAX_ENTRIES", 500),
         retry_exp_base=_env_float("RETRY_EXP_BASE", 2.0),
