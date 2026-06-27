@@ -40,6 +40,7 @@ dev = [
     "vcrpy>=6.0.0",
     "responses>=0.25.0",
     "httpx>=0.27.0",
+    "socksio>=1.0.0",  # SOCKS transport for httpx so the VCR integration suite replays under a SOCKS proxy (CI/sandbox); offline cassette replay otherwise
 ]
 
 [tool.pytest.ini_options]

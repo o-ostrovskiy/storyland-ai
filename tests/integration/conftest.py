@@ -9,6 +9,11 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 # Load environment variables from .env file
 load_dotenv()
 
+# Provide a dummy GOOGLE_API_KEY for offline VCR cassette replay when none is set
+# (e.g. proxied/no-key sandbox or autonomous QA runs). setdefault never overrides a
+# real key, so CI — which injects secrets.GOOGLE_API_KEY — and live runs are unaffected.
+os.environ.setdefault("GOOGLE_API_KEY", "test-key-for-vcr-replay")
+
 
 def normalize_query_string(url):
     """
