@@ -8,7 +8,7 @@ available to all request handlers via get_app_state().
 from dataclasses import dataclass
 from typing import Optional
 
-from fastapi import Depends, Header, HTTPException, Request
+from fastapi import Header, HTTPException, Request
 
 from common.config import Config, load_config
 from common.logging import configure_logging, get_logger
