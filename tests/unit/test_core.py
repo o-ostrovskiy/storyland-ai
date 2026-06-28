@@ -288,6 +288,23 @@ class TestPrompts:
         assert "George Orwell" in prompt
         assert "cities" in prompt.lower()
 
+    def test_discovery_prompt_vibe_absent_is_byte_identical(self):
+        # The whole point of the optional vibe: omitting it must not change the
+        # prompt at all (no behavior drift for existing callers).
+        assert build_discovery_prompt("1984", "George Orwell", None) == (
+            build_discovery_prompt("1984", "George Orwell")
+        )
+
+    def test_discovery_prompt_vibe_present_biases_and_names_mood(self):
+        prompt = build_discovery_prompt("1984", "George Orwell", "melancholic")
+        # Still contains the base discovery instruction...
+        assert '"1984"' in prompt
+        assert "cities" in prompt.lower()
+        # ...plus the mood bias, named explicitly for the "why this fits" copy.
+        assert "melancholic" in prompt
+        # ...and an explicit grounding-wins guard so vibe can't invent links.
+        assert "grounding" in prompt.lower()
+
     def test_composition_prompt(self):
         regions = [{"region_id": 1, "region_name": "England"}]
         prompt = build_composition_prompt("1984", "George Orwell", regions)

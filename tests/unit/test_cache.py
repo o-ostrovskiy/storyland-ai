@@ -103,6 +103,35 @@ class TestDiscoveryCacheKey:
     def test_versioned_prefix(self):
         assert self._key("Dune", "Herbert", None).startswith("discover:v1:")
 
+    def test_absent_vibe_key_is_unchanged(self):
+        # An absent vibe must produce the exact pre-vibe key (cache continuity).
+        from core.executor import WorkflowExecutor
+
+        with_default = WorkflowExecutor._discovery_cache_key("Dune", "Herbert", None)
+        explicit_none = WorkflowExecutor._discovery_cache_key(
+            "Dune", "Herbert", None, None
+        )
+        assert with_default == explicit_none == "discover:v1:dune|herbert|" + (
+            with_default.split("|")[-1]
+        )
+
+    def test_present_vibe_changes_key(self):
+        from core.executor import WorkflowExecutor
+
+        base = WorkflowExecutor._discovery_cache_key("Dune", "Herbert", None)
+        cozy = WorkflowExecutor._discovery_cache_key("Dune", "Herbert", None, "cozy")
+        assert cozy != base
+        assert cozy.endswith("|vibe=cozy")
+
+    def test_different_vibes_differ(self):
+        from core.executor import WorkflowExecutor
+
+        k1 = WorkflowExecutor._discovery_cache_key("Dune", "Herbert", None, "cozy")
+        k2 = WorkflowExecutor._discovery_cache_key(
+            "Dune", "Herbert", None, "hopeful"
+        )
+        assert k1 != k2
+
 
 class TestExecutorConfigCacheDefaults:
     def test_cache_config_defaults(self):

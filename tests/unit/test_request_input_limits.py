@@ -69,3 +69,32 @@ def test_local_atmosphere_accepts_valid_input():
         preferences={"pace": "slow"},
     )
     assert req.book_title == "Wuthering Heights"
+
+
+# --- optional mood/vibe field on DiscoverRequest ---
+
+def test_discover_accepts_known_vibe():
+    req = DiscoverRequest(book_title="1984", author="George Orwell", vibe="Cozy")
+    assert req.vibe == "cozy"  # normalized to canonical lower-case
+
+
+def test_discover_vibe_absent_is_none():
+    req = DiscoverRequest(book_title="1984", author="George Orwell")
+    assert req.vibe is None
+
+
+def test_discover_blank_vibe_is_none():
+    req = DiscoverRequest(book_title="1984", author="George Orwell", vibe="   ")
+    assert req.vibe is None
+
+
+def test_discover_rejects_unknown_vibe():
+    with pytest.raises(ValidationError):
+        DiscoverRequest(book_title="1984", author="George Orwell", vibe="grumpy")
+
+
+def test_discover_accepts_hyphenated_vibe():
+    req = DiscoverRequest(
+        book_title="1984", author="George Orwell", vibe="Slow-Burn"
+    )
+    assert req.vibe == "slow-burn"

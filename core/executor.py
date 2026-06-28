@@ -244,11 +244,17 @@ class WorkflowExecutor:
 
     @staticmethod
     def _discovery_cache_key(
-        book_title: str, author: str, preferences: Optional[dict]
+        book_title: str,
+        author: str,
+        preferences: Optional[dict],
+        vibe: Optional[str] = None,
     ) -> str:
         """Build a normalized, versioned cache key for a discovery request.
 
-        Versioned prefix ('v1') lets a logic change invalidate cleanly.
+        Versioned prefix ('v1') lets a logic change invalidate cleanly. A
+        present ``vibe`` is appended so a vibe-annotated request never reuses an
+        unannotated (or differently-vibed) cached region set; an absent vibe
+        leaves the key byte-identical to the pre-vibe format.
         """
         norm_title = (book_title or "").strip().lower()
         norm_author = (author or "").strip().lower()
@@ -257,7 +263,11 @@ class WorkflowExecutor:
         pref_sig = hashlib.sha1(
             repr(pref_items).encode("utf-8")
         ).hexdigest()
-        return f"discover:v1:{norm_title}|{norm_author}|{pref_sig}"
+        key = f"discover:v1:{norm_title}|{norm_author}|{pref_sig}"
+        norm_vibe = (vibe or "").strip().lower()
+        if norm_vibe:
+            key += f"|vibe={norm_vibe}"
+        return key
 
     async def discover(
         self,
@@ -265,6 +275,7 @@ class WorkflowExecutor:
         author: str,
         preferences: Optional[dict] = None,
         user_id: str = "default",
+        vibe: Optional[str] = None,
     ) -> AsyncGenerator[DomainEvent, None]:
         """Run phases 1-2: confirm book metadata + location discovery.
 
@@ -312,7 +323,7 @@ class WorkflowExecutor:
         # the previously computed (already validated) regions and makes ZERO
         # Gemini calls. Only non-empty region sets are ever cached, so a hit
         # cannot introduce a new fabrication; staleness is bounded by the TTL.
-        cache_key = self._discovery_cache_key(book_title, author, preferences)
+        cache_key = self._discovery_cache_key(book_title, author, preferences, vibe)
         cached_region_analysis = await self._discovery_cache.get(cache_key)
         if cached_region_analysis:
             logger.info("discovery_cache_hit", job_id=job_id[:8])
@@ -363,7 +374,7 @@ class WorkflowExecutor:
                     plugins=[LoggingPlugin(), langfuse_plugin],
                 )
 
-                prompt = build_discovery_prompt(exact_title, exact_author)
+                prompt = build_discovery_prompt(exact_title, exact_author, vibe)
                 message = types.Content(
                     role="user", parts=[types.Part(text=prompt)]
                 )

@@ -125,6 +125,7 @@ async def discover(request: DiscoverRequest, user_id: str = Depends(get_gateway_
         book_title=request.book_title,
         author=request.author,
         preferences=request.preferences,
+        vibe=request.vibe,
         user_id=user_id,
         executor=app_state.executor,
     )
