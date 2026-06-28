@@ -248,6 +248,7 @@ class WorkflowExecutor:
         author: str,
         preferences: Optional[dict],
         vibe: Optional[str] = None,
+        taste_context: Optional[dict] = None,
     ) -> str:
         """Build a normalized, versioned cache key for a discovery request.
 
@@ -267,6 +268,19 @@ class WorkflowExecutor:
         norm_vibe = (vibe or "").strip().lower()
         if norm_vibe:
             key += f"|vibe={norm_vibe}"
+        # A present taste_context must not reuse an unannotated (or
+        # differently-tasted) cached region set; a stable fingerprint over the
+        # normalized titles/moods keeps an absent taste_context byte-identical.
+        if taste_context:
+            taste_sig = hashlib.sha1(
+                repr(
+                    (
+                        tuple(taste_context.get("titles") or ()),
+                        tuple(taste_context.get("moods") or ()),
+                    )
+                ).encode("utf-8")
+            ).hexdigest()[:12]
+            key += f"|taste={taste_sig}"
         return key
 
     async def discover(
@@ -276,6 +290,7 @@ class WorkflowExecutor:
         preferences: Optional[dict] = None,
         user_id: str = "default",
         vibe: Optional[str] = None,
+        taste_context: Optional[dict] = None,
     ) -> AsyncGenerator[DomainEvent, None]:
         """Run phases 1-2: confirm book metadata + location discovery.
 
@@ -323,7 +338,9 @@ class WorkflowExecutor:
         # the previously computed (already validated) regions and makes ZERO
         # Gemini calls. Only non-empty region sets are ever cached, so a hit
         # cannot introduce a new fabrication; staleness is bounded by the TTL.
-        cache_key = self._discovery_cache_key(book_title, author, preferences, vibe)
+        cache_key = self._discovery_cache_key(
+            book_title, author, preferences, vibe, taste_context
+        )
         cached_region_analysis = await self._discovery_cache.get(cache_key)
         if cached_region_analysis:
             logger.info("discovery_cache_hit", job_id=job_id[:8])
@@ -374,7 +391,9 @@ class WorkflowExecutor:
                     plugins=[LoggingPlugin(), langfuse_plugin],
                 )
 
-                prompt = build_discovery_prompt(exact_title, exact_author, vibe)
+                prompt = build_discovery_prompt(
+                    exact_title, exact_author, vibe, taste_context
+                )
                 message = types.Content(
                     role="user", parts=[types.Part(text=prompt)]
                 )

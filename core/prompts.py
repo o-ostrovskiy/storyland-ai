@@ -10,7 +10,10 @@ from typing import List
 
 
 def build_discovery_prompt(
-    book_title: str, author: str, vibe: str | None = None
+    book_title: str,
+    author: str,
+    vibe: str | None = None,
+    taste_context: dict | None = None,
 ) -> str:
     """Build the user prompt for the discovery phase (phase 2).
 
@@ -20,6 +23,16 @@ def build_discovery_prompt(
     grounding requirement: places must still be genuinely connected to the book,
     so the vibe can only tilt selection among honest candidates, never invent a
     link. When ``vibe`` is None the returned prompt is byte-identical to before.
+
+    When ``taste_context`` (an optional, already-bounded
+    ``{"titles": [...], "moods": [...]}`` block derived from a reader's
+    imported reading history) is provided, it is appended as a second,
+    independent bias clause that prefers grounded places whose atmosphere
+    resonates with that demonstrated taste and lets the connection note
+    name the resonance. Like ``vibe`` it NEVER relaxes grounding. ``vibe``
+    and ``taste_context`` compose independently; absent/empty
+    ``taste_context`` leaves the prompt byte-identical to a no-taste
+    request.
     """
     prompt = (
         f'Discover travel locations for "{book_title}" by {author}.\n\n'
@@ -35,6 +48,25 @@ def build_discovery_prompt(
             f"invent any place that is not truly tied to the book just to match "
             f"the mood — factual grounding always wins over vibe."
         )
+    if taste_context:
+        titles = [t for t in (taste_context.get("titles") or []) if t]
+        moods = [m for m in (taste_context.get("moods") or []) if m]
+        descriptors = []
+        if titles:
+            descriptors.append("books such as " + ", ".join(titles))
+        if moods:
+            descriptors.append("moods like " + ", ".join(moods))
+        if descriptors:
+            taste_desc = "; ".join(descriptors)
+            prompt += (
+                f"\n\nThe reader's own reading history leans toward {taste_desc}. "
+                f"Among places that are genuinely and verifiably connected to the "
+                f"book, prefer those whose atmosphere resonates with that taste, and "
+                f"you may name that resonance in the place's connection note. Do NOT "
+                f"include or invent any place that is not truly tied to the book just "
+                f"to match the reader's taste — factual grounding always wins over "
+                f"taste."
+            )
     return prompt
 
 

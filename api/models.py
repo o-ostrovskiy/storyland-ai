@@ -76,6 +76,64 @@ def _validate_vibe(value):
     return normalized
 
 
+# Bounds for the optional imported-reading-history taste signal (StoryGraph /
+# Goodreads CSV import, PR1). The gateway (storyland-services) already parses +
+# bounds it, but the AI service re-bounds here so an unbounded history can never
+# inflate the discovery prompt (cost + prompt-injection surface). We TRUNCATE
+# rather than 422: a large legitimate reading history is normal input, not an
+# attack, and rejecting it would needlessly fail discovery.
+MAX_TASTE_TITLES = 20
+MAX_TASTE_MOODS = 12
+MAX_TASTE_STRING_LENGTH = 200
+
+
+def _bound_taste_context(value):
+    """Normalize + bound an optional ``{"titles": [...], "moods": [...]}`` block.
+
+    Strings are stripped and length-capped; blanks dropped; each list is
+    de-duplicated case-insensitively (first occurrence wins, order preserved)
+    and truncated to its cap. Returns a normalized dict, or None when
+    absent/empty so the prompt + cache key stay byte-identical to a no-taste
+    request. Raises ValueError (→ 422) only for a structurally wrong type.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("taste_context must be an object")
+
+    def _clean(items, cap):
+        if items is None:
+            return []
+        if not isinstance(items, (list, tuple)):
+            raise ValueError("taste_context titles/moods must be lists")
+        out, seen = [], set()
+        for item in items:
+            if not isinstance(item, str):
+                continue
+            normalized = item.strip()[:MAX_TASTE_STRING_LENGTH].strip()
+            if not normalized:
+                continue
+            key = normalized.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(normalized)
+            if len(out) >= cap:
+                break
+        return out
+
+    titles = _clean(value.get("titles"), MAX_TASTE_TITLES)
+    moods = _clean(value.get("moods"), MAX_TASTE_MOODS)
+    if not titles and not moods:
+        return None
+    result = {}
+    if titles:
+        result["titles"] = titles
+    if moods:
+        result["moods"] = moods
+    return result
+
+
 class DiscoverRequest(BaseModel):
     """Request body for POST /api/v1/itinerary/discover."""
 
@@ -112,6 +170,15 @@ class DiscoverRequest(BaseModel):
             "Absent ⇒ unchanged behavior."
         ),
     )
+    taste_context: Optional[dict] = Field(
+        default=None,
+        description=(
+            "Optional imported reading-history taste signal "
+            '({"titles": [...], "moods": [...]}) used to bias discovery toward '
+            "grounded places that resonate with the reader's demonstrated taste. "
+            "Bounded + de-duplicated server-side; absent ⇒ unchanged behavior."
+        ),
+    )
 
     @field_validator("book_title")
     @classmethod
@@ -142,6 +209,12 @@ class DiscoverRequest(BaseModel):
     def validate_vibe(cls, value):
         """Validate/normalize the optional mood/vibe token before the prompt."""
         return _validate_vibe(value)
+
+    @field_validator("taste_context")
+    @classmethod
+    def validate_taste_context(cls, value):
+        """Normalize + bound the optional imported taste signal before the prompt."""
+        return _bound_taste_context(value)
 
 
 class ComposeRequest(BaseModel):

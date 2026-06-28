@@ -128,6 +128,7 @@ async def discover_stream(
     user_id: str,
     executor: WorkflowExecutor,
     vibe: Optional[str] = None,
+    taste_context: Optional[dict] = None,
 ) -> AsyncGenerator[dict, None]:
     """Run phases 1-2 via executor and yield SSE events."""
     async for event in executor.discover(
@@ -135,6 +136,7 @@ async def discover_stream(
         author=author,
         preferences=preferences,
         vibe=vibe,
+        taste_context=taste_context,
         user_id=user_id,
     ):
         yield domain_event_to_sse(event)
