@@ -14,6 +14,11 @@ from typing import Optional, Tuple
 from pydantic import ValidationError
 
 from common.logging import get_logger
+from core.guardrails import (
+    sanitize_itinerary_explanations,
+    sanitize_expansion_explanations,
+    sanitize_book_recommendations,
+)
 from models.book import BookRecommendationsResult
 from models.itinerary import TripItinerary, ComposerEnvelope, ExpansionResult
 
@@ -167,7 +172,9 @@ def extract_itinerary_from_response(
     grounding_text = state_accessor.grounding_research_text
 
     def _finalize(itinerary_dict, suggestions):
-        return downgrade_ungrounded_match_types(itinerary_dict, grounding_text), suggestions
+        itinerary_dict = downgrade_ungrounded_match_types(itinerary_dict, grounding_text)
+        itinerary_dict = sanitize_itinerary_explanations(itinerary_dict)
+        return itinerary_dict, suggestions
 
     # Primary: composer_envelope from session state (set by output_key="composer_envelope")
     envelope_data = state_accessor.composer_envelope
@@ -210,7 +217,9 @@ def extract_itinerary_from_response(
 
 def extract_expansion_from_state(state_accessor) -> Optional[dict]:
     """Extract and validate the last expansion result from session state."""
-    return validate_expansion_result(state_accessor.last_expansion)
+    return sanitize_expansion_explanations(
+        validate_expansion_result(state_accessor.last_expansion)
+    )
 
 
 def validate_book_recommendations_result(value: object) -> Optional[dict]:
@@ -236,7 +245,9 @@ def validate_book_recommendations_result(value: object) -> Optional[dict]:
 
 def extract_book_recommendations_from_state(state_accessor) -> Optional[dict]:
     """Extract and validate the last book recommendations result from session state."""
-    return validate_book_recommendations_result(state_accessor.last_book_recommendations)
+    return sanitize_book_recommendations(
+        validate_book_recommendations_result(state_accessor.last_book_recommendations)
+    )
 
 
 def _normalize_text(text: object) -> str:

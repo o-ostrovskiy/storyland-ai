@@ -71,5 +71,42 @@ def load_prompts(version: str = CURRENT_PROMPT_VERSION) -> AgentPrompts:
             )
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        _cache[version] = AgentPrompts(**data["agents"])
+        agents_data = _inject_tone_guardrail(data["agents"])
+        _cache[version] = AgentPrompts(**agents_data)
     return _cache[version]
+
+
+# Agents that emit reader-facing explanation text ("why it fits" / reason /
+# overview / summary). The rec-explanation tone guardrail clause is appended to
+# each so the model never writes reader-directed judgement. Researcher agents
+# (which only gather candidates) and pure formatters that don't author the
+# explanation copy are intentionally excluded.
+_EXPLANATION_AGENTS = (
+    "trip_composer",
+    "local_atmosphere_formatter",
+    "expansion_formatter",
+    "book_recommendation_formatter",
+    "place_to_book_formatter",
+)
+
+
+def _inject_tone_guardrail(agents_data: dict) -> dict:
+    """Append the reader-safety tone guardrail to explanation-producing prompts.
+
+    Returns a shallow copy with the guardrail appended to each explanation
+    agent's instruction. Idempotent: skips an instruction that already carries
+    the clause (the cache also makes load_prompts a no-op after the first call).
+
+    The guardrail constant is imported lazily here (not at module load) so the
+    ``agents`` package never imports the heavy ``core`` package at import time,
+    avoiding an agents<->core import cycle. By the time load_prompts() first
+    runs, all modules are fully initialized.
+    """
+    from core.guardrails import READER_TONE_GUARDRAIL
+
+    out = dict(agents_data)
+    for name in _EXPLANATION_AGENTS:
+        instruction = out.get(name)
+        if isinstance(instruction, str) and READER_TONE_GUARDRAIL not in instruction:
+            out[name] = instruction + READER_TONE_GUARDRAIL
+    return out
