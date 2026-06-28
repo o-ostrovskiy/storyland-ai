@@ -123,6 +123,45 @@ class TestDiscoveryCacheKey:
         assert cozy != base
         assert cozy.endswith("|vibe=cozy")
 
+    def test_absent_taste_key_is_unchanged(self):
+        from core.executor import WorkflowExecutor
+
+        base = WorkflowExecutor._discovery_cache_key("Dune", "Herbert", None)
+        with_none = WorkflowExecutor._discovery_cache_key(
+            "Dune", "Herbert", None, None, None
+        )
+        assert base == with_none
+
+    def test_present_taste_changes_key(self):
+        from core.executor import WorkflowExecutor
+
+        base = WorkflowExecutor._discovery_cache_key("Dune", "Herbert", None)
+        tasted = WorkflowExecutor._discovery_cache_key(
+            "Dune", "Herbert", None, None, {"titles": ["1984"], "moods": ["bleak"]}
+        )
+        assert tasted != base
+        assert "|taste=" in tasted
+
+    def test_different_taste_differ(self):
+        from core.executor import WorkflowExecutor
+
+        k1 = WorkflowExecutor._discovery_cache_key(
+            "Dune", "Herbert", None, None, {"titles": ["1984"]}
+        )
+        k2 = WorkflowExecutor._discovery_cache_key(
+            "Dune", "Herbert", None, None, {"titles": ["Beloved"]}
+        )
+        assert k1 != k2
+
+    def test_vibe_and_taste_compose_in_key(self):
+        from core.executor import WorkflowExecutor
+
+        key = WorkflowExecutor._discovery_cache_key(
+            "Dune", "Herbert", None, "cozy", {"moods": ["warm"]}
+        )
+        assert "|vibe=cozy" in key
+        assert "|taste=" in key
+
     def test_different_vibes_differ(self):
         from core.executor import WorkflowExecutor
 
@@ -147,7 +186,7 @@ class TestExecutorCacheHit:
 
     async def test_cache_hit_skips_discovery_chain(self, monkeypatch):
         import core.executor as ex
-        from core.executor import WorkflowExecutor, APP_NAME
+        from core.executor import WorkflowExecutor
         from core.events import RegionsReady, WorkflowComplete
         from services.session_service import create_session_service
 

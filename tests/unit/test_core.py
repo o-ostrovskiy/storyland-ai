@@ -305,6 +305,47 @@ class TestPrompts:
         # ...and an explicit grounding-wins guard so vibe can't invent links.
         assert "grounding" in prompt.lower()
 
+    def test_discovery_prompt_taste_absent_is_byte_identical(self):
+        # Omitting taste_context must not change the prompt at all.
+        assert build_discovery_prompt("1984", "George Orwell", None, None) == (
+            build_discovery_prompt("1984", "George Orwell")
+        )
+
+    def test_discovery_prompt_empty_taste_is_byte_identical(self):
+        # A structurally-empty taste block is treated as absent.
+        assert build_discovery_prompt(
+            "1984", "George Orwell", None, {"titles": [], "moods": []}
+        ) == build_discovery_prompt("1984", "George Orwell")
+
+    def test_discovery_prompt_taste_present_biases_and_keeps_grounding(self):
+        prompt = build_discovery_prompt(
+            "1984",
+            "George Orwell",
+            None,
+            {"titles": ["Wuthering Heights"], "moods": ["melancholic"]},
+        )
+        assert '"1984"' in prompt
+        assert "cities" in prompt.lower()
+        # The reader's titles + moods surface in the bias clause...
+        assert "Wuthering Heights" in prompt
+        assert "melancholic" in prompt
+        assert "reading history" in prompt.lower()
+        # ...with the same grounding-wins guard as vibe.
+        assert "grounding" in prompt.lower()
+
+    def test_discovery_prompt_vibe_and_taste_compose(self):
+        # Both biases append independently; neither replaces the other.
+        prompt = build_discovery_prompt(
+            "1984",
+            "George Orwell",
+            "cozy",
+            {"titles": ["Dune"], "moods": ["adventurous"]},
+        )
+        assert "cozy" in prompt
+        assert "Dune" in prompt
+        assert "adventurous" in prompt
+        assert prompt.count("grounding") >= 2
+
     def test_composition_prompt(self):
         regions = [{"region_id": 1, "region_name": "England"}]
         prompt = build_composition_prompt("1984", "George Orwell", regions)
