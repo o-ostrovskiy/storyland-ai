@@ -127,12 +127,14 @@ async def discover_stream(
     preferences: Optional[dict],
     user_id: str,
     executor: WorkflowExecutor,
+    vibe: Optional[str] = None,
 ) -> AsyncGenerator[dict, None]:
     """Run phases 1-2 via executor and yield SSE events."""
     async for event in executor.discover(
         book_title=book_title,
         author=author,
         preferences=preferences,
+        vibe=vibe,
         user_id=user_id,
     ):
         yield domain_event_to_sse(event)

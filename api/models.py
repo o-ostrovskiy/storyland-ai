@@ -46,6 +46,36 @@ def _bound_preferences(value):
     return value
 
 
+# Curated mood/vibe set mirrored from the gateway (storyland-services). The
+# gateway already validates + normalizes before forwarding, but we re-validate
+# here so the AI service never trusts an unbounded value into the discovery
+# prompt (defense in depth). Canonical form is lower-case; "slow-burn" keeps its
+# hyphen. Absent ⇒ today's behavior exactly; an unrecognized value is a 422.
+ALLOWED_VIBES = frozenset(
+    {"cozy", "melancholic", "adventurous", "slow-burn", "atmospheric", "hopeful"}
+)
+
+
+def _validate_vibe(value):
+    """Normalize + validate an optional mood/vibe token.
+
+    Returns the canonical lower-case token, or None when absent/blank. Raises
+    ValueError (→ 422) for a non-string or an out-of-set value so an unknown
+    vibe is never silently dropped into the prompt.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("vibe must be a string")
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+    if normalized not in ALLOWED_VIBES:
+        allowed = ", ".join(sorted(ALLOWED_VIBES))
+        raise ValueError(f"vibe must be one of: {allowed}")
+    return normalized
+
+
 class DiscoverRequest(BaseModel):
     """Request body for POST /api/v1/itinerary/discover."""
 
@@ -74,6 +104,14 @@ class DiscoverRequest(BaseModel):
     preferences: Optional[dict] = Field(
         default=None, description="User travel preferences"
     )
+    vibe: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional explicit mood/vibe to bias discovery toward (curated set: "
+            "cozy, melancholic, adventurous, slow-burn, atmospheric, hopeful). "
+            "Absent ⇒ unchanged behavior."
+        ),
+    )
 
     @field_validator("book_title")
     @classmethod
@@ -98,6 +136,12 @@ class DiscoverRequest(BaseModel):
     def validate_preferences(cls, value):
         """Bound preferences size before it flows into the prompt."""
         return _bound_preferences(value)
+
+    @field_validator("vibe")
+    @classmethod
+    def validate_vibe(cls, value):
+        """Validate/normalize the optional mood/vibe token before the prompt."""
+        return _validate_vibe(value)
 
 
 class ComposeRequest(BaseModel):

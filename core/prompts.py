@@ -9,13 +9,33 @@ import json
 from typing import List
 
 
-def build_discovery_prompt(book_title: str, author: str) -> str:
-    """Build the user prompt for the discovery phase (phase 2)."""
-    return (
+def build_discovery_prompt(
+    book_title: str, author: str, vibe: str | None = None
+) -> str:
+    """Build the user prompt for the discovery phase (phase 2).
+
+    When ``vibe`` is provided it is appended as an explicit atmosphere
+    preference that re-weights *already-valid* candidates toward that mood and
+    asks the connection note to name it. It deliberately does NOT relax the
+    grounding requirement: places must still be genuinely connected to the book,
+    so the vibe can only tilt selection among honest candidates, never invent a
+    link. When ``vibe`` is None the returned prompt is byte-identical to before.
+    """
+    prompt = (
         f'Discover travel locations for "{book_title}" by {author}.\n\n'
         f"Find cities, landmarks, and author-related sites, "
         f"then group them into practical travel regions."
     )
+    if vibe:
+        prompt += (
+            f"\n\nThe reader has chosen a \"{vibe}\" mood. Among places that are "
+            f"genuinely and verifiably connected to the book, prefer those whose "
+            f"atmosphere best fits a {vibe} feeling, and name that {vibe} "
+            f"atmosphere in each place's connection note. Do NOT include or "
+            f"invent any place that is not truly tied to the book just to match "
+            f"the mood — factual grounding always wins over vibe."
+        )
+    return prompt
 
 
 def build_composition_prompt(
