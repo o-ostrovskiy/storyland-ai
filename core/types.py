@@ -27,6 +27,9 @@ class ExecutorConfig:
     langfuse_host: Optional[str] = None
     environment: str = "local"
     # Result cache settings (carried through from common.config.Config).
+    # cache_enabled defaults True so an absent value never silently disables
+    # caching (matches common.config.Config's CACHE_ENABLED default).
+    cache_enabled: bool = True
     cache_ttl_seconds: int = 86400
     cache_max_entries: int = 500
     # Bounded Gemini retry backoff (parity with the eval runner).
@@ -49,6 +52,7 @@ class ExecutorConfig:
             langfuse_public_key=config.langfuse_public_key,
             langfuse_host=config.langfuse_host,
             environment=config.environment,
+            cache_enabled=getattr(config, "cache_enabled", True),
             cache_ttl_seconds=getattr(config, "cache_ttl_seconds", 86400),
             cache_max_entries=getattr(config, "cache_max_entries", 500),
             retry_exp_base=getattr(config, "retry_exp_base", 2.0),

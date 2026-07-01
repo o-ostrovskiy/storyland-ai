@@ -37,7 +37,11 @@ class Config:
     # 'dev_user'. Default false so non-local deploys fail closed (403)
     # instead of silently collapsing callers into one session namespace.
     allow_dev_user: bool
-    # Result cache for the Discovery chain (always on; validated in prod 2026-06-17).
+    # Result cache for the Discovery chain. cache_enabled is the master
+    # switch: default TRUE so a missing/dropped CACHE_ENABLED env var degrades
+    # to *on with a sane default*, never silently off (the silent-config-drop
+    # correctness bug). Set CACHE_ENABLED=false to deliberately disable.
+    cache_enabled: bool
     cache_ttl_seconds: int
     cache_max_entries: int
     # Bounded Gemini retry backoff (keeps worst-case schedule < workflow_timeout).
@@ -132,6 +136,9 @@ def load_config() -> Config:
         - ALLOW_DEV_USER: local-dev only; when "true", a request with no
           trusted X-User-ID header resolves to the shared "dev_user".
           Default false (production fails closed with 403). (default: false)
+        - CACHE_ENABLED: master switch for the Discovery result cache;
+          a missing var falls back to true (on), never silently off.
+          Set "false" to deliberately disable caching. (default: true)
         - RATE_LIMIT_REQUESTS: max requests per window per user/IP on the
           expensive endpoints; 0 disables (default: 0)
         - RATE_LIMIT_WINDOW_SECONDS: rate-limit window length (default: 60)
@@ -167,6 +174,7 @@ def load_config() -> Config:
         environment=os.getenv("ENVIRONMENT", "local"),
         internal_api_secret=os.getenv("INTERNAL_API_SECRET", ""),
         allow_dev_user=_env_bool("ALLOW_DEV_USER", False),
+        cache_enabled=_env_bool("CACHE_ENABLED", True),
         cache_ttl_seconds=_env_int("CACHE_TTL_SECONDS", 86400),
         cache_max_entries=_env_int("CACHE_MAX_ENTRIES", 500),
         retry_exp_base=_env_float("RETRY_EXP_BASE", 2.0),
