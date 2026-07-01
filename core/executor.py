@@ -153,9 +153,12 @@ class WorkflowExecutor:
             use_database=config.use_database,
         )
         self._model = model or self._create_model()
-        # In-process result cache for the Discovery chain (always on;
-        # validated in prod 2026-06-17). Replays prior validated discovery
-        # results verbatim, so it cannot introduce new hallucinations.
+        # In-process result cache for the Discovery chain. Replays prior
+        # validated discovery results verbatim, so it cannot introduce new
+        # hallucinations. Gated by cache_enabled (default True): when disabled
+        # the fast-path and the store are both skipped, so caching is off
+        # deliberately (and logged at boot), never silently.
+        self._cache_enabled = config.cache_enabled
         self._discovery_cache = TTLCache(
             ttl_seconds=config.cache_ttl_seconds,
             max_entries=config.cache_max_entries,
@@ -341,7 +344,11 @@ class WorkflowExecutor:
         cache_key = self._discovery_cache_key(
             book_title, author, preferences, vibe, taste_context
         )
-        cached_region_analysis = await self._discovery_cache.get(cache_key)
+        cached_region_analysis = (
+            await self._discovery_cache.get(cache_key)
+            if self._cache_enabled
+            else None
+        )
         if cached_region_analysis:
             logger.info("discovery_cache_hit", job_id=job_id[:8])
             async for ev in self._emit_cached_discovery(
@@ -451,7 +458,7 @@ class WorkflowExecutor:
 
                 # Store on miss: cache only non-empty, schema-validated region
                 # sets so a future hit can safely short-circuit the chain.
-                if state.regions:
+                if self._cache_enabled and state.regions:
                     await self._discovery_cache.set(cache_key, state.region_analysis)
 
                 yield RegionsReady(

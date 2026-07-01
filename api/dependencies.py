@@ -59,6 +59,27 @@ async def initialize() -> AppState:
         inflight_limiter=inflight_limiter,
     )
 
+    # Boot-time visibility of the EFFECTIVE cache config so a dropped/
+    # misconfigured setting is immediately obvious in prod logs (rather than
+    # silently serving with caching off). Warn loudly if a cache expected-on
+    # resolved to disabled.
+    logger.info(
+        "cache_config_effective",
+        enabled=config.cache_enabled,
+        ttl_seconds=config.cache_ttl_seconds,
+        max_entries=config.cache_max_entries,
+        backend="in-memory",
+    )
+    if not config.cache_enabled:
+        logger.warning(
+            "cache_disabled",
+            detail=(
+                "Discovery result cache is DISABLED (CACHE_ENABLED=false): "
+                "every discover re-pays live Gemini + Google Books cost. "
+                "Unset CACHE_ENABLED to fall back to on."
+            ),
+        )
+
     logger.info("api_initialized", model=config.model_name)
     return _app_state
 

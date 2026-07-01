@@ -241,3 +241,112 @@ class TestExecutorCacheHit:
             model=object(),
         )
         assert isinstance(executor._discovery_cache, TTLCache)
+
+
+# =============================================================================
+# Cache master-switch config (MYS-153 / MYS-9 PR1)
+#
+# The Discovery result cache must NEVER be silently disabled by a dropped env
+# var: an absent CACHE_ENABLED falls back to on. These tests pin that contract
+# and the flag's propagation Config -> ExecutorConfig -> WorkflowExecutor.
+# =============================================================================
+
+import os
+from unittest.mock import MagicMock
+
+from common.config import _env_bool, load_config
+
+
+def _base_env(monkeypatch) -> None:
+    """Set the minimal REQUIRED env so load_config() succeeds; leave the
+    optional cache vars to each test."""
+    required = {
+        "GOOGLE_API_KEY": "test-key",
+        "USE_DATABASE": "false",
+        "SESSION_MAX_EVENTS": "20",
+        "MAX_CONTEXT_TOKENS": "30000",
+        "MODEL_NAME": "gemini-test",
+        "WORKFLOW_TIMEOUT": "600",
+        "AGENT_TIMEOUT": "120",
+        "LOG_LEVEL": "INFO",
+        "ENABLE_ADK_DEBUG": "false",
+    }
+    for k, v in required.items():
+        monkeypatch.setenv(k, v)
+    # Ensure the optional switch starts unset for the fallback tests.
+    monkeypatch.delenv("CACHE_ENABLED", raising=False)
+
+
+class TestCacheEnabledFallback:
+    def test_env_bool_missing_defaults_true(self, monkeypatch):
+        monkeypatch.delenv("CACHE_ENABLED", raising=False)
+        assert _env_bool("CACHE_ENABLED", True) is True
+
+    def test_env_bool_false_is_false(self, monkeypatch):
+        monkeypatch.setenv("CACHE_ENABLED", "false")
+        assert _env_bool("CACHE_ENABLED", True) is False
+
+    def test_env_bool_true_is_true(self, monkeypatch):
+        monkeypatch.setenv("CACHE_ENABLED", "true")
+        assert _env_bool("CACHE_ENABLED", True) is True
+
+    def test_load_config_missing_var_stays_on(self, monkeypatch):
+        """A dropped CACHE_ENABLED must degrade to ON, never silently off."""
+        _base_env(monkeypatch)
+        assert load_config().cache_enabled is True
+
+    def test_load_config_explicit_false_disables(self, monkeypatch):
+        _base_env(monkeypatch)
+        monkeypatch.setenv("CACHE_ENABLED", "false")
+        assert load_config().cache_enabled is False
+
+
+class TestExecutorConfigCacheEnabled:
+    def test_default_is_enabled(self):
+        cfg = ExecutorConfig(model_name="gemini-test", google_api_key="k")
+        assert cfg.cache_enabled is True
+
+    def test_from_config_carries_flag(self):
+        mock_config = MagicMock()
+        mock_config.cache_enabled = False
+        assert ExecutorConfig.from_config(mock_config).cache_enabled is False
+
+    def test_from_config_defaults_true_when_absent(self):
+        # A source config object that predates the flag (no cache_enabled
+        # attribute) must resolve to the getattr default of True.
+        from types import SimpleNamespace
+
+        legacy = SimpleNamespace(
+            model_name="gemini-test",
+            google_api_key="k",
+            workflow_timeout=600,
+            database_url=None,
+            use_database=False,
+            langfuse_secret_key=None,
+            langfuse_public_key=None,
+            langfuse_host=None,
+            environment="local",
+        )
+        assert ExecutorConfig.from_config(legacy).cache_enabled is True
+
+
+class TestExecutorCacheGating:
+    """The executor must honor cache_enabled without touching Gemini."""
+
+    def _executor(self, enabled: bool):
+        from core.executor import WorkflowExecutor
+
+        cfg = ExecutorConfig(
+            model_name="gemini-test",
+            google_api_key="k",
+            cache_enabled=enabled,
+            use_database=False,
+        )
+        # Inject a fake model so no real Gemini client is created.
+        return WorkflowExecutor(cfg, model=MagicMock())
+
+    def test_flag_propagates_enabled(self):
+        assert self._executor(True)._cache_enabled is True
+
+    def test_flag_propagates_disabled(self):
+        assert self._executor(False)._cache_enabled is False
