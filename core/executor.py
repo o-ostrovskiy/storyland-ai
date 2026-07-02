@@ -50,6 +50,7 @@ from models.book import BookMetadata
 from plugins.langfuse_plugin import LangfusePlugin
 from services.session_service import create_session_service
 
+from .discovery_errors import classify_discovery_failure
 from .events import (
     DomainEvent,
     Phase,
@@ -505,14 +506,25 @@ class WorkflowExecutor:
             await self._mark_session_failed(job_id, user_id)
             raise
         except Exception as e:
+            # Collapse the async-TaskGroup boundary: a child-task failure
+            # arrives here as an ExceptionGroup whose str() is the opaque
+            # "unhandled errors in a TaskGroup (...)". Classify it into a
+            # single, client-safe typed error and surface only that — the real
+            # exception is logged server-side, never returned to the client.
+            compose_error = classify_discovery_failure(e, taste_context=taste_context)
             logger.error(
-                "discover_error", error=str(e), error_type=type(e).__name__
+                "discover_error",
+                error=str(e),
+                error_type=type(e).__name__,
+                compose_error_kind=compose_error.kind,
             )
             await self._mark_session_failed(job_id, user_id)
             yield WorkflowError(
-                message=str(e),
-                error_type=type(e).__name__,
+                message=compose_error.message,
+                error_type="DiscoveryComposeError",
                 phase=Phase.DISCOVERY,
+                reason=compose_error.kind,
+                offending_title=compose_error.offending_title,
             )
             yield WorkflowComplete(job_id=job_id)
 
