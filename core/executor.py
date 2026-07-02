@@ -74,7 +74,8 @@ from .prompts import (
     build_composition_prompt,
     build_local_atmosphere_prompt,
 )
-from .cache import TTLCache
+from .cache import TTLCache, build_discovery_cache
+from .cache_version import compute_cache_version
 from .regions import get_valid_region_ids, validate_region_selection
 from .session_state import SessionStateAccessor, SessionStateKeys
 from .types import ExecutorConfig
@@ -159,10 +160,14 @@ class WorkflowExecutor:
         # the fast-path and the store are both skipped, so caching is off
         # deliberately (and logged at boot), never silently.
         self._cache_enabled = config.cache_enabled
-        self._discovery_cache = TTLCache(
-            ttl_seconds=config.cache_ttl_seconds,
-            max_entries=config.cache_max_entries,
-        )
+        # Persistent-or-in-memory Discovery cache, chosen by config.cache_backend
+        # (disk in prod: survives restart/redeploy; memory for tests/library use).
+        self._discovery_cache = build_discovery_cache(config)
+        # Version namespace mixed into every cache key so a model or prompt
+        # change auto-invalidates all prior entries (essential now that the disk
+        # backend persists them across deploys — no stale grounded recs, and no
+        # post-deploy warmup needed).
+        self._cache_version = compute_cache_version(config.model_name)
 
     @property
     def session_service(self):
@@ -244,6 +249,15 @@ class WorkflowExecutor:
             analysis_note=region_analysis.get("analysis_note", ""),
         )
         yield WorkflowComplete(job_id=job_id)
+
+    def _versioned_key(self, base_key: str) -> str:
+        """Namespace a logical cache key with the model/prompt version hash.
+
+        Applied at the cache boundary (not inside ``_discovery_cache_key``) so
+        the logical key contract is unchanged; a model/prompt change flips the
+        namespace and all prior (persisted) entries stop matching.
+        """
+        return f"dv:{self._cache_version}:{base_key}"
 
     @staticmethod
     def _discovery_cache_key(
@@ -341,8 +355,10 @@ class WorkflowExecutor:
         # the previously computed (already validated) regions and makes ZERO
         # Gemini calls. Only non-empty region sets are ever cached, so a hit
         # cannot introduce a new fabrication; staleness is bounded by the TTL.
-        cache_key = self._discovery_cache_key(
-            book_title, author, preferences, vibe, taste_context
+        cache_key = self._versioned_key(
+            self._discovery_cache_key(
+                book_title, author, preferences, vibe, taste_context
+            )
         )
         cached_region_analysis = (
             await self._discovery_cache.get(cache_key)
@@ -1597,4 +1613,6 @@ class WorkflowExecutor:
 
     async def close(self) -> None:
         """Cleanup resources."""
-        pass
+        close = getattr(self._discovery_cache, "close", None)
+        if callable(close):
+            close()

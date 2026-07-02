@@ -44,6 +44,13 @@ class Config:
     cache_enabled: bool
     cache_ttl_seconds: int
     cache_max_entries: int
+    # Cache backend for the Discovery result cache. "disk" (default) persists to
+    # a SQLite store under cache_dir (mounted on a docker volume) so entries
+    # survive restart/redeploy; "memory" is the legacy in-process cache. A
+    # missing var defaults to "disk" — the persistent behaviour — and the
+    # effective backend is logged at boot.
+    cache_backend: str
+    cache_dir: str
     # Bounded Gemini retry backoff (keeps worst-case schedule < workflow_timeout).
     retry_exp_base: float
     retry_max_delay: float
@@ -139,6 +146,10 @@ def load_config() -> Config:
         - CACHE_ENABLED: master switch for the Discovery result cache;
           a missing var falls back to true (on), never silently off.
           Set "false" to deliberately disable caching. (default: true)
+        - CACHE_BACKEND: "disk" (persistent SQLite on a docker volume, survives
+          restart/redeploy) or "memory" (legacy in-process). (default: disk)
+        - CACHE_DIR: directory for the disk backend's store, mounted on a
+          docker volume in prod. (default: /app/.cache/discovery)
         - RATE_LIMIT_REQUESTS: max requests per window per user/IP on the
           expensive endpoints; 0 disables (default: 0)
         - RATE_LIMIT_WINDOW_SECONDS: rate-limit window length (default: 60)
@@ -177,6 +188,8 @@ def load_config() -> Config:
         cache_enabled=_env_bool("CACHE_ENABLED", True),
         cache_ttl_seconds=_env_int("CACHE_TTL_SECONDS", 86400),
         cache_max_entries=_env_int("CACHE_MAX_ENTRIES", 500),
+        cache_backend=os.getenv("CACHE_BACKEND", "disk"),
+        cache_dir=os.getenv("CACHE_DIR", "/app/.cache/discovery"),
         retry_exp_base=_env_float("RETRY_EXP_BASE", 2.0),
         retry_max_delay=_env_float("RETRY_MAX_DELAY", 12.0),
         retry_attempts=_env_int("RETRY_ATTEMPTS", 4),

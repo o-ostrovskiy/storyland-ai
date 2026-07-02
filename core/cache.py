@@ -25,6 +25,11 @@ import time
 from collections import OrderedDict
 from typing import Any, Optional
 
+from common.logging import get_logger
+
+
+logger = get_logger("storyland.core.cache")
+
 
 class TTLCache:
     """An async-safe, bounded TTL cache with oldest-first eviction.
@@ -87,5 +92,63 @@ class TTLCache:
         async with self._lock:
             self._store.clear()
 
+    def close(self) -> None:
+        """No-op close so the in-memory cache matches the disk cache interface.
+
+        The disk backend releases a SQLite handle here; the in-memory store has
+        nothing to release. Lets the executor call ``close()`` uniformly.
+        """
+        return None
+
     def __len__(self) -> int:
         return len(self._store)
+
+
+def build_discovery_cache(config):
+    """Construct the Discovery result cache for the configured backend.
+
+    ``config`` is an ``ExecutorConfig`` (or anything exposing ``cache_backend``,
+    ``cache_dir``, ``cache_ttl_seconds`` and ``cache_max_entries``).
+
+    * ``cache_backend == "disk"`` -> a persistent :class:`~core.disk_cache.DiskTTLCache`
+      under ``cache_dir`` (mounted on a docker volume in prod), so entries
+      survive restart/redeploy.
+    * anything else (default ``"memory"``) -> the in-process :class:`TTLCache`.
+
+    Disk construction is best-effort: if ``diskcache`` is missing or the
+    directory can't be opened (permissions, read-only fs, disk full), we log and
+    fall back to the in-memory cache rather than breaking discovery. The full
+    rollback is still just reverting the commit (which restores the in-memory
+    default), but this fallback keeps a misconfigured volume from taking the
+    service down.
+    """
+    ttl = config.cache_ttl_seconds
+    max_entries = config.cache_max_entries
+    backend = (getattr(config, "cache_backend", "memory") or "memory").lower()
+
+    if backend == "disk":
+        directory = getattr(config, "cache_dir", None)
+        if not directory:
+            logger.warning(
+                "cache_disk_dir_missing",
+                detail="cache_backend=disk but cache_dir is empty; using in-memory cache.",
+            )
+            return TTLCache(ttl_seconds=ttl, max_entries=max_entries)
+        try:
+            from core.disk_cache import DiskTTLCache
+
+            cache = DiskTTLCache(
+                directory=directory, ttl_seconds=ttl, max_entries=max_entries
+            )
+            logger.info("cache_backend_selected", backend="disk", directory=directory)
+            return cache
+        except Exception as exc:  # noqa: BLE001 - never let cache setup break boot
+            logger.warning(
+                "cache_disk_init_failed",
+                directory=directory,
+                error=str(exc),
+                detail="Falling back to in-memory Discovery cache.",
+            )
+            return TTLCache(ttl_seconds=ttl, max_entries=max_entries)
+
+    return TTLCache(ttl_seconds=ttl, max_entries=max_entries)
