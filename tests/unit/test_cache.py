@@ -211,7 +211,11 @@ class TestExecutorCacheHit:
             "regions": [{"region_id": 1, "name": "Atlanta, United States"}],
             "analysis_note": "cached note",
         }
-        key = WorkflowExecutor._discovery_cache_key("1984", "George Orwell", None)
+        # The executor namespaces keys with the model/prompt version, so prime
+        # the store through the same helper discover() uses.
+        key = executor._versioned_key(
+            WorkflowExecutor._discovery_cache_key("1984", "George Orwell", None)
+        )
         await executor._discovery_cache.set(key, cached)
 
         events = [

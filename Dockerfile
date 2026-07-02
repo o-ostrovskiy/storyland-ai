@@ -17,6 +17,10 @@ RUN pip install --no-cache-dir .
 
 # Run as an unprivileged user (least privilege; shrinks RCE/SSRF blast radius).
 # uvicorn binds 8080 (>1024), so no root is required at runtime.
+# Discovery cache dir (mounted on a docker volume in prod). Created before the
+# chown so a named volume mounted here inherits appuser ownership on first use
+# and the unprivileged runtime user can write the SQLite store.
+RUN mkdir -p /app/.cache/discovery
 RUN useradd --create-home --uid 10001 appuser \
     && chown -R appuser:appuser /app
 USER appuser

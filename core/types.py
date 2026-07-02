@@ -32,6 +32,14 @@ class ExecutorConfig:
     cache_enabled: bool = True
     cache_ttl_seconds: int = 86400
     cache_max_entries: int = 500
+    # Cache backend: "memory" (in-process, default for direct/library use and
+    # tests) or "disk" (persistent SQLite on a docker volume, survives
+    # restart/redeploy). The deployed app sets this to "disk" via CACHE_BACKEND;
+    # the dataclass default stays "memory" so unit tests are hermetic.
+    cache_backend: str = "memory"
+    # On-disk directory for the "disk" backend (mounted on a docker volume in
+    # prod). Ignored by the memory backend.
+    cache_dir: Optional[str] = None
     # Bounded Gemini retry backoff (parity with the eval runner).
     retry_exp_base: float = 2.0
     retry_max_delay: float = 12.0
@@ -55,6 +63,8 @@ class ExecutorConfig:
             cache_enabled=getattr(config, "cache_enabled", True),
             cache_ttl_seconds=getattr(config, "cache_ttl_seconds", 86400),
             cache_max_entries=getattr(config, "cache_max_entries", 500),
+            cache_backend=getattr(config, "cache_backend", "memory"),
+            cache_dir=getattr(config, "cache_dir", None),
             retry_exp_base=getattr(config, "retry_exp_base", 2.0),
             retry_max_delay=getattr(config, "retry_max_delay", 12.0),
             retry_attempts=getattr(config, "retry_attempts", 4),

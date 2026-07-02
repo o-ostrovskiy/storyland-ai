@@ -68,7 +68,8 @@ async def initialize() -> AppState:
         enabled=config.cache_enabled,
         ttl_seconds=config.cache_ttl_seconds,
         max_entries=config.cache_max_entries,
-        backend="in-memory",
+        backend=config.cache_backend,
+        cache_dir=config.cache_dir if config.cache_backend == "disk" else None,
     )
     if not config.cache_enabled:
         logger.warning(
