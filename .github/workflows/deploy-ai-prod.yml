@@ -34,6 +34,14 @@ name: Deploy AI (prod)
 # DEPENDENCY NOTE: on the box, restarting `storyland-ai` via docker compose can
 # also recreate its depends_on services. This mirrors deploy.sh's existing
 # behaviour; the `--no-deps` refinement is tracked separately.
+#
+# JUST-IN-TIME SSH: port 22 on the box is CLOSED at rest
+# (storyland-infrastructure/deploy/terraform-lightsail). This workflow assumes
+# the storyland-github-deploy role via OIDC (no long-lived AWS keys), opens
+# port 22 for the runner's IP for the duration of the deploy, and always
+# closes it afterwards. Requires the AWS_DEPLOY_ROLE_ARN repo VARIABLE.
+# Mirrors the same steps in the infra repo's deploy-service.yml — keep the
+# two in sync.
 
 on:
   workflow_dispatch:
@@ -49,6 +57,7 @@ concurrency:
 
 permissions:
   contents: read
+  id-token: write # OIDC token for the just-in-time SSH role
 
 jobs:
   deploy:
@@ -65,6 +74,27 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
+
+      - name: Validate JIT-SSH configuration
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          [ -n "$AWS_DEPLOY_ROLE_ARN" ] || { echo "::error::Repo variable AWS_DEPLOY_ROLE_ARN is not set"; exit 1; }
+
+      - name: Assume deploy role (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Open SSH for this runner (just-in-time)
+        run: |
+          RUNNER_IP="$(curl -sf https://checkip.amazonaws.com)"
+          # ipv6Cidrs must be explicitly empty — Lightsail defaults it to ::/0
+          # when omitted (open to the whole IPv6 internet).
+          aws lightsail open-instance-public-ports \
+            --instance-name storyland \
+            --port-info "{\"fromPort\":22,\"toPort\":22,\"protocol\":\"tcp\",\"cidrs\":[\"$RUNNER_IP/32\"],\"ipv6Cidrs\":[]}"
 
       - name: Set up SSH key + pinned known_hosts
         env:
@@ -84,8 +114,13 @@ jobs:
           BOX_IP: ${{ secrets.BOX_IP }}
         run: |
           # storyland-ai source -> ~/storyland/storyland-ai/ (the compose build context).
-          SSH_CMD="ssh -i ~/.ssh/deploy_key -o ServerAliveInterval=30"
-          $SSH_CMD "ubuntu@$BOX_IP" "mkdir -p ~/storyland/storyland-ai"
+          SSH_CMD="ssh -i ~/.ssh/deploy_key -o ServerAliveInterval=30 -o ConnectTimeout=10"
+          # The just-in-time firewall change can take a few seconds to propagate.
+          for i in $(seq 1 6); do
+            $SSH_CMD "ubuntu@$BOX_IP" "mkdir -p ~/storyland/storyland-ai" && break
+            [ "$i" = 6 ] && { echo "::error::Box unreachable over SSH after JIT port opening"; exit 1; }
+            sleep 5
+          done
           # Excludes mirror deploy.sh; .env/.env.prod are excluded so the box's
           # runtime config (source of truth) is never clobbered. .claude/.mcp.json
           # are excluded so no local agent config / credentials can ride to the box.
@@ -108,3 +143,12 @@ jobs:
             "cd ~/storyland/storyland-infrastructure/deploy && \
              docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build storyland-ai && \
              docker compose -f docker-compose.prod.yml ps storyland-ai"
+
+      - name: Close SSH (at-rest state)
+        if: always()
+        run: |
+          # Runs even on failure/cancel so port 22 never lingers open.
+          # Converges to exactly what terraform manages (no port-22 entry).
+          aws lightsail close-instance-public-ports \
+            --instance-name storyland \
+            --port-info "fromPort=22,toPort=22,protocol=tcp"
