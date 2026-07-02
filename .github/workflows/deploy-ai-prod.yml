@@ -124,7 +124,11 @@ jobs:
           # Excludes mirror deploy.sh; .env/.env.prod are excluded so the box's
           # runtime config (source of truth) is never clobbered. .claude/.mcp.json
           # are excluded so no local agent config / credentials can ride to the box.
-          rsync -az \
+          # --delete propagates file removals/rollbacks to the box (stale files
+          # were otherwise rebaked into the image by `COPY . .`). Safe: the source
+          # is a fresh, complete actions/checkout, and rsync never deletes receiver
+          # files matching an --exclude unless --delete-excluded is set.
+          rsync -az --delete \
             --exclude '.git' --exclude 'node_modules' --exclude '__pycache__' --exclude '*.pyc' \
             --exclude 'dist' --exclude 'build' --exclude '.venv' --exclude 'venv' \
             --exclude '.terraform' --exclude '*.tfstate*' --exclude '.env' --exclude '.env.prod' \
