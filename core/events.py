@@ -84,11 +84,21 @@ class BookRecommendationsReady:
 
 @dataclass(frozen=True)
 class WorkflowError:
-    """An error occurred during workflow execution."""
+    """An error occurred during workflow execution.
+
+    ``reason`` is a machine-readable classification the gateway/fe branch on
+    (currently ``"transient"`` or ``"taste_validation"`` for discovery-compose
+    failures); ``offending_title`` names the specific taste_context title when
+    ``reason == "taste_validation"``. Both are optional so non-classified
+    errors are unchanged. ``message`` is always client-safe — never a raw
+    exception / ExceptionGroup string.
+    """
 
     message: str
     error_type: str
     phase: Optional[Phase] = None
+    reason: Optional[str] = None
+    offending_title: Optional[str] = None
 
 
 @dataclass(frozen=True)

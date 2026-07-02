@@ -491,6 +491,17 @@ class SSEErrorEvent(BaseModel):
     phase: Optional[int] = Field(
         default=None, description="Phase where error occurred"
     )
+    reason: Optional[str] = Field(
+        default=None,
+        description=(
+            "Machine-readable failure class for recovery UX "
+            '("transient" | "taste_validation"). Absent for unclassified errors.'
+        ),
+    )
+    offending_title: Optional[str] = Field(
+        default=None,
+        description="taste_context title that failed validation (reason=taste_validation)",
+    )
 
 
 class SSEDoneEvent(BaseModel):

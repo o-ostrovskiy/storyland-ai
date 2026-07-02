@@ -100,11 +100,21 @@ def domain_event_to_sse(event: DomainEvent) -> dict:
                     recommendations=r, book_recommendation_count=n
                 ).model_dump_json(),
             )
-        case WorkflowError(message=m, error_type=t, phase=p):
+        case WorkflowError(
+            message=m,
+            error_type=t,
+            phase=p,
+            reason=r,
+            offending_title=ot,
+        ):
             return _sse(
                 "error",
                 SSEErrorEvent(
-                    message=m, error_type=t, phase=int(p) if p is not None else None
+                    message=m,
+                    error_type=t,
+                    phase=int(p) if p is not None else None,
+                    reason=r,
+                    offending_title=ot,
                 ).model_dump_json(),
             )
         case WorkflowComplete(job_id=j, token_usage=u):
