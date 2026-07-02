@@ -35,14 +35,13 @@ name: Deploy AI (prod)
 # also recreate its depends_on services. This mirrors deploy.sh's existing
 # behaviour; the `--no-deps` refinement is tracked separately.
 #
-# JUST-IN-TIME SSH: port 22 on the box is restricted at rest to the home CIDR
+# JUST-IN-TIME SSH: port 22 on the box is CLOSED at rest
 # (storyland-infrastructure/deploy/terraform-lightsail). This workflow assumes
 # the storyland-github-deploy role via OIDC (no long-lived AWS keys), opens
 # port 22 for the runner's IP for the duration of the deploy, and always
-# restores the at-rest CIDR afterwards. Requires the AWS_DEPLOY_ROLE_ARN repo
-# VARIABLE and the SSH_ALLOWED_CIDR repo SECRET (a secret so the home CIDR is
-# masked in this public repo's logs). Mirrors the same steps in the infra
-# repo's deploy-service.yml — keep the two in sync.
+# closes it afterwards. Requires the AWS_DEPLOY_ROLE_ARN repo VARIABLE.
+# Mirrors the same steps in the infra repo's deploy-service.yml — keep the
+# two in sync.
 
 on:
   workflow_dispatch:
@@ -79,10 +78,8 @@ jobs:
       - name: Validate JIT-SSH configuration
         env:
           AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          SSH_ALLOWED_CIDR: ${{ secrets.SSH_ALLOWED_CIDR }}
         run: |
           [ -n "$AWS_DEPLOY_ROLE_ARN" ] || { echo "::error::Repo variable AWS_DEPLOY_ROLE_ARN is not set"; exit 1; }
-          [ -n "$SSH_ALLOWED_CIDR" ] || { echo "::error::Repo secret SSH_ALLOWED_CIDR is not set"; exit 1; }
 
       - name: Assume deploy role (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -91,16 +88,13 @@ jobs:
           aws-region: us-east-1
 
       - name: Open SSH for this runner (just-in-time)
-        env:
-          SSH_ALLOWED_CIDR: ${{ secrets.SSH_ALLOWED_CIDR }}
         run: |
           RUNNER_IP="$(curl -sf https://checkip.amazonaws.com)"
-          # OpenInstancePublicPorts REPLACES the port-22 entry, so the home CIDR
-          # is included to keep laptop access during the deploy. ipv6Cidrs must
-          # be explicitly empty — Lightsail defaults it to ::/0 when omitted.
+          # ipv6Cidrs must be explicitly empty — Lightsail defaults it to ::/0
+          # when omitted (open to the whole IPv6 internet).
           aws lightsail open-instance-public-ports \
             --instance-name storyland \
-            --port-info "{\"fromPort\":22,\"toPort\":22,\"protocol\":\"tcp\",\"cidrs\":[\"$RUNNER_IP/32\",\"$SSH_ALLOWED_CIDR\"],\"ipv6Cidrs\":[]}"
+            --port-info "{\"fromPort\":22,\"toPort\":22,\"protocol\":\"tcp\",\"cidrs\":[\"$RUNNER_IP/32\"],\"ipv6Cidrs\":[]}"
 
       - name: Set up SSH key + pinned known_hosts
         env:
@@ -150,13 +144,11 @@ jobs:
              docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build storyland-ai && \
              docker compose -f docker-compose.prod.yml ps storyland-ai"
 
-      - name: Restore at-rest SSH firewall (home CIDR only)
+      - name: Close SSH (at-rest state)
         if: always()
-        env:
-          SSH_ALLOWED_CIDR: ${{ secrets.SSH_ALLOWED_CIDR }}
         run: |
-          # Runs even on failure/cancel so the runner IP never lingers in the
-          # firewall. Converges to exactly what terraform manages, so no drift.
-          aws lightsail open-instance-public-ports \
+          # Runs even on failure/cancel so port 22 never lingers open.
+          # Converges to exactly what terraform manages (no port-22 entry).
+          aws lightsail close-instance-public-ports \
             --instance-name storyland \
-            --port-info "{\"fromPort\":22,\"toPort\":22,\"protocol\":\"tcp\",\"cidrs\":[\"$SSH_ALLOWED_CIDR\"],\"ipv6Cidrs\":[]}"
+            --port-info "fromPort=22,toPort=22,protocol=tcp"
