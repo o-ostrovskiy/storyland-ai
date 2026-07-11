@@ -5,6 +5,7 @@ Holds the WorkflowExecutor (core SDK) initialized at startup and
 available to all request handlers via get_app_state().
 """
 
+import hmac
 from dataclasses import dataclass
 from typing import Optional
 
@@ -81,6 +82,51 @@ async def initialize() -> AppState:
             ),
         )
 
+    # Boot-time visibility of the EFFECTIVE gateway auth config. An empty
+    # INTERNAL_API_SECRET disables service-to-service auth entirely (every
+    # caller is accepted, and X-User-ID is then a forgeable identity), and until
+    # now that state was completely SILENT — nothing at boot or per-request said
+    # so, unlike the cache, which has warned loudly since day one. A
+    # misconfiguration you cannot see in the logs is a misconfiguration you
+    # cannot fix. This is that missing signal.
+    gateway_auth_enforced = bool(config.internal_api_secret)
+    logger.info(
+        "gateway_auth_effective",
+        enforced=gateway_auth_enforced,
+        required=config.require_gateway_secret,
+        environment=config.environment,
+    )
+    if not gateway_auth_enforced:
+        if config.require_gateway_secret:
+            # Fail closed: refuse to start rather than serve unauthenticated.
+            logger.critical(
+                "gateway_auth_misconfigured",
+                detail=(
+                    "INTERNAL_API_SECRET is empty but REQUIRE_GATEWAY_SECRET=true: "
+                    "refusing to start. Set INTERNAL_API_SECRET (the backend "
+                    "gateway reads the same variable) or unset "
+                    "REQUIRE_GATEWAY_SECRET to start without service-to-service auth."
+                ),
+                environment=config.environment,
+            )
+            raise RuntimeError(
+                "INTERNAL_API_SECRET is empty but REQUIRE_GATEWAY_SECRET=true. "
+                "Refusing to start without service-to-service authentication."
+            )
+        logger.warning(
+            "gateway_auth_disabled",
+            detail=(
+                "Service-to-service auth is DISABLED (INTERNAL_API_SECRET is empty): "
+                "the X-Internal-Secret check accepts EVERY caller, and X-User-ID is "
+                "then an unverified, forgeable identity — any caller able to reach "
+                "this service can drive Gemini spend and read or mutate any user's "
+                "sessions and itineraries. Set INTERNAL_API_SECRET (the backend "
+                "gateway reads the same variable), then set REQUIRE_GATEWAY_SECRET=true "
+                "to make this state fatal instead of merely loud."
+            ),
+            environment=config.environment,
+        )
+
     logger.info("api_initialized", model=config.model_name)
     return _app_state
 
@@ -117,9 +163,27 @@ def get_place_to_book_resolver() -> PlaceToBookResolver:
 
 
 def verify_gateway_secret(request: Request) -> None:
-    """Require X-Internal-Secret header when INTERNAL_API_SECRET is configured."""
+    """Require a matching X-Internal-Secret header when the gateway secret is set.
+
+    Behaviour is deliberately explicit about the empty-secret case, which used to
+    be an accident of ``if secret and ...``:
+
+    * secret configured -> the header MUST match, else HTTP 403 (fail closed).
+    * secret empty       -> every caller is accepted. This is a misconfiguration,
+      not a feature. It is no longer silent: boot logs ``gateway_auth_disabled``
+      (WARNING), and with ``REQUIRE_GATEWAY_SECRET=true`` the service refuses to
+      start at all (see ``initialize``). The check is left permissive HERE rather
+      than 403-ing at request time so that the failure mode of a misconfigured
+      deploy is a loud log, not a silent total outage of the discovery chain.
+
+    The comparison is constant-time: ``==`` on a secret leaks its prefix length
+    through timing, and this header is attacker-supplied.
+    """
     secret = get_app_state().config.internal_api_secret
-    if secret and request.headers.get("X-Internal-Secret") != secret:
+    if not secret:
+        return
+    presented = request.headers.get("X-Internal-Secret") or ""
+    if not hmac.compare_digest(presented, secret):
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
