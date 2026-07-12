@@ -31,7 +31,25 @@ class Config:
     langfuse_public_key: Optional[str]
     langfuse_host: Optional[str]
     environment: str
+    # Shared service-to-service secret. The backend gateway sends it as the
+    # X-Internal-Secret header, reading the SAME env var (backend
+    # app/proxy/client.py), so the two services are only ever both-set or
+    # both-empty. Empty means the gateway check accepts every caller — see
+    # require_gateway_secret.
     internal_api_secret: str
+    # Fail-closed switch for the gateway secret. When true, an EMPTY
+    # internal_api_secret is a fatal misconfiguration and the service refuses to
+    # start, rather than accepting unauthenticated callers (who may then forge
+    # X-User-ID and read/mutate any user's sessions).
+    #
+    # Default FALSE, deliberately: the value actually present in .env.prod on the
+    # box is not knowable from CI (prod env files are uncommitted), so defaulting
+    # this on would turn a possible misconfiguration into a certain outage on the
+    # next deploy. Instead, boot now ALWAYS states the effective setting
+    # (gateway_auth_effective, plus a loud gateway_auth_disabled warning when the
+    # secret is empty) — so an operator can read one log line, confirm the secret
+    # is present, and set REQUIRE_GATEWAY_SECRET=true to make it permanent.
+    require_gateway_secret: bool
     # Local-dev only escape hatch. When ALLOW_DEV_USER=true and no trusted
     # X-User-ID header is present, identity falls back to the shared
     # 'dev_user'. Default false so non-local deploys fail closed (403)
@@ -140,6 +158,12 @@ def load_config() -> Config:
         - LANGFUSE_PUBLIC_KEY: Langfuse public key
         - LANGFUSE_HOST: Langfuse host URL
         - ENVIRONMENT: deployment environment tag (default: "local")
+        - INTERNAL_API_SECRET: shared gateway secret; when empty the gateway
+          check accepts every caller (loudly warned at boot). (default: "")
+        - REQUIRE_GATEWAY_SECRET: when "true", refuse to start if
+          INTERNAL_API_SECRET is empty (fail closed). Default false so that
+          enabling enforcement is a deliberate operator act — see the field
+          comment on Config.require_gateway_secret. (default: false)
         - ALLOW_DEV_USER: local-dev only; when "true", a request with no
           trusted X-User-ID header resolves to the shared "dev_user".
           Default false (production fails closed with 403). (default: false)
@@ -184,6 +208,7 @@ def load_config() -> Config:
         langfuse_host=os.getenv("LANGFUSE_HOST"),
         environment=os.getenv("ENVIRONMENT", "local"),
         internal_api_secret=os.getenv("INTERNAL_API_SECRET", ""),
+        require_gateway_secret=_env_bool("REQUIRE_GATEWAY_SECRET", False),
         allow_dev_user=_env_bool("ALLOW_DEV_USER", False),
         cache_enabled=_env_bool("CACHE_ENABLED", True),
         cache_ttl_seconds=_env_int("CACHE_TTL_SECONDS", 86400),
