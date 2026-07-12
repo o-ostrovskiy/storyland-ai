@@ -178,12 +178,24 @@ def verify_gateway_secret(request: Request) -> None:
 
     The comparison is constant-time: ``==`` on a secret leaks its prefix length
     through timing, and this header is attacker-supplied.
+
+    It compares BYTES, not ``str``. ``hmac.compare_digest`` accepts ``str`` only
+    when BOTH operands are ASCII-only, but Starlette decodes header values as
+    latin-1 -- so one attacker-supplied byte in 0x80-0xFF arrives as a non-ASCII
+    ``str`` and makes ``compare_digest`` raise ``TypeError``, turning a clean 403
+    into an unhandled 500 on the one input an attacker fully controls. Encoding
+    the presented value back to latin-1 recovers the exact bytes that came off
+    the wire (``errors="replace"`` cannot itself raise, even on a hand-built
+    Request carrying codepoints > 255), and the configured secret is encoded as
+    UTF-8 -- which is what the backend gateway puts on the wire.
     """
     secret = get_app_state().config.internal_api_secret
     if not secret:
         return
     presented = request.headers.get("X-Internal-Secret") or ""
-    if not hmac.compare_digest(presented, secret):
+    if not hmac.compare_digest(
+        presented.encode("latin-1", "replace"), secret.encode("utf-8")
+    ):
         raise HTTPException(status_code=403, detail="Forbidden")
 
 

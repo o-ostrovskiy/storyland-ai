@@ -131,6 +131,43 @@ def test_secret_prefix_is_not_enough(install_state):
     assert exc.value.status_code == 403
 
 
+def test_non_ascii_secret_header_is_rejected_not_a_500(install_state):
+    """A latin-1 byte in the header must 403, not blow up compare_digest.
+
+    Starlette decodes headers as latin-1, so `X-Internal-Secret: s3cr\xffet`
+    reaches us as a str with a codepoint > 127. `compare_digest` on str operands
+    raises TypeError unless BOTH are ASCII-only -- which would turn this 403 into
+    an unhandled 500 on an input the caller fully controls. Regression pin.
+    """
+    install_state(internal_api_secret="s3cret")
+    with pytest.raises(HTTPException) as exc:
+        deps.verify_gateway_secret(_request("s3cr\xffet"))
+    assert exc.value.status_code == 403
+
+
+def test_every_high_latin1_byte_is_rejected_not_a_500(install_state):
+    """The whole 0x80-0xFF range -- one byte anywhere in it must not raise."""
+    install_state(internal_api_secret="s3cret")
+    for codepoint in range(0x80, 0x100):
+        with pytest.raises(HTTPException) as exc:
+            deps.verify_gateway_secret(_request("s3cret" + chr(codepoint)))
+        assert exc.value.status_code == 403
+
+
+def test_non_ascii_secret_matches_when_the_gateway_presents_it(install_state):
+    """A non-ASCII configured secret still round-trips.
+
+    The backend gateway puts the secret on the wire as UTF-8; Starlette hands it
+    back decoded as latin-1 (mojibake str). Re-encoding latin-1 recovers the
+    original UTF-8 bytes, so the match holds -- the bytes fix must not break a
+    legitimate non-ASCII secret.
+    """
+    secret = "s3cret-\u00e9\u00e8"  # non-ASCII, operator-chosen
+    install_state(internal_api_secret=secret)
+    on_the_wire = secret.encode("utf-8").decode("latin-1")
+    assert deps.verify_gateway_secret(_request(on_the_wire)) is None
+
+
 def test_empty_config_accepts_every_caller_and_that_is_a_misconfiguration(install_state):
     """PINNED, not endorsed: an empty INTERNAL_API_SECRET accepts ANY caller.
 
