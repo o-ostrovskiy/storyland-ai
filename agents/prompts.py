@@ -8,15 +8,22 @@ factory functions to control which prompts are used at runtime.
 Usage:
     from agents.prompts import load_prompts
 
-    prompts = load_prompts("v2")          # explicit version
-    prompts = load_prompts()              # default (v2)
+    prompts = load_prompts("v3")          # explicit version
+    prompts = load_prompts()              # default (v3)
 """
 
 import json
 from dataclasses import dataclass
 from pathlib import Path
 
-CURRENT_PROMPT_VERSION = "v2"
+# v3 (MYS-460): region_analyzer additionally emits country_code + primary_locality,
+# the grounded fields the canonical place_key is minted from. Bumped here rather
+# than edited into v2.json in place: a published version is immutable, and — see
+# MYS-462 — an in-place JSON edit would NOT change the discovery cache
+# fingerprint, so the flush would silently not happen. THIS constant's source text
+# is hashed (core/cache_version.py), so the bump is part of what invalidates the
+# stale, keyless entries.
+CURRENT_PROMPT_VERSION = "v3"
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _cache: dict[str, "AgentPrompts"] = {}
@@ -52,8 +59,8 @@ def load_prompts(version: str = CURRENT_PROMPT_VERSION) -> AgentPrompts:
     Results are cached in-process so repeated calls are free.
 
     Args:
-        version: Prompt version identifier, e.g. "v1", "v2". Defaults to
-                 CURRENT_PROMPT_VERSION ("v2").
+        version: Prompt version identifier, e.g. "v1", "v2", "v3". Defaults to
+                 CURRENT_PROMPT_VERSION ("v3").
 
     Returns:
         AgentPrompts dataclass with all agent instruction strings.

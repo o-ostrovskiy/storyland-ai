@@ -31,9 +31,19 @@ import hashlib
 import importlib
 import inspect
 
-# Prompt modules whose text determines the discovered region set. A change to
-# any of these should invalidate cached discovery results.
-_PROMPT_MODULES = ("core.prompts", "agents.prompts")
+# Modules whose text determines the discovered region set. A change to any of
+# these must invalidate cached discovery results.
+#
+# ``models.discovery`` is in this list on purpose (MYS-460). The cached value IS
+# a discovery payload, so the payload's SHAPE is an input to it: when we added
+# ``place_key`` to RegionOption, every pre-existing entry became a region with no
+# identity — and a persistent, cross-user cache would have gone on serving those
+# keyless regions forever, hardest on the popular repeated titles the combined
+# readaway is for. Hashing the schema module makes that self-invalidating instead
+# of a thing someone has to remember. ``agents.prompts`` also carries
+# CURRENT_PROMPT_VERSION, so a prompt-version bump changes this hash too — but the
+# v2/v3 JSON *content* does not (it is data, not source: that gap is MYS-462).
+_PROMPT_MODULES = ("core.prompts", "agents.prompts", "models.discovery")
 
 
 def _module_source(module_name: str) -> str:
