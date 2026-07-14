@@ -370,6 +370,22 @@ _COUNTRY_NAME_TO_ALPHA2: dict[str, str] = {
 }
 
 
+# A model emits abbreviations WITH internal periods -- "U.S.", "U.K." -- that
+# are otherwise a valid alpha-2 code or name-table entry once the punctuation
+# is gone: "U.S." stripped of periods is "US", a real ISO code, but the raw
+# string is neither 2 bare letters nor a table key ("u.s.a." is in the table;
+# "u.s." on its own, without the trailing "a", was not -- MYS-460 review
+# round 6), so it fell through to unresolvable -> tolerated -> minted. Only
+# periods are stripped: hyphens are load-bearing in real country names
+# (Timor-Leste, Guinea-Bissau, Bosnia-Herzegovina) and must survive.
+_PERIOD = "."
+
+
+def _normalise_punctuation(value: str) -> str:
+    """Strip periods before country-code/name resolution. See module note above."""
+    return value.replace(_PERIOD, "")
+
+
 def resolve_country_name(name: object) -> Optional[str]:
     """Best-effort country NAME (or CODE) -> ISO alpha-2. Unresolved -> None (tolerate).
 
@@ -381,6 +397,11 @@ def resolve_country_name(name: object) -> Optional[str]:
     -> tolerated -> a check that is silently name-only again for exactly
     the input it most needs to catch (MYS-460 review).
 
+    Punctuation-normalised (periods stripped) BEFORE both the code check and
+    the name-table lookup, so "U.S." and "U.K." resolve the same way their
+    unpunctuated spellings already do, instead of silently missing the table
+    by one character (MYS-460 review round 6).
+
     None is the safe direction on both ends of this function: an unrecognised
     spelling is not evidence of a mismatch, so callers must treat it as "could
     not check" rather than "checked and failed".
@@ -390,10 +411,11 @@ def resolve_country_name(name: object) -> Optional[str]:
     stripped = name.strip()
     if not stripped:
         return None
-    as_code = _canonical_country_code(stripped)
+    normalised = _normalise_punctuation(stripped)
+    as_code = _canonical_country_code(normalised)
     if as_code is not None:
         return as_code
-    return _COUNTRY_NAME_TO_ALPHA2.get(stripped.lower())
+    return _COUNTRY_NAME_TO_ALPHA2.get(normalised.lower())
 
 
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")

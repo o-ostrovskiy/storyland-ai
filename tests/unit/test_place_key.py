@@ -315,6 +315,24 @@ class TestCountryResolutionCoversAlpha2InputAndTheFullIsoNameSet:
         assert resolve_country_name("UK") == "GB"
         assert resolve_country_name("EL") == "GR"
 
+    def test_punctuated_abbreviations_resolve_the_same_as_their_bare_spelling(self):
+        # MYS-460 review round 6: "U.S." stripped of periods is "US" -- a real
+        # ISO code -- but the raw string is neither 2 bare letters nor a table
+        # key ("u.s.a." is in the table; "u.s." on its own, without the
+        # trailing "a", was not), so it fell through to unresolvable ->
+        # tolerated -> minted. Only periods are normalised away; a hyphenated
+        # real country name must survive untouched.
+        assert resolve_country_name("U.S.") == "US"
+        assert resolve_country_name("U.K.") == "GB"
+        assert resolve_country_name("U.S.A.") == "US"
+        assert resolve_country_name("Timor-Leste") == "TL"
+        assert (
+            mint_checked_place_key(
+                "US", "Portland", [{"name": "Portland", "country": "U.S."}]
+            )
+            == "us:portland"
+        )
+
     def test_a_real_country_outside_the_old_fifty_entry_table_is_no_longer_tolerated_into_a_wrong_combine(self):
         # Eng Lead's case 2, verbatim: a Chilean city under a Spanish
         # country_code used to mint es:santiago because "chile" wasn't in
@@ -461,6 +479,55 @@ class TestRegionOptionSchema:
         assert "place_key" in RegionOption.model_json_schema(mode="serialization")["properties"]
 
 
+class TestAdminArea:
+    """MYS-460 review round 6 (Eng Lead): place_key alone cannot tell Portland,
+    Maine from Portland, Oregon apart -- RegionCity is name+country only, and
+    country_code + primary_locality mint the identical `us:portland` for both.
+    admin_area is a second, independent field carried BESIDE place_key (never
+    folded into the key itself -- that would resurrect the uk:london /
+    gb:london defect one layer down, splitting a single real region like
+    'Île-de-France' from 'Paris Region'). The veto that actually USES it lives
+    in PR2 (fe); this PR's job is only to make the field exist on the wire
+    before the cache warms, since the cache flush this PR performs is a
+    one-time event -- a field added later would be invisible on every hit.
+    """
+
+    def test_admin_area_is_present_and_optional_on_the_model(self):
+        with_area = RegionOption(**_region(admin_area="Maine"))
+        assert with_area.model_dump()["admin_area"] == "Maine"
+        without_area = RegionOption(**_region())
+        assert without_area.model_dump()["admin_area"] is None
+
+    def test_admin_area_does_not_change_the_place_key_format(self):
+        # The disambiguator rides beside the key, never inside it.
+        maine = RegionOption(**_region(
+            country_code="US", primary_locality="Portland", admin_area="Maine",
+            cities=[{"name": "Portland", "country": "US"}],
+        ))
+        oregon = RegionOption(**_region(
+            country_code="US", primary_locality="Portland", admin_area="Oregon",
+            cities=[{"name": "Portland", "country": "US"}],
+        ))
+        assert maine.model_dump()["place_key"] == oregon.model_dump()["place_key"] == "us:portland"
+        assert maine.model_dump()["admin_area"] != oregon.model_dump()["admin_area"]
+
+    def test_admin_area_is_asked_of_the_model_like_country_code_and_primary_locality(self):
+        # Unlike place_key (a computed field, absent from the validation
+        # schema), admin_area IS something we ask the model for.
+        asked_of_model = RegionOption.model_json_schema()["properties"]
+        assert "admin_area" in asked_of_model
+
+    def test_enrich_region_analysis_passes_admin_area_through_unchanged(self):
+        out = enrich_region_analysis({"regions": [_region(admin_area="Oregon")]})
+        assert out["regions"][0]["admin_area"] == "Oregon"
+        assert out["regions"][0]["place_key"] == "fr:paris"
+
+    def test_a_region_with_no_admin_area_still_enriches_normally(self):
+        out = enrich_region_analysis({"regions": [_region()]})
+        assert out["regions"][0].get("admin_area") is None
+        assert out["regions"][0]["place_key"] == "fr:paris"
+
+
 class TestSseWireContract:
     def test_the_regions_sse_event_relays_place_key_untouched(self):
         # SSERegionsEvent.regions is List[dict]: the key must survive to fe (PR2).
@@ -475,6 +542,18 @@ class TestSseWireContract:
             ).model_dump_json()
         )
         assert payload["regions"][0]["place_key"] == "fr:paris"
+
+    def test_the_regions_sse_event_relays_admin_area_untouched(self):
+        # The whole point of shipping admin_area in THIS PR (not a follow-up):
+        # if it doesn't survive to the wire, the cache flush this PR performs
+        # was spent for nothing on the field PR2's veto needs most.
+        from api.models import SSERegionsEvent
+
+        enriched = enrich_region_analysis({"regions": [_region(admin_area="Maine")]})["regions"]
+        payload = json.loads(
+            SSERegionsEvent(job_id="j", regions=enriched, analysis_note="n").model_dump_json()
+        )
+        assert payload["regions"][0]["admin_area"] == "Maine"
 
 
 # ── 3. THE AC: a discovery cache HIT can never return a keyless region ───────
@@ -529,6 +608,7 @@ class TestPromptV3:
         prompts = load_prompts("v3")
         instruction = prompts.region_analyzer
         assert "country_code" in instruction and "primary_locality" in instruction
+        assert "admin_area" in instruction
         assert "ISO 3166-1 alpha-2" in instruction
         # It must tell the model to omit rather than guess — a guessed country
         # code is a fabricated place identity.

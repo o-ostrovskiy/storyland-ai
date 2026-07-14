@@ -103,6 +103,20 @@ class RegionOption(BaseModel):
             "It MUST be one of the cities listed in `cities`."
         ),
     )
+    admin_area: Optional[str] = Field(
+        default=None,
+        description=(
+            "The state, province, or top-level administrative division `primary_locality` "
+            "sits in (e.g. 'Maine', 'Oregon', 'Ontario', 'Île-de-France'). Same-named cities "
+            "in the SAME country are not rare -- Portland ME and Portland OR both mint the "
+            "identical place_key ('us:portland') from country_code + primary_locality alone. "
+            "admin_area is a second, independent disambiguator carried alongside place_key -- "
+            "never folded INTO the key itself (a per-admin-area key would split a single real "
+            "region like 'Île-de-France' from 'Paris Region' into two keys for the same place, "
+            "the uk:london / gb:london defect one layer down). Omit ONLY if genuinely unknown; "
+            "never guess."
+        ),
+    )
     cities: List[RegionCity] = Field(description="Cities in this region")
     estimated_days: int = Field(
         description="Estimated total days to visit all cities in this region", ge=1, le=30
