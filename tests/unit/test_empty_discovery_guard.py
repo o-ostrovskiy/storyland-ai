@@ -97,8 +97,28 @@ class TestEmptyDiscoveryGuard:
         assert any(isinstance(e, WorkflowComplete) for e in events)
 
     async def test_nonempty_regions_unaffected(self, monkeypatch):
-        """Happy path: a real region set still yields RegionsReady, no error."""
+        """Happy path: a real region set still yields RegionsReady, no error.
+
+        The guard's contract is that it PASSES THE REGION SET THROUGH — same
+        regions, same count, same order, nothing dropped. That is not the same
+        claim as "the pipeline changes nothing about a region", and this test
+        used to conflate the two by comparing the emitted regions to the raw
+        input dicts. Since MYS-460 the executor seam legitimately enriches every
+        region with a canonical ``place_key``, so the emitted regions are the
+        input regions PLUS that field, and the raw-input comparison was asserting
+        an invariant the guard never owned.
+
+        So compare against the ENRICHED expectation, written out in full. It
+        still reds if the guard drops, reorders or mutates a region — which is
+        what this test is for — and it does not red on an enrichment that is
+        working as designed. Deliberately NOT weakened to a subset/length match:
+        that would go blind to a dropped region, the exact failure it guards.
+        """
         regions = [{"region_id": 1, "name": "Bath, England"}]
+        # No country_code / primary_locality on this fixture, so no key can be
+        # minted — `None`, never a key derived from "Bath, England". A keyless
+        # region simply cannot be intersected: a MISSED combine, never a wrong one.
+        expected = [{"region_id": 1, "name": "Bath, England", "place_key": None}]
         executor = _make_executor(monkeypatch, regions=regions)
 
         events = [
@@ -110,6 +130,57 @@ class TestEmptyDiscoveryGuard:
 
         regions_events = [e for e in events if isinstance(e, RegionsReady)]
         assert len(regions_events) == 1
-        assert regions_events[0].regions == regions
+        assert regions_events[0].regions == expected
         assert not any(isinstance(e, WorkflowError) for e in events)
         assert any(isinstance(e, WorkflowComplete) for e in events)
+
+    async def test_every_emitted_region_carries_a_place_key_field_even_when_null(
+        self, monkeypatch
+    ):
+        """UNIFORM SHAPE on the wire: `place_key` is always present, sometimes null.
+
+        This is the contract PR2's intersection is allowed to rely on, and the
+        regression above is what handed it to us. Omitting the field when we
+        minted nothing would buy a smaller payload and cost us the invariant:
+        every consumer would then have to treat ABSENT and NULL as separate
+        cases, and the one that forgets treats a keyless region as a match
+        candidate — a WRONG combine, the exact asymmetry this design exists to
+        prevent. Absence would also make "we minted nothing" indistinguishable
+        from "this payload predates the field".
+
+        Drives both region classes through the real executor seam in one run: a
+        grounded region (key minted) and an ungrounded one (key null).
+        """
+        regions = [
+            {
+                "region_id": 1,
+                "name": "Bath, England",
+                "country_code": "GB",
+                "primary_locality": "Bath",
+            },
+            {"region_id": 2, "name": "Somewhere the model could not ground"},
+        ]
+        executor = _make_executor(monkeypatch, regions=regions)
+
+        events = [
+            e
+            async for e in executor.discover(
+                book_title="Persuasion", author="Jane Austen"
+            )
+        ]
+
+        emitted = [e for e in events if isinstance(e, RegionsReady)][0].regions
+        assert len(emitted) == 2, "the guard dropped a region"
+
+        for region in emitted:
+            assert "place_key" in region, (
+                "a region reached the wire with NO place_key field — a consumer "
+                "that only handles null now has to handle absent too, and the "
+                "one that forgets will treat it as a match candidate"
+            )
+
+        assert emitted[0]["place_key"] == "gb:bath"
+        assert emitted[1]["place_key"] is None, (
+            "an ungrounded region must carry an explicit null, never a key "
+            "derived from its region_name"
+        )
