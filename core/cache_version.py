@@ -43,7 +43,29 @@ import inspect
 # of a thing someone has to remember. ``agents.prompts`` also carries
 # CURRENT_PROMPT_VERSION, so a prompt-version bump changes this hash too — but the
 # v2/v3 JSON *content* does not (it is data, not source: that gap is MYS-462).
-_PROMPT_MODULES = ("core.prompts", "agents.prompts", "models.discovery")
+#
+# ``models.place_key`` and ``core.regions`` are in this list for the same reason,
+# one seam deeper (MYS-460 review round 7). The cached payload doesn't just have
+# the *shape* ``place_key`` — every ``place_key`` value in it was MINTED by
+# ``mint_checked_place_key()`` (``models/place_key.py``) and applied at the
+# ``enrich_region_analysis`` seam (``core/regions.py``). That mint logic is an
+# INPUT to the cached value, not just its schema, and it has been corrected six
+# times in this PR alone (hostile incoming key, ISO membership, locality-vs-cities,
+# the country pair, the full ISO name table, admin_area). Without these two
+# modules in the fingerprint, the next correction to how a key is minted would be
+# invisible on every cache hit — hardest on the popular, repeated titles the
+# combined readaway exists for, which is the MYS-222 trap: a cache that turns a
+# real fix into a permanent false green. (``core.regions`` also carries
+# ``validate_region_selection``, which does not shape the cached payload — an
+# edit to it flushes the cache spuriously. That is an unnecessary re-warm, not a
+# wrong combine, so it is the safe side to be wrong on.)
+_PROMPT_MODULES = (
+    "core.prompts",
+    "agents.prompts",
+    "models.discovery",
+    "models.place_key",
+    "core.regions",
+)
 
 
 def _module_source(module_name: str) -> str:
