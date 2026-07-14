@@ -27,6 +27,7 @@ from core.cache_version import _PROMPT_MODULES, compute_cache_version
 from core.regions import enrich_region_analysis
 from models.discovery import RegionOption
 from models.place_key import (
+    _TRANSLITERATIONS,
     mint_checked_place_key,
     mint_place_key,
     resolve_country_name,
@@ -78,6 +79,60 @@ class TestMintPlaceKey:
         assert mint_place_key("DE", "Straße") == "de:strasse"
         assert mint_place_key("IS", "Þingvellir") == "is:thingvellir"
         assert mint_place_key("FR", "Île-de-France") == "fr:ile-de-france"
+
+    def test_turkish_dotless_i_and_the_other_round_8_letters_are_transliterated_not_dropped(self):
+        # MYS-460 review round 8: "ı" (Turkish dotless i, U+0131) is not an
+        # accented ascii base -- NFKD leaves it untouched -- so it was being
+        # silently DELETED, not reduced. "Diyarbakır" -> "diyarbakr" while
+        # "Diyarbakir" -> "diyarbakir": two spellings of one city minting two
+        # keys, the exact defect this ticket exists to close. Capital "İ" DOES
+        # decompose (dotted capital I -> I + combining dot above), which is
+        # why it looked fine and the lowercase form didn't.
+        assert mint_place_key("TR", "Diyarbakır") == "tr:diyarbakir"
+        assert mint_place_key("TR", "Diyarbakir") == "tr:diyarbakir"
+        assert mint_place_key("TR", "Diyarbakır") == mint_place_key("TR", "Diyarbakir")
+        assert mint_place_key("TR", "Kırşehir") == "tr:kirsehir"
+        assert mint_place_key("TR", "Kırşehir") == mint_place_key("TR", "Kirsehir")
+        # Azerbaijani schwa (U+0259) -- also non-decomposing.
+        assert mint_place_key("AZ", "Gəncə") == "az:gence"
+        assert mint_place_key("AZ", "Gəncə") == mint_place_key("AZ", "Gence")
+
+    def test_a_letter_nfkd_cannot_decompose_and_the_table_does_not_yet_cover_refuses_the_key_rather_than_mutilating_it(self):
+        # The class this closes, not just the instance: ANY Unicode letter
+        # that NFKD leaves untouched and _TRANSLITERATIONS doesn't name must
+        # make slug() return "" (mint_place_key -> None), never a shortened
+        # slug built by silently deleting that one letter. "ƒ" (Latin small
+        # letter f with hook, U+0192) is deliberately NOT in the
+        # transliteration table -- it stands in for "the next unlisted
+        # letter", which is the actual risk: this must not require adding
+        # every letter one whack at a time to stay safe.
+        assert slug("ƒoo") == ""
+        assert mint_place_key("GH", "ƒoo") is None
+
+    def test_no_latin_extended_letter_is_ever_silently_shortened_mutation_guard(self):
+        # For every letter in Latin Extended-A/B: either _TRANSLITERATIONS (or
+        # NFKD's own accent-decomposition) maps it to a real ascii letter, or
+        # slug() refuses the whole string outright. Never a THIRD outcome --
+        # a nonempty slug missing that one letter -- which is exactly how
+        # "Diyarbakır" became "diyarbakr" and how the next unlisted letter
+        # would silently reopen the same class of bug.
+        import unicodedata
+
+        for codepoint in range(0x0100, 0x0250):
+            ch = chr(codepoint)
+            if not unicodedata.category(ch).startswith("L"):
+                continue
+            reduced_alone = (
+                unicodedata.normalize("NFKD", ch).encode("ascii", "ignore").decode("ascii")
+            )
+            if reduced_alone or ch in _TRANSLITERATIONS:
+                continue  # NFKD or the table already handles this one -- not what we're checking
+            # An uncovered, non-decomposing letter: slug() must refuse it
+            # entirely, never emit a nonempty-but-shortened result.
+            assert slug(ch) == "", (
+                f"U+{codepoint:04X} {ch!r} should refuse the key (slug() == ''), "
+                f"got {slug(ch)!r} -- a letter silently dropped, not refused"
+            )
 
     def test_country_disambiguates_the_same_locality_name(self):
         # THE false positive the key exists to kill: Paris, Texas is not Paris, France.

@@ -439,6 +439,19 @@ _TRANSLITERATIONS: dict[str, str] = {
     "Œ": "Oe", "œ": "oe",
     "Ħ": "H", "ħ": "h",
     "Ŀ": "L", "ŀ": "l",
+    # MYS-460 review round 8. Codex flagged Turkish dotless "ı" (U+0131) —
+    # "Diyarbakır" -> "diyarbakr" while "Diyarbakir" -> "diyarbakir", two
+    # keys for one city, the exact sentence this ticket exists to delete.
+    # "ı" is not an isolated case: it is one instance of an unclosed class —
+    # 244 Latin Extended-A/B letters NFKD does not decompose, so the ascii
+    # pass silently deletes any of them the table doesn't yet name. These are
+    # the ones that actually name places today; _slug_would_drop_a_letter
+    # below is what closes the CLASS so the next one is refused, not deleted.
+    "ı": "i", "İ": "I",
+    "ŧ": "t", "Ŧ": "T",
+    "ŋ": "n", "Ŋ": "N",
+    "ĸ": "k",
+    "ə": "e", "Ə": "E",
 }
 
 
@@ -456,6 +469,34 @@ def _canonical_country_code(country_code: str) -> Optional[str]:
     return code
 
 
+def _slug_would_drop_a_letter(value: str) -> bool:
+    """True if ANY Unicode letter in ``value`` would vanish entirely under the
+    NFKD -> ascii-ignore pass ``slug()`` applies, rather than reduce to a real
+    ascii letter (MYS-460 review round 8).
+
+    An ACCENTED letter (e.g. "i" + U+0301) is exactly what NFKD exists to
+    handle: it decomposes into a base ascii letter plus a combining mark, and
+    the ascii-ignore pass drops the (non-ascii) mark and keeps the (ascii)
+    base. But a letter like "ı" (Turkish dotless i) or "ə" (schwa) has NO
+    decomposition at all — NFKD leaves it untouched — so the same ascii-ignore
+    pass deletes the *whole letter*, silently. ``_TRANSLITERATIONS`` closes
+    the known instances of this; this function closes the CLASS, so a letter
+    nobody has named yet is refused instead of deleted.
+
+    Checked letter-by-letter, not by comparing whole-string lengths before and
+    after: a combining mark disappearing is EXPECTED (that's how an accent
+    reduces to its base letter) and would make a naive length diff indistinguishable
+    from an actual dropped letter.
+    """
+    for ch in value:
+        if not unicodedata.category(ch).startswith("L"):
+            continue
+        reduced = unicodedata.normalize("NFKD", ch).encode("ascii", "ignore").decode("ascii")
+        if not reduced:
+            return True
+    return False
+
+
 def slug(value: str) -> str:
     """Lowercase ASCII slug: 'Reykjavík' -> 'reykjavik', 'Łódź' -> 'lodz'.
 
@@ -463,8 +504,20 @@ def slug(value: str) -> str:
     must be one of the region's own `cities`) needs to slug-compare the two
     fields with the exact same function that mints the key, or a spelling
     difference the key-minting side tolerates becomes a false mismatch.
+
+    Returns "" (refuses the key, MYS-460 review round 8) rather than a
+    partially-deleted slug when the input contains a letter the NFKD/ascii
+    pass cannot represent and ``_TRANSLITERATIONS`` doesn't cover — see
+    ``_slug_would_drop_a_letter``. No key beats a key minted from a
+    mutilated name: a missed combine, never a wrong one, is the asymmetry
+    this whole module stands on. A wholly non-Latin locality (e.g. "Москва")
+    already slugged to "" before this change; this only extends the same
+    honest answer to the *partial*-deletion case, which used to slip through
+    silently as a shortened-but-nonempty slug.
     """
     transliterated = _transliterate(value)
+    if _slug_would_drop_a_letter(transliterated):
+        return ""
     decomposed = unicodedata.normalize("NFKD", transliterated)
     ascii_only = decomposed.encode("ascii", "ignore").decode("ascii")
     return _SLUG_STRIP.sub("-", ascii_only.lower()).strip("-")
