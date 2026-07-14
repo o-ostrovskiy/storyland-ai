@@ -73,6 +73,51 @@ class TestMintPlaceKey:
         assert mint_place_key("FR", "") is None
         assert mint_place_key("FR", "———") is None  # slugs to empty
 
+    def test_only_real_iso_3166_1_alpha2_codes_or_the_two_named_aliases_are_accepted(self):
+        # `^[A-Za-z]{2}$` (the shape-only check this replaces) would accept ALL
+        # of these — they are two letters, but none is an ISO code or alias.
+        assert mint_place_key("EU", "Paris") is None
+        assert mint_place_key("ZZ", "Nowhere") is None
+        assert mint_place_key("XX", "Nowhere") is None
+
+    def test_uk_and_el_are_the_two_real_aliases_and_normalise_to_the_iso_code(self):
+        # "UK" is the single most likely thing an LLM emits for a British
+        # region — our top collections are Edinburgh, London, Dublin — and the
+        # ISO code is "GB". Without normalising this alias, one job's "UK"
+        # region and another's "GB" region are two different keys for the same
+        # city and never intersect. "EL" is the EU's own reservation for
+        # Greece; the ISO code is "GR".
+        assert mint_place_key("UK", "London") == mint_place_key("GB", "London") == "gb:london"
+        assert mint_place_key("EL", "Athens") == mint_place_key("GR", "Athens") == "gr:athens"
+
+    def test_a_two_letter_code_that_is_not_a_real_iso_code_or_alias_yields_no_key(self):
+        # A GUESS is not an alias. Only the two named exceptional reservations
+        # normalise — everything else outside the real ISO set stays a missed
+        # combine, never a wrong one.
+        assert mint_place_key("ZZ", "X") is None
+        assert mint_place_key("UX", "London") is None
+
+
+class TestEnrichmentNeverTrustsAnIncomingKey:
+    def test_a_hostile_incoming_place_key_is_replaced_with_the_grounded_one(self):
+        # ADK writes the model's RAW parsed JSON dict into session state — if a
+        # model ever emits an unasked-for `place_key` (or a legacy/cached entry
+        # carries one), the enrichment seam must not ride it through untouched.
+        # A fabricated "fr:paris" stapled onto a US/Paris region is a WRONG
+        # combine — the one failure mode this whole design must not have.
+        hostile = _region(
+            place_key="fr:paris", country_code="US", primary_locality="Paris"
+        )
+        out = enrich_region_analysis({"regions": [hostile]})
+        assert out["regions"][0]["place_key"] == "us:paris"
+
+    def test_overwriting_is_still_idempotent(self):
+        # Minting is deterministic, so re-enriching an already-correct region
+        # must not change its key.
+        once = enrich_region_analysis({"regions": [_region()]})
+        twice = enrich_region_analysis(once)
+        assert twice["regions"][0]["place_key"] == once["regions"][0]["place_key"] == "fr:paris"
+
 
 class TestKeyIsNotDerivedFromTheWrongThing:
     def test_region_name_never_becomes_a_key(self):

@@ -74,7 +74,16 @@ def enrich_region_analysis(region_analysis: Optional[dict]) -> dict:
             enriched.append(region)
             continue
         out = dict(region)
-        out["place_key"] = out.get("place_key") or mint_place_key(
+        # ALWAYS overwrite — never trust an incoming place_key. ADK writes the
+        # model's raw parsed JSON dict into session state (the premise this
+        # whole seam exists on), so a model that emits an unasked-for
+        # place_key anyway — or a cached/legacy entry carrying a bad one —
+        # would otherwise ride straight through untouched. Minting is
+        # deterministic from the grounded fields, so overwriting costs
+        # nothing: idempotency holds (re-enriching yields the same key) and a
+        # HOSTILE key (e.g. "fr:paris" stapled onto a US/Paris region) is
+        # replaced with the one actually derived from the grounded fields.
+        out["place_key"] = mint_place_key(
             out.get("country_code"), out.get("primary_locality")
         )
         enriched.append(out)

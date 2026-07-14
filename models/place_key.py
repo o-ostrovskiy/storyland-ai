@@ -42,11 +42,67 @@ import re
 import unicodedata
 from typing import Optional
 
-# ISO 3166-1 alpha-2: exactly two ASCII letters. Anything else (a country NAME,
-# an alpha-3, an empty string) is not a country code and must not be keyed on.
-_ALPHA2 = re.compile(r"^[A-Za-z]{2}$")
+# The REAL ISO 3166-1 alpha-2 set — every code the standard has assigned.
+# `^[A-Za-z]{2}$` (the shape-only check this replaces) accepts ANY two
+# letters: "UK", "EU", "ZZ" all pass it. "UK" is not an ISO code — "GB" is —
+# and it is the single most likely thing an LLM emits for a British region
+# (London, Edinburgh, Dublin — our top collections). Validating MEMBERSHIP,
+# not just shape, is what keeps "uk:london" and "gb:london" from being two
+# different keys for the same city.
+_ISO_3166_1_ALPHA2: frozenset[str] = frozenset({
+    "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AQ", "AR", "AS", "AT",
+    "AU", "AW", "AX", "AZ",
+    "BA", "BB", "BD", "BE", "BF", "BG", "BH", "BI", "BJ", "BL", "BM", "BN",
+    "BO", "BQ", "BR", "BS", "BT", "BV", "BW", "BY", "BZ",
+    "CA", "CC", "CD", "CF", "CG", "CH", "CI", "CK", "CL", "CM", "CN", "CO",
+    "CR", "CU", "CV", "CW", "CX", "CY", "CZ",
+    "DE", "DJ", "DK", "DM", "DO", "DZ",
+    "EC", "EE", "EG", "EH", "ER", "ES", "ET",
+    "FI", "FJ", "FK", "FM", "FO", "FR",
+    "GA", "GB", "GD", "GE", "GF", "GG", "GH", "GI", "GL", "GM", "GN", "GP",
+    "GQ", "GR", "GS", "GT", "GU", "GW", "GY",
+    "HK", "HM", "HN", "HR", "HT", "HU",
+    "ID", "IE", "IL", "IM", "IN", "IO", "IQ", "IR", "IS", "IT",
+    "JE", "JM", "JO", "JP",
+    "KE", "KG", "KH", "KI", "KM", "KN", "KP", "KR", "KW", "KY", "KZ",
+    "LA", "LB", "LC", "LI", "LK", "LR", "LS", "LT", "LU", "LV", "LY",
+    "MA", "MC", "MD", "ME", "MF", "MG", "MH", "MK", "ML", "MM", "MN", "MO",
+    "MP", "MQ", "MR", "MS", "MT", "MU", "MV", "MW", "MX", "MY", "MZ",
+    "NA", "NC", "NE", "NF", "NG", "NI", "NL", "NO", "NP", "NR", "NU", "NZ",
+    "OM",
+    "PA", "PE", "PF", "PG", "PH", "PK", "PL", "PM", "PN", "PR", "PS", "PT",
+    "PW", "PY",
+    "QA",
+    "RE", "RO", "RS", "RU", "RW",
+    "SA", "SB", "SC", "SD", "SE", "SG", "SH", "SI", "SJ", "SK", "SL", "SM",
+    "SN", "SO", "SR", "SS", "ST", "SV", "SX", "SY", "SZ",
+    "TC", "TD", "TF", "TG", "TH", "TJ", "TK", "TL", "TM", "TN", "TO", "TR",
+    "TT", "TV", "TW", "TZ",
+    "UA", "UG", "UM", "US", "UY", "UZ",
+    "VA", "VC", "VE", "VG", "VI", "VN", "VU",
+    "WF", "WS",
+    "YE", "YT",
+    "ZA", "ZM", "ZW",
+})
+
+# The two exceptionally-reserved aliases an LLM will actually produce in
+# prose: the UK government's own usage is "UK" everywhere (the ISO code is
+# "GB"), and "EL" is the EU's own reservation for Greece (the ISO code is
+# "GR"). Anything else outside the real set above is a GUESS, not an alias,
+# and must still yield no key — normalising an alias is not the same as
+# accepting anything two letters long.
+_ALPHA2_ALIASES: dict[str, str] = {"UK": "GB", "EL": "GR"}
 
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")
+
+
+def _canonical_country_code(country_code: str) -> Optional[str]:
+    """Upper-case, alias-normalise, then require REAL ISO-3166-1 membership."""
+    code = country_code.strip().upper()
+    code = _ALPHA2_ALIASES.get(code, code)
+    if code not in _ISO_3166_1_ALPHA2:
+        return None
+    return code
 
 
 def _slug(value: str) -> str:
@@ -70,7 +126,10 @@ def mint_place_key(
     A region with no key simply cannot participate in an intersection. That is a
     missed combine — never a wrong one.
     """
-    if not isinstance(country_code, str) or not _ALPHA2.match(country_code.strip()):
+    if not isinstance(country_code, str):
+        return None
+    code = _canonical_country_code(country_code)
+    if code is None:
         return None
     if not isinstance(primary_locality, str):
         return None
@@ -79,4 +138,4 @@ def mint_place_key(
     if not locality:
         return None
 
-    return f"{country_code.strip().lower()}:{locality}"
+    return f"{code.lower()}:{locality}"
