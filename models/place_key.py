@@ -93,47 +93,293 @@ _ISO_3166_1_ALPHA2: frozenset[str] = frozenset({
 # accepting anything two letters long.
 _ALPHA2_ALIASES: dict[str, str] = {"UK": "GB", "EL": "GR"}
 
-# Country NAME -> ISO alpha-2, used ONLY to cross-check a matched city's own
-# `country` field against the region's `country_code` (self-consistency, not
-# a general gazetteer). It is intentionally small: it needs the spellings an
-# LLM actually emits in `cities[].country`, not every possible country name.
-# A name that is NOT in this map does not resolve -- and an unresolvable name
-# is TOLERATED (the mint proceeds), never rejected. Rejecting on an
-# unrecognised spelling would silently stop the feature firing, which is the
-# same "ships and never fires" failure the cache-namespace bump exists to
-# prevent -- the asymmetry here is the same one `mint_place_key` stands on: a
-# missed combine is cheap, a wrong one is not, but a feature with no combines
-# at all is also a failure.
+# Country NAME (or, since MYS-460 review, an alpha-2 CODE/alias -- see
+# resolve_country_name below) -> ISO alpha-2, used ONLY to cross-check a
+# matched city's own `country` field against the region's `country_code`
+# (self-consistency, not a general gazetteer). Covers the full ISO 3166-1
+# English short name for every code in _ISO_3166_1_ALPHA2, plus the common
+# variant spellings a model actually emits (USA, UK, Holland, Turkiye...).
+#
+# A name that is NOT in this map does not resolve -- and an unresolvable
+# name is TOLERATED (the mint proceeds), never rejected. Rejecting on an
+# unrecognised spelling would silently stop the feature firing, which is
+# the same "ships and never fires" failure the cache-namespace bump exists
+# to prevent -- the asymmetry here is the same one `mint_place_key` stands
+# on: a missed combine is cheap, a wrong one is not, but a feature with no
+# combines at all is also a failure.
+#
+# 🔴 Before MYS-460 review round 5, this table had ~50 entries -- Chile,
+# Peru, Colombia, Kenya, Israel and most of the world were simply not in
+# it, so `cities[].country: "Chile"` on a region claiming `country_code:
+# "ES"` resolved to None -> tolerated -> minted `es:santiago` for a
+# Chilean city. A short table doesn't make the check honest; it makes
+# "unresolvable" mean "not in the fifty I typed", not "genuinely
+# unrecognisable". Completed to the full set so tolerate-on-unresolvable
+# is finally the honest branch it was always meant to be.
+# 311 name/alias entries covering all 249 codes in _ISO_3166_1_ALPHA2.
 _COUNTRY_NAME_TO_ALPHA2: dict[str, str] = {
-    "usa": "US", "u.s.a.": "US", "united states": "US",
-    "united states of america": "US", "america": "US",
-    "uk": "GB", "u.k.": "GB", "united kingdom": "GB", "great britain": "GB",
-    "britain": "GB", "england": "GB", "scotland": "GB", "wales": "GB",
-    "northern ireland": "GB",
-    "czechia": "CZ", "czech republic": "CZ",
-    "france": "FR", "germany": "DE", "spain": "ES", "italy": "IT",
-    "russia": "RU", "russian federation": "RU",
-    "south korea": "KR", "republic of korea": "KR", "korea": "KR",
-    "north korea": "KP",
-    "netherlands": "NL", "the netherlands": "NL", "holland": "NL",
-    "greece": "GR", "hellenic republic": "GR",
-    "ireland": "IE", "republic of ireland": "IE",
-    "sweden": "SE", "norway": "NO", "denmark": "DK", "finland": "FI",
-    "iceland": "IS",
-    "poland": "PL", "portugal": "PT", "austria": "AT", "switzerland": "CH",
+    "andorra": "AD",
+    "united arab emirates": "AE", "uae": "AE", "u.a.e.": "AE",
+    "afghanistan": "AF",
+    "antigua and barbuda": "AG", "antigua": "AG", "barbuda": "AG",
+    "anguilla": "AI",
+    "albania": "AL",
+    "armenia": "AM",
+    "angola": "AO",
+    "antarctica": "AQ",
+    "argentina": "AR",
+    "american samoa": "AS",
+    "austria": "AT",
+    "australia": "AU",
+    "aruba": "AW",
+    "aland islands": "AX", "åland islands": "AX",
+    "azerbaijan": "AZ",
+    "bosnia and herzegovina": "BA", "bosnia": "BA",
+    "barbados": "BB",
+    "bangladesh": "BD",
     "belgium": "BE",
+    "burkina faso": "BF",
+    "bulgaria": "BG",
+    "bahrain": "BH",
+    "burundi": "BI",
+    "benin": "BJ",
+    "saint barthelemy": "BL", "saint barthélemy": "BL", "st barthelemy": "BL",
+    "bermuda": "BM",
+    "brunei": "BN", "brunei darussalam": "BN",
+    "bolivia": "BO",
+    "bonaire, sint eustatius and saba": "BQ", "bonaire": "BQ",
+    "brazil": "BR",
+    "bahamas": "BS", "the bahamas": "BS",
+    "bhutan": "BT",
+    "bouvet island": "BV",
+    "botswana": "BW",
+    "belarus": "BY",
+    "belize": "BZ",
+    "canada": "CA",
+    "cocos islands": "CC", "cocos (keeling) islands": "CC",
+    "democratic republic of the congo": "CD", "congo (drc)": "CD", "dr congo": "CD", "drc": "CD",
+    "central african republic": "CF",
+    "republic of the congo": "CG", "congo": "CG",
+    "switzerland": "CH",
+    "cote d'ivoire": "CI", "côte d'ivoire": "CI", "ivory coast": "CI",
+    "cook islands": "CK",
+    "chile": "CL",
+    "cameroon": "CM",
+    "china": "CN",
+    "colombia": "CO",
+    "costa rica": "CR",
+    "cuba": "CU",
+    "cabo verde": "CV", "cape verde": "CV",
+    "curacao": "CW", "curaçao": "CW",
+    "christmas island": "CX",
+    "cyprus": "CY",
+    "czechia": "CZ", "czech republic": "CZ",
+    "germany": "DE",
+    "djibouti": "DJ",
+    "denmark": "DK",
+    "dominica": "DM",
+    "dominican republic": "DO",
+    "algeria": "DZ",
+    "ecuador": "EC",
+    "estonia": "EE",
+    "egypt": "EG",
+    "western sahara": "EH",
+    "eritrea": "ER",
+    "spain": "ES",
+    "ethiopia": "ET",
+    "finland": "FI",
+    "fiji": "FJ",
+    "falkland islands": "FK", "the falkland islands": "FK",
+    "micronesia": "FM",
+    "faroe islands": "FO",
+    "france": "FR",
+    "gabon": "GA",
+    "uk": "GB", "u.k.": "GB", "united kingdom": "GB", "great britain": "GB", "britain": "GB", "england": "GB", "scotland": "GB", "wales": "GB", "northern ireland": "GB",
+    "grenada": "GD",
+    "georgia": "GE",
+    "french guiana": "GF",
+    "guernsey": "GG",
+    "ghana": "GH",
+    "gibraltar": "GI",
+    "greenland": "GL",
+    "gambia": "GM", "the gambia": "GM",
+    "guinea": "GN",
+    "guadeloupe": "GP",
+    "equatorial guinea": "GQ",
+    "greece": "GR", "hellenic republic": "GR",
+    "south georgia and the south sandwich islands": "GS",
+    "guatemala": "GT",
+    "guam": "GU",
+    "guinea-bissau": "GW",
+    "guyana": "GY",
+    "hong kong": "HK",
+    "heard island and mcdonald islands": "HM",
+    "honduras": "HN",
+    "croatia": "HR",
+    "haiti": "HT",
+    "hungary": "HU",
+    "indonesia": "ID",
+    "ireland": "IE", "republic of ireland": "IE",
+    "israel": "IL",
+    "isle of man": "IM",
+    "india": "IN",
+    "british indian ocean territory": "IO",
+    "iraq": "IQ",
+    "iran": "IR",
+    "iceland": "IS",
+    "italy": "IT",
+    "jersey": "JE",
+    "jamaica": "JM",
+    "jordan": "JO",
+    "japan": "JP",
+    "kenya": "KE",
+    "kyrgyzstan": "KG",
+    "cambodia": "KH",
+    "kiribati": "KI",
+    "comoros": "KM",
+    "saint kitts and nevis": "KN", "st kitts and nevis": "KN",
+    "north korea": "KP",
+    "south korea": "KR", "republic of korea": "KR", "korea": "KR",
+    "kuwait": "KW",
+    "cayman islands": "KY",
+    "kazakhstan": "KZ",
+    "laos": "LA",
+    "lebanon": "LB",
+    "saint lucia": "LC", "st lucia": "LC",
+    "liechtenstein": "LI",
+    "sri lanka": "LK",
+    "liberia": "LR",
+    "lesotho": "LS",
+    "lithuania": "LT",
+    "luxembourg": "LU",
+    "latvia": "LV",
+    "libya": "LY",
+    "morocco": "MA",
+    "monaco": "MC",
+    "moldova": "MD",
+    "montenegro": "ME",
+    "saint martin": "MF", "st martin": "MF",
+    "madagascar": "MG",
+    "marshall islands": "MH",
+    "north macedonia": "MK", "macedonia": "MK",
+    "mali": "ML",
+    "myanmar": "MM", "burma": "MM",
+    "mongolia": "MN",
+    "macao": "MO", "macau": "MO",
+    "northern mariana islands": "MP",
+    "martinique": "MQ",
+    "mauritania": "MR",
+    "montserrat": "MS",
+    "malta": "MT",
+    "mauritius": "MU",
+    "maldives": "MV",
+    "malawi": "MW",
+    "mexico": "MX",
+    "malaysia": "MY",
+    "mozambique": "MZ",
+    "namibia": "NA",
+    "new caledonia": "NC",
+    "niger": "NE",
+    "norfolk island": "NF",
+    "nigeria": "NG",
+    "nicaragua": "NI",
+    "netherlands": "NL", "the netherlands": "NL", "holland": "NL",
+    "norway": "NO",
+    "nepal": "NP",
+    "nauru": "NR",
+    "niue": "NU",
+    "new zealand": "NZ",
+    "oman": "OM",
+    "panama": "PA",
+    "peru": "PE",
+    "french polynesia": "PF",
+    "papua new guinea": "PG",
+    "philippines": "PH", "the philippines": "PH",
+    "pakistan": "PK",
+    "poland": "PL",
+    "saint pierre and miquelon": "PM",
+    "pitcairn": "PN", "pitcairn islands": "PN",
+    "puerto rico": "PR",
+    "palestine": "PS", "state of palestine": "PS",
+    "portugal": "PT",
+    "palau": "PW",
+    "paraguay": "PY",
+    "qatar": "QA",
+    "reunion": "RE", "réunion": "RE",
+    "romania": "RO",
+    "serbia": "RS",
+    "russia": "RU", "russian federation": "RU",
+    "rwanda": "RW",
+    "saudi arabia": "SA",
+    "solomon islands": "SB",
+    "seychelles": "SC",
+    "sudan": "SD",
+    "sweden": "SE",
+    "singapore": "SG",
+    "saint helena": "SH", "st helena": "SH",
+    "slovenia": "SI",
+    "svalbard and jan mayen": "SJ",
+    "slovakia": "SK",
+    "sierra leone": "SL",
+    "san marino": "SM",
+    "senegal": "SN",
+    "somalia": "SO",
+    "suriname": "SR",
+    "south sudan": "SS",
+    "sao tome and principe": "ST", "são tomé and príncipe": "ST",
+    "el salvador": "SV",
+    "sint maarten": "SX",
+    "syria": "SY",
+    "eswatini": "SZ", "swaziland": "SZ",
+    "turks and caicos islands": "TC",
+    "chad": "TD",
+    "french southern territories": "TF",
+    "togo": "TG",
+    "thailand": "TH",
+    "tajikistan": "TJ",
+    "tokelau": "TK",
+    "timor-leste": "TL", "east timor": "TL",
+    "turkmenistan": "TM",
+    "tunisia": "TN",
+    "tonga": "TO",
     "turkey": "TR", "türkiye": "TR", "turkiye": "TR",
-    "egypt": "EG", "morocco": "MA",
-    "japan": "JP", "china": "CN", "india": "IN",
-    "australia": "AU", "new zealand": "NZ",
-    "canada": "CA", "mexico": "MX", "brazil": "BR", "argentina": "AR",
-    "croatia": "HR", "hungary": "HU", "romania": "RO",
-    "vietnam": "VN", "viet nam": "VN", "thailand": "TH",
+    "trinidad and tobago": "TT",
+    "tuvalu": "TV",
+    "taiwan": "TW",
+    "tanzania": "TZ",
+    "ukraine": "UA",
+    "uganda": "UG",
+    "united states minor outlying islands": "UM",
+    "usa": "US", "u.s.a.": "US", "united states": "US", "united states of america": "US", "america": "US",
+    "uruguay": "UY",
+    "uzbekistan": "UZ",
+    "vatican city": "VA", "holy see": "VA",
+    "saint vincent and the grenadines": "VC", "st vincent and the grenadines": "VC",
+    "venezuela": "VE",
+    "british virgin islands": "VG",
+    "united states virgin islands": "VI", "us virgin islands": "VI",
+    "vietnam": "VN", "viet nam": "VN",
+    "vanuatu": "VU",
+    "wallis and futuna": "WF",
+    "samoa": "WS",
+    "yemen": "YE",
+    "mayotte": "YT",
+    "south africa": "ZA",
+    "zambia": "ZM",
+    "zimbabwe": "ZW",
 }
 
 
 def resolve_country_name(name: object) -> Optional[str]:
-    """Best-effort country NAME -> ISO alpha-2. Unresolved -> None (tolerate).
+    """Best-effort country NAME (or CODE) -> ISO alpha-2. Unresolved -> None (tolerate).
+
+    `RegionCity.country` is documented as a name, but a model will sometimes
+    emit an alpha-2 code (or the UK/EL alias) there instead -- "US" rather
+    than "United States". Resolving that FIRST through the same ISO
+    membership check `mint_place_key` uses closes that off completely: a
+    literal code input no longer falls through to "not in the name table"
+    -> tolerated -> a check that is silently name-only again for exactly
+    the input it most needs to catch (MYS-460 review).
 
     None is the safe direction on both ends of this function: an unrecognised
     spelling is not evidence of a mismatch, so callers must treat it as "could
@@ -141,7 +387,13 @@ def resolve_country_name(name: object) -> Optional[str]:
     """
     if not isinstance(name, str):
         return None
-    return _COUNTRY_NAME_TO_ALPHA2.get(name.strip().lower())
+    stripped = name.strip()
+    if not stripped:
+        return None
+    as_code = _canonical_country_code(stripped)
+    if as_code is not None:
+        return as_code
+    return _COUNTRY_NAME_TO_ALPHA2.get(stripped.lower())
 
 
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")

@@ -26,7 +26,12 @@ from core.cache import TTLCache
 from core.cache_version import _PROMPT_MODULES, compute_cache_version
 from core.regions import enrich_region_analysis
 from models.discovery import RegionOption
-from models.place_key import mint_checked_place_key, mint_place_key
+from models.place_key import (
+    mint_checked_place_key,
+    mint_place_key,
+    resolve_country_name,
+    slug,
+)
 
 
 def _region(**overrides) -> dict:
@@ -277,6 +282,101 @@ class TestPrimaryLocalityCityMatchIsCheckedOnTheCountryPairTooNotNameAlone:
         )
         out = enrich_region_analysis({"regions": [region]})
         assert out["regions"][0]["place_key"] == "fr:paris"
+
+
+class TestCountryResolutionCoversAlpha2InputAndTheFullIsoNameSet:
+    """Eng Lead's 5th-round finding: `resolve_country_name()` only resolved
+    the ~50 spellings in the (then-small) name table, and everything else --
+    including a literal alpha-2 CODE in `cities[].country`, and most of the
+    world's country NAMES -- fell through to "unresolvable" -> tolerate ->
+    mint. Two ordinary inputs landed there and produced a wrong combine:
+    a model emitting an alpha-2 code instead of a name, and a real country
+    (Chile, Peru, Colombia, Kenya, Israel...) that simply wasn't in the
+    fifty-entry table.
+    """
+
+    def test_an_alpha2_code_in_citys_country_resolves_and_is_checked(self):
+        # Eng Lead's case 1: RegionCity.country is documented as a name, but
+        # the model sometimes emits an alpha-2 code there instead. This must
+        # resolve and be checked like any other value -- not silently
+        # degrade to "unresolvable -> tolerate".
+        assert resolve_country_name("US") == "US"
+        assert (
+            mint_checked_place_key("US", "Paris", [{"name": "Paris", "country": "US"}])
+            == "us:paris"
+        )
+        # And it still catches a genuine mismatch through the code path.
+        assert (
+            mint_checked_place_key("FR", "Paris", [{"name": "Paris", "country": "US"}])
+            is None
+        )
+
+    def test_uk_and_el_aliases_resolve_through_the_country_field_too(self):
+        assert resolve_country_name("UK") == "GB"
+        assert resolve_country_name("EL") == "GR"
+
+    def test_a_real_country_outside_the_old_fifty_entry_table_is_no_longer_tolerated_into_a_wrong_combine(self):
+        # Eng Lead's case 2, verbatim: a Chilean city under a Spanish
+        # country_code used to mint es:santiago because "chile" wasn't in
+        # the table. It must now be a demonstrated mismatch -- no key.
+        assert (
+            mint_checked_place_key(
+                "ES", "Santiago", [{"name": "Santiago", "country": "Chile"}]
+            )
+            is None
+        )
+        for country_code, locality, city_country in [
+            ("ES", "Lima", "Peru"),
+            ("ES", "Bogota", "Colombia"),
+            ("FR", "Nairobi", "Kenya"),
+            ("FR", "Jerusalem", "Israel"),
+        ]:
+            assert (
+                mint_checked_place_key(
+                    country_code, locality, [{"name": locality, "country": city_country}]
+                )
+                is None
+            ), f"{country_code}/{locality}/{city_country} should be a demonstrated mismatch, not tolerated"
+
+    def test_the_same_countries_still_mint_when_they_agree(self):
+        # Not just "reject foreign countries" -- the completed table must
+        # still recognise these countries' OWN names and mint normally.
+        for country_code, locality, city_country in [
+            ("CL", "Santiago", "Chile"),
+            ("PE", "Lima", "Peru"),
+            ("CO", "Bogota", "Colombia"),
+            ("KE", "Nairobi", "Kenya"),
+            ("IL", "Jerusalem", "Israel"),
+        ]:
+            expected = f"{country_code.lower()}:{slug(locality)}"
+            assert (
+                mint_checked_place_key(
+                    country_code, locality, [{"name": locality, "country": city_country}]
+                )
+                == expected
+            )
+
+    def test_a_genuinely_unrecognised_spelling_is_still_tolerated(self):
+        # The completed table doesn't turn "tolerate unresolvable" into
+        # "reject anything not typed exactly" -- a name this module truly
+        # doesn't recognise still mints (missed-combine-is-cheap holds).
+        assert resolve_country_name("Freedonia") is None
+        assert (
+            mint_checked_place_key(
+                "FR", "Paris", [{"name": "Paris", "country": "Freedonia"}]
+            )
+            == "fr:paris"
+        )
+
+    def test_every_code_in_the_iso_set_has_at_least_one_resolvable_name(self):
+        # Mutation guard: if the name table regresses to a partial subset of
+        # _ISO_3166_1_ALPHA2 (the exact shape of this bug), this goes red.
+        from models.place_key import _COUNTRY_NAME_TO_ALPHA2, _ISO_3166_1_ALPHA2
+
+        covered = set(_COUNTRY_NAME_TO_ALPHA2.values())
+        assert covered == _ISO_3166_1_ALPHA2, (
+            f"missing from the name table: {sorted(_ISO_3166_1_ALPHA2 - covered)}"
+        )
 
 
 class TestKeyIsNotDerivedFromTheWrongThing:
