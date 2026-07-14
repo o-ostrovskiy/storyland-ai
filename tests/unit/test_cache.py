@@ -217,6 +217,9 @@ class TestExecutorCacheHit:
                     "name": "Atlanta, United States",
                     "country_code": "US",
                     "primary_locality": "Atlanta",
+                    # MYS-460 fix-list #3: primary_locality is self-consistency
+                    # checked against the region's own `cities` before minting.
+                    "cities": [{"name": "Atlanta", "country": "United States"}],
                 }
             ],
             "analysis_note": "cached note",

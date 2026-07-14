@@ -7,7 +7,7 @@ between API and CLI delivery mechanisms.
 
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from models.place_key import mint_place_key
+from models.place_key import locality_matches_cities, mint_place_key
 
 
 def get_valid_region_ids(regions: List[dict]) -> Set[int]:
@@ -55,8 +55,8 @@ def enrich_region_analysis(region_analysis: Optional[dict]) -> dict:
 
     Pure: builds new dicts, mutates nothing (SessionStateAccessor's setters are
     silent no-ops against persisted state — MYS-172 — so we never write back).
-    Idempotent: re-enriching an enriched payload is a no-op, and a region that
-    already carries a key keeps it.
+    Idempotent: re-enriching an enriched payload is a no-op — minting always
+    overwrites, so a second pass derives the same key from the same fields.
 
     A region whose grounded geo fields are missing gets ``place_key: None``. That
     is deliberate: it cannot be intersected, which costs us a combine. Deriving a
@@ -74,6 +74,24 @@ def enrich_region_analysis(region_analysis: Optional[dict]) -> dict:
             enriched.append(region)
             continue
         out = dict(region)
+        # Self-consistency check FIRST: models/discovery.py states as prose
+        # that `primary_locality` MUST be one of the region's own `cities` —
+        # nothing enforced that. A region grouping Bath/Winchester that emits
+        # primary_locality="London" would otherwise mint a valid-looking
+        # gb:london that WRONGLY intersects with a real London region. The
+        # check is free — both fields are already in the same model response
+        # — and a locality that doesn't match any of the region's own cities
+        # is treated as ungrounded for minting purposes (the emitted
+        # `primary_locality` field itself is left untouched; only the value
+        # fed to the key is affected).
+        cities = out.get("cities")
+        city_names = [
+            c.get("name") for c in cities if isinstance(c, dict)
+        ] if isinstance(cities, list) else []
+        primary_locality = out.get("primary_locality")
+        if not locality_matches_cities(primary_locality, city_names):
+            primary_locality = None
+
         # ALWAYS overwrite — never trust an incoming place_key. ADK writes the
         # model's raw parsed JSON dict into session state (the premise this
         # whole seam exists on), so a model that emits an unasked-for
@@ -83,9 +101,7 @@ def enrich_region_analysis(region_analysis: Optional[dict]) -> dict:
         # nothing: idempotency holds (re-enriching yields the same key) and a
         # HOSTILE key (e.g. "fr:paris" stapled onto a US/Paris region) is
         # replaced with the one actually derived from the grounded fields.
-        out["place_key"] = mint_place_key(
-            out.get("country_code"), out.get("primary_locality")
-        )
+        out["place_key"] = mint_place_key(out.get("country_code"), primary_locality)
         enriched.append(out)
 
     source["regions"] = enriched

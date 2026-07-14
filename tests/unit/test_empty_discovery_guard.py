@@ -157,6 +157,10 @@ class TestEmptyDiscoveryGuard:
                 "name": "Bath, England",
                 "country_code": "GB",
                 "primary_locality": "Bath",
+                # MYS-460 fix-list #3: primary_locality is now self-consistency
+                # checked against the region's own `cities` before minting, so
+                # this fixture needs one that agrees with primary_locality.
+                "cities": [{"name": "Bath", "country": "England"}],
             },
             {"region_id": 2, "name": "Somewhere the model could not ground"},
         ]

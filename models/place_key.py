@@ -95,6 +95,32 @@ _ALPHA2_ALIASES: dict[str, str] = {"UK": "GB", "EL": "GR"}
 
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")
 
+# Latin letters NFKD does NOT decompose into base + combining mark, so the
+# ascii-encode/ignore pass that follows DELETES them outright instead of
+# reducing them to an ascii base letter the way it does for e.g. i -> i.
+# That is the same city-collapses-to-two-keys defect as UK/GB, one layer
+# down: "Łódź" -> "odz" (pl:odz) while "Lodz" -> "lodz" (pl:lodz); "Tromsø"
+# -> "troms" (no:troms) while "Tromso" -> "tromso". Transliterate BEFORE the
+# NFKD/ascii pass so these letters degrade to a real ascii letter instead of
+# vanishing.
+_TRANSLITERATIONS: dict[str, str] = {
+    "Ł": "L", "ł": "l",
+    "Ø": "O", "ø": "o",
+    "Đ": "D", "đ": "d",
+    "Ð": "D", "ð": "d",
+    "Þ": "Th", "þ": "th",
+    "ß": "ss",
+    "Æ": "Ae", "æ": "ae",
+    "Œ": "Oe", "œ": "oe",
+    "Ħ": "H", "ħ": "h",
+    "Ŀ": "L", "ŀ": "l",
+}
+
+
+def _transliterate(value: str) -> str:
+    """Replace letters NFKD leaves untouched, before the ascii pass drops them."""
+    return "".join(_TRANSLITERATIONS.get(ch, ch) for ch in value)
+
 
 def _canonical_country_code(country_code: str) -> Optional[str]:
     """Upper-case, alias-normalise, then require REAL ISO-3166-1 membership."""
@@ -105,11 +131,43 @@ def _canonical_country_code(country_code: str) -> Optional[str]:
     return code
 
 
-def _slug(value: str) -> str:
-    """Lowercase ASCII slug: 'Reykjavík' -> 'reykjavik', 'St. Petersburg' -> 'st-petersburg'."""
-    decomposed = unicodedata.normalize("NFKD", value)
+def slug(value: str) -> str:
+    """Lowercase ASCII slug: 'Reykjavík' -> 'reykjavik', 'Łódź' -> 'lodz'.
+
+    Public: the self-consistency check in core/regions.py (primary_locality
+    must be one of the region's own `cities`) needs to slug-compare the two
+    fields with the exact same function that mints the key, or a spelling
+    difference the key-minting side tolerates becomes a false mismatch.
+    """
+    transliterated = _transliterate(value)
+    decomposed = unicodedata.normalize("NFKD", transliterated)
     ascii_only = decomposed.encode("ascii", "ignore").decode("ascii")
     return _SLUG_STRIP.sub("-", ascii_only.lower()).strip("-")
+
+
+def locality_matches_cities(primary_locality: Optional[str], city_names) -> bool:
+    """Self-consistency: does `primary_locality` slug-match one of the region's own cities?
+
+    ``models/discovery.py`` states this as a MUST in prose (`primary_locality`
+    must be one of the cities listed in `cities`) and nothing enforced it. A
+    region grouping Bath/Winchester that emits `primary_locality: "London"`
+    would otherwise mint a valid-looking `gb:london` that WRONGLY intersects
+    with a real London region — the one outcome this whole design forbids.
+    This check costs nothing: both fields are already in the same model
+    response, so it can never be starved of the data it needs.
+
+    A locality that fails this check yields no key: a missed combine, never a
+    wrong one — the same asymmetry `mint_place_key` already stands on.
+    """
+    if not isinstance(primary_locality, str):
+        return False
+    target = slug(primary_locality)
+    if not target:
+        return False
+    for name in city_names or ():
+        if isinstance(name, str) and slug(name) == target:
+            return True
+    return False
 
 
 def mint_place_key(
@@ -134,7 +192,7 @@ def mint_place_key(
     if not isinstance(primary_locality, str):
         return None
 
-    locality = _slug(primary_locality)
+    locality = slug(primary_locality)
     if not locality:
         return None
 
