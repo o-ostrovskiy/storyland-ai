@@ -8,7 +8,7 @@ the research phase of itinerary creation.
 from pydantic import BaseModel, Field, computed_field
 from typing import List, Optional
 
-from .place_key import mint_place_key
+from .place_key import mint_checked_place_key
 
 
 class CityInfo(BaseModel):
@@ -125,8 +125,22 @@ class RegionOption(BaseModel):
         descriptions it can actually know, and the identity every downstream
         intersection keys on is minted by us, deterministically. The model can
         neither invent a key nor collide two places by emitting the same one.
+
+        Routed through ``mint_checked_place_key`` — the SAME checked seam
+        ``core/regions.py``'s ``enrich_region_analysis`` uses — not
+        ``mint_place_key`` directly. ``mint_place_key`` alone only refuses
+        missing/invalid fields; it has no way to know whether
+        ``primary_locality`` is even one of this region's own ``cities``. Two
+        mint paths with two different rules is exactly how a caller ends up
+        reading the unchecked answer (MYS-460 review). Today ADK writes the
+        agent's raw parsed JSON dict into session state, so this property
+        never materialises at runtime on its own — but the first caller that
+        constructs a ``RegionOption`` and reads ``.place_key`` (a future PR2
+        codepath, a test, a script) must get the checked answer, not a second
+        set of rules.
         """
-        return mint_place_key(self.country_code, self.primary_locality)
+        cities = [c.model_dump() for c in self.cities]
+        return mint_checked_place_key(self.country_code, self.primary_locality, cities)
 
 
 class RegionAnalysis(BaseModel):

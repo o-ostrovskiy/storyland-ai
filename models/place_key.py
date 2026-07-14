@@ -93,6 +93,57 @@ _ISO_3166_1_ALPHA2: frozenset[str] = frozenset({
 # accepting anything two letters long.
 _ALPHA2_ALIASES: dict[str, str] = {"UK": "GB", "EL": "GR"}
 
+# Country NAME -> ISO alpha-2, used ONLY to cross-check a matched city's own
+# `country` field against the region's `country_code` (self-consistency, not
+# a general gazetteer). It is intentionally small: it needs the spellings an
+# LLM actually emits in `cities[].country`, not every possible country name.
+# A name that is NOT in this map does not resolve -- and an unresolvable name
+# is TOLERATED (the mint proceeds), never rejected. Rejecting on an
+# unrecognised spelling would silently stop the feature firing, which is the
+# same "ships and never fires" failure the cache-namespace bump exists to
+# prevent -- the asymmetry here is the same one `mint_place_key` stands on: a
+# missed combine is cheap, a wrong one is not, but a feature with no combines
+# at all is also a failure.
+_COUNTRY_NAME_TO_ALPHA2: dict[str, str] = {
+    "usa": "US", "u.s.a.": "US", "united states": "US",
+    "united states of america": "US", "america": "US",
+    "uk": "GB", "u.k.": "GB", "united kingdom": "GB", "great britain": "GB",
+    "britain": "GB", "england": "GB", "scotland": "GB", "wales": "GB",
+    "northern ireland": "GB",
+    "czechia": "CZ", "czech republic": "CZ",
+    "france": "FR", "germany": "DE", "spain": "ES", "italy": "IT",
+    "russia": "RU", "russian federation": "RU",
+    "south korea": "KR", "republic of korea": "KR", "korea": "KR",
+    "north korea": "KP",
+    "netherlands": "NL", "the netherlands": "NL", "holland": "NL",
+    "greece": "GR", "hellenic republic": "GR",
+    "ireland": "IE", "republic of ireland": "IE",
+    "sweden": "SE", "norway": "NO", "denmark": "DK", "finland": "FI",
+    "iceland": "IS",
+    "poland": "PL", "portugal": "PT", "austria": "AT", "switzerland": "CH",
+    "belgium": "BE",
+    "turkey": "TR", "türkiye": "TR", "turkiye": "TR",
+    "egypt": "EG", "morocco": "MA",
+    "japan": "JP", "china": "CN", "india": "IN",
+    "australia": "AU", "new zealand": "NZ",
+    "canada": "CA", "mexico": "MX", "brazil": "BR", "argentina": "AR",
+    "croatia": "HR", "hungary": "HU", "romania": "RO",
+    "vietnam": "VN", "viet nam": "VN", "thailand": "TH",
+}
+
+
+def resolve_country_name(name: object) -> Optional[str]:
+    """Best-effort country NAME -> ISO alpha-2. Unresolved -> None (tolerate).
+
+    None is the safe direction on both ends of this function: an unrecognised
+    spelling is not evidence of a mismatch, so callers must treat it as "could
+    not check" rather than "checked and failed".
+    """
+    if not isinstance(name, str):
+        return None
+    return _COUNTRY_NAME_TO_ALPHA2.get(name.strip().lower())
+
+
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")
 
 # Latin letters NFKD does NOT decompose into base + combining mark, so the
@@ -145,29 +196,90 @@ def slug(value: str) -> str:
     return _SLUG_STRIP.sub("-", ascii_only.lower()).strip("-")
 
 
-def locality_matches_cities(primary_locality: Optional[str], city_names) -> bool:
-    """Self-consistency: does `primary_locality` slug-match one of the region's own cities?
+def locality_matches_cities(
+    primary_locality: Optional[str],
+    cities,
+    country_code: Optional[str] = None,
+) -> bool:
+    """Self-consistency: does `primary_locality` match one of the region's own
+    `cities` -- on the PAIR (name AND country), not on name alone.
 
     ``models/discovery.py`` states this as a MUST in prose (`primary_locality`
     must be one of the cities listed in `cities`) and nothing enforced it. A
     region grouping Bath/Winchester that emits `primary_locality: "London"`
     would otherwise mint a valid-looking `gb:london` that WRONGLY intersects
-    with a real London region — the one outcome this whole design forbids.
+    with a real London region -- the one outcome this whole design forbids.
     This check costs nothing: both fields are already in the same model
     response, so it can never be starved of the data it needs.
 
+    Matching on NAME alone is not enough. A region with `country_code: "US"`
+    and `primary_locality: "Paris"` would match a `cities` entry
+    `{"name": "Paris", "country": "France"}` on name alone and mint
+    `us:paris` -- the key of Paris, TEXAS -- for a region that is actually in
+    France. Ambiguous city names shared by two countries are not exotic:
+    Paris, Odessa, Cambridge, Melbourne, Athens, St Petersburg all exist in
+    more than one, and they are literary cities, not edge cases.
+
+    So once a city's NAME matches, its own `country` field (if present and
+    resolvable) is cross-checked against `country_code`:
+    - names match AND countries agree (or the city's country can't be
+      resolved to a code) -> match.
+    - names match but the resolved countries DISAGREE -> a demonstrated
+      mismatch; keep scanning the rest of `cities` for another match instead
+      of failing outright, since a duplicate-named city elsewhere in the same
+      list could still be the right one.
+
+    An UNRESOLVABLE country name is deliberately NOT a mismatch: rejecting on
+    a spelling this module doesn't recognise would cost a missed combine for
+    no reason -- the same "ships and never fires" failure the cache-namespace
+    bump exists to prevent.
+
     A locality that fails this check yields no key: a missed combine, never a
-    wrong one — the same asymmetry `mint_place_key` already stands on.
+    wrong one -- the same asymmetry `mint_place_key` already stands on.
     """
     if not isinstance(primary_locality, str):
         return False
     target = slug(primary_locality)
     if not target:
         return False
-    for name in city_names or ():
-        if isinstance(name, str) and slug(name) == target:
-            return True
+    region_alpha2 = (
+        _canonical_country_code(country_code)
+        if isinstance(country_code, str)
+        else None
+    )
+    for city in cities or ():
+        if not isinstance(city, dict):
+            continue
+        name = city.get("name")
+        if not (isinstance(name, str) and slug(name) == target):
+            continue
+        if region_alpha2 is not None:
+            resolved = resolve_country_name(city.get("country"))
+            if resolved is not None and resolved != region_alpha2:
+                continue  # demonstrated mismatch -- not this city, keep scanning
+        return True
     return False
+
+
+def mint_checked_place_key(
+    country_code: Optional[str],
+    primary_locality: Optional[str],
+    cities,
+) -> Optional[str]:
+    """The ONE checked seam: self-consistency (name+country pair) THEN mint.
+
+    Both callers that mint a place_key from a region's raw fields --
+    `enrich_region_analysis` (core/regions.py) and
+    `RegionOption.place_key` (models/discovery.py) -- must go through this,
+    never through `mint_place_key` directly on unchecked fields.
+    `mint_place_key` on its own only refuses missing/invalid fields; it has
+    no way to know whether `primary_locality` is even one of the region's
+    own `cities`. Two mint paths with two different rules is exactly how a
+    caller ends up reading the unchecked answer (MYS-460 review).
+    """
+    if not locality_matches_cities(primary_locality, cities, country_code):
+        return None
+    return mint_place_key(country_code, primary_locality)
 
 
 def mint_place_key(

@@ -7,7 +7,7 @@ between API and CLI delivery mechanisms.
 
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from models.place_key import locality_matches_cities, mint_place_key
+from models.place_key import mint_checked_place_key
 
 
 def get_valid_region_ids(regions: List[dict]) -> Set[int]:
@@ -74,34 +74,23 @@ def enrich_region_analysis(region_analysis: Optional[dict]) -> dict:
             enriched.append(region)
             continue
         out = dict(region)
-        # Self-consistency check FIRST: models/discovery.py states as prose
-        # that `primary_locality` MUST be one of the region's own `cities` —
-        # nothing enforced that. A region grouping Bath/Winchester that emits
-        # primary_locality="London" would otherwise mint a valid-looking
-        # gb:london that WRONGLY intersects with a real London region. The
-        # check is free — both fields are already in the same model response
-        # — and a locality that doesn't match any of the region's own cities
-        # is treated as ungrounded for minting purposes (the emitted
-        # `primary_locality` field itself is left untouched; only the value
-        # fed to the key is affected).
-        cities = out.get("cities")
-        city_names = [
-            c.get("name") for c in cities if isinstance(c, dict)
-        ] if isinstance(cities, list) else []
-        primary_locality = out.get("primary_locality")
-        if not locality_matches_cities(primary_locality, city_names):
-            primary_locality = None
-
-        # ALWAYS overwrite — never trust an incoming place_key. ADK writes the
-        # model's raw parsed JSON dict into session state (the premise this
-        # whole seam exists on), so a model that emits an unasked-for
-        # place_key anyway — or a cached/legacy entry carrying a bad one —
-        # would otherwise ride straight through untouched. Minting is
-        # deterministic from the grounded fields, so overwriting costs
-        # nothing: idempotency holds (re-enriching yields the same key) and a
-        # HOSTILE key (e.g. "fr:paris" stapled onto a US/Paris region) is
-        # replaced with the one actually derived from the grounded fields.
-        out["place_key"] = mint_place_key(out.get("country_code"), primary_locality)
+        # ALWAYS overwrite — never trust an incoming place_key — and mint
+        # through the ONE checked seam (mint_checked_place_key), which runs
+        # the self-consistency check (primary_locality must be one of the
+        # region's own `cities`, matched on NAME AND COUNTRY, not name alone)
+        # before minting. ADK writes the model's raw parsed JSON dict into
+        # session state (the premise this whole seam exists on), so a model
+        # that emits an unasked-for place_key anyway — or a cached/legacy
+        # entry carrying a bad one — would otherwise ride straight through
+        # untouched. Minting is deterministic from the grounded fields, so
+        # overwriting costs nothing: idempotency holds (re-enriching yields
+        # the same key) and a HOSTILE key (e.g. "fr:paris" stapled onto a
+        # US/Paris region) is replaced with the one actually derived from
+        # the grounded, checked fields.
+        cities = out.get("cities") if isinstance(out.get("cities"), list) else []
+        out["place_key"] = mint_checked_place_key(
+            out.get("country_code"), out.get("primary_locality"), cities
+        )
         enriched.append(out)
 
     source["regions"] = enriched

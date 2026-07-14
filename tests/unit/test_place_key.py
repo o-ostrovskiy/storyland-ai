@@ -26,7 +26,7 @@ from core.cache import TTLCache
 from core.cache_version import _PROMPT_MODULES, compute_cache_version
 from core.regions import enrich_region_analysis
 from models.discovery import RegionOption
-from models.place_key import mint_place_key
+from models.place_key import mint_checked_place_key, mint_place_key
 
 
 def _region(**overrides) -> dict:
@@ -122,8 +122,14 @@ class TestEnrichmentNeverTrustsAnIncomingKey:
         # carries one), the enrichment seam must not ride it through untouched.
         # A fabricated "fr:paris" stapled onto a US/Paris region is a WRONG
         # combine — the one failure mode this whole design must not have.
+        # cities carries a US-tagged Paris so this fixture is self-consistent
+        # under the country-pair check (MYS-460 4th fix) -- it is testing
+        # "a hostile incoming key gets overwritten", not the country-mismatch
+        # path (that has its own class below,
+        # TestPrimaryLocalityCityMatchIsCheckedOnTheCountryPairTooNotNameAlone).
         hostile = _region(
-            place_key="fr:paris", country_code="US", primary_locality="Paris"
+            place_key="fr:paris", country_code="US", primary_locality="Paris",
+            cities=[{"name": "Paris", "country": "United States"}],
         )
         out = enrich_region_analysis({"regions": [hostile]})
         assert out["regions"][0]["place_key"] == "us:paris"
@@ -203,6 +209,74 @@ class TestPrimaryLocalityMustBeOneOfTheRegionsOwnCities:
         )
         out = enrich_region_analysis({"regions": [region]})
         assert out["regions"][0]["place_key"] is None
+
+
+class TestPrimaryLocalityCityMatchIsCheckedOnTheCountryPairTooNotNameAlone:
+    """Codex-found, Eng Lead-confirmed gap: `city_names` used to drop
+    `c.get("country")`, so the self-consistency check was name-only. A
+    region grounded in France whose `primary_locality` happens to
+    name-collide with a US city (or vice versa) would mint a valid-looking
+    but WRONG key -- Paris, Texas by way of a French region.
+    """
+
+    def test_a_matching_name_from_the_wrong_country_yields_no_key(self):
+        # THE exact case from the review: country_code="US" but the only
+        # `cities` entry named "Paris" is tagged France -- a demonstrated
+        # mismatch, so no key, not `us:paris`.
+        region = _region(
+            country_code="US",
+            primary_locality="Paris",
+            cities=[{"name": "Paris", "country": "France"}],
+        )
+        out = enrich_region_analysis({"regions": [region]})
+        assert out["regions"][0]["place_key"] is None
+        assert mint_checked_place_key("US", "Paris", [{"name": "Paris", "country": "France"}]) is None
+
+    def test_a_matching_name_with_agreeing_country_still_mints(self):
+        region = _region(
+            country_code="FR",
+            primary_locality="Paris",
+            cities=[{"name": "Paris", "country": "France"}],
+        )
+        out = enrich_region_analysis({"regions": [region]})
+        assert out["regions"][0]["place_key"] == "fr:paris"
+
+    def test_an_unresolvable_country_name_is_tolerated_not_rejected(self):
+        # "Freedonia" is not a real country name in the resolver's map --
+        # rejecting on an unrecognised spelling would cost a missed combine
+        # for no reason (the same failure class the whole module refuses to
+        # risk). Unresolvable -> tolerate -> mint.
+        region = _region(
+            country_code="FR",
+            primary_locality="Paris",
+            cities=[{"name": "Paris", "country": "Freedonia"}],
+        )
+        out = enrich_region_analysis({"regions": [region]})
+        assert out["regions"][0]["place_key"] == "fr:paris"
+
+    def test_a_second_same_named_city_with_the_right_country_still_matches(self):
+        # Two cities named "Paris" in the same list (implausible in practice,
+        # but the scan must not stop at the first name match) -- the France
+        # one should still be found and mint.
+        region = _region(
+            country_code="FR",
+            primary_locality="Paris",
+            cities=[
+                {"name": "Paris", "country": "United States"},
+                {"name": "Paris", "country": "France"},
+            ],
+        )
+        out = enrich_region_analysis({"regions": [region]})
+        assert out["regions"][0]["place_key"] == "fr:paris"
+
+    def test_missing_city_country_field_is_tolerated_not_rejected(self):
+        region = _region(
+            country_code="FR",
+            primary_locality="Paris",
+            cities=[{"name": "Paris"}],
+        )
+        out = enrich_region_analysis({"regions": [region]})
+        assert out["regions"][0]["place_key"] == "fr:paris"
 
 
 class TestKeyIsNotDerivedFromTheWrongThing:
