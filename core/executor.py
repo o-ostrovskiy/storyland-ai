@@ -77,7 +77,11 @@ from .prompts import (
 )
 from .cache import TTLCache, build_discovery_cache
 from .cache_version import compute_cache_version
-from .regions import get_valid_region_ids, validate_region_selection
+from .regions import (
+    enrich_region_analysis,
+    get_valid_region_ids,
+    validate_region_selection,
+)
 from .session_state import SessionStateAccessor, SessionStateKeys
 from .types import ExecutorConfig
 
@@ -222,6 +226,14 @@ class WorkflowExecutor:
         downstream discover->compose handoff (which reads ``state.regions``)
         behaves identically to a fresh run.
         """
+        # A cache HIT must never replay a region with no place_key: hits land
+        # hardest on popular, repeated titles — exactly the book-club case the
+        # combined readaway exists for — so a keyless replay would kill the
+        # feature on precisely the books it was built for. The version namespace
+        # (core/cache_version.py) already makes a pre-MYS-460 entry unreachable;
+        # this is the second lock on the same door, and it costs one call.
+        region_analysis = enrich_region_analysis(region_analysis)
+
         book_metadata = BookMetadata(
             book_title=book_title,
             author=author,
@@ -473,14 +485,23 @@ class WorkflowExecutor:
                     yield WorkflowComplete(job_id=job_id)
                     return
 
+                # Mint the canonical cross-job place_key (MYS-460) before the
+                # payload goes anywhere. Enrich the value we CACHE and the value
+                # we EMIT from the same call, so a cached hit and a fresh run are
+                # byte-identical on the wire. Session state is deliberately left
+                # untouched: its setters are silent no-ops against persisted
+                # state (MYS-172), and compose() keys on region_id, not place_key.
+                region_analysis = enrich_region_analysis(state.region_analysis)
+                regions = region_analysis.get("regions", [])
+
                 # Store on miss: cache only non-empty, schema-validated region
                 # sets so a future hit can safely short-circuit the chain.
-                if self._cache_enabled and state.regions:
-                    await self._discovery_cache.set(cache_key, state.region_analysis)
+                if self._cache_enabled and regions:
+                    await self._discovery_cache.set(cache_key, region_analysis)
 
                 yield RegionsReady(
                     job_id=job_id,
-                    regions=state.regions,
+                    regions=regions,
                     analysis_note=state.analysis_note,
                 )
 

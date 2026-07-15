@@ -207,8 +207,21 @@ class TestExecutorCacheHit:
             model=object(),  # never used on a hit; bypass real Gemini construction
         )
 
+        # MYS-460: a cached entry carries the grounded geo fields, and the replay
+        # must mint the place_key from them. This is the AC stated as behaviour —
+        # a HIT can never hand the wire a region with no cross-job identity.
         cached = {
-            "regions": [{"region_id": 1, "name": "Atlanta, United States"}],
+            "regions": [
+                {
+                    "region_id": 1,
+                    "name": "Atlanta, United States",
+                    "country_code": "US",
+                    "primary_locality": "Atlanta",
+                    # MYS-460 fix-list #3: primary_locality is self-consistency
+                    # checked against the region's own `cities` before minting.
+                    "cities": [{"name": "Atlanta", "country": "United States"}],
+                }
+            ],
             "analysis_note": "cached note",
         }
         # The executor namespaces keys with the model/prompt version, so prime
@@ -227,7 +240,14 @@ class TestExecutorCacheHit:
 
         regions_events = [e for e in events if isinstance(e, RegionsReady)]
         assert len(regions_events) == 1
-        assert regions_events[0].regions == cached["regions"]
+        replayed = regions_events[0].regions
+        # The cached payload is relayed intact...
+        assert replayed == [{**cached["regions"][0], "place_key": "us:atlanta"}]
+        # ...and the identity is on it. Cache hits land hardest on popular,
+        # repeated titles — exactly the book-club case the combined readaway is
+        # for — so a keyless replay would kill the feature on precisely the books
+        # it was built for.
+        assert all(r["place_key"] for r in replayed)
         assert regions_events[0].analysis_note == "cached note"
         assert any(isinstance(e, WorkflowComplete) for e in events)
 
