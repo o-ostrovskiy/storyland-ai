@@ -138,6 +138,32 @@ class TestMintPlaceKey:
         # THE false positive the key exists to kill: Paris, Texas is not Paris, France.
         assert mint_place_key("US", "Paris") != mint_place_key("FR", "Paris")
 
+    @pytest.mark.parametrize("dotted,undotted", [
+        ("Washington, D.C.", "Washington DC"),
+        ("L.A.", "LA"),
+        ("N.Y.C.", "NYC"),
+    ])
+    def test_dotted_and_undotted_locality_abbreviations_mint_the_same_key(self, dotted, undotted):
+        # MYS-460 review round 9: slug() didn't normalise periods, so a
+        # dotted locality abbreviation minted a different key than its
+        # undotted spelling -- "Washington, D.C." -> "washington-d-c" vs
+        # "Washington DC" -> "washington-dc", two keys for one city, the
+        # exact defect this ticket exists to delete. Country-name/code
+        # resolution already stripped periods (round 6); this closes the
+        # same gap on the locality side, where mint_place_key actually
+        # spends it.
+        assert slug(dotted) == slug(undotted)
+        assert mint_place_key("US", dotted) == mint_place_key("US", undotted)
+
+    def test_a_near_miss_period_case_still_slugs_correctly(self):
+        # The near-miss that makes the period bug easy to overlook: "St."
+        # already slugs the same as "St" because ". " and " " both collapse
+        # to one separator. The real divergence is an INTRA-token period
+        # with no following space (D.C., L.A.) -- assert the easy case
+        # still holds after the fix, so the period-strip doesn't overcorrect
+        # a case that was already fine.
+        assert slug("St. Petersburg") == slug("St Petersburg") == "st-petersburg"
+
     def test_a_country_name_or_alpha3_is_not_a_country_code(self):
         # Only ISO-3166-1 alpha-2. Anything else is a guess wearing a code's clothes.
         assert mint_place_key("France", "Paris") is None

@@ -515,7 +515,15 @@ def slug(value: str) -> str:
     honest answer to the *partial*-deletion case, which used to slip through
     silently as a shortened-but-nonempty slug.
     """
-    transliterated = _transliterate(value)
+    # MYS-460 review round 9: periods were normalised for country-code/name
+    # resolution (round 6) but not here, so a dotted locality abbreviation
+    # minted a different key than its undotted spelling -- "Washington,
+    # D.C." -> "washington-d-c" vs "Washington DC" -> "washington-dc", two
+    # keys for one city. Apply the same punctuation strip here, before the
+    # transliteration/NFKD pass, so both spellings collapse to one slug. This
+    # is also why mint_place_key and locality_matches_cities can never drift
+    # on this: both call this one function.
+    transliterated = _transliterate(_normalise_punctuation(value))
     if _slug_would_drop_a_letter(transliterated):
         return ""
     decomposed = unicodedata.normalize("NFKD", transliterated)
