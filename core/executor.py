@@ -938,6 +938,25 @@ class WorkflowExecutor:
             )
             yield WorkflowComplete(job_id=job_id)
 
+    @staticmethod
+    def _resolve_trusted_action_prompt(last_suggestions: list, action_id: str) -> str:
+        """Look up the server-stored action_prompt for a validated chip id.
+
+        MYS-167: the client-echoed `action_prompt` request field must never
+        reach an agent instruction -- only the value the server itself
+        generated and persisted onto the chip (at `_persist_suggestions`
+        time, sourced from the composer/formatter's own SuggestionChip
+        output) may. Callers must validate `action_id` against
+        `last_suggestions` before calling this (expand() already does, via
+        `valid_ids`); an id with no matching chip resolves to "" rather than
+        raising, since the caller already owns the InvalidActionId rejection
+        path and this is never reached for an unresolved id in practice.
+        """
+        resolved_chip = next(
+            (chip for chip in last_suggestions if chip.get("id") == action_id), None
+        )
+        return (resolved_chip or {}).get("action_prompt", "")
+
     def _stamp_suggestion_ids(self, suggestions: list) -> list:
         """Overwrite chip ids with fresh server-issued uuid4s."""
         stamped = []
@@ -999,14 +1018,22 @@ class WorkflowExecutor:
         """Expand the itinerary with new places based on a suggestion chip.
 
         Requires a completed job_id (compose or local-atmosphere). Validates the
-        action_id against stored suggestion chips to prevent injection. Yields
-        ProgressEvent → ExpansionReady → WorkflowComplete.
+        action_id against stored suggestion chips, then resolves the expansion
+        instruction from THAT stored chip -- never from the client-echoed
+        action_prompt argument -- so a caller cannot steer the researcher's
+        system instruction by sending an arbitrary string alongside a valid
+        chip id (MYS-167). Yields ProgressEvent → ExpansionReady →
+        WorkflowComplete.
 
         Args:
             job_id: Session ID from a completed compose/local-atmosphere call.
             action_id: ID of the suggestion chip the user clicked.
             action_label: Human-readable chip label (for logging only).
-            action_prompt: Expansion instruction carried by the chip.
+            action_prompt: Client-echoed chip prompt text. NOT trusted and never
+                interpolated into an agent instruction -- display-only, same as
+                action_label. The instruction actually used is looked up from
+                the server-stored chip matching action_id. Kept as a request
+                field for FE wire compatibility.
             user_id: User identifier (must match the original session).
         """
         try:
@@ -1076,6 +1103,20 @@ class WorkflowExecutor:
             yield WorkflowComplete(job_id=job_id)
             return
 
+        # MYS-167: resolve the chip's OWN server-stored action_prompt rather than
+        # trusting the client-echoed `action_prompt` argument. Only `action_id`
+        # was ever validated against `state.last_suggestions` above -- the free-
+        # text prompt string itself was passed straight through into the
+        # researcher/formatter's system instruction, so a caller holding one
+        # valid chip id could steer 20 expansions of arbitrary system-prompt
+        # content. From here down `action_prompt` (the parameter) is treated as
+        # display-only, same as `action_label` -- it must never reach an agent
+        # instruction again. `action_id` is already confirmed to be in
+        # `valid_ids`, so the lookup below always resolves.
+        trusted_action_prompt = self._resolve_trusted_action_prompt(
+            last_suggestions, action_id
+        )
+
         # Concurrency guard: block if another expansion is in flight
         if state.expansion_in_progress:
             yield WorkflowError(
@@ -1114,11 +1155,12 @@ class WorkflowExecutor:
 
                 existing_places = "\n".join(existing_names) if existing_names else "(none)"
 
-                # Determine target city: scan action_prompt for a known city name,
-                # fall back to the first city so single-city itineraries always work.
+                # Determine target city: scan the TRUSTED action_prompt for a known
+                # city name, fall back to the first city so single-city itineraries
+                # always work. (MYS-167: was the client-echoed action_prompt.)
                 cities = itinerary.get("cities", [])
                 parent_city = cities[0].get("name", "") if cities else ""
-                action_prompt_lower = action_prompt.lower()
+                action_prompt_lower = trusted_action_prompt.lower()
                 for city in cities:
                     city_name = city.get("name", "")
                     if city_name and city_name.lower() in action_prompt_lower:
@@ -1135,7 +1177,7 @@ class WorkflowExecutor:
                     book_title=book_title,
                     author=author,
                     parent_city=parent_city,
-                    action_prompt=action_prompt,
+                    action_prompt=trusted_action_prompt,
                     existing_places=existing_places,
                 )
                 runner = Runner(
@@ -1147,7 +1189,7 @@ class WorkflowExecutor:
 
                 prompt = (
                     f"Expand the itinerary for {book_title} by {author}. "
-                    f"Find new places in {parent_city} matching: {action_prompt}"
+                    f"Find new places in {parent_city} matching: {trusted_action_prompt}"
                 )
                 message = types.Content(
                     role="user", parts=[types.Part(text=prompt)]

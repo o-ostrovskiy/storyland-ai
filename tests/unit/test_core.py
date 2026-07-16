@@ -38,6 +38,7 @@ from core.extraction import (
     downgrade_ungrounded_match_types,
 )
 from core.events import ExpansionReady
+from core.executor import WorkflowExecutor
 from core.regions import get_valid_region_ids, validate_region_selection
 from evaluation.tools.run_scheduled_eval import select_first_region, select_all_regions
 
@@ -562,6 +563,71 @@ class TestExtractExpansionFromState:
     def test_no_expansion_in_state(self):
         accessor = SessionStateAccessor({})
         assert extract_expansion_from_state(accessor) is None
+
+
+class TestResolveTrustedActionPrompt:
+    """MYS-167: expand() must resolve the expansion instruction from the
+    server-stored chip matching action_id, never from the client-echoed
+    action_prompt request field -- a caller holding one valid chip id must
+    not be able to steer the researcher's system instruction with an
+    arbitrary string. Tested as a pure staticmethod: no session service,
+    Runner, or LLM agent construction needed to prove the resolution logic
+    itself is correct.
+    """
+
+    def test_resolves_the_stored_prompt_for_a_matching_chip(self):
+        last_suggestions = [
+            {"id": "chip-1", "label": "Add restaurants", "action_prompt": "Find atmospheric restaurants near the stops."},
+            {"id": "chip-2", "label": "More cafés", "action_prompt": "Find cafés matching the mood."},
+        ]
+        resolved = WorkflowExecutor._resolve_trusted_action_prompt(last_suggestions, "chip-2")
+        assert resolved == "Find cafés matching the mood."
+
+    def test_ignores_a_client_supplied_string_entirely(self):
+        """The injection case: a caller sends a valid action_id alongside an
+        attacker-controlled action_prompt string. The resolver never even
+        receives that argument -- it can't leak into the result no matter
+        what the client sent alongside the id."""
+        last_suggestions = [
+            {"id": "chip-1", "label": "Add restaurants", "action_prompt": "Find atmospheric restaurants near the stops."},
+        ]
+        resolved = WorkflowExecutor._resolve_trusted_action_prompt(last_suggestions, "chip-1")
+        assert resolved == "Find atmospheric restaurants near the stops."
+        assert "Ignore previous instructions" not in resolved
+
+    def test_unmatched_action_id_resolves_to_empty_string_not_an_error(self):
+        """expand() only reaches this after action_id passed the valid_ids
+        check, so this path isn't reachable in practice -- but the resolver
+        itself must fail closed (empty string) rather than raise or fall
+        back to any caller-supplied value."""
+        last_suggestions = [
+            {"id": "chip-1", "label": "Add restaurants", "action_prompt": "Find restaurants."},
+        ]
+        resolved = WorkflowExecutor._resolve_trusted_action_prompt(last_suggestions, "no-such-id")
+        assert resolved == ""
+
+    def test_empty_last_suggestions_resolves_to_empty_string(self):
+        assert WorkflowExecutor._resolve_trusted_action_prompt([], "chip-1") == ""
+
+    def test_chip_missing_action_prompt_key_resolves_to_empty_string(self):
+        """The 'Find books like this' chip shape stores action_prompt="" (and
+        is kept out of last_suggestions entirely per _build_book_recommendation_chip's
+        docstring) -- but defensively, a chip dict with no key at all must not
+        raise either."""
+        last_suggestions = [{"id": "chip-1", "label": "No prompt field"}]
+        resolved = WorkflowExecutor._resolve_trusted_action_prompt(last_suggestions, "chip-1")
+        assert resolved == ""
+
+    def test_duplicate_ids_resolves_the_first_match(self):
+        """Chip ids are server-stamped uuid4s (_stamp_suggestion_ids) so this
+        shouldn't occur in practice; pin deterministic first-match behavior
+        rather than leaving it as an accident of `next()`."""
+        last_suggestions = [
+            {"id": "chip-1", "label": "First", "action_prompt": "First prompt."},
+            {"id": "chip-1", "label": "Second", "action_prompt": "Second prompt."},
+        ]
+        resolved = WorkflowExecutor._resolve_trusted_action_prompt(last_suggestions, "chip-1")
+        assert resolved == "First prompt."
 
 
 class TestExpansionReadyEvent:
