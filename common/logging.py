@@ -16,14 +16,15 @@ import structlog
 
 def _sentry_error_processor(logger, method_name, event_dict):
     """
-    Forward error-level structlog events to Sentry.
+    Forward structlog events to Sentry: error/critical as EVENTS (alerting),
+    info/warning as Sentry LOGS (searchable), debug local-only.
 
     structlog here uses PrintLoggerFactory (straight to stdout), so the Sentry
     SDK's stdlib logging integration never sees these events — without this
     processor, handled workflow failures (caught + logger.error + streamed as
     a WorkflowError) would stay docker-log-only. When called inside an except
     block the live exception is captured with its traceback; otherwise the
-    event message is captured. Every capture_* call is a no-op unless
+    event message is captured. Every capture_*/logger call is a no-op unless
     init_sentry() actually initialized the SDK (no SENTRY_DSN → no client),
     so local dev and CI still never report.
     """
@@ -39,6 +40,16 @@ def _sentry_error_processor(logger, method_name, event_dict):
             else:
                 level = "critical" if method_name == "critical" else "error"
                 sentry_sdk.capture_message(str(event_dict.get("event")), level=level)
+    elif method_name in ("info", "warning"):
+        # Ship info/warning to Sentry Logs (searchable, no alerting). Same
+        # PrintLoggerFactory rationale as above; no-op unless init_sentry ran
+        # with enable_logs. DEBUG stays local-only by design — full LLM
+        # prompts can appear at that level.
+        from sentry_sdk import logger as sentry_logger
+
+        attributes = {k: v for k, v in event_dict.items() if k != "event"}
+        log_fn = sentry_logger.info if method_name == "info" else sentry_logger.warning
+        log_fn(str(event_dict.get("event")), attributes=attributes)
     return event_dict
 
 

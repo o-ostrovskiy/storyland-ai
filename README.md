@@ -237,6 +237,7 @@ All configuration is via environment variables in `.env`. Copy `.env.example` to
 | `LANGFUSE_PUBLIC_KEY` | Langfuse public key (optional) | — |
 | `LANGFUSE_HOST` | Langfuse host URL (optional) | — |
 | `SENTRY_DSN` | Sentry error-tracking DSN (optional) — unset means Sentry is fully disabled (local/CI). Errors only by default; performance tracing stays off since agent runs are already traced in Langfuse. | — |
+| `SENTRY_ENABLE_LOGS` | Ship INFO+ logs to Sentry Logs (searchable/alertable). Kill switch — only takes effect when `SENTRY_DSN` is set. structlog error/critical become Sentry events, info/warning become Sentry logs, debug stays local (LLM prompts can appear there). | `true` |
 | `SENTRY_TRACES_SAMPLE_RATE` | Sentry performance-tracing sample rate (0.0–1.0) | `0.0` |
 | `CORS_ORIGINS` | Allowed CORS origins for API (comma-separated) | `*` |
 | `INTERNAL_API_SECRET` | Shared secret with the gateway service — when set, all itinerary endpoints require an `X-Internal-Secret` header with this value. The health endpoint (`/health`) is always open. Leave empty for standalone/dev use. | — |
