@@ -143,8 +143,12 @@ jobs:
           # Mirrors deploy.sh's per-service compose path exactly (build context +
           # --env-file .env.prod live on the box). Like deploy.sh, this can recreate
           # depends_on services; the `--no-deps` refinement is tracked separately.
+          # SENTRY_RELEASE: tag Sentry events with the deployed commit so
+          # regressions pin to a release. Compose forwards it to the container
+          # (environment: block); empty would mean untagged, never a failure.
           ssh -i ~/.ssh/deploy_key -o ServerAliveInterval=30 "ubuntu@$BOX_IP" \
             "cd ~/storyland/storyland-infrastructure/deploy && \
+             SENTRY_RELEASE=${GITHUB_SHA::7} \
              docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build storyland-ai && \
              docker compose -f docker-compose.prod.yml ps storyland-ai"
 

@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from api.sentry import init_sentry
+from api.sentry import _drop_health_probe_logs, init_sentry
 
 
 @pytest.fixture(autouse=True)
@@ -43,6 +43,7 @@ class TestInitSentry:
             send_default_pii=False,
             max_request_body_size="never",
             enable_logs=True,
+            before_send_log=_drop_health_probe_logs,
             enable_metrics=True,
         )
 
@@ -193,6 +194,20 @@ class TestStructlogSentryProcessor:
 
         configure_logging(level="INFO")
         assert _sentry_error_processor in structlog.get_config()["processors"]
+
+
+class TestHealthProbeLogFilter:
+    def test_health_probe_access_log_dropped(self):
+        log = {"body": '172.18.0.4:0 - "GET /api/v1/health HTTP/1.1" 200'}
+        assert _drop_health_probe_logs(log, {}) is None
+
+    def test_regular_log_passes_through(self):
+        log = {"body": "discovery_started"}
+        assert _drop_health_probe_logs(log, {}) is log
+
+    def test_missing_body_passes_through(self):
+        log = {"attributes": {}}
+        assert _drop_health_probe_logs(log, {}) is log
 
 
 class TestCreateAppWiring:
