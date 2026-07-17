@@ -143,13 +143,14 @@ jobs:
           # Mirrors deploy.sh's per-service compose path exactly (build context +
           # --env-file .env.prod live on the box). Like deploy.sh, this can recreate
           # depends_on services; the `--no-deps` refinement is tracked separately.
-          # SENTRY_RELEASE: tag Sentry events with the deployed commit so
-          # regressions pin to a release. Compose forwards it to the container
-          # (environment: block); empty would mean untagged, never a failure.
+          # .env.release persists the Sentry release tag (deployed git short
+          # SHA) across deploys; every compose call reads it (--env-file), and
+          # only ai deploys rewrite it — keep in sync with deploy.sh and
+          # infra's deploy-service.yml (the usual two-places JIT-SSH caveat).
           ssh -i ~/.ssh/deploy_key -o ServerAliveInterval=30 "ubuntu@$BOX_IP" \
             "cd ~/storyland/storyland-infrastructure/deploy && \
-             SENTRY_RELEASE=${GITHUB_SHA::7} \
-             docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build storyland-ai && \
+             printf 'SENTRY_RELEASE=%s\n' '${GITHUB_SHA::7}' > .env.release && \
+             docker compose -f docker-compose.prod.yml --env-file .env.prod --env-file .env.release up -d --build storyland-ai && \
              docker compose -f docker-compose.prod.yml ps storyland-ai"
 
       - name: Close SSH (at-rest state)
