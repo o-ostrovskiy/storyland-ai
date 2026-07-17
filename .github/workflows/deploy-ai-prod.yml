@@ -147,9 +147,13 @@ jobs:
           # SHA) across deploys; every compose call reads it (--env-file), and
           # only ai deploys rewrite it — keep in sync with deploy.sh and
           # infra's deploy-service.yml (the usual two-places JIT-SSH caveat).
+          # Derived from the CHECKED-OUT workspace, not GITHUB_SHA: a manual
+          # dispatch with the `ref` input (rollback/tag deploy) checks out and
+          # deploys that ref, while GITHUB_SHA stays the triggering commit.
+          RELEASE="$(git rev-parse --short HEAD)"
           ssh -i ~/.ssh/deploy_key -o ServerAliveInterval=30 "ubuntu@$BOX_IP" \
             "cd ~/storyland/storyland-infrastructure/deploy && \
-             printf 'SENTRY_RELEASE=%s\n' '${GITHUB_SHA::7}' > .env.release && \
+             printf 'SENTRY_RELEASE=%s\n' \"$RELEASE\" > .env.release && \
              docker compose -f docker-compose.prod.yml --env-file .env.prod --env-file .env.release up -d --build storyland-ai && \
              docker compose -f docker-compose.prod.yml ps storyland-ai"
 
