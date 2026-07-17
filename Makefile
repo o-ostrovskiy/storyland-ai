@@ -1,7 +1,7 @@
 # StoryLand AI - Makefile
 # Common commands for development and demo
 
-.PHONY: help install install-dev test test-cov test-agents test-models test-tools test-services test-api test-integration test-integration-live test-integration-vcr-record test-all eval eval-setup eval-setup-one eval-run eval-place-to-book eval-summary eval-report eval-export run-api db-reset db-show db-users clean check-env
+.PHONY: help install install-dev lock audit test test-ci test-cov test-agents test-models test-tools test-services test-api test-integration test-integration-live test-integration-vcr-record test-all eval eval-setup eval-setup-one eval-run eval-place-to-book eval-summary eval-report eval-export run-api db-reset db-show db-users clean check-env
 
 # Default target
 help:
@@ -52,12 +52,36 @@ install:
 install-dev:
 	pip install -e ".[dev]"
 
+# Regenerate the hash-pinned lockfiles from pyproject.toml (needs `pip install uv`).
+# requirements.lock = prod (the Docker image installs it with --require-hashes);
+# requirements-dev.lock = prod + dev extras (CI installs it). Run after editing a
+# dependency/cap in pyproject.toml, then commit pyproject.toml AND both locks in
+# the same PR. Pinned uv version matches CI so hashes don't churn.
+# --universal: a platform-independent lock (env markers for platform-divergent
+# deps like greenlet) so a lock generated on macOS installs identically on the
+# Linux CI/image and the staleness guard is deterministic across both.
+lock:
+	uv pip compile pyproject.toml --universal --generate-hashes --output-file requirements.lock
+	uv pip compile pyproject.toml --universal --extra dev --generate-hashes --output-file requirements-dev.lock
+
+# Audit the shipped (prod) lock for known vulnerabilities (same gate CI runs).
+audit:
+	pip-audit --strict --require-hashes -r requirements.lock \
+		--ignore-vuln PYSEC-2026-161 --ignore-vuln PYSEC-2026-248 --ignore-vuln PYSEC-2026-249 \
+		--ignore-vuln PYSEC-2026-2280 --ignore-vuln PYSEC-2026-2281 --ignore-vuln PYSEC-2026-2447
+
 # =============================================================================
 # Testing
 # =============================================================================
 
 test:
 	.venv/bin/pytest tests/unit/ -v
+
+# CI target: unit tests + the coverage ratchet. Bare --cov honors the
+# [tool.coverage.run] source list in pyproject (NOT --cov=., which measures the
+# whole tree and breaks the fail_under baseline). fail_under lives in pyproject.
+test-ci:
+	.venv/bin/pytest tests/unit/ --cov --cov-report=term-missing
 
 test-cov:
 	.venv/bin/pytest tests/unit/ --cov=. --cov-report=term-missing
