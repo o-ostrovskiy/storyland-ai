@@ -29,14 +29,44 @@ jobs:
           python -m venv .venv
           echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
 
-      - name: Install dependencies
+      - name: Install dependencies (hash-locked)
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          # Pinned deps with hashes; then the local package only (--no-deps keeps
+          # the resolver from re-touching the pinned tree). The editable local pkg
+          # cannot itself be hash-pinned, hence the two-step install.
+          pip install --require-hashes -r requirements-dev.lock
+          pip install -e . --no-deps
 
       - name: Assert google-adk pinned to the tested 1.x line
+        # Now validates the LOCKED resolution (strictly stronger than a live resolve).
         run: |
           python -c "import importlib.metadata as m, sys; v = m.version('google-adk'); print('resolved google-adk', v); sys.exit(0 if v.split('.')[0] == '1' else 'ERROR: google-adk resolved to %s; expected the pinned 1.x major (>=1.33.0,<2)' % v)"
+
+      - name: Verify lockfiles are up to date
+        # A pyproject dependency/cap edit without a regenerated lock is silent drift.
+        # Recompile with the pinned uv version and fail if the committed lock changed.
+        run: |
+          pip install uv==0.11.29
+          make lock
+          git diff --exit-code requirements.lock requirements-dev.lock \
+            || { echo "::error::Lockfile stale — run 'make lock' and commit requirements*.lock."; exit 1; }
+
+      - name: Audit shipped dependencies (pip-audit gate)
+        # Fails on any known vuln in the PROD lock. Accepted risks are ignored inline
+        # WITH justification + tracking; a NEW, un-accepted vuln fails the build.
+        run: |
+          pip install pip-audit==2.10.1
+          pip-audit --strict --require-hashes -r requirements.lock \
+            --ignore-vuln PYSEC-2026-161 --ignore-vuln PYSEC-2026-248 --ignore-vuln PYSEC-2026-249 \
+            --ignore-vuln PYSEC-2026-2280 --ignore-vuln PYSEC-2026-2281 \
+            --ignore-vuln PYSEC-2026-2447
+            # starlette 0.52.1 CVEs (161/248/249/2280/2281): fixes are all >=1.0, but
+            # google-adk (pinned <2 for a reproducible agent line) hard-caps
+            # starlette<1. Unreachable without an ADK 2.x major upgrade — tracked as a
+            # founder-facing security follow-up. diskcache 2447: no upstream fix.
+            # storyland-ai is an internal upstream behind the gateway, not directly
+            # internet-facing, which lowers the Host-header DoS exposure.
 
       - name: Create .env file for unit tests
         run: |
@@ -50,6 +80,6 @@ jobs:
           echo "LOG_LEVEL=INFO" >> .env
           echo "ENABLE_ADK_DEBUG=false" >> .env
 
-      - name: Run unit tests
+      - name: Run unit tests with coverage (ratchet)
         run: |
-          make test
+          make test-ci
