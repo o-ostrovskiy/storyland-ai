@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.dependencies import initialize, shutdown
 from api.routes import router, system_router
+from api.sentry import init_sentry
 from services.session_retention import SessionSweeper
 
 
@@ -62,6 +63,10 @@ def create_app() -> FastAPI:
     Returns:
         Configured FastAPI application
     """
+    # Before app construction so the SDK's FastAPI/Starlette integration wraps
+    # the app. Env-gated: a missing SENTRY_DSN means fully disabled (local, CI).
+    init_sentry()
+
     app = FastAPI(
         title="StoryLand AI API",
         description=(
