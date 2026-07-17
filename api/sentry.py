@@ -1,9 +1,14 @@
 """
 Env-gated Sentry initialization for the API service.
 
-Error tracking only by default: unhandled exceptions and ERROR-level logs
-become Sentry events (the SDK's logging integration also records INFO+ logs
-as breadcrumbs on those events). Performance tracing is OFF by default —
+Error tracking only by default: unhandled exceptions become Sentry events via
+the FastAPI integration, and handled workflow failures reach Sentry through
+the structlog processor in common.logging (structlog prints straight to
+stdout here, so the SDK's stdlib logging integration alone would never see
+them; stdlib loggers — ADK, google libs — still feed breadcrumbs/events the
+normal way). Request bodies are never attached (max_request_body_size:
+send_default_pii=False does not cover them, and ours carry book titles,
+taste context, and lat/lng). Performance tracing is OFF by default —
 agent runs are already traced in Langfuse, so Sentry transactions would
 duplicate that spend; opt in per-environment via SENTRY_TRACES_SAMPLE_RATE.
 
@@ -57,6 +62,10 @@ def init_sentry() -> bool:
         # No request headers/IPs/cookies on events. User prompts already live
         # in Langfuse traces under access control; Sentry only needs the error.
         send_default_pii=False,
+        # send_default_pii=False does NOT cover request bodies — the SDK
+        # default ("medium") uploads small failing-request bodies, which here
+        # carry book titles, taste context, and local-atmosphere lat/lng.
+        max_request_body_size="never",
     )
     logger.info(
         "sentry_enabled",
