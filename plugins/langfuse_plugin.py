@@ -46,9 +46,16 @@ def _pricing_for(model_name: str) -> tuple[float, float]:
     if not model_name:
         return _GEMINI_DEFAULT_PRICING
     lower = model_name.lower()
-    for key, rates in _GEMINI_PRICING.items():
+    # MYS-398 follow-up: match longest key first. `_GEMINI_PRICING` is
+    # keyed by substring ("key in lower"), and "gemini-2.5-flash" is
+    # itself a substring of "gemini-2.5-flash-lite" -- checking keys in
+    # plain insertion order let the shorter, wrong entry match first, so
+    # every flash-lite call was silently priced at the plain-flash rate
+    # (pre-existing, caught by the MYS-398 concurrency test asserting two
+    # different flash variants' costs side by side for the first time).
+    for key in sorted(_GEMINI_PRICING, key=len, reverse=True):
         if key in lower:
-            return rates
+            return _GEMINI_PRICING[key]
     return _GEMINI_DEFAULT_PRICING
 
 
@@ -112,10 +119,18 @@ class LangfusePlugin(BasePlugin):
         self._token_usage = TokenUsage()
         self._total_cost_usd: float = 0.0
         self._current_trace = None
-        self._current_generation = None
-        self._current_model: str = ""
-        self._agent_stack = []  # Track nested agent calls
-        self._current_span = None
+        # MYS-398: discovery's parallel_discovery ParallelAgent runs three
+        # sub-agent branches (city/landmark/author pipelines) concurrently
+        # against this ONE plugin instance (core/executor.py creates one
+        # LangfusePlugin per workflow *run*, not per sub-agent). The fields
+        # below used to be shared scalars/a single LIFO list, so an
+        # interleaved before_model/after_model pair from one branch could
+        # overwrite or pop state that belonged to a different, still-open
+        # branch -- see _branch_key() for how they're now scoped per branch.
+        self._generations: dict[str, Any] = {}  # branch key -> open generation observation
+        self._models: dict[str, str] = {}  # branch key -> model name of the open generation
+        self._agent_stacks: dict[str, list] = {}  # branch key -> that branch's own LIFO agent stack
+        self._spans: dict[str, Any] = {}  # branch key -> open tool span
         self._propagation_cm = None
 
         if not LANGFUSE_AVAILABLE:
@@ -138,6 +153,36 @@ class LangfusePlugin(BasePlugin):
         else:
             logger.info("langfuse_disabled", reason="missing_credentials")
             self.enabled = False
+
+    @staticmethod
+    def _branch_key(callback_context: CallbackContext) -> str:
+        """Per-concurrent-call key so parallel sub-agent branches never
+        share the same generation/agent-stack/span slot (MYS-398).
+
+        ADK's own ParallelAgent already solves this problem for itself:
+        every sub-agent gets a private InvocationContext copy carrying a
+        unique, stable `branch` string for the sub-agent's entire run (see
+        google.adk.agents.parallel_agent._create_branch_ctx_for_sub_agent,
+        e.g. "parallel_discovery.city_pipeline"). Nested SequentialAgent
+        steps within a branch (research -> format) do not fork a new
+        branch, so they safely share one key -- only ParallelAgent forks,
+        and this plugin only needs to isolate exactly that boundary.
+
+        `branch` has no public accessor on Context/CallbackContext, so this
+        reads the private `_invocation_context` attribute directly; that's
+        a real coupling to google-adk's internals, which is why the repo
+        pins `google-adk[eval]>=1.33.0,<2` (tested 1.x line, no silent
+        jump to a breaking 2.x). Falls back to a constant key when `branch`
+        is unset (sequential-only paths, and the try/except below in case a
+        future ADK version renames the attribute) -- a single shared key is
+        exactly what non-parallel invocations already had, and correct for
+        them since there's never more than one in-flight generation there.
+        """
+        try:
+            branch = callback_context._invocation_context.branch
+        except AttributeError:
+            branch = None
+        return branch or "_root"
 
     async def on_user_message_callback(
         self,
@@ -197,8 +242,9 @@ class LangfusePlugin(BasePlugin):
                     "callback_context": str(callback_context),
                 },
             )
-            self._agent_stack.append((agent_name, span))
-            logger.debug("langfuse_agent_start", agent=agent_name)
+            key = self._branch_key(callback_context)
+            self._agent_stacks.setdefault(key, []).append((agent_name, span))
+            logger.debug("langfuse_agent_start", agent=agent_name, branch=key)
         except Exception as e:
             logger.warning("langfuse_agent_start_error", error=str(e), error_type=type(e).__name__)
 
@@ -212,10 +258,14 @@ class LangfusePlugin(BasePlugin):
             return None
 
         try:
-            if self._agent_stack:
-                agent_name, span = self._agent_stack.pop()
+            key = self._branch_key(callback_context)
+            stack = self._agent_stacks.get(key)
+            if stack:
+                agent_name, span = stack.pop()
+                if not stack:
+                    self._agent_stacks.pop(key, None)
                 span.end()
-                logger.debug("langfuse_agent_complete", agent=agent_name)
+                logger.debug("langfuse_agent_complete", agent=agent_name, branch=key)
         except Exception as e:
             logger.warning("langfuse_agent_complete_error", error=str(e), error_type=type(e).__name__)
 
@@ -230,20 +280,23 @@ class LangfusePlugin(BasePlugin):
 
         try:
             model_name = getattr(llm_request, 'model', 'unknown_model') or 'unknown_model'
-            self._current_model = model_name
+            key = self._branch_key(callback_context)
+            self._models[key] = model_name
 
-            # Create generation tracking under the current agent span or trace span
-            parent = self._agent_stack[-1][1] if self._agent_stack else self._current_trace
-            self._current_generation = parent.start_observation(
+            # Create generation tracking under the current agent span (this
+            # branch's own stack top) or the shared trace span.
+            stack = self._agent_stacks.get(key) or []
+            parent = stack[-1][1] if stack else self._current_trace
+            self._generations[key] = parent.start_observation(
                 as_type="generation",
                 name=f"{model_name}_call",
                 model=model_name,
                 input=str(llm_request),
                 metadata={
-                    "agent": self._agent_stack[-1][0] if self._agent_stack else "unknown",
+                    "agent": stack[-1][0] if stack else "unknown",
                 },
             )
-            logger.debug("langfuse_model_request", model=model_name)
+            logger.debug("langfuse_model_request", model=model_name, branch=key)
         except Exception as e:
             logger.warning("langfuse_model_request_error", error=str(e), error_type=type(e).__name__)
 
@@ -257,23 +310,30 @@ class LangfusePlugin(BasePlugin):
 
         This is where we capture actual token counts from Gemini API.
         """
-        if not self.enabled or not self.client or not self._current_generation:
+        key = self._branch_key(callback_context)
+        generation = self._generations.get(key)
+        if not self.enabled or not self.client or not generation:
             return None
 
         try:
             # Extract token usage from response
             usage = self._extract_token_usage(llm_response)
+            model_name = self._models.get(key, "")
 
             if usage:
-                # Update running totals
+                # Update running totals. Plain += on dataclass fields/floats
+                # is safe to share across branches: asyncio is single-
+                # threaded and these statements contain no `await`, so each
+                # increment runs to completion without interleaving with
+                # another branch's increment.
                 self._token_usage.input_tokens += usage.input_tokens
                 self._token_usage.output_tokens += usage.output_tokens
                 self._token_usage.total_tokens += usage.total_tokens
 
-                cost = _calculate_cost(usage.input_tokens, usage.output_tokens, self._current_model)
+                cost = _calculate_cost(usage.input_tokens, usage.output_tokens, model_name)
                 self._total_cost_usd += cost
-                input_rate, output_rate = _pricing_for(self._current_model)
-                self._current_generation.update(
+                input_rate, output_rate = _pricing_for(model_name)
+                generation.update(
                     output=str(llm_response),
                     usage_details={
                         "input": usage.input_tokens,
@@ -295,10 +355,12 @@ class LangfusePlugin(BasePlugin):
                     input_tokens=usage.input_tokens,
                     output_tokens=usage.output_tokens,
                     cost_usd=cost,
+                    branch=key,
                 )
 
-            self._current_generation.end()
-            self._current_generation = None
+            generation.end()
+            self._generations.pop(key, None)
+            self._models.pop(key, None)
         except Exception as e:
             logger.warning("langfuse_model_response_error", error=str(e), error_type=type(e).__name__)
 
@@ -356,8 +418,10 @@ class LangfusePlugin(BasePlugin):
 
         try:
             tool_name = getattr(tool, 'name', 'unknown_tool')
-            parent = self._agent_stack[-1][1] if self._agent_stack else self._current_trace
-            self._current_span = parent.start_observation(
+            key = self._branch_key(tool_context)
+            stack = self._agent_stacks.get(key) or []
+            parent = stack[-1][1] if stack else self._current_trace
+            self._spans[key] = parent.start_observation(
                 as_type="span",
                 name=f"tool_{tool_name}",
                 metadata={
@@ -366,7 +430,7 @@ class LangfusePlugin(BasePlugin):
                     "tool_args": str(tool_args),
                 },
             )
-            logger.debug("langfuse_tool_start", tool=tool_name)
+            logger.debug("langfuse_tool_start", tool=tool_name, branch=key)
         except Exception as e:
             logger.warning("langfuse_tool_start_error", error=str(e), error_type=type(e).__name__)
 
@@ -381,15 +445,17 @@ class LangfusePlugin(BasePlugin):
         result: dict,
     ) -> Optional[dict]:
         """Track tool execution completion."""
-        if not self.enabled or not self.client or not self._current_span:
+        key = self._branch_key(tool_context)
+        span = self._spans.get(key)
+        if not self.enabled or not self.client or not span:
             return None
 
         try:
             tool_name = getattr(tool, 'name', 'unknown_tool')
-            self._current_span.update(output=str(result))
-            self._current_span.end()
-            self._current_span = None
-            logger.debug("langfuse_tool_complete", tool=tool_name)
+            span.update(output=str(result))
+            span.end()
+            self._spans.pop(key, None)
+            logger.debug("langfuse_tool_complete", tool=tool_name, branch=key)
         except Exception as e:
             logger.warning("langfuse_tool_complete_error", error=str(e), error_type=type(e).__name__)
 
