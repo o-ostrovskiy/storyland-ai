@@ -13,6 +13,43 @@ import sys
 
 import structlog
 
+# Attribute keys safe to forward to Sentry Logs. ALLOWLIST, deliberately:
+# info/warning logs carry user-supplied content (book titles/authors,
+# local-atmosphere locations, place queries) and occasionally infra values
+# (connection strings) — the same classes of data api/sentry.py refuses to
+# attach to events (send_default_pii=False, max_request_body_size="never").
+# Unknown keys are DROPPED and recorded in `redacted_keys`, so a new log
+# site can never leak by default; extend this set only with keys that are
+# provably not user content or secrets.
+_SENTRY_SAFE_LOG_ATTR_KEYS = frozenset(
+    {
+        "level",
+        "timestamp",
+        "job_id",
+        "phase",
+        "step",
+        "reason",
+        "type",
+        "backend",
+        "count",
+        "num_regions",
+        "results",
+        "floor",
+        "attempts",
+        "status",
+        "error_type",
+        "compose_error_kind",
+        "ttl_seconds",
+        "max_entries",
+        "interval_seconds",
+        "persistent",
+        "environment",
+        "traces_sample_rate",
+        "logs_enabled",
+        "metrics_enabled",
+    }
+)
+
 
 def _sentry_error_processor(logger, method_name, event_dict):
     """
@@ -51,7 +88,17 @@ def _sentry_error_processor(logger, method_name, event_dict):
         # prompts can appear at that level.
         from sentry_sdk import logger as sentry_logger
 
-        attributes = {k: v for k, v in event_dict.items() if k != "event"}
+        attributes = {}
+        redacted = []
+        for k, v in event_dict.items():
+            if k == "event":
+                continue
+            if k in _SENTRY_SAFE_LOG_ATTR_KEYS:
+                attributes[k] = v
+            else:
+                redacted.append(k)
+        if redacted:
+            attributes["redacted_keys"] = ",".join(sorted(redacted))
         log_fn = sentry_logger.info if method_name == "info" else sentry_logger.warning
         log_fn(str(event_dict.get("event")), attributes=attributes)
 

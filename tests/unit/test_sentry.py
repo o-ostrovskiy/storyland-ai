@@ -128,6 +128,34 @@ class TestStructlogSentryProcessor:
             "discovery_started", attributes={"job_id": "j1"}
         )
 
+    def test_user_content_attributes_redacted_from_logs(self):
+        """Non-allowlisted keys (user content, secrets) never ship — the key
+        NAMES are recorded in redacted_keys, the values dropped (Codex P1 on
+        PR #204: book titles / locations / place queries / connection strings
+        must not be exported by default)."""
+        from common.logging import _sentry_error_processor
+
+        with patch("sentry_sdk.logger.info") as mock_log:
+            _sentry_error_processor(
+                None,
+                "info",
+                {
+                    "event": "search_started",
+                    "job_id": "j1",
+                    "book_title": "1984",
+                    "place": "Paris",
+                    "connection_string": "postgres://secret",
+                },
+            )
+        attrs = mock_log.call_args.kwargs["attributes"]
+        assert attrs["job_id"] == "j1"
+        assert "book_title" not in attrs
+        assert "place" not in attrs
+        assert "connection_string" not in attrs
+        assert attrs["redacted_keys"] == "book_title,connection_string,place"
+        assert "1984" not in str(mock_log.call_args)
+        assert "postgres://secret" not in str(mock_log.call_args)
+
     def test_warning_event_forwarded_to_sentry_logs(self):
         from common.logging import _sentry_error_processor
 
