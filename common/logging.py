@@ -17,7 +17,11 @@ import structlog
 def _sentry_error_processor(logger, method_name, event_dict):
     """
     Forward structlog events to Sentry: error/critical as EVENTS (alerting),
-    info/warning as Sentry LOGS (searchable), debug local-only.
+    info/warning as Sentry LOGS (searchable), debug local-only. Every
+    non-debug event is also counted as the `log.events` metric with
+    {event, level} attributes — event names are a fixed vocabulary in code,
+    so cardinality is bounded and timeouts / cache hits / workflow failures
+    become chartable without per-site instrumentation.
 
     structlog here uses PrintLoggerFactory (straight to stdout), so the Sentry
     SDK's stdlib logging integration never sees these events — without this
@@ -50,6 +54,18 @@ def _sentry_error_processor(logger, method_name, event_dict):
         attributes = {k: v for k, v in event_dict.items() if k != "event"}
         log_fn = sentry_logger.info if method_name == "info" else sentry_logger.warning
         log_fn(str(event_dict.get("event")), attributes=attributes)
+
+    if method_name != "debug":
+        from sentry_sdk import metrics
+
+        metrics.count(
+            "log.events",
+            1,
+            attributes={
+                "event": str(event_dict.get("event")),
+                "level": method_name,
+            },
+        )
     return event_dict
 
 

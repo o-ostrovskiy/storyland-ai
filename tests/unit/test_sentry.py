@@ -14,6 +14,7 @@ def clean_sentry_env(monkeypatch):
         "SENTRY_DSN",
         "SENTRY_TRACES_SAMPLE_RATE",
         "SENTRY_ENABLE_LOGS",
+        "SENTRY_ENABLE_METRICS",
         "ENVIRONMENT",
     ):
         monkeypatch.delenv(var, raising=False)
@@ -42,14 +43,17 @@ class TestInitSentry:
             send_default_pii=False,
             max_request_body_size="never",
             enable_logs=True,
+            enable_metrics=True,
         )
 
-    def test_logs_kill_switch(self, monkeypatch):
+    def test_logs_and_metrics_kill_switches(self, monkeypatch):
         monkeypatch.setenv("SENTRY_DSN", "https://key@example.ingest.sentry.io/1")
         monkeypatch.setenv("SENTRY_ENABLE_LOGS", "false")
+        monkeypatch.setenv("SENTRY_ENABLE_METRICS", "false")
         with patch("sentry_sdk.init") as mock_init:
             assert init_sentry() is True
         assert mock_init.call_args.kwargs["enable_logs"] is False
+        assert mock_init.call_args.kwargs["enable_metrics"] is False
 
     def test_environment_and_sample_rate_from_env(self, monkeypatch):
         monkeypatch.setenv("SENTRY_DSN", "https://key@example.ingest.sentry.io/1")
@@ -136,10 +140,23 @@ class TestStructlogSentryProcessor:
 
         with patch("sentry_sdk.logger.debug") as mock_debug, patch(
             "sentry_sdk.logger.info"
-        ) as mock_info:
+        ) as mock_info, patch("sentry_sdk.metrics.count") as mock_count:
             _sentry_error_processor(None, "debug", {"event": "llm_prompt"})
         mock_debug.assert_not_called()
         mock_info.assert_not_called()
+        mock_count.assert_not_called()
+
+    @pytest.mark.parametrize("level", ["info", "warning", "error", "critical"])
+    def test_non_debug_events_counted_as_metric(self, level):
+        from common.logging import _sentry_error_processor
+
+        with patch("sentry_sdk.metrics.count") as mock_count:
+            _sentry_error_processor(None, level, {"event": "discover_timeout"})
+        mock_count.assert_called_once_with(
+            "log.events",
+            1,
+            attributes={"event": "discover_timeout", "level": level},
+        )
 
     def test_processor_registered_in_structlog_config(self):
         import structlog

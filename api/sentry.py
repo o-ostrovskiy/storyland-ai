@@ -22,6 +22,11 @@ Environment variables:
     SENTRY_DSN                  enable switch; empty/absent = disabled
     SENTRY_ENABLE_LOGS          "true"/"false", default true — ship INFO+
                                 logs to Sentry Logs (searchable, alertable)
+    SENTRY_ENABLE_METRICS       "true"/"false", default true — emit metrics;
+                                every structlog event is auto-counted as
+                                `log.events` {event, level}, so timeouts,
+                                cache hits, and workflow failures are
+                                chartable without per-site instrumentation
     SENTRY_TRACES_SAMPLE_RATE   0.0-1.0, default 0.0 (errors only)
     ENVIRONMENT                 reused as the Sentry environment tag
     SENTRY_RELEASE              optional release tag (read by the SDK itself)
@@ -42,6 +47,20 @@ Logging examples (what reaches Sentry, and how):
     logger.error("workflow_failed", job_id=job_id, phase=phase)
 
     # debug stays local-only by design (LLM prompts can appear there)
+
+Metrics examples (for NEW call sites; existing log events are counted
+automatically as `log.events` by the structlog bridge):
+
+    from sentry_sdk import metrics
+
+    # counter — how often something happens
+    metrics.count("discovery.cache.hit", 1, attributes={"backend": "disk"})
+
+    # distribution — spread of a measured value (p50/p95 in Sentry)
+    metrics.distribution("workflow.discover.duration", elapsed_s, unit="second")
+
+    # gauge — current level of something
+    metrics.gauge("sessions.active", n)
 
 Stdlib loggers (google-adk, urllib3, ...) flow via the SDK's logging
 integration automatically; the structlog bridge in common.logging covers
@@ -74,8 +93,9 @@ def init_sentry() -> bool:
     traces_sample_rate = float(os.getenv("SENTRY_TRACES_SAMPLE_RATE") or "0.0")
     environment = os.getenv("ENVIRONMENT", "local")
     # Default ON when Sentry itself is on: log volume at current traffic is
-    # tiny and searchable prod logs are the point. Kill switch, not opt-in.
+    # tiny and searchable prod logs are the point. Kill switches, not opt-ins.
     enable_logs = (os.getenv("SENTRY_ENABLE_LOGS") or "true").lower() == "true"
+    enable_metrics = (os.getenv("SENTRY_ENABLE_METRICS") or "true").lower() == "true"
 
     # Imported lazily so the module can be imported (and the disabled path
     # unit-tested) even if the SDK were ever absent from a local env.
@@ -96,11 +116,16 @@ def init_sentry() -> bool:
         # events ship via the bridge in common.logging (structlog bypasses
         # stdlib, so without the bridge nothing of ours would appear).
         enable_logs=enable_logs,
+        # Metrics: every structlog event is auto-counted (`log.events`) by the
+        # bridge in common.logging; new call sites can use sentry_sdk.metrics
+        # directly (examples in the module docstring).
+        enable_metrics=enable_metrics,
     )
     logger.info(
         "sentry_enabled",
         environment=environment,
         traces_sample_rate=traces_sample_rate,
         logs_enabled=enable_logs,
+        metrics_enabled=enable_metrics,
     )
     return True
