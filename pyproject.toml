@@ -68,6 +68,13 @@ source = ["agents", "models", "tools", "services", "api", "core"]
 omit = ["tests/*", "*/__pycache__/*"]
 
 [tool.coverage.report]
+show_missing = true
+# Coverage RATCHET, not a target. Set below the measured green-suite baseline
+# (76% over the source list above, 702 unit tests, 2026-07-17) so day-one CI is
+# green and only REGRESSIONS fail. Raise over time; never lower. Measured with
+# bare `--cov` (honors [tool.coverage.run] source) — NOT `--cov=.`, which would
+# measure the whole tree and make this number meaningless. CI runs `make test-ci`.
+fail_under = 74
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
