@@ -29,7 +29,10 @@ Environment variables:
                                 chartable without per-site instrumentation
     SENTRY_TRACES_SAMPLE_RATE   0.0-1.0, default 0.0 (errors only)
     ENVIRONMENT                 reused as the Sentry environment tag
-    SENTRY_RELEASE              optional release tag (read by the SDK itself)
+    SENTRY_RELEASE              release tag (read by the SDK itself); the
+                                deploy tooling sets it to the deployed git
+                                SHA so Sentry can pin "first seen in
+                                release X" and auto-resolve on new deploys
 
 Logging examples (what reaches Sentry, and how):
 
@@ -74,6 +77,18 @@ from common.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _drop_health_probe_logs(log, hint):
+    """
+    before_send_log filter: drop the docker healthcheck's uvicorn access-log
+    lines ('GET /api/v1/health ... 200'). They fire every 30s (~3k/day of
+    pure noise in the Logs explorer); the healthcheck's FAILURE signal is the
+    container going unhealthy, not a Sentry log line. Everything else passes.
+    """
+    if "/api/v1/health" in (log.get("body") or ""):
+        return None
+    return log
+
+
 def init_sentry() -> bool:
     """
     Initialize the Sentry SDK if SENTRY_DSN is set.
@@ -116,6 +131,7 @@ def init_sentry() -> bool:
         # events ship via the bridge in common.logging (structlog bypasses
         # stdlib, so without the bridge nothing of ours would appear).
         enable_logs=enable_logs,
+        before_send_log=_drop_health_probe_logs,
         # Metrics: every structlog event is auto-counted (`log.events`) by the
         # bridge in common.logging; new call sites can use sentry_sdk.metrics
         # directly (examples in the module docstring).
