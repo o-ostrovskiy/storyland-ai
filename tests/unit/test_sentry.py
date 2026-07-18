@@ -4,7 +4,12 @@ from unittest.mock import patch
 
 import pytest
 
-from api.sentry import _drop_health_probe_logs, init_sentry
+from api.sentry import (
+    _drop_health_probe_logs,
+    _scrub_breadcrumb,
+    _scrub_event,
+    init_sentry,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -45,6 +50,8 @@ class TestInitSentry:
             include_local_variables=False,
             enable_logs=True,
             before_send_log=_drop_health_probe_logs,
+            before_send=_scrub_event,
+            before_breadcrumb=_scrub_breadcrumb,
             enable_metrics=True,
         )
 
@@ -205,6 +212,22 @@ class TestHealthProbeLogFilter:
     def test_regular_log_passes_through(self):
         log = {"body": "discovery_started"}
         assert _drop_health_probe_logs(log, {}) is log
+
+    def test_event_and_breadcrumb_query_scrub(self):
+        """Parity with storyland-services#92 4th finding: events and
+        breadcrumbs carry URLs the log scrub never sees."""
+        event = {
+            "request": {"url": "http://x/api?q=user+text", "query_string": "q=user+text"},
+            "logentry": {"message": "m", "params": ["GET /y?place=Paris"], "formatted": "f"},
+        }
+        out = _scrub_event(event, {})
+        assert out["request"]["url"] == "http://x/api"
+        assert "query_string" not in out["request"]
+        assert out["logentry"]["params"] == ["GET /y"]
+        crumb = {"message": "GET /z?token=s", "data": {"url": "http://x/w?a=b"}}
+        out2 = _scrub_breadcrumb(crumb, {})
+        assert out2["message"] == "GET /z"
+        assert out2["data"]["url"] == "http://x/w"
 
     def test_url_query_strings_scrubbed(self):
         """Parity with the backend (Codex on storyland-services#92): stdlib

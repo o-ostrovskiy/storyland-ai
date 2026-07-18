@@ -107,6 +107,45 @@ def _drop_health_probe_logs(log, hint):
     return log
 
 
+def _scrub_event(event, hint):
+    """
+    before_send: strip URL query strings from error EVENTS (request.url,
+    stdlib logentry message/params) — these bypass the log-path scrub.
+    Parity with the backend gateway (storyland-services#92).
+    """
+    request = event.get("request")
+    if request:
+        url = request.get("url")
+        if isinstance(url, str) and "?" in url:
+            request["url"] = _URL_QUERY_RE.sub("", url)
+        request.pop("query_string", None)
+    logentry = event.get("logentry")
+    if logentry:
+        for key in ("message", "formatted"):
+            value = logentry.get(key)
+            if isinstance(value, str) and "?" in value:
+                logentry[key] = _URL_QUERY_RE.sub("", value)
+        params = logentry.get("params")
+        if isinstance(params, (list, tuple)):
+            logentry["params"] = [
+                _URL_QUERY_RE.sub("", p) if isinstance(p, str) and "?" in p else p
+                for p in params
+            ]
+    return event
+
+
+def _scrub_breadcrumb(crumb, hint):
+    """before_breadcrumb: scrub stdlib-record crumbs (message + string data)."""
+    message = crumb.get("message")
+    if isinstance(message, str) and "?" in message:
+        crumb["message"] = _URL_QUERY_RE.sub("", message)
+    data = crumb.get("data") or {}
+    for key, value in list(data.items()):
+        if isinstance(value, str) and "?" in value:
+            data[key] = _URL_QUERY_RE.sub("", value)
+    return crumb
+
+
 def init_sentry() -> bool:
     """
     Initialize the Sentry SDK if SENTRY_DSN is set.
@@ -154,6 +193,8 @@ def init_sentry() -> bool:
         # stdlib, so without the bridge nothing of ours would appear).
         enable_logs=enable_logs,
         before_send_log=_drop_health_probe_logs,
+        before_send=_scrub_event,
+        before_breadcrumb=_scrub_breadcrumb,
         # Metrics: every structlog event is auto-counted (`log.events`) by the
         # bridge in common.logging; new call sites can use sentry_sdk.metrics
         # directly (examples in the module docstring).
