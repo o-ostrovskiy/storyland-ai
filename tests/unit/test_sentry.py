@@ -206,6 +206,19 @@ class TestHealthProbeLogFilter:
         log = {"body": "discovery_started"}
         assert _drop_health_probe_logs(log, {}) is log
 
+    def test_url_query_strings_scrubbed(self):
+        """Parity with the backend (Codex on storyland-services#92): stdlib
+        access records bypass the structlog allowlist and can carry request
+        paths WITH query strings."""
+        log = {
+            "body": '10.0.0.2:0 - "GET /api/v1/thing?q=user+text HTTP/1.1" 200',
+            "attributes": {"sentry.message.parameter.request_line": "GET /x?place=Paris HTTP/1.1"},
+        }
+        out = _drop_health_probe_logs(log, {})
+        assert out is not None
+        assert "q=" not in out["body"]
+        assert out["attributes"]["sentry.message.parameter.request_line"] == "GET /x HTTP/1.1"
+
     def test_missing_body_passes_through(self):
         log = {"attributes": {}}
         assert _drop_health_probe_logs(log, {}) is log

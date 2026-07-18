@@ -71,21 +71,39 @@ our own loggers, which bypass stdlib entirely (PrintLoggerFactory).
 """
 
 import os
+import re
 
 from common.logging import get_logger
 
 logger = get_logger(__name__)
 
 
+# Everything from '?' up to whitespace or a closing quote — URL query strings
+# in access lines and any other URL-bearing stdlib log reaching Sentry Logs.
+_URL_QUERY_RE = re.compile(r"\?[^\s\"]*")
+
+
 def _drop_health_probe_logs(log, hint):
     """
-    before_send_log filter: drop the docker healthcheck's uvicorn access-log
-    lines ('GET /api/v1/health ... 200'). They fire every 30s (~3k/day of
-    pure noise in the Logs explorer); the healthcheck's FAILURE signal is the
-    container going unhealthy, not a Sentry log line. Everything else passes.
+    before_send_log filter, two jobs (parity with the backend gateway —
+    Codex on storyland-services#92):
+
+    1. DROP the docker healthcheck's uvicorn access-log lines
+       ('GET /api/v1/health ... 200') — every 30s, pure noise; the
+       healthcheck's FAILURE signal is the container going unhealthy.
+    2. SCRUB URL query strings from bodies and string attributes: stdlib
+       records (uvicorn.access etc.) bypass the structlog allowlist and can
+       carry request paths WITH query. Fail-safe: any '?' tail is stripped.
     """
-    if "/api/v1/health" in (log.get("body") or ""):
+    body = log.get("body") or ""
+    if "/api/v1/health" in body:
         return None
+    if "?" in body:
+        log["body"] = _URL_QUERY_RE.sub("", body)
+    attributes = log.get("attributes") or {}
+    for key, value in list(attributes.items()):
+        if isinstance(value, str) and "?" in value:
+            attributes[key] = _URL_QUERY_RE.sub("", value)
     return log
 
 
