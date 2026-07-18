@@ -44,7 +44,8 @@ class TestInitSentry:
         mock_init.assert_called_once_with(
             dsn="https://key@example.ingest.sentry.io/1",
             environment="local",
-            traces_sample_rate=0.0,
+            traces_sample_rate=None,
+            before_send_transaction=_scrub_event,
             send_default_pii=False,
             max_request_body_size="never",
             include_local_variables=False,
@@ -228,6 +229,25 @@ class TestHealthProbeLogFilter:
         out2 = _scrub_breadcrumb(crumb, {})
         assert out2["message"] == "GET /z"
         assert out2["data"]["url"] == "http://x/w"
+
+    def test_round5_parity(self, monkeypatch):
+        """storyland-services#92 round 5: dict params + extras scrubbed,
+        health crumbs dropped, tracing None when off / kept when opted in."""
+        event = {
+            "logentry": {"message": "%(url)s", "params": {"url": "/x?token=s"}},
+            "extra": {"url": "/api?place=Paris", "count": 3},
+        }
+        out = _scrub_event(event, {})
+        assert out["logentry"]["params"] == {"url": "/x"}
+        assert out["extra"] == {"url": "/api", "count": 3}
+        assert _scrub_breadcrumb(
+            {"message": '"GET /api/v1/health HTTP/1.1" 200'}, {}
+        ) is None
+        monkeypatch.setenv("SENTRY_DSN", "https://key@example.ingest.sentry.io/1")
+        monkeypatch.setenv("SENTRY_TRACES_SAMPLE_RATE", "0.5")
+        with patch("sentry_sdk.init") as mock_init:
+            init_sentry()
+        assert mock_init.call_args.kwargs["traces_sample_rate"] == 0.5
 
     def test_url_query_strings_scrubbed(self):
         """Parity with the backend (Codex on storyland-services#92): stdlib

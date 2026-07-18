@@ -131,14 +131,32 @@ def _scrub_event(event, hint):
                 _URL_QUERY_RE.sub("", p) if isinstance(p, str) and "?" in p else p
                 for p in params
             ]
+        elif isinstance(params, dict):
+            # Mapping-style formatting: logger.error("%(url)s", {"url": …})
+            for key, value in list(params.items()):
+                if isinstance(value, str) and "?" in value:
+                    params[key] = _URL_QUERY_RE.sub("", value)
+    # stdlib records with extra={"url": …} land on event["extra"].
+    extra = event.get("extra")
+    if isinstance(extra, dict):
+        for key, value in list(extra.items()):
+            if isinstance(value, str) and "?" in value:
+                extra[key] = _URL_QUERY_RE.sub("", value)
     return event
 
 
 def _scrub_breadcrumb(crumb, hint):
-    """before_breadcrumb: scrub stdlib-record crumbs (message + string data)."""
+    """
+    before_breadcrumb: scrub stdlib-record crumbs (message + string data);
+    DROP health-probe lines entirely — at one every 30s they can fill the
+    100-crumb buffer in a quiet container and evict real pre-error context.
+    """
     message = crumb.get("message")
-    if isinstance(message, str) and "?" in message:
-        crumb["message"] = _URL_QUERY_RE.sub("", message)
+    if isinstance(message, str):
+        if "/api/v1/health" in message:
+            return None
+        if "?" in message:
+            crumb["message"] = _URL_QUERY_RE.sub("", message)
     data = crumb.get("data") or {}
     for key, value in list(data.items()):
         if isinstance(value, str) and "?" in value:
@@ -176,7 +194,11 @@ def init_sentry() -> bool:
     sentry_sdk.init(
         dsn=dsn,
         environment=environment,
-        traces_sample_rate=traces_sample_rate,
+        # None (not 0.0) when tracing is off: with 0.0 the SDK still honors
+        # inbound sentry-trace headers and can emit transactions, which skip
+        # every error/log scrubber. before_send_transaction covers opt-in.
+        traces_sample_rate=traces_sample_rate if traces_sample_rate > 0 else None,
+        before_send_transaction=_scrub_event,
         # No request headers/IPs/cookies on events. User prompts already live
         # in Langfuse traces under access control; Sentry only needs the error.
         send_default_pii=False,
