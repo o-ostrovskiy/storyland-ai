@@ -42,6 +42,7 @@ class TestInitSentry:
             traces_sample_rate=0.0,
             send_default_pii=False,
             max_request_body_size="never",
+            include_local_variables=False,
             enable_logs=True,
             before_send_log=_drop_health_probe_logs,
             enable_metrics=True,

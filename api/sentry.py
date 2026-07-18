@@ -127,6 +127,10 @@ def init_sentry() -> bool:
         # default ("medium") uploads small failing-request bodies, which here
         # carry book titles, taste context, and local-atmosphere lat/lng.
         max_request_body_size="never",
+        # Nor does it cover failing-frame LOCALS (SDK default True) — which
+        # here hold user prompts, taste context, and request models. Same
+        # hardening as the backend gateway (Codex on storyland-services#92).
+        include_local_variables=False,
         # Sentry Logs: stdlib INFO+ records ship automatically; our structlog
         # events ship via the bridge in common.logging (structlog bypasses
         # stdlib, so without the bridge nothing of ours would appear).
