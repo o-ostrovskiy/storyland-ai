@@ -229,6 +229,12 @@ class TestHealthProbeLogFilter:
         out2 = _scrub_breadcrumb(crumb, {})
         assert out2["message"] == "GET /z"
         assert out2["data"]["url"] == "http://x/w"
+        spans_event = {
+            "spans": [{"description": "GET http://u/v?book_title=secret", "data": {"url": "http://u/v?book_title=secret"}}]
+        }
+        out3 = _scrub_event(spans_event, {})
+        assert out3["spans"][0]["description"] == "GET http://u/v"
+        assert out3["spans"][0]["data"]["url"] == "http://u/v"
 
     def test_round5_parity(self, monkeypatch):
         """storyland-services#92 round 5: dict params + extras scrubbed,

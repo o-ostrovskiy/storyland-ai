@@ -142,6 +142,21 @@ def _scrub_event(event, hint):
         for key, value in list(extra.items()):
             if isinstance(value, str) and "?" in value:
                 extra[key] = _URL_QUERY_RE.sub("", value)
+    # Transaction spans (before_send_transaction path): HTTP-client spans
+    # record outbound URLs with query strings in description/data.
+    spans = event.get("spans")
+    if isinstance(spans, list):
+        for span in spans:
+            if not isinstance(span, dict):
+                continue
+            description = span.get("description")
+            if isinstance(description, str) and "?" in description:
+                span["description"] = _URL_QUERY_RE.sub("", description)
+            data = span.get("data")
+            if isinstance(data, dict):
+                for key, value in list(data.items()):
+                    if isinstance(value, str) and "?" in value:
+                        data[key] = _URL_QUERY_RE.sub("", value)
     return event
 
 
