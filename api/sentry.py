@@ -71,22 +71,112 @@ our own loggers, which bypass stdlib entirely (PrintLoggerFactory).
 """
 
 import os
+import re
 
 from common.logging import get_logger
 
 logger = get_logger(__name__)
 
 
+# Everything from '?' up to whitespace or a closing quote — URL query strings
+# in access lines and any other URL-bearing stdlib log reaching Sentry Logs.
+_URL_QUERY_RE = re.compile(r"\?[^\s\"]*")
+
+
 def _drop_health_probe_logs(log, hint):
     """
-    before_send_log filter: drop the docker healthcheck's uvicorn access-log
-    lines ('GET /api/v1/health ... 200'). They fire every 30s (~3k/day of
-    pure noise in the Logs explorer); the healthcheck's FAILURE signal is the
-    container going unhealthy, not a Sentry log line. Everything else passes.
+    before_send_log filter, two jobs (parity with the backend gateway —
+    Codex on storyland-services#92):
+
+    1. DROP the docker healthcheck's uvicorn access-log lines
+       ('GET /api/v1/health ... 200') — every 30s, pure noise; the
+       healthcheck's FAILURE signal is the container going unhealthy.
+    2. SCRUB URL query strings from bodies and string attributes: stdlib
+       records (uvicorn.access etc.) bypass the structlog allowlist and can
+       carry request paths WITH query. Fail-safe: any '?' tail is stripped.
     """
-    if "/api/v1/health" in (log.get("body") or ""):
+    body = log.get("body") or ""
+    if "/api/v1/health" in body:
         return None
+    if "?" in body:
+        log["body"] = _URL_QUERY_RE.sub("", body)
+    attributes = log.get("attributes") or {}
+    for key, value in list(attributes.items()):
+        if isinstance(value, str) and "?" in value:
+            attributes[key] = _URL_QUERY_RE.sub("", value)
     return log
+
+
+def _scrub_event(event, hint):
+    """
+    before_send: strip URL query strings from error EVENTS (request.url,
+    stdlib logentry message/params) — these bypass the log-path scrub.
+    Parity with the backend gateway (storyland-services#92).
+    """
+    request = event.get("request")
+    if request:
+        url = request.get("url")
+        if isinstance(url, str) and "?" in url:
+            request["url"] = _URL_QUERY_RE.sub("", url)
+        request.pop("query_string", None)
+    logentry = event.get("logentry")
+    if logentry:
+        for key in ("message", "formatted"):
+            value = logentry.get(key)
+            if isinstance(value, str) and "?" in value:
+                logentry[key] = _URL_QUERY_RE.sub("", value)
+        params = logentry.get("params")
+        if isinstance(params, (list, tuple)):
+            logentry["params"] = [
+                _URL_QUERY_RE.sub("", p) if isinstance(p, str) and "?" in p else p
+                for p in params
+            ]
+        elif isinstance(params, dict):
+            # Mapping-style formatting: logger.error("%(url)s", {"url": …})
+            for key, value in list(params.items()):
+                if isinstance(value, str) and "?" in value:
+                    params[key] = _URL_QUERY_RE.sub("", value)
+    # stdlib records with extra={"url": …} land on event["extra"].
+    extra = event.get("extra")
+    if isinstance(extra, dict):
+        for key, value in list(extra.items()):
+            if isinstance(value, str) and "?" in value:
+                extra[key] = _URL_QUERY_RE.sub("", value)
+    # Transaction spans (before_send_transaction path): HTTP-client spans
+    # record outbound URLs with query strings in description/data.
+    spans = event.get("spans")
+    if isinstance(spans, list):
+        for span in spans:
+            if not isinstance(span, dict):
+                continue
+            description = span.get("description")
+            if isinstance(description, str) and "?" in description:
+                span["description"] = _URL_QUERY_RE.sub("", description)
+            data = span.get("data")
+            if isinstance(data, dict):
+                for key, value in list(data.items()):
+                    if isinstance(value, str) and "?" in value:
+                        data[key] = _URL_QUERY_RE.sub("", value)
+    return event
+
+
+def _scrub_breadcrumb(crumb, hint):
+    """
+    before_breadcrumb: scrub stdlib-record crumbs (message + string data);
+    DROP health-probe lines entirely — at one every 30s they can fill the
+    100-crumb buffer in a quiet container and evict real pre-error context.
+    """
+    message = crumb.get("message")
+    if isinstance(message, str):
+        if "/api/v1/health" in message:
+            return None
+        if "?" in message:
+            crumb["message"] = _URL_QUERY_RE.sub("", message)
+    data = crumb.get("data") or {}
+    for key, value in list(data.items()):
+        if isinstance(value, str) and "?" in value:
+            data[key] = _URL_QUERY_RE.sub("", value)
+    return crumb
 
 
 def init_sentry() -> bool:
@@ -119,7 +209,11 @@ def init_sentry() -> bool:
     sentry_sdk.init(
         dsn=dsn,
         environment=environment,
-        traces_sample_rate=traces_sample_rate,
+        # None (not 0.0) when tracing is off: with 0.0 the SDK still honors
+        # inbound sentry-trace headers and can emit transactions, which skip
+        # every error/log scrubber. before_send_transaction covers opt-in.
+        traces_sample_rate=traces_sample_rate if traces_sample_rate > 0 else None,
+        before_send_transaction=_scrub_event,
         # No request headers/IPs/cookies on events. User prompts already live
         # in Langfuse traces under access control; Sentry only needs the error.
         send_default_pii=False,
@@ -127,11 +221,17 @@ def init_sentry() -> bool:
         # default ("medium") uploads small failing-request bodies, which here
         # carry book titles, taste context, and local-atmosphere lat/lng.
         max_request_body_size="never",
+        # Nor does it cover failing-frame LOCALS (SDK default True) — which
+        # here hold user prompts, taste context, and request models. Same
+        # hardening as the backend gateway (Codex on storyland-services#92).
+        include_local_variables=False,
         # Sentry Logs: stdlib INFO+ records ship automatically; our structlog
         # events ship via the bridge in common.logging (structlog bypasses
         # stdlib, so without the bridge nothing of ours would appear).
         enable_logs=enable_logs,
         before_send_log=_drop_health_probe_logs,
+        before_send=_scrub_event,
+        before_breadcrumb=_scrub_breadcrumb,
         # Metrics: every structlog event is auto-counted (`log.events`) by the
         # bridge in common.logging; new call sites can use sentry_sdk.metrics
         # directly (examples in the module docstring).

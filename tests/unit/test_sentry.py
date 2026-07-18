@@ -4,7 +4,12 @@ from unittest.mock import patch
 
 import pytest
 
-from api.sentry import _drop_health_probe_logs, init_sentry
+from api.sentry import (
+    _drop_health_probe_logs,
+    _scrub_breadcrumb,
+    _scrub_event,
+    init_sentry,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -39,11 +44,15 @@ class TestInitSentry:
         mock_init.assert_called_once_with(
             dsn="https://key@example.ingest.sentry.io/1",
             environment="local",
-            traces_sample_rate=0.0,
+            traces_sample_rate=None,
+            before_send_transaction=_scrub_event,
             send_default_pii=False,
             max_request_body_size="never",
+            include_local_variables=False,
             enable_logs=True,
             before_send_log=_drop_health_probe_logs,
+            before_send=_scrub_event,
+            before_breadcrumb=_scrub_breadcrumb,
             enable_metrics=True,
         )
 
@@ -204,6 +213,60 @@ class TestHealthProbeLogFilter:
     def test_regular_log_passes_through(self):
         log = {"body": "discovery_started"}
         assert _drop_health_probe_logs(log, {}) is log
+
+    def test_event_and_breadcrumb_query_scrub(self):
+        """Parity with storyland-services#92 4th finding: events and
+        breadcrumbs carry URLs the log scrub never sees."""
+        event = {
+            "request": {"url": "http://x/api?q=user+text", "query_string": "q=user+text"},
+            "logentry": {"message": "m", "params": ["GET /y?place=Paris"], "formatted": "f"},
+        }
+        out = _scrub_event(event, {})
+        assert out["request"]["url"] == "http://x/api"
+        assert "query_string" not in out["request"]
+        assert out["logentry"]["params"] == ["GET /y"]
+        crumb = {"message": "GET /z?token=s", "data": {"url": "http://x/w?a=b"}}
+        out2 = _scrub_breadcrumb(crumb, {})
+        assert out2["message"] == "GET /z"
+        assert out2["data"]["url"] == "http://x/w"
+        spans_event = {
+            "spans": [{"description": "GET http://u/v?book_title=secret", "data": {"url": "http://u/v?book_title=secret"}}]
+        }
+        out3 = _scrub_event(spans_event, {})
+        assert out3["spans"][0]["description"] == "GET http://u/v"
+        assert out3["spans"][0]["data"]["url"] == "http://u/v"
+
+    def test_round5_parity(self, monkeypatch):
+        """storyland-services#92 round 5: dict params + extras scrubbed,
+        health crumbs dropped, tracing None when off / kept when opted in."""
+        event = {
+            "logentry": {"message": "%(url)s", "params": {"url": "/x?token=s"}},
+            "extra": {"url": "/api?place=Paris", "count": 3},
+        }
+        out = _scrub_event(event, {})
+        assert out["logentry"]["params"] == {"url": "/x"}
+        assert out["extra"] == {"url": "/api", "count": 3}
+        assert _scrub_breadcrumb(
+            {"message": '"GET /api/v1/health HTTP/1.1" 200'}, {}
+        ) is None
+        monkeypatch.setenv("SENTRY_DSN", "https://key@example.ingest.sentry.io/1")
+        monkeypatch.setenv("SENTRY_TRACES_SAMPLE_RATE", "0.5")
+        with patch("sentry_sdk.init") as mock_init:
+            init_sentry()
+        assert mock_init.call_args.kwargs["traces_sample_rate"] == 0.5
+
+    def test_url_query_strings_scrubbed(self):
+        """Parity with the backend (Codex on storyland-services#92): stdlib
+        access records bypass the structlog allowlist and can carry request
+        paths WITH query strings."""
+        log = {
+            "body": '10.0.0.2:0 - "GET /api/v1/thing?q=user+text HTTP/1.1" 200',
+            "attributes": {"sentry.message.parameter.request_line": "GET /x?place=Paris HTTP/1.1"},
+        }
+        out = _drop_health_probe_logs(log, {})
+        assert out is not None
+        assert "q=" not in out["body"]
+        assert out["attributes"]["sentry.message.parameter.request_line"] == "GET /x HTTP/1.1"
 
     def test_missing_body_passes_through(self):
         log = {"attributes": {}}
