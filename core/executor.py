@@ -42,8 +42,8 @@ from google.adk.plugins.logging_plugin import LoggingPlugin
 
 from agents.orchestrator import (
     create_book_recommendation_workflow,
-    create_discovery_workflow,
-    create_composition_workflow,
+    create_book_to_place_discovery_workflow,
+    create_book_to_place_composition_workflow,
     create_expansion_workflow,
     create_local_atmosphere_workflow,
 )
@@ -102,17 +102,12 @@ logger = get_logger("storyland.core.executor")
 DISCOVERY_AGENT_STEPS: dict[str, str] = {
     "book_context_researcher": "Researching book setting and themes",
     "book_context_formatter": "Formatting book context",
-    "book_context_pipeline": "Analyzing book context",
-    "parallel_discovery": "Running parallel location discovery",
     "city_researcher": "Finding cities related to the book",
     "city_formatter": "Formatting city results",
-    "city_pipeline": "Discovering cities",
     "landmark_researcher": "Discovering landmarks and key locations",
     "landmark_formatter": "Formatting landmark results",
-    "landmark_pipeline": "Discovering landmarks",
     "author_researcher": "Locating author-related sites",
     "author_formatter": "Formatting author sites",
-    "author_pipeline": "Discovering author sites",
     "region_analyzer": "Analyzing geographic regions",
 }
 
@@ -123,13 +118,11 @@ LOCAL_ATMOSPHERE_AGENT_STEPS: dict[str, str] = {
     "book_context_pipeline": "Analyzing book atmosphere",
     "local_atmosphere_researcher": "Finding atmospheric places near you",
     "local_atmosphere_formatter": "Composing your local outing",
-    "local_atmosphere_pipeline": "Building local-atmosphere itinerary",
 }
 
 EXPANSION_AGENT_STEPS: dict[str, str] = {
     "expansion_researcher": "Searching for new places",
     "expansion_formatter": "Curating your additions",
-    "expansion_pipeline": "Finding new places to add",
 }
 
 SOFT_CHIP_CAP = 6
@@ -139,8 +132,6 @@ BOOK_RECOMMENDATION_HARD_CAP = 5
 BOOK_RECOMMENDATION_AGENT_STEPS: dict[str, str] = {
     "book_recommendation_researcher": "Searching for book recommendations",
     "book_recommendation_formatter": "Curating your book picks",
-    "book_recommendation_pipeline": "Finding books for you",
-    "book_recommendation_workflow": "Finding books for you",
 }
 
 APP_NAME = "storyland"
@@ -232,7 +223,7 @@ class WorkflowExecutor:
         if langfuse_plugin is not None:
             plugins.append(langfuse_plugin)
         return Runner(
-            agent=workflow,
+            node=workflow,
             app_name=APP_NAME,
             session_service=self._session_service,
             plugins=plugins,
@@ -443,7 +434,7 @@ class WorkflowExecutor:
             )
 
             langfuse_plugin = self._create_langfuse_plugin()
-            discovery_workflow = create_discovery_workflow(
+            discovery_workflow = create_book_to_place_discovery_workflow(
                 self._model, book_title=exact_title, author=exact_author
             )
             runner = self._build_runner(discovery_workflow, langfuse_plugin)
@@ -657,7 +648,7 @@ class WorkflowExecutor:
             )
 
             langfuse_plugin = self._create_langfuse_plugin()
-            composition_workflow = create_composition_workflow(self._model)
+            composition_workflow = create_book_to_place_composition_workflow(self._model)
             runner = self._build_runner(composition_workflow, langfuse_plugin)
 
             prompt = build_composition_prompt(

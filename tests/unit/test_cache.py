@@ -194,7 +194,7 @@ class TestExecutorCacheHit:
         def _boom(*args, **kwargs):
             raise AssertionError("discovery chain invoked on a cache hit")
 
-        monkeypatch.setattr(ex, "create_discovery_workflow", _boom)
+        monkeypatch.setattr(ex, "create_book_to_place_discovery_workflow", _boom)
         monkeypatch.setattr(ex, "Runner", _boom)
 
         config = ExecutorConfig(

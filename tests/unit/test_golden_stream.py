@@ -84,8 +84,8 @@ def _make_executor(monkeypatch):
     from core.executor import WorkflowExecutor
     from services.session_service import create_session_service
 
-    monkeypatch.setattr(ex, "create_discovery_workflow", lambda *a, **k: object())
-    monkeypatch.setattr(ex, "create_composition_workflow", lambda *a, **k: object())
+    monkeypatch.setattr(ex, "create_book_to_place_discovery_workflow", lambda *a, **k: object())
+    monkeypatch.setattr(ex, "create_book_to_place_composition_workflow", lambda *a, **k: object())
 
     config = ExecutorConfig(
         model_name="gemini-2.0-flash",

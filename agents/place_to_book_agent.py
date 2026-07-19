@@ -11,7 +11,7 @@ input and books are the output. No new model and no new paid API — it reuses t
 same google_search researcher pass already used across discovery.
 """
 
-from google.adk.agents import LlmAgent, SequentialAgent
+from google.adk.agents import LlmAgent
 
 from models.place_to_book import PlaceToBookCandidates
 from agents.prompts import AgentPrompts, load_prompts
@@ -21,12 +21,12 @@ from agents.prompts import AgentPrompts, load_prompts
 PLACE_TO_BOOK_OUTPUT_KEY = "last_place_to_book"
 
 
-def create_place_to_book_pipeline(
+def create_place_to_book_agents(
     model,
     google_search_tool,
     place: str,
     prompts: AgentPrompts | None = None,
-) -> SequentialAgent:
+):
     """Create the place→book reverse-routing pipeline.
 
     Researcher uses google_search to find books genuinely set in (or strongly
@@ -41,7 +41,7 @@ def create_place_to_book_pipeline(
         prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
-        SequentialAgent that researches and formats place→book candidates.
+        (researcher, formatter) LlmAgent pair that researches and formats place→book candidates.
     """
     if prompts is None:
         prompts = load_prompts()
@@ -64,7 +64,4 @@ def create_place_to_book_pipeline(
         instruction=formatter_instruction,
     )
 
-    return SequentialAgent(
-        name="place_to_book_pipeline",
-        sub_agents=[researcher, formatter],
-    )
+    return researcher, formatter

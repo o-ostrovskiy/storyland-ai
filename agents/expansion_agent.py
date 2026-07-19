@@ -6,13 +6,13 @@ itinerary based on a user-selected suggestion chip. Mirrors the local_atmosphere
 pattern: researcher uses google_search, formatter emits structured output only.
 """
 
-from google.adk.agents import LlmAgent, SequentialAgent
+from google.adk.agents import LlmAgent
 
 from models.itinerary import ExpansionResult
 from agents.prompts import AgentPrompts, load_prompts
 
 
-def create_expansion_pipeline(
+def create_expansion_agents(
     model,
     google_search_tool,
     book_title: str,
@@ -39,7 +39,7 @@ def create_expansion_pipeline(
         prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
-        SequentialAgent that researches and formats an expansion result.
+        (researcher, formatter) LlmAgent pair that researches and formats an expansion result.
     """
     if prompts is None:
         prompts = load_prompts()
@@ -71,7 +71,4 @@ def create_expansion_pipeline(
         instruction=formatter_instruction,
     )
 
-    return SequentialAgent(
-        name="expansion_pipeline",
-        sub_agents=[researcher, formatter],
-    )
+    return researcher, formatter

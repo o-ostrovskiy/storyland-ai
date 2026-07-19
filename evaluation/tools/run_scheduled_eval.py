@@ -22,8 +22,8 @@ from common.config import load_config
 from core.retry import build_retry_options
 from services.session_service import create_session_service
 from agents.orchestrator import (
-    create_discovery_workflow,
-    create_composition_workflow,
+    create_book_to_place_discovery_workflow,
+    create_book_to_place_composition_workflow,
 )
 from agents.prompts import load_prompts, CURRENT_PROMPT_VERSION, AgentPrompts
 from google.adk.models.google_llm import Gemini
@@ -494,11 +494,11 @@ async def _run_evaluation_case(
         root_span.update(metadata={"current_phase": "discovery"})
 
         try:
-            discovery_workflow = create_discovery_workflow(
+            discovery_workflow = create_book_to_place_discovery_workflow(
                 model, book_title=exact_title, author=exact_author, prompts=prompts
             )
             discovery_runner = Runner(
-                agent=discovery_workflow,
+                node=discovery_workflow,
                 app_name="storyland",
                 session_service=session_service,
                 plugins=[LoggingPlugin(), langfuse_plugin],
@@ -587,9 +587,9 @@ Find cities, landmarks, and author-related sites, then group them into practical
         )
 
         try:
-            composition_workflow = create_composition_workflow(model, prompts=prompts)
+            composition_workflow = create_book_to_place_composition_workflow(model, prompts=prompts)
             composition_runner = Runner(
-                agent=composition_workflow,
+                node=composition_workflow,
                 app_name="storyland",
                 session_service=session_service,
                 plugins=[LoggingPlugin(), langfuse_plugin],

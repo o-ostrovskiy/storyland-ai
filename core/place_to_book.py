@@ -221,7 +221,7 @@ class PlaceToBookResolver:
         ``core.place_to_book.Runner`` as the single fake seam.
         """
         return Runner(
-            agent=workflow,
+            node=workflow,
             app_name=APP_NAME,
             session_service=self._session_service,
             plugins=[LoggingPlugin()],

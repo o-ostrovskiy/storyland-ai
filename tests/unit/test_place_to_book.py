@@ -9,13 +9,13 @@ not-found state, and result caching.
 
 import pytest
 
-from google.adk.agents import SequentialAgent, LlmAgent
+from google.adk.agents import LlmAgent
 from google.adk.events import Event
 from google.adk.tools import FunctionTool
 from google.genai import types
 
 from agents import (
-    create_place_to_book_pipeline,
+    create_place_to_book_agents,
     create_place_to_book_workflow,
 )
 from models.place_to_book import (
@@ -200,26 +200,34 @@ class TestLabelInvariants:
 # ---------------------------------------------------------------------------
 
 class TestFactories:
-    def test_pipeline_is_sequential(self, mock_google_search_tool):
-        pipe = create_place_to_book_pipeline("gemini-2.0-flash", mock_google_search_tool, place="Lisbon")
-        assert isinstance(pipe, SequentialAgent)
-        assert pipe.name == "place_to_book_pipeline"
-        assert len(pipe.sub_agents) == 2
-        names = [a.name for a in pipe.sub_agents]
-        assert names == ["place_to_book_researcher", "place_to_book_formatter"]
+    def test_agent_pair(self, mock_google_search_tool):
+        researcher, formatter = create_place_to_book_agents(
+            "gemini-2.0-flash", mock_google_search_tool, place="Lisbon"
+        )
+        assert researcher.name == "place_to_book_researcher"
+        assert formatter.name == "place_to_book_formatter"
 
     def test_researcher_has_search_tool_formatter_does_not(self, mock_google_search_tool):
-        pipe = create_place_to_book_pipeline("gemini-2.0-flash", mock_google_search_tool, place="Tokyo")
-        researcher, formatter = pipe.sub_agents
+        researcher, formatter = create_place_to_book_agents(
+            "gemini-2.0-flash", mock_google_search_tool, place="Tokyo"
+        )
         assert isinstance(researcher, LlmAgent) and researcher.tools
-        # Formatter is tool-less (output_schema forbids tools in ADK).
+        # Formatter stays tool-less: ADK 2.x allows tools + output_schema, but
+        # the researcher/formatter separation is the ADR #2 anti-hallucination
+        # contract, kept deliberately.
         assert not formatter.tools
 
-    def test_workflow_wraps_pipeline(self, mock_google_search_tool):
+    def test_workflow_is_researcher_to_formatter_graph(self, mock_google_search_tool):
+        from google.adk.workflow import Workflow
+
         wf = create_place_to_book_workflow("gemini-2.0-flash", mock_google_search_tool, place="Dublin")
-        assert isinstance(wf, SequentialAgent)
+        assert isinstance(wf, Workflow)
         assert wf.name == "place_to_book_workflow"
-        assert len(wf.sub_agents) == 1
+        chain = [(e.from_node.name, e.to_node.name) for e in wf.graph.edges]
+        assert chain == [
+            ("__START__", "place_to_book_researcher"),
+            ("place_to_book_researcher", "place_to_book_formatter"),
+        ]
 
 
 # ---------------------------------------------------------------------------

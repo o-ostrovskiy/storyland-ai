@@ -1,63 +1,79 @@
 """
 Workflow orchestrator.
 
-Creates workflows that coordinate all agents to produce complete literary
-travel itineraries.
+Builds the ADK 2 graph workflows (``google.adk.workflow.Workflow``) that
+coordinate all agents. Agents themselves are plain ``LlmAgent`` pairs built by
+the ``create_*_agents`` factories; this module owns ALL composition (chains,
+fan-out, fan-in) as explicit graph edges — no Sequential/ParallelAgent
+templates (removed in the ADK 2 graph rewrite, ADR #24).
 
-Two-phase architecture (HTTP API with HITL):
-1. Discovery workflow - finds locations and groups into travel regions
-2. Composition workflow - creates itinerary for selected region(s)
+NAMING: the primary capability — a book in, real places out — is
+``book_to_place``, the symmetric counterpart of the ``place_to_book`` reverse
+flow. It runs as two phase workflows because of the human-in-the-loop region
+selection between them (ADR #1):
+
+1. ``book_to_place_discovery``  — finds locations, groups into travel regions
+2. ``book_to_place_composition`` — creates the itinerary for selected region(s)
 
 WHY TWO PHASES WITH HITL?
 - Problem: Books like "Gone with the Wind" span Georgia (USA) and have author
   sites in Atlanta. Auto-generating itineraries for ALL regions would create
   impractical multi-continent trips.
-- Solution: After discovery, show user region options (e.g., "England", "Scotland")
-  and let them choose which region(s) to explore. This prevents wasting tokens
-  on unwanted regions and gives users control over trip scope.
-- Trade-off: Requires human input (not fully autonomous) but produces much more
-  practical and personalized itineraries.
+- Solution: After discovery, show user region options (e.g., "England",
+  "Scotland") and let them choose which region(s) to explore. This prevents
+  wasting tokens on unwanted regions and gives users control over trip scope.
+- Trade-off: Requires human input (not fully autonomous) but produces much
+  more practical and personalized itineraries.
 """
 
-from google.adk.agents import SequentialAgent, ParallelAgent
 from google.adk.tools import google_search
+from google.adk.workflow import JoinNode, START, Workflow
 
-from .book_context_agent import create_book_context_pipeline
+from .book_context_agent import create_book_context_agents
 from .discovery_agents import (
-    create_city_pipeline,
-    create_landmark_pipeline,
-    create_author_pipeline,
+    create_city_agents,
+    create_landmark_agents,
+    create_author_agents,
 )
-from .book_recommendation_agent import create_book_recommendation_pipeline
-from .place_to_book_agent import create_place_to_book_pipeline
-from .expansion_agent import create_expansion_pipeline
-from .local_atmosphere_agent import create_local_atmosphere_pipeline
+from .book_recommendation_agent import create_book_recommendation_agents
+from .place_to_book_agent import create_place_to_book_agents
+from .expansion_agent import create_expansion_agents
+from .local_atmosphere_agent import create_local_atmosphere_agents
 from .trip_composer_agent import create_trip_composer_agent
 from .region_analyzer_agent import create_region_analyzer_agent
 from .prompts import AgentPrompts, load_prompts
 
 
-def create_discovery_workflow(
+def create_book_to_place_discovery_workflow(
     model,
     book_title: str,
     author: str,
     prompts: AgentPrompts | None = None,
 ):
     """
-    Create the discovery workflow that finds locations and analyzes regions.
+    Create the book→place discovery workflow (phase 1 of the primary flow).
 
-    This workflow runs after the book metadata has been confirmed and before
-    user region selection. It discovers cities, landmarks, and author sites,
-    then groups them into practical travel regions for the user to choose from.
+    Runs after the book metadata has been confirmed and before user region
+    selection. It discovers cities, landmarks, and author sites, then groups
+    them into practical travel regions for the user to choose from.
 
-    Architecture:
-        SequentialAgent (discovery_workflow)
-        ├─ book_context_pipeline [research → format] → state["book_context"]
-        ├─ ParallelAgent (parallel_discovery) ⚡ CONCURRENT
-        │  ├─ city_pipeline [research → format] → state["city_discovery"]
-        │  ├─ landmark_pipeline [research → format] → state["landmark_discovery"]
-        │  └─ author_pipeline [research → format] → state["author_sites"]
-        └─ region_analyzer_agent → state["region_analysis"]
+    Graph:
+        START → book_context_researcher → book_context_formatter
+              → ⚡ fan-out: city_researcher   → city_formatter   ─┐
+                          landmark_researcher → landmark_formatter ┼→ join
+                          author_researcher   → author_formatter  ─┘
+              → region_analyzer                                  (fan-in)
+
+    Formatters write state["book_context"] / ["city_discovery"] /
+    ["landmark_discovery"] / ["author_sites"]; region_analyzer writes
+    state["region_analysis"]. The JoinNode is required: a plain node fires on
+    ANY predecessor, and region_analyzer must wait for ALL three branches
+    (pinned by tests/unit/test_graph_workflows.py).
+
+    WHY the fan-out: the three discovery branches make independent
+    google_search queries with no cross-dependencies — running them as
+    parallel graph branches is a 3x latency win at identical token cost
+    (ADR #3).
 
     Args:
         model: The LLM model to use
@@ -66,54 +82,70 @@ def create_discovery_workflow(
         prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
-        SequentialAgent orchestrating the discovery workflow
+        Workflow graph for book→place discovery
     """
     if prompts is None:
         prompts = load_prompts()
 
-    # Create pipelines with exact book info
-    book_context_pipeline = create_book_context_pipeline(
+    book_context_researcher, book_context_formatter = create_book_context_agents(
         model, google_search, book_title=book_title, author=author, prompts=prompts
     )
-
-    city_pipeline = create_city_pipeline(model, google_search, prompts=prompts)
-    landmark_pipeline = create_landmark_pipeline(model, google_search, prompts=prompts)
-    author_pipeline = create_author_pipeline(model, google_search, prompts=prompts)
-
+    city_researcher, city_formatter = create_city_agents(
+        model, google_search, prompts=prompts
+    )
+    landmark_researcher, landmark_formatter = create_landmark_agents(
+        model, google_search, prompts=prompts
+    )
+    author_researcher, author_formatter = create_author_agents(
+        model, google_search, prompts=prompts
+    )
     region_analyzer = create_region_analyzer_agent(model, prompts=prompts)
+    join = JoinNode(name="discovery_join")
 
-    # Create parallel discovery agent for concurrent execution
-    # WHY PARALLEL: Running city/landmark/author agents concurrently provides 3x speedup
-    # (15s vs 45s) with no additional token cost. Each agent makes independent Google
-    # Search queries that don't depend on each other's results.
-    parallel_discovery = ParallelAgent(
-        name="parallel_discovery",
-        sub_agents=[city_pipeline, landmark_pipeline, author_pipeline],
+    return Workflow(
+        name="book_to_place_discovery",
+        edges=[
+            (
+                START,
+                book_context_researcher,
+                book_context_formatter,
+                (city_researcher, landmark_researcher, author_researcher),
+            ),
+            (city_researcher, city_formatter, join),
+            (landmark_researcher, landmark_formatter, join),
+            (author_researcher, author_formatter, join),
+            (join, region_analyzer),
+        ],
     )
 
-    # Build discovery workflow
-    # WHY SEQUENTIAL: Each stage depends on previous stage's output:
-    # - book_context provides setting/theme → discovery agents use this context
-    # - parallel_discovery provides locations → region_analyzer groups them
-    #
-    # reader_profile_agent (an LlmAgent reading get_user_preferences) was
-    # removed here (MYS-436): no UI has ever collected budget/pace/museums/
-    # kids/genres, so it burned a sequential LLM call on every discovery to
-    # always produce the same "no preferences found, using defaults" turn.
-    # trip_composer's own instruction already falls back to those exact
-    # defaults when it finds no reader_profile turn in conversation history
-    # (agents/prompts/{v1,v2,v3}.json, "reader_profile" is prose consumed via
-    # conversation history, not a `{reader_profile}` template variable -- so
-    # there is no interpolation KeyError risk from removing the writer).
-    sub_agents = [
-        book_context_pipeline,
-        parallel_discovery,
-        region_analyzer,
-    ]
 
-    return SequentialAgent(
-        name="discovery_workflow",
-        sub_agents=sub_agents,
+def create_book_to_place_composition_workflow(
+    model, prompts: AgentPrompts | None = None
+):
+    """
+    Create the book→place composition workflow (phase 2 of the primary flow).
+
+    Runs after the user has selected region(s); expects the selection in
+    session state (written by the executor before the run).
+
+    Graph:
+        START → trip_composer → state["composer_envelope"]
+
+    Args:
+        model: The LLM model to use
+        prompts: Optional AgentPrompts instance. Loads default version if not provided.
+
+    Returns:
+        Workflow graph for book→place composition
+    """
+    if prompts is None:
+        prompts = load_prompts()
+
+    trip_composer = create_trip_composer_agent(model, prompts=prompts)
+
+    return Workflow(
+        name="book_to_place_composition",
+        edges=[(START, trip_composer)],
     )
 
 
@@ -132,13 +164,12 @@ def create_local_atmosphere_workflow(
     an itinerary near their current location whose mood and sensory character
     evoke the book.
 
-    Architecture:
-        SequentialAgent (local_atmosphere_workflow)
-        ├─ book_context_pipeline [research → format] → state["book_context"]
-        └─ local_atmosphere_pipeline [research → format] → state["final_itinerary"]
+    Graph:
+        START → book_context_researcher → book_context_formatter
+              → local_atmosphere_researcher → local_atmosphere_formatter
 
-    There is no city/landmark/author/region discovery: those agents look at the
-    book's geography, which is irrelevant here.
+    There is no city/landmark/author/region discovery: those agents look at
+    the book's geography, which is irrelevant here (ADR #13).
 
     Args:
         model: The LLM model to use.
@@ -149,17 +180,15 @@ def create_local_atmosphere_workflow(
         prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
-        SequentialAgent orchestrating the local-atmosphere workflow.
+        Workflow graph for the local-atmosphere flow.
     """
     if prompts is None:
         prompts = load_prompts()
 
-    book_context_pipeline = create_book_context_pipeline(
+    book_context_researcher, book_context_formatter = create_book_context_agents(
         model, google_search, book_title=book_title, author=author, prompts=prompts
     )
-    # reader_profile_agent removed here too (MYS-436) -- same dead hot-path
-    # LLM call as create_discovery_workflow above; see that function's comment.
-    local_pipeline = create_local_atmosphere_pipeline(
+    local_researcher, local_formatter = create_local_atmosphere_agents(
         model,
         google_search,
         location_label=location_label,
@@ -167,9 +196,17 @@ def create_local_atmosphere_workflow(
         prompts=prompts,
     )
 
-    return SequentialAgent(
+    return Workflow(
         name="local_atmosphere_workflow",
-        sub_agents=[book_context_pipeline, local_pipeline],
+        edges=[
+            (
+                START,
+                book_context_researcher,
+                book_context_formatter,
+                local_researcher,
+                local_formatter,
+            )
+        ],
     )
 
 
@@ -186,14 +223,12 @@ def create_expansion_workflow(
     """
     Create the expansion workflow that adds new places to an existing itinerary city.
 
-    Called after composition when the user clicks a suggestion chip. Runs a
-    researcher → formatter pipeline scoped to the chosen city and action.
+    Called after composition when the user clicks a suggestion chip.
 
-    Architecture:
-        SequentialAgent (expansion_workflow)
-        └─ expansion_pipeline
-           ├─ expansion_researcher [google_search] → research notes
-           └─ expansion_formatter [output_schema=ExpansionResult] → state["last_expansion"]
+    Graph:
+        START → expansion_researcher [google_search]
+              → expansion_formatter [output_schema=ExpansionResult]
+              → state["last_expansion"]
 
     Args:
         model: The LLM model to use.
@@ -206,12 +241,12 @@ def create_expansion_workflow(
         prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
-        SequentialAgent orchestrating the expansion pipeline.
+        Workflow graph for the expansion flow.
     """
     if prompts is None:
         prompts = load_prompts()
 
-    expansion_pipeline = create_expansion_pipeline(
+    researcher, formatter = create_expansion_agents(
         model,
         google_search_tool,
         book_title=book_title,
@@ -222,9 +257,9 @@ def create_expansion_workflow(
         prompts=prompts,
     )
 
-    return SequentialAgent(
+    return Workflow(
         name="expansion_workflow",
-        sub_agents=[expansion_pipeline],
+        edges=[(START, researcher, formatter)],
     )
 
 
@@ -241,13 +276,10 @@ def create_book_recommendation_workflow(
     Create the book recommendation workflow.
 
     Called after composition when the user clicks the "Find books like this" chip.
-    Runs a single agent that searches for and returns 5 book recommendations.
 
-    Architecture:
-        SequentialAgent (book_recommendation_workflow)
-        └─ book_recommendation_pipeline
-           ├─ book_recommendation_researcher [google_search] → research notes
-           └─ book_recommendation_formatter [output_schema=BookRecommendationsResult]
+    Graph:
+        START → book_recommendation_researcher [google_search]
+              → book_recommendation_formatter [output_schema=BookRecommendationsResult]
               → state["last_book_recommendations"]
 
     Args:
@@ -260,12 +292,12 @@ def create_book_recommendation_workflow(
         prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
-        SequentialAgent orchestrating the book recommendation pipeline.
+        Workflow graph for the book-recommendation flow.
     """
     if prompts is None:
         prompts = load_prompts()
 
-    pipeline = create_book_recommendation_pipeline(
+    researcher, formatter = create_book_recommendation_agents(
         model,
         google_search_tool,
         book_title=book_title,
@@ -275,38 +307,9 @@ def create_book_recommendation_workflow(
         prompts=prompts,
     )
 
-    return SequentialAgent(
+    return Workflow(
         name="book_recommendation_workflow",
-        sub_agents=[pipeline],
-    )
-
-
-def create_composition_workflow(model, prompts: AgentPrompts | None = None):
-    """
-    Create the composition workflow that generates the final itinerary.
-
-    This workflow runs after the user has selected a region.
-    It expects the selected region to be stored in session state as "selected_region".
-
-    Architecture:
-        SequentialAgent (composition_workflow)
-        └─ trip_composer_agent → state["final_itinerary"]
-
-    Args:
-        model: The LLM model to use
-        prompts: Optional AgentPrompts instance. Loads default version if not provided.
-
-    Returns:
-        SequentialAgent orchestrating the composition workflow
-    """
-    if prompts is None:
-        prompts = load_prompts()
-
-    trip_composer = create_trip_composer_agent(model, prompts=prompts)
-
-    return SequentialAgent(
-        name="composition_workflow",
-        sub_agents=[trip_composer],
+        edges=[(START, researcher, formatter)],
     )
 
 
@@ -319,19 +322,15 @@ def create_place_to_book_workflow(
     """
     Create the place→book reverse-routing workflow (AI candidate layer).
 
-    The reverse of discovery: a destination is the input and grounded,
-    literal/vibe-labelled book candidates are the output. Wraps the
-    place_to_book pipeline (researcher [google_search] → formatter
-    [output_schema=PlaceToBookCandidates]).
+    The reverse of the primary book→place flow: a destination is the input
+    and grounded, literal/vibe-labelled book candidates are the output.
+    Exposed as ``POST /place-to-book`` (gateway secret enforced); the
+    storyland-services gateway runs the authoritative Google Books existence
+    check downstream.
 
-    Isolated capability — not yet wired into the HTTP API; the BE place→book
-    endpoint will call it (PR 3 of the reverse-flow feature).
-
-    Architecture:
-        SequentialAgent (place_to_book_workflow)
-        └─ place_to_book_pipeline
-           ├─ place_to_book_researcher [google_search] → research notes
-           └─ place_to_book_formatter [output_schema=PlaceToBookCandidates]
+    Graph:
+        START → place_to_book_researcher [google_search]
+              → place_to_book_formatter [output_schema=PlaceToBookCandidates]
               → state["last_place_to_book"]
 
     Args:
@@ -341,16 +340,16 @@ def create_place_to_book_workflow(
         prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
-        SequentialAgent orchestrating the place→book pipeline.
+        Workflow graph for the place→book flow.
     """
     if prompts is None:
         prompts = load_prompts()
 
-    pipeline = create_place_to_book_pipeline(
+    researcher, formatter = create_place_to_book_agents(
         model, google_search_tool, place=place, prompts=prompts
     )
 
-    return SequentialAgent(
+    return Workflow(
         name="place_to_book_workflow",
-        sub_agents=[pipeline],
+        edges=[(START, researcher, formatter)],
     )

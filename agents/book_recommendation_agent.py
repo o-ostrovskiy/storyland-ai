@@ -11,13 +11,13 @@ The split below lets us keep both: researcher does the searches, formatter
 shapes the results into BookRecommendationsResult.
 """
 
-from google.adk.agents import LlmAgent, SequentialAgent
+from google.adk.agents import LlmAgent
 
 from models.book import BookRecommendationsResult
 from agents.prompts import AgentPrompts, load_prompts
 
 
-def create_book_recommendation_pipeline(
+def create_book_recommendation_agents(
     model,
     google_search_tool,
     book_title: str,
@@ -25,7 +25,7 @@ def create_book_recommendation_pipeline(
     destinations: str,
     themes: str,
     prompts: AgentPrompts | None = None,
-) -> SequentialAgent:
+):
     """Create the book recommendation pipeline.
 
     Researcher uses google_search to find candidate books matching destination,
@@ -42,7 +42,7 @@ def create_book_recommendation_pipeline(
         prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
-        SequentialAgent that researches and formats book recommendations.
+        (researcher, formatter) LlmAgent pair that researches and formats book recommendations.
     """
     if prompts is None:
         prompts = load_prompts()
@@ -75,7 +75,4 @@ def create_book_recommendation_pipeline(
         instruction=formatter_instruction,
     )
 
-    return SequentialAgent(
-        name="book_recommendation_pipeline",
-        sub_agents=[researcher, formatter],
-    )
+    return researcher, formatter

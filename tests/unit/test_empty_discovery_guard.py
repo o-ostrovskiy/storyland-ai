@@ -29,7 +29,7 @@ def _make_executor(monkeypatch, regions):
     from services.session_service import create_session_service
 
     # Stub the workflow builder: never construct/run a real Gemini chain.
-    monkeypatch.setattr(ex, "create_discovery_workflow", lambda *a, **k: object())
+    monkeypatch.setattr(ex, "create_book_to_place_discovery_workflow", lambda *a, **k: object())
 
     class _FakeRunner:
         def __init__(self, *args, **kwargs):

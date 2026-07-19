@@ -6,13 +6,13 @@ whose mood and sensory character evoke a chosen book — used when the reader
 cannot travel to the book's actual setting.
 """
 
-from google.adk.agents import LlmAgent, SequentialAgent
+from google.adk.agents import LlmAgent
 
 from models.itinerary import ComposerEnvelope
 from agents.prompts import AgentPrompts, load_prompts
 
 
-def create_local_atmosphere_pipeline(
+def create_local_atmosphere_agents(
     model,
     google_search_tool,
     location_label: str,
@@ -33,7 +33,7 @@ def create_local_atmosphere_pipeline(
         prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
-        SequentialAgent that researches and formats a local-atmosphere itinerary.
+        (researcher, formatter) LlmAgent pair that researches and formats a local-atmosphere itinerary.
     """
     if prompts is None:
         prompts = load_prompts()
@@ -60,7 +60,4 @@ def create_local_atmosphere_pipeline(
         instruction=formatter_instruction,
     )
 
-    return SequentialAgent(
-        name="local_atmosphere_pipeline",
-        sub_agents=[researcher, formatter],
-    )
+    return researcher, formatter
