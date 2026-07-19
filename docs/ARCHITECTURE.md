@@ -2,6 +2,8 @@
 
 This document explains key design decisions in the StoryLand AI project and the rationale behind them.
 
+> Reconciled against `main` on 2026-07-19 (MYS-554). Per engineering-standards §6, a PR that makes a new architecture decision appends a dated numbered entry here in the same PR.
+
 ---
 
 ## 1. Two-Phase Workflow with Human-in-the-Loop
@@ -158,7 +160,7 @@ This pattern appears in:
 - `book_context_agent.py` → BookContext
 - `discovery_agents.py` → CityDiscovery, LandmarkDiscovery, AuthorSites
 
-**Note:** `book_metadata_agent.py` previously followed this pattern (researcher + formatter). It was later removed entirely when the ADK web UI was dropped (see ADR #12 and #13).
+**Note:** `book_metadata_agent.py` previously followed this pattern (researcher + formatter). It was later removed entirely when the ADK web UI was dropped and the Google Books lookup moved to the frontend (see ADR #12).
 
 ---
 
@@ -222,88 +224,53 @@ sub_agents = [
 
 - `book_context` must complete before discovery (discovery needs setting info)
 - `region_analyzer` must wait for all discoveries (needs cities to group)
-- `trip_composer` needs region selection (can't run until Phase 3)
+- `trip_composer` needs region selection (can't run until Phase 2)
 
 **Rule:** Parallelize only when agents have zero data dependencies.
 
 ---
 
-## 4. Exponential Backoff Retry Strategy
+## 4. Bounded Exponential Backoff Retry Strategy (revised)
+
+> **Revised 2026-07 (doc reconciled 2026-07-19).** The original decision here was aggressive backoff (`exp_base=7`, `attempts=5`, no delay cap, hardcoded inline in `core/executor.py`). It was replaced: its ~400s worst-case cumulative backoff exceeded the 300s `workflow_timeout`, so a 429/500/503 burst sat in multi-minute blind backoff until the timeout wall fired — surfacing a false "timed out" error to the user precisely when the API was throttling.
 
 ### Decision
-Configure HTTP retries with aggressive exponential backoff (exp_base=7) for rate limits.
+Retry transient Gemini errors with **bounded** exponential backoff — `exp_base=2`, an explicit `max_delay` cap, and env-configurable knobs — built in one place, `core/retry.py`, shared by the executor and the eval runner.
 
 ### Implementation
 ```python
-retry_config = types.HttpRetryOptions(
-    attempts=5,           # Retry up to 5 times
-    exp_base=7,           # Aggressive backoff: 1s → 7s → 49s
-    initial_delay=1,      # Start with 1 second
-    http_status_codes=[429, 500, 503, 504]
-)
-model = Gemini(model=config.model_name, retry_options=retry_config)
+# core/retry.py — build_retry_options(), the single source of truth
+# Defaults (env-overridable via common/config.py):
+#   RETRY_ATTEMPTS=4 · RETRY_EXP_BASE=2.0 · RETRY_MAX_DELAY=12.0
+retry_config = build_retry_options(
+    attempts=4, exp_base=2, initial_delay=1, max_delay=12
+)  # called from core/executor.py and evaluation/tools/run_scheduled_eval.py
 ```
+Retry status codes unchanged: `[429, 500, 503, 504]` (`RETRY_STATUS_CODES` in `core/retry.py`).
 
 ### Rationale
 
-**Problem:** Gemini API free tier has **15 requests per minute (RPM)** limit. With:
-- 6+ agents in workflow
-- Parallel discovery (3 concurrent agents)
-- Each agent making multiple Google Search calls
-- Total: 20-30 API calls in <30 seconds
+**Constraint:** every workflow phase runs inside `workflow_timeout` (300s default, ADR #7). The retry schedule must resolve — success or clean error — well inside that window, or backoff converts throttling into false timeouts.
 
-We frequently hit 429 (Too Many Requests) errors.
+**Backoff schedule (worst case):** 1s → 2s → 4s ≈ **~7s cumulative** (3 retries; the 12s `max_delay` caps any further growth). Two orders of magnitude under the timeout wall.
 
-**Backoff Schedule:**
-- 1st retry: 1 second delay
-- 2nd retry: 7 seconds delay
-- 3rd retry: 49 seconds delay
-- 4th retry: 343 seconds delay (5.7 minutes)
-- 5th retry: 2,401 seconds delay (40 minutes)
-
-**Why aggressive (exp_base=7)?**
-- RPM limits reset after 60 seconds
-- Small delays (1s, 2s) don't help if limit window hasn't reset
-- 7-second delay gives time for window to partially reset
-- 49-second delay almost guarantees new rate limit window
-- Better to wait once than fail permanently
+`core/retry.py` also exposes `worst_case_backoff_seconds()` so the relationship between the retry schedule and `workflow_timeout` is checkable, not folklore.
 
 ### Trade-offs
 
 **Benefits:**
-- **Reliability:** Workflows succeed despite rate limits
-- **No user intervention:** Automatic recovery from transient errors
-- **Covers server errors:** Also retries 500, 503, 504 (server overload)
+- **No false timeouts:** throttling resolves to a fast success or a fast, honest error.
+- **Single source of truth:** executor and eval runner can't drift apart.
+- **Tunable per environment** via `RETRY_*` env vars without code changes.
 
 **Costs:**
-- **Potential long waits:** 49s delay feels slow to users
-- **Delayed failures:** 5 retries can take minutes before final error
-- **Masking problems:** Retry might hide persistent issues
+- **Less patience with long throttle windows:** a sustained RPM exhaustion fails fast instead of waiting out the window (acceptable: prod runs on a billed key, and the UI surfaces a clean retryable error).
 
 ### Alternatives Considered
 
-1. **Linear backoff (exp_base=2)**
-   - Rejected: 1s → 2s → 4s delays too short for RPM window reset
-   - Would burn through all retries before rate limit expires
-
-2. **No retries**
-   - Rejected: Workflow fails immediately on rate limit
-   - Poor UX for free tier users
-
-3. **Fixed delay (e.g., 60s)**
-   - Considered: Always wait 60s for rate limit reset
-   - Rejected: Wastes time on non-rate-limit errors (500, 503)
-
-4. **Jittered backoff**
-   - Considered: Add randomness to delays (7s ± 2s)
-   - Not implemented: ADK HttpRetryOptions doesn't support jitter
-   - Would help if multiple users hit limits simultaneously
-
-### Future Improvements
-
-1. **Adaptive backoff** based on `Retry-After` header (if Gemini provides it)
-2. **Circuit breaker** pattern to fail fast after sustained errors
-3. **Rate limit tracking** to proactively slow down before hitting limits
+1. **Aggressive backoff (`exp_base=7`, no cap)** — the original design. Rejected in practice: worst case (~400s) exceeded `workflow_timeout`, producing blind multi-minute waits and false "timed out" errors.
+2. **No retries** — rejected: transient 429/5xx would fail workflows immediately.
+3. **Fixed 60s delay** — rejected: wastes time on non-rate-limit errors.
 
 ---
 
@@ -330,9 +297,9 @@ session.state["selected_regions"] = selected_regions  # User's choice
 
 ### Rationale
 
-**Problem:** Three-phase workflow requires data to flow across Runner instances:
+**Problem:** Two-phase workflow requires data to flow across Runner instances:
 - Phase 1 extracts metadata → Phase 2 needs exact title/author
-- Phase 2 discovers regions → Phase 3 needs user's selected regions
+- Phase 1 discovers regions → Phase 2 needs user's selected regions
 - All phases share user preferences → Read from `state["user:preferences"]`
 
 **ADK Session Model:**
@@ -470,7 +437,7 @@ Without timeout: Workflow runs indefinitely, user doesn't know if it's stuck or 
 **Diagnostic Value of event_count:**
 - `event_count=5` → Stuck in Phase 1 (metadata extraction)
 - `event_count=50` → Stuck in Phase 2 (discovery running)
-- `event_count=100` → Stuck in Phase 3 (composition)
+- `event_count=100` → Stuck in Phase 2 (composition)
 
 Helps debug WHERE the timeout occurred without detailed logs.
 
@@ -492,7 +459,7 @@ Helps debug WHERE the timeout occurred without detailed logs.
 **Typical workflow timing:**
 - Phase 1 (metadata): ~5-10 seconds
 - Phase 2 (discovery): ~30-60 seconds
-- Phase 3 (composition): ~20-30 seconds
+- Phase 2 (composition): ~20-30 seconds
 - **Total:** ~60-100 seconds
 
 300s provides 3x safety margin.
@@ -550,7 +517,7 @@ Client                          FastAPI Server
 - **Session ID = Job ID:** The ADK session serves as job storage. All intermediate state (metadata, discoveries, regions) persists in `session.state` between the two HTTP calls.
 - **SSE over WebSocket:** SSE is unidirectional (server→client), which matches the workflow pattern. No need for bidirectional communication during streaming.
 - **Errors as SSE events:** Once headers are sent (200 OK), HTTP status can't change. All errors during streaming are emitted as `error` SSE events.
-- **Fresh LangfusePlugin per request:** Isolates token counters between concurrent requests.
+- **Fresh LangfusePlugin per request:** Isolates token counters between concurrent requests. (Later found insufficient under parallel discovery: branches of one request shared scalar generation/span state — now scoped per ParallelAgent branch via `_branch_key()` in `plugins/langfuse_plugin.py`; see ADR #21.)
 
 ### Trade-offs
 
@@ -625,7 +592,7 @@ case RegionsReady(job_id=j, regions=r, analysis_note=n):
 
 ### Rationale
 
-**Problem:** The three-phase workflow was originally built for CLI/Streamlit use (direct Python calls). Adding a web API shouldn't require rewriting the workflow logic — and the API shouldn't be the only way to use the system.
+**Problem:** The two-phase workflow was originally built for CLI/Streamlit use (direct Python calls). Adding a web API shouldn't require rewriting the workflow logic — and the API shouldn't be the only way to use the system.
 
 **Why transport-agnostic core matters:**
 - Evaluation tools import `WorkflowExecutor` directly — no HTTP, no serialization, no service to run
@@ -656,6 +623,27 @@ case RegionsReady(job_id=j, regions=r, analysis_note=n):
 - `core/types.py` — `ExecutorConfig` (plain dataclass, no env coupling)
 - `api/streaming.py` — `domain_event_to_sse()`: the only place domain events become HTTP
 - `api/routes.py` — thin wiring, no business logic
+
+---
+
+## 10. Gateway Service-to-Service Authentication (fail-closed)
+
+*Decided 2026-06-27 → 2026-07-11 (MYS-399); entry backfilled 2026-07-19 — the Patterns table row existed but the section was never written.*
+
+### Decision
+When deployed behind the backend gateway, require a shared secret on every itinerary endpoint and take end-user identity **only** from the trusted `X-User-ID` header the gateway sets after JWT validation. Fail closed.
+
+### Implementation
+- `api/dependencies.py` — `verify_gateway_secret`: when `INTERNAL_API_SECRET` is set, all itinerary endpoints require a matching `X-Internal-Secret` header (`/health` stays open). The secret is compared as **bytes**, constant-time.
+- Identity: the `X-User-ID` header only — the service trusts nothing else from the request. Missing header → 403 (except standalone dev, where identity falls back to the shared `dev_user`).
+- `REQUIRE_GATEWAY_SECRET=true` (`common/config.py`) refuses to **start** with an empty secret — closing the foot-gun where an empty secret silently accepts everyone and `X-User-ID` becomes a forgeable identity.
+
+### Rationale
+The service holds per-user sessions; without the secret gate, anyone who can reach the container could read/mutate any user's sessions by forging `X-User-ID`. The gateway owns real authn (JWT); this service only needs to verify "this request came through the gateway."
+
+### Trade-offs
+**Benefits:** blocks direct access in prod; identity model stays trivially simple; standalone dev still works.
+**Costs:** one more env var to coordinate between gateway and service; `/health` deliberately unauthenticated.
 
 ---
 
@@ -789,7 +777,7 @@ storyland-ai: POST /discover { book_title: "1984", author: "George Orwell" }
 - `tools/google_books.py` — deleted
 - `core/executor.py` — Phase 1 replaced with direct `BookMetadata` construction
 - `api/models.py` — `author` field made required (both `book_title` and `author` required)
-- `agents/book_metadata_agent.py` — deleted (no longer needed; see ADR #13)
+- `agents/book_metadata_agent.py` — deleted (no longer needed; see ADR #12)
 
 ### Trade-offs
 
@@ -862,6 +850,111 @@ After generating a travel itinerary based on a book, readers often want to know 
 
 ---
 
+## 15. Persistent, Content-Versioned Discovery Result Cache (2026-06 → 07-01)
+
+### Decision
+Cache Discovery results in a **persistent, SQLite-backed `diskcache`** store that survives restart/redeploy, keyed with a **content fingerprint** so code changes self-invalidate the cache.
+
+### Implementation
+- `core/cache.py` + `core/disk_cache.py`; config `CACHE_ENABLED` (default **true** — a missing env var degrades to caching on, never a correctness bug), `CACHE_BACKEND` (`disk` = persistent SQLite on a docker volume, or in-memory), `CACHE_DIR`, `CACHE_TTL_SECONDS`, `CACHE_MAX_ENTRIES`. Effective config logged at boot.
+- `core/cache_version.py` — `compute_cache_version()` hashes the model name plus the **source of the prompt/schema modules** (`_PROMPT_MODULES`, which includes `models.discovery`, `models.place_key`, `core.regions`). A model/prompt/schema change mints a new namespace; stale entries can never be served after a deploy that changed what a cached result means.
+
+### Rationale
+Discovery is the expensive phase (parallel LLM fan-out + search). Same book → same regions, so recomputing per request wastes tokens and seconds. An earlier `ENABLE_RESULT_CACHE` feature flag was removed — caching is core behavior, not an experiment. Content-fingerprinting removed the post-deploy "cache warmup / manual flush" ritual.
+
+### Trade-offs
+**Benefits:** repeat lookups return in milliseconds at zero token cost; persistence survives redeploys; self-invalidation makes deploys safe by construction.
+**Costs:** a real-API integration test (`tests/integration/test_cache_real_api.py`) is needed to prove the seam; disk growth bounded by `CACHE_MAX_ENTRIES`/TTL.
+
+---
+
+## 16. Canonical Cross-Job `place_key` Identity (2026-07-15, MYS-435/MYS-460)
+
+### Decision
+Mint a canonical `"<cc>:<locality-slug>"` key (ISO-3166-1 alpha-2 country code + canonicalized principal locality) for every grounded region, emitted on the `regions` SSE payload, so the **same real place can be recognized across different book jobs** (combined "readaway" journeys).
+
+### Implementation
+- `models/place_key.py` (~650 lines: ISO table, transliteration, slug hardening) — minting only through the ONE checked seam `mint_checked_place_key()`, which enforces locality-matches-cities and country self-consistency.
+- `core/regions.py` — `enrich_region_analysis()` stamps `place_key` (and `admin_area`) onto each region; `models/discovery.py` — `RegionOption.place_key`.
+- Deliberately **never** derived from `region_id` (a per-response ordinal) or `region_name` (prose). If the checked mint can't be confident it returns `None`: the asymmetry is "a missed combine, never a wrong one."
+- The minting modules are part of the cache-version fingerprint (ADR #15), so the persistent cache could not serve keyless/legacy regions after this landed.
+
+### Rationale
+Combining two books' journeys needs a place identity to intersect on; nothing existing was stable across jobs. Frontend-side name matching would guess; a wrong merge is worse than no merge.
+
+---
+
+## 17. Harness-First CI: Hash-Locked Deps, Coverage Ratchet, Audit Gate, ADK Pin (2026-07-17; pin 2026-06-18)
+
+### Decision
+Make "done" mechanical (per team engineering-standards): reproducible dependencies, a coverage floor that only ratchets up, a strict vulnerability gate, and a guarded major-version pin — all wired to fail CI, not to report.
+
+### Implementation
+- **Hash-locked deps:** `requirements.lock` / `requirements-dev.lock` from `uv pip compile --universal --generate-hashes`; CI installs `--require-hashes` and fails if `make lock` would change the committed lock.
+- **Coverage ratchet:** `fail_under = 74` in `pyproject.toml` (76% baseline; bare `--cov` honoring `[tool.coverage.run]`). Ratchet, not target — raise, never lower.
+- **Audit gate:** `pip-audit --strict --require-hashes` on the prod lock; ignores are inline with justification + ticket.
+- **ADK pin:** `google-adk[eval]>=1.33.0,<2` in `pyproject.toml` + a CI guard asserting the **locked** resolution stays 1.x (prevents a non-reproducible jump to ADK 2.x).
+
+### Rationale
+The agent (and everyone else) is only as autonomous as the definition of "done" is mechanical; a green build must mean tests passed, coverage didn't regress, deps are exactly what was reviewed, and no known-vulnerable package ships.
+
+---
+
+## 18. Sentry Error Tracking with Privacy Hardening (2026-07-17/18, MYS-541/543)
+
+### Decision
+Env-gated Sentry for the API — **errors-only by default**, with aggressive scrubbing, because agent runs are already traced in Langfuse and our payloads carry user reading taste and location data.
+
+### Implementation
+- `api/sentry.py`, gated on `SENTRY_DSN`; `common/logging.py` bridges structlog → Sentry (INFO+ as Logs, auto-counted `log.events` metrics). Release tagging via `SENTRY_RELEASE` (deployed SHA).
+- Performance tracing off by default: `traces_sample_rate` resolves to `None` (not `0.0`) so inbound trace headers that would bypass scrubbers aren't honored.
+- Privacy: `send_default_pii=False`, `max_request_body_size="never"`, `include_local_variables=False` (frame locals hold prompts, taste context, lat/lng), URL query-string scrubbing across events/logs/breadcrumbs/spans, health-probe noise dropped.
+
+### Rationale
+We need to see production exceptions without shipping user data to a third party; Langfuse owns the "what did the agents do" question, Sentry only the "what broke" question.
+
+---
+
+## 19. Single-Box Deployment via G5-Gated Manual Workflow (2026-06-24 → 07-02)
+
+### Decision
+Decommission ECR-build/ECS-deploy; production is a **single self-hosted Lightsail box** running docker compose, deployed only through a founder-gated manual workflow.
+
+### Implementation
+- `.github/workflows/deploy-ai-prod.yml` — `workflow_dispatch`-only, paused on the `production` GitHub Environment for required-reviewer approval (that pause **is** the G5 gate), then a reusable SSH-deploy workflow.
+- Hardening: just-in-time SSH via OIDC — port 22 opens only during a deploy and closes after (fully closed at rest); `rsync --delete` so removals/rollbacks reach the box; on-box `.env.prod` excluded from rsync. `Dockerfile`: non-root, HEALTHCHECK, digest-pinned base.
+- CI (`.github/workflows/ci-cd.yml`) compiles and tests; it never deploys.
+
+### Rationale
+One small product, one box: ECS added cost and indirection without capacity needs. The founder gate keeps deploys a deliberate act; JIT SSH removes the standing attack surface a always-open management port is.
+
+---
+
+## 20. Place→Book Reverse Routing + Server-Derived Grounding (2026-06-19 → 06-22)
+
+### Decision
+Add an isolated, gateway-internal capability that routes a **place back to books** (the reverse of the main flow), and derive grounding labels **server-side** rather than trusting the model's self-report.
+
+### Implementation
+- `core/place_to_book.py` + `models/place_to_book.py` + `agents/place_to_book_agent.py`, exposed as its own endpoint; follows the researcher→formatter pattern (ADR #2); dedicated eval runner `evaluation/tools/run_place_to_book_eval.py`.
+- Grounding: `CityStop` gained `match_type` (`literal | historical | thematic | vibe`) and `grounding_source`; `match_type` is **derived server-side** so ungrounded literal/historical claims get downgraded regardless of what the model asserts about itself.
+
+### Rationale
+"What should I read for this place?" is the inverse product question and shares the anti-hallucination machinery. The model grading its own grounding is exactly the "uncomputed claim" class the team bans in UI copy — so the server computes it.
+
+---
+
+## 21. API Abuse + Operational Hardening (grouped; 2026-06-23 → 07-17)
+
+Four smaller decisions, recorded together:
+
+- **Rate limiting + concurrency cap** (2026-06-23): per-identity request rate limit and in-flight concurrency cap on discovery endpoints (`api/ratelimit.py`); input-size bounds return 422 **before** any Gemini tokens are spent.
+- **Bounded session retention** (2026-06-24): a periodic retention sweep (`services/session_retention.py`) bounds the in-memory/SQLite session store — extends ADR #6, which predates it.
+- **Recommendation-tone guardrail** (2026-06-28): rec explanations are fit-only and never grade the reader (`core/guardrails/tone_guardrail.py`).
+- **Langfuse per-branch scoping** (2026-07-17, MYS-398): generation/agent-stack/span state is scoped **per ParallelAgent branch** (`_branch_key()` in `plugins/langfuse_plugin.py`) — per-request plugin instances (ADR #8) were not enough under the ADR #3 parallel fan-out.
+
+---
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -876,7 +969,14 @@ After generating a travel itinerary based on a book, readers often want to know 
 | **SSE streaming API** | Real-time progress, HITL preserved | Long-lived connections |
 | **Transport-agnostic core SDK** | Library or HTTP consumption, same logic | Interface drift risk between gateway and API layer |
 | **Failure status flag** | Terminal failures visible via /status, retryable | State must be persisted via `append_event`, not in-place mutation |
-| **Gateway secret** | Blocks direct access when deployed behind a gateway | Health endpoint intentionally excluded; leave secret empty for standalone dev |
+| **Gateway secret (ADR #10)** | Blocks direct access when deployed behind a gateway; fail-closed X-User-ID identity | Health endpoint intentionally excluded; leave secret empty for standalone dev |
 | **Local-atmosphere mode** | Lets readers feel a book without traveling; reuses pipeline pattern | Separate endpoint to maintain; LLM-side radius enforcement only |
+| **Persistent versioned cache (ADR #15)** | Repeat lookups free + instant; deploy-safe self-invalidation | Real-API seam test; bounded disk growth |
+| **Cross-job place_key (ADR #16)** | Same real place recognized across book jobs | Missed combine possible (never a wrong one) |
+| **Harness-first CI (ADR #17)** | "Done" is mechanical: locks, ratchet, audit, pin | Lock/relock discipline on every dep change |
+| **Sentry, errors-only (ADR #18)** | Prod exceptions visible without shipping user data | No perf tracing (Langfuse owns tracing) |
+| **G5-gated single-box deploy (ADR #19)** | Cheap, deliberate, port-22-closed-at-rest deploys | Single box = no horizontal redundancy |
+| **Place→book + server-derived grounding (ADR #20)** | Reverse product flow; grounding labels computed, not self-reported | Two LLM hops; separate endpoint |
+| **Abuse/ops hardening (ADR #21)** | Token spend protected; bounded stores; honest tone; per-branch traces | More knobs to configure |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.
