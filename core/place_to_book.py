@@ -6,11 +6,11 @@ running the place_to_book pipeline, then applying an output-side grounding
 filter and label invariants. Results are cached in-process under the key
 ``place2book:v1:<normalized place>``, mirroring the discovery result cache.
 
-ISOLATED CAPABILITY: this is intentionally NOT yet wired into the HTTP API or
-the BE place→book endpoint. The BE (storyland-services) endpoint will call this
-resolver in a later increment (PR 3 of the reverse-flow feature), at which point
-BE runs the authoritative Google Books *existence* check on each candidate. The
-grounding filter here is a defensive AI-side complement, not the hard gate.
+HTTP surface: exposed as the internal ``POST /place-to-book`` endpoint
+(``api/routes.py``, gateway secret enforced). The storyland-services gateway
+calls it and then runs the authoritative Google Books *existence* check on
+each candidate, decorating the user-facing grounding object. The grounding
+filter here is a defensive AI-side complement, not the hard gate.
 
 Grounding contract:
   * Every candidate's title must appear in the grounded researcher text

@@ -5,7 +5,6 @@ This package contains agent factory functions for:
 - Book context research
 - Discovery agents (cities, landmarks, author sites)
 - Trip composition
-- Reader profile and personalization
 - Workflow orchestration
 """
 
@@ -17,7 +16,6 @@ from .discovery_agents import (
 )
 from .local_atmosphere_agent import create_local_atmosphere_pipeline
 from .trip_composer_agent import create_trip_composer_agent
-from .reader_profile_agent import create_reader_profile_agent
 from .region_analyzer_agent import create_region_analyzer_agent
 from .book_recommendation_agent import create_book_recommendation_pipeline
 from .place_to_book_agent import create_place_to_book_pipeline
@@ -36,7 +34,6 @@ __all__ = [
     "create_author_pipeline",
     "create_local_atmosphere_pipeline",
     "create_trip_composer_agent",
-    "create_reader_profile_agent",
     "create_region_analyzer_agent",
     "create_book_recommendation_pipeline",
     "create_place_to_book_pipeline",
