@@ -90,6 +90,26 @@ def book_facts_block(
     return "\n".join(lines) + "\n\n"
 
 
+def preferences_block(preferences: dict | None) -> str:
+    """Explicit reader-preferences block for graph-scoped agent instructions.
+
+    Appending preferences to a flow's initial user prompt only reaches the
+    FIRST node of the graph (trigger-chain scoping, ADR #24); any agent
+    deeper in the chain needs them baked into its instruction. Empty when no
+    preferences were supplied — the instruction is byte-identical to the
+    no-preferences build. Lives in this cache-fingerprinted module for the
+    same reason as book_facts_block.
+    """
+    if not preferences:
+        return ""
+    import json
+
+    return (
+        "\n\nREADER PREFERENCES — honor these when choosing places and "
+        "pacing:\n" + json.dumps(preferences)
+    )
+
+
 def load_prompts(version: str = CURRENT_PROMPT_VERSION) -> AgentPrompts:
     """
     Load agent prompts for a given version from agents/prompts/{version}.json.

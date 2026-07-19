@@ -856,6 +856,7 @@ class WorkflowExecutor:
                 author=author,
                 location_label=location_label,
                 radius_km=radius_km,
+                preferences=preferences,
             )
             runner = self._build_runner(workflow, langfuse_plugin)
 

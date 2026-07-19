@@ -9,7 +9,7 @@ cannot travel to the book's actual setting.
 from google.adk.agents import LlmAgent
 
 from models.itinerary import ComposerEnvelope
-from agents.prompts import AgentPrompts, load_prompts
+from agents.prompts import AgentPrompts, load_prompts, preferences_block
 
 
 def create_local_atmosphere_agents(
@@ -17,6 +17,7 @@ def create_local_atmosphere_agents(
     google_search_tool,
     location_label: str,
     radius_km: int,
+    preferences: dict | None = None,
     prompts: AgentPrompts | None = None,
 ):
     """
@@ -38,12 +39,15 @@ def create_local_atmosphere_agents(
     if prompts is None:
         prompts = load_prompts()
 
+    # Graph-scoped context (ADR #24): the initial user prompt reaches only
+    # the first node (book_context_researcher) — these two agents sit 3-4
+    # nodes downstream, so preferences must be baked into their instructions.
     researcher_instruction = prompts.local_atmosphere_researcher.format(
         location_label=location_label, radius_km=radius_km
-    )
+    ) + preferences_block(preferences)
     formatter_instruction = prompts.local_atmosphere_formatter.format(
         location_label=location_label, radius_km=radius_km
-    )
+    ) + preferences_block(preferences)
 
     researcher = LlmAgent(
         name="local_atmosphere_researcher",

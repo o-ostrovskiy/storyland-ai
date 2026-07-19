@@ -355,3 +355,92 @@ class TestResolver:
         result = await resolver.resolve("   ")
         assert result.found is False
         assert runs == []  # never ran the pipeline
+
+
+# ---------------------------------------------------------------------------
+# Resolver capture under the REAL graph runtime (Codex P2, 2026-07-19 20:48)
+# ---------------------------------------------------------------------------
+
+class TestResolverCaptureUnderRealGraph:
+    """Drive the REAL PlaceToBookResolver._run_pipeline — real workflow, real
+    Runner(node=...), scripted model — and prove the researcher-text capture
+    path is alive under graph authorship.
+
+    The concern: if Workflow stamped child events with the workflow author,
+    capture_authors=("place_to_book_researcher",) would record nothing,
+    researcher_text would be empty, and filter_grounded_candidates would FAIL
+    OPEN — invented titles returned instead of dropped, on /books-set-in/*
+    under a "Verified" badge. The executor pump was refuted separately
+    (TestHarnessPumpAgainstRealGraph); this covers the resolver's own capture
+    path, the second instance of the class. If it reds, the evidence path is
+    dead and the fail-open below returns BOTH titles.
+    """
+
+    async def test_researcher_capture_feeds_grounding_filter(self, monkeypatch):
+        import json as _json
+
+        import google.adk.models.google_llm as google_llm
+        from google.adk.models.llm_response import LlmResponse
+        from google.adk.sessions import InMemorySessionService
+        from google.genai import types as genai_types
+
+        calls = []
+
+        def _canned(text):
+            return LlmResponse(
+                content=genai_types.Content(
+                    role="model", parts=[genai_types.Part(text=text)]
+                ),
+                usage_metadata=genai_types.GenerateContentResponseUsageMetadata(
+                    prompt_token_count=5, candidates_token_count=5, total_token_count=10
+                ),
+            )
+
+        async def scripted(self, *args, **kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                # Researcher: grounded evidence names ONE real title only.
+                yield _canned(
+                    "Grounded research: The Book of Disquiet by Pessoa is set in Lisbon."
+                )
+            else:
+                # Formatter: returns the grounded title AND an invented one.
+                yield _canned(_json.dumps({
+                    "candidates": [
+                        {
+                            "title": "The Book of Disquiet",
+                            "author": "Fernando Pessoa",
+                            "description": "d",
+                            "why_it_fits": "w",
+                            "match_type": "literal",
+                            "maps_to": "Baixa, Lisbon",
+                        },
+                        {
+                            "title": "Totally Invented Title",
+                            "author": "Nobody",
+                            "description": "d",
+                            "why_it_fits": "w",
+                            "match_type": "literal",
+                            "maps_to": "Lisbon",
+                        },
+                    ]
+                }))
+
+        monkeypatch.setattr(google_llm.Gemini, "generate_content_async", scripted)
+
+        model = google_llm.Gemini(
+            model="gemini-2.5-flash-lite", client_kwargs={"api_key": "dummy"}
+        )
+        resolver = PlaceToBookResolver(
+            model, session_service=InMemorySessionService()
+        )
+        result = await resolver.resolve("Lisbon")
+
+        titles = [c.title for c in result.candidates]
+        assert "Totally Invented Title" not in titles, (
+            "invented title survived — researcher_text was empty and the "
+            "grounding filter failed open: the resolver capture path is dead "
+            "under graph authorship"
+        )
+        assert titles == ["The Book of Disquiet"]
+        assert result.found is True

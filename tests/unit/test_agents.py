@@ -166,6 +166,32 @@ class TestLocalAtmosphereAgents:
         assert "Salem, MA" in formatter.instruction
         assert "60" in formatter.instruction
 
+    def test_preferences_baked_into_both_instructions(self, model_name, mock_google_search_tool):
+        """Codex P2 (2026-07-19 21:10): preferences appended to the initial
+        user prompt reach only the FIRST graph node; the formatter is 3-4
+        nodes downstream. Both local agents must carry them in-instruction."""
+        researcher, formatter = create_local_atmosphere_agents(
+            model_name,
+            mock_google_search_tool,
+            location_label="Salem, MA",
+            radius_km=60,
+            preferences={"pace": "la-prefs-marker", "budget": "low"},
+        )
+        assert "la-prefs-marker" in researcher.instruction
+        assert "la-prefs-marker" in formatter.instruction
+
+    def test_no_preferences_leaves_instructions_unchanged(self, model_name, mock_google_search_tool):
+        with_none = create_local_atmosphere_agents(
+            model_name, mock_google_search_tool,
+            location_label="Salem, MA", radius_km=60, preferences=None,
+        )
+        without = create_local_atmosphere_agents(
+            model_name, mock_google_search_tool,
+            location_label="Salem, MA", radius_km=60,
+        )
+        assert with_none[0].instruction == without[0].instruction
+        assert with_none[1].instruction == without[1].instruction
+
 
 class TestLocalAtmosphereWorkflow:
     """Tests for create_local_atmosphere_workflow."""

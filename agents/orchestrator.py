@@ -175,6 +175,7 @@ def create_local_atmosphere_workflow(
     author: str,
     location_label: str,
     radius_km: int,
+    preferences: dict | None = None,
     prompts: AgentPrompts | None = None,
 ):
     """
@@ -213,6 +214,7 @@ def create_local_atmosphere_workflow(
         google_search,
         location_label=location_label,
         radius_km=radius_km,
+        preferences=preferences,
         prompts=prompts,
     )
 
