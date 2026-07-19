@@ -276,7 +276,8 @@ storyland-ai/
 │   ├── prompts.py                   # AgentPrompts dataclass + versioned loader
 │   └── prompts/                  # Versioned prompt sets
 │       ├── v1.json               # Original prompts (git ref 4c6fdc9)
-│       └── v2.json               # Current prompts (PR #63)
+│       ├── v2.json               # Prompts as of PR #63 (history)
+│       └── v3.json               # Current prompts (CURRENT_PROMPT_VERSION)
 │
 ├── core/                # Transport-agnostic orchestration & SDK
 │   ├── executor.py      # WorkflowExecutor (discover/compose/expand/recommend)
@@ -341,7 +342,7 @@ Agent prompts include reliability improvements:
 - **Error handling:** `"If the tool returns an error, report it clearly and explain what went wrong"`
 - **Disambiguation:** Book title and author injected into search queries to avoid confusion with similarly-named books
 
-**Versioned prompts** — all agent instructions live in `agents/prompts/v2.json` (and `v1.json` for history). To add a new prompt version, create `agents/prompts/v3.json` and pass `--prompt-version v3` to the eval runner. The current version (`v2`) is controlled by `CURRENT_PROMPT_VERSION` in `agents/prompts.py`. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md).
+**Versioned prompts** — all agent instructions live in `agents/prompts/v3.json` (`v1.json`/`v2.json` kept for history). To add a new prompt version, create the next `agents/prompts/vN.json` and pass `--prompt-version vN` to the eval runner. The current version (`v3`) is controlled by `CURRENT_PROMPT_VERSION` in `agents/prompts.py`. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md).
 
 ## Deployment
 
@@ -370,24 +371,25 @@ reviewer.
 ## Testing
 
 ```bash
-make test                  # Unit tests (442 tests)
+make test                  # Unit tests (700+; exact count changes per PR)
 make test-integration      # Integration tests with VCR cassettes (excludes real_api)
 make test-integration-live # Live tests that hit real APIs (real_api marker; uses quota)
 make test-all              # Both
 make test-cov              # With coverage
 ```
 
-| Module | Tests | Description |
-|--------|-------|-------------|
-| `test_models.py` | 79 | Pydantic model validation (incl. BookRecommendation) |
-| `test_tools.py` | 4 | Preferences tool |
-| `test_agents.py` | 49 | Agent factory functions (incl. book recommendation pipeline) |
-| `test_services.py` | 10 | Session service |
-| `test_llm_scorer.py` | 23 | LLM scoring models and prompts |
-| `test_cache.py` | 14 | Discovery result cache (TTL/LRU, key normalization, cache-hit short-circuit) |
-| `test_core.py` | 89 | Events, session state, extraction, regions, prompts (incl. book recs) |
-| `test_api.py` | 108 | API models, endpoints, SSE streaming (incl. book recommendations) |
-| `test_place_to_book.py` | 33 | Place→book reverse routing: normalization, grounding filter, label invariants, resolver |
+The unit suite (`tests/unit/`) by area — per-module counts rot with every PR, so they are not tracked here:
+
+| Area | Modules |
+|------|---------|
+| Models & agents | `test_models.py`, `test_agents.py`, `test_tools.py` |
+| Core workflow | `test_core.py`, `test_discovery_errors.py`, `test_empty_discovery_guard.py`, `test_retry_backoff.py` |
+| API layer | `test_api.py`, `test_gateway_auth.py`, `test_ratelimit.py`, `test_request_input_limits.py`, `test_dependencies.py` |
+| Caching | `test_cache.py`, `test_disk_cache.py`, `test_cache_version.py` |
+| Place features | `test_place_key.py`, `test_place_to_book.py`, `test_place_to_book_eval.py` |
+| Quality & guardrails | `test_llm_scorer.py`, `test_tone_guardrail.py`, `test_recommendation_floor.py` |
+| Observability | `test_sentry.py`, `test_langfuse_plugin_concurrency.py`, `test_langfuse_pricing.py` |
+| Sessions & ops | `test_services.py`, `test_session_retention.py` |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).
 
