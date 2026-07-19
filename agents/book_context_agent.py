@@ -5,12 +5,12 @@ Two-stage pipeline that researches the book's setting, time period, and themes
 using Google Search.
 """
 
-from google.adk.agents import LlmAgent, SequentialAgent
+from google.adk.agents import LlmAgent
 from models.book import BookContext
 from agents.prompts import AgentPrompts, load_prompts
 
 
-def create_book_context_pipeline(
+def create_book_context_agents(
     model,
     google_search_tool,
     book_title: str = "",
@@ -28,7 +28,7 @@ def create_book_context_pipeline(
         prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
-        SequentialAgent that researches and formats book context
+        (researcher, formatter) LlmAgent pair that researches and formats book context
     """
     if prompts is None:
         prompts = load_prompts()
@@ -79,7 +79,4 @@ def create_book_context_pipeline(
         instruction=prompts.book_context_formatter,
     )
 
-    return SequentialAgent(
-        name="book_context_pipeline",
-        sub_agents=[book_context_researcher, book_context_formatter],
-    )
+    return book_context_researcher, book_context_formatter

@@ -52,6 +52,64 @@ class AgentPrompts:
     place_to_book_formatter: str  # template with {place}
 
 
+def book_facts_block(
+    book_title: str,
+    author: str,
+    vibe: str | None = None,
+    taste_context: dict | None = None,
+) -> str:
+    """Explicit book-facts header prepended to graph-scoped researcher instructions.
+
+    Under the ADK 2 graph runtime (ADR #24) a node's conversation is scoped to
+    its trigger chain: the city/landmark/author researchers receive only the
+    BookContext emitted by their direct predecessor — which carries locations,
+    period, and themes but NOT the exact title, author, or the reader's
+    vibe/taste biasing that ride the discovery user prompt. On 1.x templates
+    they saw all of it implicitly. This block restores those facts explicitly.
+
+    Lives in THIS module deliberately: core/cache_version.py fingerprints
+    ``agents.prompts`` source, so any edit here flips the discovery cache
+    namespace. Baking the block in the factory modules instead would change
+    effective instructions WITHOUT invalidating cached discovery results —
+    the MYS-222/MYS-462 class of error.
+    """
+    lines = [
+        "BOOK FACTS (explicit — the conversation may not contain them):",
+        f'Title: "{book_title}"',
+        f"Author: {author}",
+    ]
+    if vibe:
+        lines.append(f"Reader's requested vibe: {vibe}")
+    if taste_context:
+        titles = ", ".join(taste_context.get("titles") or [])
+        moods = ", ".join(taste_context.get("moods") or [])
+        if titles:
+            lines.append(f"Reader also loved: {titles}")
+        if moods:
+            lines.append(f"Reader's preferred moods: {moods}")
+    return "\n".join(lines) + "\n\n"
+
+
+def preferences_block(preferences: dict | None) -> str:
+    """Explicit reader-preferences block for graph-scoped agent instructions.
+
+    Appending preferences to a flow's initial user prompt only reaches the
+    FIRST node of the graph (trigger-chain scoping, ADR #24); any agent
+    deeper in the chain needs them baked into its instruction. Empty when no
+    preferences were supplied — the instruction is byte-identical to the
+    no-preferences build. Lives in this cache-fingerprinted module for the
+    same reason as book_facts_block.
+    """
+    if not preferences:
+        return ""
+    import json
+
+    return (
+        "\n\nREADER PREFERENCES — honor these when choosing places and "
+        "pacing:\n" + json.dumps(preferences)
+    )
+
+
 def load_prompts(version: str = CURRENT_PROMPT_VERSION) -> AgentPrompts:
     """
     Load agent prompts for a given version from agents/prompts/{version}.json.

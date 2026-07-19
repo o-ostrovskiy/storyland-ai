@@ -199,18 +199,17 @@ A complete evaluation run produces this span hierarchy:
 
 ```
 eval_run_YYYYMMDD_v2  (dataset run root — from start_as_current_observation)
-├── discovery_workflow_invocation  (plugin root span)
-│   └── discovery_workflow
-│       ├── book_context_pipeline
-│       │   ├── book_context_researcher
-│       │   │   └── gemini-2.5-flash_call  (generation, with token counts)
-│       │   └── book_context_formatter
-│       │       └── gemini-2.5-flash_call
-│       ├── parallel_discovery  (city/landmark/author agents in parallel)
+├── book_to_place_discovery_invocation  (plugin root span)
+│   └── book_to_place_discovery
+│       ├── book_context_researcher
+│       │   └── gemini-2.5-flash_call  (generation, with token counts)
+│       ├── book_context_formatter
+│       │   └── gemini-2.5-flash_call
+│       ├── city/landmark/author researcher→formatter  (parallel graph branches)
 │       │   └── ...
 │       └── region_analyzer
 │           └── gemini-2.5-flash_call
-├── composition_workflow_invocation  (plugin root span)
+├── book_to_place_composition_invocation  (plugin root span)
 │   └── ...
 └── llm_score_itinerary  (generation — from @observe in llm_scorer.py)
     model: gemini-2.5-flash-lite, input/output tokens, scores as output

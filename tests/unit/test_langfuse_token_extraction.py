@@ -77,3 +77,55 @@ class TestExtractTokenUsage:
 
     def test_object_without_field_returns_none(self):
         assert _plugin()._extract_token_usage(object()) is None
+
+
+class TestResolveRootName:
+    """Trace-name identity under Runner(node=...) roots (Codex #7, 21:58).
+
+    ADK 2.5 builds InvocationContext with agent=None for node roots (pinned
+    in test_graph_workflows.TestNodeRootInvocationIdentity), so the old
+    getattr(invocation_context.agent, 'name', 'unknown_agent') silently named
+    EVERY trace unknown_agent_invocation — falsifying the dashboard note and
+    blinding the Langfuse instrument PR 4's cost/quality case depends on.
+    Identity is now injected at the _build_runner seam.
+    """
+
+    def test_real_agent_name_wins(self):
+        from types import SimpleNamespace
+
+        plugin = LangfusePlugin(root_name="injected_wf")
+        ctx = SimpleNamespace(agent=SimpleNamespace(name="real_agent"), invocation_id="i")
+        assert plugin._resolve_root_name(ctx) == "real_agent"
+
+    def test_none_agent_falls_back_to_injected_root_name(self):
+        from types import SimpleNamespace
+
+        plugin = LangfusePlugin(root_name="book_to_place_discovery")
+        ctx = SimpleNamespace(agent=None, invocation_id="i")
+        assert plugin._resolve_root_name(ctx) == "book_to_place_discovery"
+
+    def test_nothing_available_warns_and_returns_unknown(self):
+        from types import SimpleNamespace
+
+        plugin = LangfusePlugin()
+        ctx = SimpleNamespace(agent=None, invocation_id="i")
+        assert plugin._resolve_root_name(ctx) == "unknown_agent"
+
+    def test_build_runner_injects_workflow_name(self):
+        """The executor seam is the injection point — every flow gets it."""
+        from types import SimpleNamespace
+
+        import core.executor as ex
+        from core.executor import WorkflowExecutor
+        from core.types import ExecutorConfig
+        from services.session_service import create_session_service
+
+        executor = WorkflowExecutor(
+            config=ExecutorConfig(model_name="m", google_api_key="k"),
+            session_service=create_session_service(use_database=False),
+            model=object(),
+        )
+        plugin = LangfusePlugin()
+        workflow = SimpleNamespace(name="book_to_place_composition")
+        executor._build_runner(workflow, plugin)
+        assert plugin.root_name == "book_to_place_composition"

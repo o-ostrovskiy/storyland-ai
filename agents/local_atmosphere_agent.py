@@ -6,17 +6,18 @@ whose mood and sensory character evoke a chosen book — used when the reader
 cannot travel to the book's actual setting.
 """
 
-from google.adk.agents import LlmAgent, SequentialAgent
+from google.adk.agents import LlmAgent
 
 from models.itinerary import ComposerEnvelope
-from agents.prompts import AgentPrompts, load_prompts
+from agents.prompts import AgentPrompts, load_prompts, preferences_block
 
 
-def create_local_atmosphere_pipeline(
+def create_local_atmosphere_agents(
     model,
     google_search_tool,
     location_label: str,
     radius_km: int,
+    preferences: dict | None = None,
     prompts: AgentPrompts | None = None,
 ):
     """
@@ -33,17 +34,20 @@ def create_local_atmosphere_pipeline(
         prompts: Optional AgentPrompts instance. Loads default version if not provided.
 
     Returns:
-        SequentialAgent that researches and formats a local-atmosphere itinerary.
+        (researcher, formatter) LlmAgent pair that researches and formats a local-atmosphere itinerary.
     """
     if prompts is None:
         prompts = load_prompts()
 
+    # Graph-scoped context (ADR #24): the initial user prompt reaches only
+    # the first node (book_context_researcher) — these two agents sit 3-4
+    # nodes downstream, so preferences must be baked into their instructions.
     researcher_instruction = prompts.local_atmosphere_researcher.format(
         location_label=location_label, radius_km=radius_km
-    )
+    ) + preferences_block(preferences)
     formatter_instruction = prompts.local_atmosphere_formatter.format(
         location_label=location_label, radius_km=radius_km
-    )
+    ) + preferences_block(preferences)
 
     researcher = LlmAgent(
         name="local_atmosphere_researcher",
@@ -60,7 +64,4 @@ def create_local_atmosphere_pipeline(
         instruction=formatter_instruction,
     )
 
-    return SequentialAgent(
-        name="local_atmosphere_pipeline",
-        sub_agents=[researcher, formatter],
-    )
+    return researcher, formatter

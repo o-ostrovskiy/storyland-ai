@@ -101,6 +101,8 @@ formatter = LlmAgent(
 )
 
 pipeline = SequentialAgent(sub_agents=[researcher, formatter])
+# ^ historical (ADK 1.x). Since the graph rewrite (ADR #24) the pair is wired
+#   as Workflow edges: (START, researcher, formatter) — same two-stage contract.
 ```
 
 ### Rationale
@@ -170,6 +172,8 @@ This pattern appears in:
 
 ### Decision
 Run city, landmark, and author discovery agents concurrently using `ParallelAgent`.
+
+> **Implementation superseded (2026-07, ADR #24):** the fan-out is now explicit graph edges — `book_context_formatter → (city, landmark, author) → JoinNode → region_analyzer`. The decision (parallelize the three independent branches) is unchanged; only the mechanism moved from the template agent to the graph runtime.
 
 ### Implementation
 ```python
@@ -1023,6 +1027,40 @@ Migrate in stages, eval-gated against a two-run pre-migration baseline (storylan
 
 ---
 
+## 24. Graph-Runtime Orchestration + the Primary Flow Named `book_to_place` (2026-07-19)
+
+### Context
+
+PR 2 of the ADK migration (ADR #23) ran on the deprecated-but-functional `SequentialAgent`/`ParallelAgent` templates. Separately, the codebase had a naming asymmetry: the reverse direction was a named capability (`place_to_book`) while the primary direction — a book in, real places out — was the unnamed default ("the workflow"), which is why the harness had grown two dialects for driving the same runner.
+
+### Decision
+
+**All six workflows are explicit `google.adk.workflow.Workflow` graphs** built in `agents/orchestrator.py`; the `agents/create_*_agents` factories return plain `(researcher, formatter)` `LlmAgent` pairs and own NO composition. Zero template agents remain (asserted: constructing every workflow emits no Sequential/ParallelAgent deprecation warning). `Runner` is driven via `node=` (one seam: `_build_runner` in the executor and the resolver).
+
+**The primary flow is named `book_to_place`**, the symmetric counterpart of `place_to_book`: phase workflows `book_to_place_discovery` and `book_to_place_composition` (factories `create_book_to_place_discovery_workflow` / `create_book_to_place_composition_workflow`). Executor methods keep their phase verbs (`discover`/`compose`) and the HTTP contract is byte-identical (golden-stream snapshot unchanged).
+
+Discovery graph (the only non-linear one):
+
+```
+START → book_context_researcher → book_context_formatter
+      → fan-out: city_r→city_f, landmark_r→landmark_f, author_r→author_f
+      → JoinNode(discovery_join) → region_analyzer
+```
+
+The JoinNode is load-bearing: a plain node fires on ANY predecessor; region_analyzer must wait for ALL three branches.
+
+**Graph semantics are pinned by tests, not assumed** (`tests/unit/test_graph_workflows.py` drives real Workflows through a real Runner with a scripted model): (1) downstream nodes see upstream responses in their request contents — the ADR #2 researcher→formatter contract; (2) `output_key` still writes session state — ADR #5; (3) events keep per-agent authorship — the progress-mapping contract; (4) JoinNode gates the fan-in to exactly one run after all branches. `tests/unit/test_agents.py` pins the graph shapes (edges, join, terminals).
+
+Kept deliberately: the researcher/formatter split (ADK 2.x would allow tools + output_schema on one agent; collapsing is a separate eval-gated experiment), the ADR #11 `append_event` persistence pattern (verified compatible), the two-endpoint HITL facade (native pause/resume still deferred).
+
+### Trade-offs
+
+**Benefits:** off the deprecated path before removal; composition is explicit data (edges) instead of nested agent trees; dead progress-map entries for container agents removed; the primary capability is greppable by name; symmetric naming ends the "named reverse, unnamed default" asymmetry.
+
+**Costs:** factory renames touch the executor's imports and monkeypatch targets (mechanical); Langfuse span hierarchy shows graph node names (dashboards keyed on `discovery_workflow_invocation` see `book_to_place_discovery_invocation` after this change).
+
+---
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -1048,5 +1086,6 @@ Migrate in stages, eval-gated against a two-run pre-migration baseline (storylan
 | **Abuse/ops hardening (ADR #21)** | Token spend protected; bounded stores; honest tone; per-branch traces | More knobs to configure |
 | **Shared run harness (ADR #22)** | One ADK-facing scaffold for all flows; explicit per-flow error policy | Flow bodies are nested generators; policy lives in `GuardSpec`, not inline |
 | **ADK 2.x, template-first (ADR #23)** | Supported line; CVE ignores retired; public-API plugin; bisectable stages | Deprecation warnings until the graph rewrite; fresh session DB at cutover |
+| **Graph workflows + `book_to_place` naming (ADR #24)** | Explicit edges, no deprecated templates; primary flow named; semantics test-pinned | Factory renames; Langfuse trace names change |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.

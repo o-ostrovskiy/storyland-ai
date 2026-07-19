@@ -150,7 +150,7 @@ def _make_executor(monkeypatch, raise_exc):
     from core.executor import WorkflowExecutor
     from services.session_service import create_session_service
 
-    monkeypatch.setattr(ex, "create_discovery_workflow", lambda *a, **k: object())
+    monkeypatch.setattr(ex, "create_book_to_place_discovery_workflow", lambda *a, **k: object())
 
     class _RaisingRunner:
         def __init__(self, *args, **kwargs):

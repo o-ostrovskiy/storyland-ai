@@ -92,9 +92,9 @@ flowchart TB
     end
 
     subgraph Phase1["Phase 1: Discovery"]
-        BC[book_context_pipeline<br/>🔍 Setting & themes]
+        BC[book_context researcher→formatter<br/>🔍 Setting & themes]
 
-        subgraph PD["Parallel Discovery ⚡"]
+        subgraph PD["Parallel graph branches ⚡ (fan-out → join)"]
             CP[City Agent<br/>🏙️]
             LP[Landmark Agent<br/>🏛️]
             AP[Author Agent<br/>✍️]

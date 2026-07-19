@@ -42,8 +42,8 @@ from google.adk.plugins.logging_plugin import LoggingPlugin
 
 from agents.orchestrator import (
     create_book_recommendation_workflow,
-    create_discovery_workflow,
-    create_composition_workflow,
+    create_book_to_place_discovery_workflow,
+    create_book_to_place_composition_workflow,
     create_expansion_workflow,
     create_local_atmosphere_workflow,
 )
@@ -102,17 +102,12 @@ logger = get_logger("storyland.core.executor")
 DISCOVERY_AGENT_STEPS: dict[str, str] = {
     "book_context_researcher": "Researching book setting and themes",
     "book_context_formatter": "Formatting book context",
-    "book_context_pipeline": "Analyzing book context",
-    "parallel_discovery": "Running parallel location discovery",
     "city_researcher": "Finding cities related to the book",
     "city_formatter": "Formatting city results",
-    "city_pipeline": "Discovering cities",
     "landmark_researcher": "Discovering landmarks and key locations",
     "landmark_formatter": "Formatting landmark results",
-    "landmark_pipeline": "Discovering landmarks",
     "author_researcher": "Locating author-related sites",
     "author_formatter": "Formatting author sites",
-    "author_pipeline": "Discovering author sites",
     "region_analyzer": "Analyzing geographic regions",
 }
 
@@ -123,13 +118,11 @@ LOCAL_ATMOSPHERE_AGENT_STEPS: dict[str, str] = {
     "book_context_pipeline": "Analyzing book atmosphere",
     "local_atmosphere_researcher": "Finding atmospheric places near you",
     "local_atmosphere_formatter": "Composing your local outing",
-    "local_atmosphere_pipeline": "Building local-atmosphere itinerary",
 }
 
 EXPANSION_AGENT_STEPS: dict[str, str] = {
     "expansion_researcher": "Searching for new places",
     "expansion_formatter": "Curating your additions",
-    "expansion_pipeline": "Finding new places to add",
 }
 
 SOFT_CHIP_CAP = 6
@@ -139,8 +132,6 @@ BOOK_RECOMMENDATION_HARD_CAP = 5
 BOOK_RECOMMENDATION_AGENT_STEPS: dict[str, str] = {
     "book_recommendation_researcher": "Searching for book recommendations",
     "book_recommendation_formatter": "Curating your book picks",
-    "book_recommendation_pipeline": "Finding books for you",
-    "book_recommendation_workflow": "Finding books for you",
 }
 
 APP_NAME = "storyland"
@@ -230,9 +221,13 @@ class WorkflowExecutor:
         """
         plugins = [LoggingPlugin()]
         if langfuse_plugin is not None:
+            # Inject the trace-name identity: under Runner(node=...) ADK builds
+            # InvocationContext with agent=None, so the plugin cannot recover
+            # the root name from the context (see LangfusePlugin.root_name).
+            langfuse_plugin.root_name = getattr(workflow, "name", None)
             plugins.append(langfuse_plugin)
         return Runner(
-            agent=workflow,
+            node=workflow,
             app_name=APP_NAME,
             session_service=self._session_service,
             plugins=plugins,
@@ -244,16 +239,20 @@ class WorkflowExecutor:
         user_id: str,
         book_title: str,
         author: str,
-        region_analysis: dict,
+        cached: dict,
     ) -> AsyncGenerator[DomainEvent, None]:
         """Replay a cached discovery result without invoking Gemini.
 
         The session already exists (created by ``discover`` before the cache
-        lookup). This writes the confirmed book metadata and the cached
-        region analysis into session state via ``append_event`` so the
-        downstream discover->compose handoff (which reads ``state.regions``)
-        behaves identically to a fresh run.
+        lookup). ``cached`` is the v2 grounding bundle: region_analysis PLUS
+        book_context and the three discovery payloads. ALL of it is written
+        into session state via ``append_event`` so the downstream
+        discover->compose handoff behaves identically to a fresh run —
+        compose() reads the grounding from state (ADR #24 graph scoping), so
+        a hit that replayed only regions would compose from city names alone
+        on precisely the popular, repeated titles the cache serves most.
         """
+        region_analysis = cached.get("region_analysis") or {}
         # A cache HIT must never replay a region with no place_key: hits land
         # hardest on popular, repeated titles — exactly the book-club case the
         # combined readaway exists for — so a keyless replay would kill the
@@ -272,15 +271,23 @@ class WorkflowExecutor:
         session = await self._session_service.get_session(
             app_name=APP_NAME, user_id=user_id, session_id=job_id
         )
+        state_delta = {
+            SessionStateKeys.BOOK_METADATA: book_metadata.model_dump(),
+            SessionStateKeys.REGION_ANALYSIS: region_analysis,
+        }
+        # Replay the grounding payloads compose() will read from state.
+        for key, value in (
+            (SessionStateKeys.BOOK_CONTEXT, cached.get("book_context")),
+            (SessionStateKeys.CITY_DISCOVERY, cached.get("city_discovery")),
+            (SessionStateKeys.LANDMARK_DISCOVERY, cached.get("landmark_discovery")),
+            (SessionStateKeys.AUTHOR_SITES, cached.get("author_sites")),
+        ):
+            if value:
+                state_delta[key] = value
         cache_event = Event(
             invocation_id="system",
             author="system",
-            actions=EventActions(
-                state_delta={
-                    SessionStateKeys.BOOK_METADATA: book_metadata.model_dump(),
-                    SessionStateKeys.REGION_ANALYSIS: region_analysis,
-                }
-            ),
+            actions=EventActions(state_delta=state_delta),
         )
         await self._session_service.append_event(session, cache_event)
 
@@ -322,7 +329,10 @@ class WorkflowExecutor:
         pref_sig = hashlib.sha1(
             repr(pref_items).encode("utf-8")
         ).hexdigest()
-        key = f"discover:v1:{norm_title}|{norm_author}|{pref_sig}"
+        # v2: the cached value is the full grounding bundle (region_analysis +
+        # book_context + the three discovery payloads), not just region_analysis —
+        # a cache HIT must compose with the same grounding as a fresh run.
+        key = f"discover:v2:{norm_title}|{norm_author}|{pref_sig}"
         norm_vibe = (vibe or "").strip().lower()
         if norm_vibe:
             key += f"|vibe={norm_vibe}"
@@ -412,7 +422,7 @@ class WorkflowExecutor:
                 user_id=user_id,
                 book_title=book_title,
                 author=author,
-                region_analysis=cached_region_analysis,
+                cached=cached_region_analysis,
             ):
                 yield ev
             return
@@ -443,8 +453,15 @@ class WorkflowExecutor:
             )
 
             langfuse_plugin = self._create_langfuse_plugin()
-            discovery_workflow = create_discovery_workflow(
-                self._model, book_title=exact_title, author=exact_author
+            # vibe/taste ride the researcher instructions now (ADR #24:
+            # graph-scoped context — branch researchers never see the user
+            # prompt that used to carry them).
+            discovery_workflow = create_book_to_place_discovery_workflow(
+                self._model,
+                book_title=exact_title,
+                author=exact_author,
+                vibe=vibe,
+                taste_context=taste_context,
             )
             runner = self._build_runner(discovery_workflow, langfuse_plugin)
 
@@ -508,9 +525,21 @@ class WorkflowExecutor:
             regions = region_analysis.get("regions", [])
 
             # Store on miss: cache only non-empty, schema-validated region
-            # sets so a future hit can safely short-circuit the chain.
+            # sets so a future hit can safely short-circuit the chain. The
+            # bundle carries the grounding payloads too: on a HIT, compose()
+            # reads them from replayed session state (a hit that composed
+            # from region names alone was the first PR-3 gate failure).
             if self._cache_enabled and regions:
-                await self._discovery_cache.set(cache_key, region_analysis)
+                await self._discovery_cache.set(
+                    cache_key,
+                    {
+                        "region_analysis": region_analysis,
+                        "book_context": run_state.book_context,
+                        "city_discovery": run_state.city_discovery,
+                        "landmark_discovery": run_state.landmark_discovery,
+                        "author_sites": run_state.author_sites,
+                    },
+                )
 
             yield RegionsReady(
                 job_id=job_id,
@@ -657,11 +686,21 @@ class WorkflowExecutor:
             )
 
             langfuse_plugin = self._create_langfuse_plugin()
-            composition_workflow = create_composition_workflow(self._model)
+            composition_workflow = create_book_to_place_composition_workflow(self._model)
             runner = self._build_runner(composition_workflow, langfuse_plugin)
 
+            # Graph-runtime history is scoped per invocation (ADR #24): the
+            # composer sees none of the discovery conversation, so its
+            # grounded inputs are passed explicitly from session state.
             prompt = build_composition_prompt(
-                exact_title, exact_author, selected_regions
+                exact_title,
+                exact_author,
+                selected_regions,
+                book_context=state.book_context,
+                city_discovery=state.city_discovery,
+                landmark_discovery=state.landmark_discovery,
+                author_sites=state.author_sites,
+                preferences=state.user_preferences,
             )
             message = types.Content(
                 role="user", parts=[types.Part(text=prompt)]
@@ -821,11 +860,13 @@ class WorkflowExecutor:
                 author=author,
                 location_label=location_label,
                 radius_km=radius_km,
+                preferences=preferences,
             )
             runner = self._build_runner(workflow, langfuse_plugin)
 
             prompt = build_local_atmosphere_prompt(
-                book_title, author, location_label, radius_km
+                book_title, author, location_label, radius_km,
+                preferences=preferences,
             )
             message = types.Content(
                 role="user", parts=[types.Part(text=prompt)]

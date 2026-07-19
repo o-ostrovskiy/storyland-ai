@@ -19,11 +19,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from common.logging import get_logger, configure_logging
 from common.config import load_config
+from core.prompts import build_composition_prompt
 from core.retry import build_retry_options
+from core.session_state import SessionStateAccessor
 from services.session_service import create_session_service
 from agents.orchestrator import (
-    create_discovery_workflow,
-    create_composition_workflow,
+    create_book_to_place_discovery_workflow,
+    create_book_to_place_composition_workflow,
 )
 from agents.prompts import load_prompts, CURRENT_PROMPT_VERSION, AgentPrompts
 from google.adk.models.google_llm import Gemini
@@ -494,11 +496,12 @@ async def _run_evaluation_case(
         root_span.update(metadata={"current_phase": "discovery"})
 
         try:
-            discovery_workflow = create_discovery_workflow(
+            discovery_workflow = create_book_to_place_discovery_workflow(
                 model, book_title=exact_title, author=exact_author, prompts=prompts
             )
+            langfuse_plugin.root_name = discovery_workflow.name
             discovery_runner = Runner(
-                agent=discovery_workflow,
+                node=discovery_workflow,
                 app_name="storyland",
                 session_service=session_service,
                 plugins=[LoggingPlugin(), langfuse_plugin],
@@ -587,20 +590,36 @@ Find cities, landmarks, and author-related sites, then group them into practical
         )
 
         try:
-            composition_workflow = create_composition_workflow(model, prompts=prompts)
+            composition_workflow = create_book_to_place_composition_workflow(model, prompts=prompts)
+            langfuse_plugin.root_name = composition_workflow.name
             composition_runner = Runner(
-                agent=composition_workflow,
+                node=composition_workflow,
                 app_name="storyland",
                 session_service=session_service,
                 plugins=[LoggingPlugin(), langfuse_plugin],
             )
 
-            composition_prompt = f"""Create a travel itinerary for "{exact_title}" by {exact_author}.
-
-Use ONLY the cities from the selected region(s): {json.dumps(selected_regions)}
-
-Create a personalized itinerary based on user preferences and the selected region(s).
-Include ALL cities from the selected regions in your itinerary."""
+            # Same prompt path as production (core.prompts.build_composition_prompt)
+            # INCLUDING the explicit grounding from session state — under the
+            # graph runtime (ADR #24) the composer sees none of the discovery
+            # conversation, so an eval that composed from region names alone
+            # would score a different, under-grounded workflow than prod.
+            grounding_session = await session_service.get_session(
+                app_name="storyland", user_id=user_id, session_id=session_id
+            )
+            grounding_state = SessionStateAccessor(
+                grounding_session.state if grounding_session else {}
+            )
+            composition_prompt = build_composition_prompt(
+                exact_title,
+                exact_author,
+                selected_regions,
+                book_context=grounding_state.book_context,
+                city_discovery=grounding_state.city_discovery,
+                landmark_discovery=grounding_state.landmark_discovery,
+                author_sites=grounding_state.author_sites,
+                preferences=grounding_state.user_preferences,
+            )
             composition_message = types.Content(
                 role="user", parts=[types.Part(text=composition_prompt)]
             )
