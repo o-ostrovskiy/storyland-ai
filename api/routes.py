@@ -92,7 +92,7 @@ async def health_check() -> HealthResponse:
                 "text/event-stream": {
                     "example": (
                         'event: started\ndata: {"event":"started","job_id":"abc-123"}\n\n'
-                        'event: progress\ndata: {"event":"progress","phase":1,"step":"Starting location discovery"}\n\n'
+                        'event: progress\ndata: {"event":"progress","phase":2,"step":"Starting location discovery"}\n\n'
                         'event: metadata\ndata: {"event":"metadata","book_title":"1984","author":"George Orwell"}\n\n'
                         'event: regions\ndata: {"event":"regions","job_id":"abc-123","regions":[...]}\n\n'
                         'event: done\ndata: {"event":"done","job_id":"abc-123"}\n\n'

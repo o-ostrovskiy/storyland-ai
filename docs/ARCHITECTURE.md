@@ -22,6 +22,8 @@ Phase 1: Discovery & Region Analysis (LLM agents)
 Phase 2: Itinerary Composition (LLM agents)
 ```
 
+**Wire-numbering note (2026-07-19):** the workflow is conceptually two-phase, but `Phase(IntEnum)` in `core/events.py` keeps its legacy values — `BOOK_SEARCH = 1` (retired, ADR #12), `DISCOVERY = 2`, `COMPOSITION = 3` — and SSE `progress` events serialize these ints, so clients receive **2 for discovery and 3 for composition** today. Renumbering the enum is a breaking wire change and must be its own code PR, never a docs edit. In this document, "Phase 1/Phase 2" means the conceptual workflow; anything about events or diagnostics uses the wire values explicitly.
+
 ### Rationale
 
 **Problem:** Books often span multiple distant locations. Examples:
@@ -299,7 +301,7 @@ session.state["selected_regions"] = selected_regions  # User's choice
 
 **Problem:** Two-phase workflow requires data to flow across Runner instances:
 - Phase 1 extracts metadata → Phase 2 needs exact title/author
-- Phase 1 discovers regions → Phase 2 needs user's selected regions
+- The discovery phase produces regions → the composition phase needs the user's selected regions
 - All phases share user preferences → Read from `state["user:preferences"]`
 
 **ADK Session Model:**
@@ -436,8 +438,8 @@ Without timeout: Workflow runs indefinitely, user doesn't know if it's stuck or 
 
 **Diagnostic Value of event_count:**
 - `event_count=5` → Stuck in Phase 1 (metadata extraction)
-- `event_count=50` → Stuck in Phase 2 (discovery running)
-- `event_count=100` → Stuck in Phase 2 (composition)
+- `event_count=50` → Stuck in discovery (wire `phase: 2`)
+- `event_count=100` → Stuck in composition (wire `phase: 3` — legacy enum value, see the wire-numbering note in ADR #1)
 
 Helps debug WHERE the timeout occurred without detailed logs.
 
@@ -459,7 +461,7 @@ Helps debug WHERE the timeout occurred without detailed logs.
 **Typical workflow timing:**
 - Phase 1 (metadata): ~5-10 seconds
 - Phase 2 (discovery): ~30-60 seconds
-- Phase 2 (composition): ~20-30 seconds
+- Composition (wire `phase: 3`): ~20-30 seconds
 - **Total:** ~60-100 seconds
 
 300s provides 3x safety margin.
@@ -890,7 +892,7 @@ Combining two books' journeys needs a place identity to intersect on; nothing ex
 Make "done" mechanical (per team engineering-standards): reproducible dependencies, a coverage floor that only ratchets up, a strict vulnerability gate, and a guarded major-version pin — all wired to fail CI, not to report.
 
 ### Implementation
-- **Hash-locked deps:** `requirements.lock` / `requirements-dev.lock` from `uv pip compile --universal --generate-hashes`; CI installs `--require-hashes` and fails if `make lock` would change the committed lock.
+- **Hash-locked deps:** `requirements.lock` / `requirements-dev.lock` from `uv pip compile --universal --generate-hashes`; the unit workflow (`codex.yml`) installs `--require-hashes` and fails if `make lock` would change the committed lock. Qualifier: `integration-tests.yml` still installs with `pip install -e ".[dev]"` (live resolution) — the lock gates the unit workflow, not yet every CI run.
 - **Coverage ratchet:** `fail_under = 74` in `pyproject.toml` (76% baseline; bare `--cov` honoring `[tool.coverage.run]`). Ratchet, not target — raise, never lower.
 - **Audit gate:** `pip-audit --strict --require-hashes` on the prod lock; ignores are inline with justification + ticket.
 - **ADK pin:** `google-adk[eval]>=1.33.0,<2` in `pyproject.toml` + a CI guard asserting the **locked** resolution stays 1.x (prevents a non-reproducible jump to ADK 2.x).
@@ -903,10 +905,10 @@ The agent (and everyone else) is only as autonomous as the definition of "done" 
 ## 18. Sentry Error Tracking with Privacy Hardening (2026-07-17/18, MYS-541/543)
 
 ### Decision
-Env-gated Sentry for the API — **errors-only by default**, with aggressive scrubbing, because agent runs are already traced in Langfuse and our payloads carry user reading taste and location data.
+Env-gated Sentry for the API — performance tracing **off** by default, logs and metrics **opt-out** (on unless disabled), with aggressive scrubbing, because agent runs are already traced in Langfuse and our payloads carry user reading taste and location data. Setting only `SENTRY_DSN` ships exceptions **plus INFO+ logs plus metrics**; set `SENTRY_ENABLE_LOGS=false` / `SENTRY_ENABLE_METRICS=false` for a genuinely errors-only posture.
 
 ### Implementation
-- `api/sentry.py`, gated on `SENTRY_DSN`; `common/logging.py` bridges structlog → Sentry (INFO+ as Logs, auto-counted `log.events` metrics). Release tagging via `SENTRY_RELEASE` (deployed SHA).
+- `api/sentry.py`, gated on `SENTRY_DSN`; `common/logging.py` bridges structlog → Sentry (INFO+ as Logs, auto-counted `log.events` metrics) — both default **on** (`SENTRY_ENABLE_LOGS`/`SENTRY_ENABLE_METRICS` default `true`). Release tagging via `SENTRY_RELEASE` (deployed SHA).
 - Performance tracing off by default: `traces_sample_rate` resolves to `None` (not `0.0`) so inbound trace headers that would bypass scrubbers aren't honored.
 - Privacy: `send_default_pii=False`, `max_request_body_size="never"`, `include_local_variables=False` (frame locals hold prompts, taste context, lat/lng), URL query-string scrubbing across events/logs/breadcrumbs/spans, health-probe noise dropped.
 
@@ -974,7 +976,7 @@ Four smaller decisions, recorded together:
 | **Persistent versioned cache (ADR #15)** | Repeat lookups free + instant; deploy-safe self-invalidation | Real-API seam test; bounded disk growth |
 | **Cross-job place_key (ADR #16)** | Same real place recognized across book jobs | Missed combine possible (never a wrong one) |
 | **Harness-first CI (ADR #17)** | "Done" is mechanical: locks, ratchet, audit, pin | Lock/relock discipline on every dep change |
-| **Sentry, errors-only (ADR #18)** | Prod exceptions visible without shipping user data | No perf tracing (Langfuse owns tracing) |
+| **Sentry, no-tracing + scrubbed (ADR #18)** | Prod exceptions/logs visible with PII scrubbed | Logs/metrics are opt-out; no perf tracing (Langfuse owns tracing) |
 | **G5-gated single-box deploy (ADR #19)** | Cheap, deliberate, port-22-closed-at-rest deploys | Single box = no horizontal redundancy |
 | **Place→book + server-derived grounding (ADR #20)** | Reverse product flow; grounding labels computed, not self-reported | Two LLM hops; separate endpoint |
 | **Abuse/ops hardening (ADR #21)** | Token spend protected; bounded stores; honest tone; per-branch traces | More knobs to configure |
