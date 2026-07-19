@@ -93,7 +93,6 @@ flowchart TB
 
     subgraph Phase1["Phase 1: Discovery"]
         BC[book_context_pipeline<br/>🔍 Setting & themes]
-        RP[reader_profile_agent<br/>👤 User preferences]
 
         subgraph PD["Parallel Discovery ⚡"]
             CP[City Agent<br/>🏙️]
@@ -102,7 +101,6 @@ flowchart TB
         end
 
         BC --> PD
-        RP --> PD
         PD --> RA[region_analyzer<br/>🌍 Geographic grouping]
     end
 
@@ -270,7 +268,6 @@ storyland-ai/
 │   ├── expansion_agent.py           # Researcher+formatter for place expansion chips
 │   ├── book_recommendation_agent.py # Researcher+formatter for "Find books like this" chip
 │   ├── place_to_book_agent.py        # Researcher+formatter for place→book reverse discovery
-│   ├── reader_profile_agent.py      # Preferences-based personalization
 │   ├── region_analyzer_agent.py     # Geographic region grouping
 │   ├── orchestrator.py              # Two-phase + local-atmosphere + expansion + book-rec + place→book workflows
 │   ├── prompts.py                   # AgentPrompts dataclass + versioned loader

@@ -16,7 +16,6 @@ from agents import (
     create_author_pipeline,
     create_local_atmosphere_pipeline,
     create_trip_composer_agent,
-    create_reader_profile_agent,
     create_region_analyzer_agent,
     create_book_recommendation_pipeline,
     create_book_recommendation_workflow,
@@ -202,8 +201,9 @@ class TestLocalAtmosphereWorkflow:
         assert isinstance(workflow, SequentialAgent)
         assert workflow.name == "local_atmosphere_workflow"
 
-    def test_three_stage_pipeline(self, model_name):
-        """book_context_pipeline → reader_profile → local_atmosphere_pipeline."""
+    def test_two_stage_pipeline(self, model_name):
+        """book_context_pipeline -> local_atmosphere_pipeline (MYS-436: no
+        reader_profile_agent hop -- see TestNoReaderProfileAgent)."""
         workflow = create_local_atmosphere_workflow(
             model_name,
             book_title="X",
@@ -214,7 +214,6 @@ class TestLocalAtmosphereWorkflow:
         names = [a.name for a in workflow.sub_agents]
         assert names == [
             "book_context_pipeline",
-            "reader_profile_agent",
             "local_atmosphere_pipeline",
         ]
 
@@ -247,31 +246,42 @@ class TestTripComposerAgent:
 
 
 # =============================================================================
-# Reader Profile Agent Tests
+# MYS-436: reader_profile_agent removed -- class-level guard, not a spot check
 # =============================================================================
 
-class TestReaderProfileAgent:
-    """Tests for create_reader_profile_agent."""
+class TestNoReaderProfileAgent:
+    """Pins the deletion: reader_profile_agent must not exist anywhere in the
+    tree, and no SequentialAgent this module builds may contain an agent
+    named "reader_profile_agent" -- a regression here would silently
+    reintroduce a per-search LLM call that produces a constant (MYS-436)."""
 
-    def test_creates_llm_agent(self, model_name):
-        """Test that reader profile returns an LlmAgent."""
-        agent = create_reader_profile_agent(model_name)
+    def test_factory_function_is_gone(self):
+        import agents
 
-        assert isinstance(agent, LlmAgent)
+        assert not hasattr(agents, "create_reader_profile_agent")
 
-    def test_agent_has_correct_name(self, model_name):
-        """Test agent has expected name."""
-        agent = create_reader_profile_agent(model_name)
+    def test_module_file_is_gone(self):
+        import importlib.util
 
-        assert agent.name == "reader_profile_agent"
+        assert importlib.util.find_spec("agents.reader_profile_agent") is None
 
-    def test_agent_has_tools(self, model_name):
-        """Test agent has preference tool configured."""
-        agent = create_reader_profile_agent(model_name)
+    def test_discovery_workflow_has_no_reader_profile_agent(self, model_name):
+        workflow = create_discovery_workflow(
+            model_name, book_title="1984", author="George Orwell"
+        )
+        names = [a.name for a in workflow.sub_agents]
+        assert "reader_profile_agent" not in names
 
-        # Should have tools for reading preferences
-        assert hasattr(agent, 'tools')
-        assert len(agent.tools) > 0
+    def test_local_atmosphere_workflow_has_no_reader_profile_agent(self, model_name):
+        workflow = create_local_atmosphere_workflow(
+            model_name,
+            book_title="X",
+            author="Y",
+            location_label="Boston, MA",
+            radius_km=80,
+        )
+        names = [a.name for a in workflow.sub_agents]
+        assert "reader_profile_agent" not in names
 
 
 # =============================================================================
@@ -336,14 +346,15 @@ class TestDiscoveryWorkflow:
 
         assert workflow.name == "discovery_workflow"
 
-    def test_workflow_has_four_stages(self, model_name):
-        """Test discovery workflow has 4 stages."""
+    def test_workflow_has_three_stages(self, model_name):
+        """Test discovery workflow has 3 stages (MYS-436: reader_profile_agent
+        removed -- was a dead hot-path LLM call producing a constant)."""
         workflow = create_discovery_workflow(
             model_name, book_title="1984", author="George Orwell"
         )
 
-        # book_context, reader_profile, parallel_discovery, region_analyzer
-        assert len(workflow.sub_agents) == 4
+        # book_context, parallel_discovery, region_analyzer
+        assert len(workflow.sub_agents) == 3
 
     def test_workflow_ends_with_region_analyzer(self, model_name):
         """Test discovery workflow ends with region_analyzer."""
@@ -363,9 +374,8 @@ class TestDiscoveryWorkflow:
         stage_names = [agent.name for agent in workflow.sub_agents]
 
         assert stage_names[0] == "book_context_pipeline"
-        assert stage_names[1] == "reader_profile_agent"
-        assert stage_names[2] == "parallel_discovery"
-        assert stage_names[3] == "region_analyzer"
+        assert stage_names[1] == "parallel_discovery"
+        assert stage_names[2] == "region_analyzer"
 
     def test_workflow_contains_parallel_agent(self, model_name):
         """Test discovery workflow contains a ParallelAgent for discovery."""
