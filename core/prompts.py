@@ -78,6 +78,7 @@ def build_composition_prompt(
     city_discovery: object | None = None,
     landmark_discovery: object | None = None,
     author_sites: object | None = None,
+    preferences: dict | None = None,
 ) -> str:
     """Build the user prompt for the composition phase (phase 3).
 
@@ -111,6 +112,15 @@ def build_composition_prompt(
         "author_sites": author_sites,
     }
     grounded = {k: v for k, v in grounded.items() if v}
+    if preferences:
+        # user:preferences reach the composer explicitly (MYS-436 removed the
+        # reader_profile agent that used to surface them as a conversation
+        # turn; the API — and the eval harness — still supply them).
+        sections.append(
+            "READER PREFERENCES — honor these when choosing stops, pacing, "
+            "and trip length:\n"
+            f"{json.dumps(preferences)}\n"
+        )
     if grounded:
         sections.append(
             "Grounded discovery research — prefer these real, researched "
@@ -131,6 +141,7 @@ def build_local_atmosphere_prompt(
     author: str,
     location_label: str,
     radius_km: int,
+    preferences: dict | None = None,
 ) -> str:
     """Build the user prompt for the local-atmosphere flow.
 
@@ -147,4 +158,10 @@ def build_local_atmosphere_prompt(
         f"Find real places near the user whose mood, era, and sensory feel "
         f"evoke the book. Group them into 1-3 nearby towns and return a "
         f"TripItinerary that respects the user's preferences."
+        + (
+            "\n\nREADER PREFERENCES — honor these when choosing stops and "
+            "pacing:\n" + json.dumps(preferences)
+            if preferences
+            else ""
+        )
     )

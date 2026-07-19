@@ -696,6 +696,7 @@ class WorkflowExecutor:
                 city_discovery=state.city_discovery,
                 landmark_discovery=state.landmark_discovery,
                 author_sites=state.author_sites,
+                preferences=state.user_preferences,
             )
             message = types.Content(
                 role="user", parts=[types.Part(text=prompt)]
@@ -859,7 +860,8 @@ class WorkflowExecutor:
             runner = self._build_runner(workflow, langfuse_plugin)
 
             prompt = build_local_atmosphere_prompt(
-                book_title, author, location_label, radius_km
+                book_title, author, location_label, radius_km,
+                preferences=preferences,
             )
             message = types.Content(
                 role="user", parts=[types.Part(text=prompt)]

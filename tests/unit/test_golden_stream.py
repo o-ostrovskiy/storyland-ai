@@ -223,6 +223,10 @@ class TestComposerExplicitGrounding:
                         "regions": _REGIONS,
                         "analysis_note": "note",
                     },
+                    SessionStateKeys.USER_PREFERENCES: {
+                        "pace": "prefs-marker-pace",
+                        "duration_days": 12,
+                    },
                     SessionStateKeys.BOOK_CONTEXT: {
                         "setting": "Bath and Lyme Regis",
                         "themes": ["persuasion-marker-theme"],
@@ -278,6 +282,10 @@ class TestComposerExplicitGrounding:
             "city-marker-reason",
             "landmark-marker",
             "author-marker",
+            # MYS-436 follow-up: user:preferences must reach the composer
+            # explicitly (the reader_profile turn that used to carry them is
+            # gone; the API and the eval harness still supply them).
+            "prefs-marker-pace",
         ):
             assert marker in prompt, f"composer prompt lost grounding: {marker}"
 

@@ -616,6 +616,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
                 city_discovery=grounding_state.city_discovery,
                 landmark_discovery=grounding_state.landmark_discovery,
                 author_sites=grounding_state.author_sites,
+                preferences=grounding_state.user_preferences,
             )
             composition_message = types.Content(
                 role="user", parts=[types.Part(text=composition_prompt)]
