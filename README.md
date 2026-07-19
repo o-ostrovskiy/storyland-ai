@@ -278,7 +278,8 @@ storyland-ai/
 │
 ├── core/                # Transport-agnostic orchestration & SDK
 │   ├── executor.py      # WorkflowExecutor (discover/compose/expand/recommend)
-│   ├── place_to_book.py # PlaceToBookResolver (place→book reverse routing, isolated capability)
+│   ├── run_harness.py   # Shared ADK runner scaffold (event pump, timeout/error policy)
+│   ├── place_to_book.py # PlaceToBookResolver (place→book reverse routing)
 │   ├── cache.py         # In-process TTL/LRU result cache
 │   └── session_state.py # Typed session-state accessor
 │
