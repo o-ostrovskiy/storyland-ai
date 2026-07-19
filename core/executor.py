@@ -651,8 +651,17 @@ class WorkflowExecutor:
             composition_workflow = create_book_to_place_composition_workflow(self._model)
             runner = self._build_runner(composition_workflow, langfuse_plugin)
 
+            # Graph-runtime history is scoped per invocation (ADR #24): the
+            # composer sees none of the discovery conversation, so its
+            # grounded inputs are passed explicitly from session state.
             prompt = build_composition_prompt(
-                exact_title, exact_author, selected_regions
+                exact_title,
+                exact_author,
+                selected_regions,
+                book_context=state.book_context,
+                city_discovery=state.city_discovery,
+                landmark_discovery=state.landmark_discovery,
+                author_sites=state.author_sites,
             )
             message = types.Content(
                 role="user", parts=[types.Part(text=prompt)]

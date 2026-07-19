@@ -197,3 +197,86 @@ class TestGoldenStream:
         )
         assert types_ == ["WorkflowError", "WorkflowComplete"]
         assert sse == ["error", "done"]
+
+
+class TestComposerExplicitGrounding:
+    """The composer's prompt must carry the discovery research explicitly.
+
+    Under the graph runtime (ADR #24) the composition invocation sees none of
+    the discovery conversation, so build_composition_prompt interpolates
+    book_context and the three discovery payloads from session state. This
+    test drives the real executor with fake runners and asserts the message
+    handed to the composition Runner contains that grounding — the regression
+    that caused the first PR-3 eval-gate FAIL (composer composing from city
+    names alone).
+    """
+
+    async def test_compose_prompt_contains_state_grounding(self, monkeypatch):
+        executor, ex = _make_executor(monkeypatch)
+
+        monkeypatch.setattr(
+            ex,
+            "Runner",
+            _state_writing_runner(
+                lambda: {
+                    SessionStateKeys.REGION_ANALYSIS: {
+                        "regions": _REGIONS,
+                        "analysis_note": "note",
+                    },
+                    SessionStateKeys.BOOK_CONTEXT: {
+                        "setting": "Bath and Lyme Regis",
+                        "themes": ["persuasion-marker-theme"],
+                    },
+                    SessionStateKeys.CITY_DISCOVERY: {
+                        "cities": [{"name": "Bath", "reason": "city-marker-reason"}]
+                    },
+                    SessionStateKeys.LANDMARK_DISCOVERY: {
+                        "landmarks": [{"name": "The Cobb", "reason": "landmark-marker"}]
+                    },
+                    SessionStateKeys.AUTHOR_SITES: {
+                        "sites": [{"name": "Chawton Cottage", "reason": "author-marker"}]
+                    },
+                }
+            ),
+        )
+
+        job_id = None
+        async for ev in executor.discover(book_title="Persuasion", author="Jane Austen"):
+            if isinstance(ev, JobStarted):
+                job_id = ev.job_id
+
+        captured_prompts = []
+
+        class _CapturingRunner:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def run_async(self, user_id, session_id, new_message):
+                captured_prompts.append(
+                    "".join(p.text or "" for p in new_message.parts)
+                )
+                if False:
+                    yield None
+
+        monkeypatch.setattr(ex, "Runner", _CapturingRunner)
+
+        # ExtractionError is expected (the capturing runner writes no
+        # envelope) — only the outbound prompt matters here.
+        async for _ in executor.compose(job_id=job_id, region_ids=[1]):
+            pass
+
+        assert len(captured_prompts) == 1
+        prompt = captured_prompts[0]
+        for marker in (
+            "persuasion-marker-theme",
+            "city-marker-reason",
+            "landmark-marker",
+            "author-marker",
+        ):
+            assert marker in prompt, f"composer prompt lost grounding: {marker}"

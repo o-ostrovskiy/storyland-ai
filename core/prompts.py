@@ -74,16 +74,56 @@ def build_composition_prompt(
     book_title: str,
     author: str,
     selected_regions: List[dict],
+    book_context: dict | None = None,
+    city_discovery: object | None = None,
+    landmark_discovery: object | None = None,
+    author_sites: object | None = None,
 ) -> str:
-    """Build the user prompt for the composition phase (phase 3)."""
-    return (
-        f'Create a travel itinerary for "{book_title}" by {author}.\n\n'
-        f"Use ONLY the cities from the selected region(s): "
-        f"{json.dumps(selected_regions)}\n\n"
-        f"Create a personalized itinerary based on user preferences "
-        f"and the selected region(s).\n"
-        f"Include ALL cities from the selected regions in your itinerary."
+    """Build the user prompt for the composition phase (phase 3).
+
+    Under the ADK 2 graph runtime an invocation's conversation is scoped to
+    its trigger chain — the composer (a separate invocation from discovery)
+    sees NOTHING of the discovery conversation. On the 1.x template runtime
+    it implicitly saw all of it. The grounded research the composer needs is
+    therefore passed EXPLICITLY here, read from session state (where the
+    discovery formatters put it via output_key): book context for
+    theme/setting fit, and the three discovery payloads so stops come from
+    researched places instead of the model's unaided world knowledge.
+    Explicit-and-bounded beats the old implicit-and-unbounded history: the
+    composer gets exactly the validated payloads, not every intermediate
+    researcher turn.
+    """
+    sections = [
+        f'Create a travel itinerary for "{book_title}" by {author}.\n',
+        (
+            "Use ONLY the cities from the selected region(s): "
+            f"{json.dumps(selected_regions)}\n"
+        ),
+    ]
+    if book_context:
+        sections.append(
+            "Book context (setting, time period, themes) from research:\n"
+            f"{json.dumps(book_context)}\n"
+        )
+    grounded = {
+        "cities": city_discovery,
+        "landmarks": landmark_discovery,
+        "author_sites": author_sites,
+    }
+    grounded = {k: v for k, v in grounded.items() if v}
+    if grounded:
+        sections.append(
+            "Grounded discovery research — prefer these real, researched "
+            "places (within the selected regions) when composing stops, and "
+            "label match_type/grounding_source from this evidence:\n"
+            f"{json.dumps(grounded)}\n"
+        )
+    sections.append(
+        "Create a personalized itinerary based on user preferences "
+        "and the selected region(s).\n"
+        "Include ALL cities from the selected regions in your itinerary."
     )
+    return "\n".join(sections)
 
 
 def build_local_atmosphere_prompt(

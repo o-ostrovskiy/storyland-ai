@@ -221,3 +221,65 @@ class TestGraphSemantics:
         # Branch events keep their agent authorship (progress mapping).
         authors = {e.author for e in events if getattr(e, "author", None)}
         assert {"branch_city", "branch_landmark", "branch_author"} <= authors
+
+
+class TestGraphHistoryScoping:
+    """Pin the graph runtime's history model so nobody re-assumes 1.x behavior.
+
+    Under graphs, an agent's conversation is scoped to its TRIGGER CHAIN:
+    a direct successor sees its predecessor's output (pinned above), but a
+    second invocation on the same session sees NOTHING of the first — not
+    even its user message. This is why the composer's grounded inputs are
+    passed explicitly via build_composition_prompt (state → prompt), not via
+    implicit conversation history. If an ADK upgrade ever changes this to
+    full-history again, this test fails and the explicit wiring (plus its
+    token cost) should be re-evaluated.
+    """
+
+    async def test_second_invocation_sees_nothing_of_the_first(self, monkeypatch):
+        first = LlmAgent(
+            name="first_agent",
+            model=_model(),
+            instruction="FIRST-MARKER: produce facts.",
+        )
+        second = LlmAgent(
+            name="second_agent",
+            model=_model(),
+            instruction="SECOND-MARKER: compose from whatever you can see.",
+        )
+
+        def script(llm_request):
+            text = _request_text(llm_request)
+            if "FIRST-MARKER" in text:
+                return "FIRST-INVOCATION-OUTPUT"
+            return "second-output"
+
+        captured = _install_scripted_model(monkeypatch, script)
+
+        service = InMemorySessionService()
+        await service.create_session(
+            app_name=APP, user_id=USER, session_id="cross", state={}
+        )
+
+        async def drive(workflow, prompt):
+            runner = Runner(node=workflow, app_name=APP, session_service=service)
+            async with runner:
+                async for _ in runner.run_async(
+                    user_id=USER,
+                    session_id="cross",
+                    new_message=types.Content(
+                        role="user", parts=[types.Part(text=prompt)]
+                    ),
+                ):
+                    pass
+
+        await drive(Workflow(name="wf_a", edges=[(START, first)]), "prompt-one")
+        await drive(Workflow(name="wf_b", edges=[(START, second)]), "prompt-two")
+
+        second_requests = [
+            r for r in captured if "SECOND-MARKER" in _request_text(r)
+        ]
+        assert len(second_requests) == 1
+        text = _request_text(second_requests[0])
+        assert "FIRST-INVOCATION-OUTPUT" not in text
+        assert "prompt-one" not in text
