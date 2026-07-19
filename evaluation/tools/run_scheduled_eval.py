@@ -401,9 +401,11 @@ async def _run_evaluation_case(
             initial_delay=1,
             max_delay=config.retry_max_delay,
         )
+        # ADK 2.x: the api_key goes through client_kwargs (a bare api_key=
+        # kwarg is silently dropped and auth falls back to env).
         model = Gemini(
             model=config.model_name,
-            api_key=config.google_api_key,
+            client_kwargs={"api_key": config.google_api_key},
             retry_options=retry_config
         )
 

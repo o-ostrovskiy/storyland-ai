@@ -22,7 +22,7 @@ def create_session_service(
 
     Args:
         connection_string: Optional database URL (e.g., "sqlite+aiosqlite:///sessions.db")
-                          If not provided, defaults to "sqlite+aiosqlite:///storyland_sessions.db"
+                          If not provided, defaults to "sqlite+aiosqlite:///storyland_sessions_v2.db"
                           Note: This is passed as 'db_url' to DatabaseSessionService
         use_database: If True, use DatabaseSessionService; otherwise InMemorySessionService
 
@@ -51,8 +51,13 @@ def create_session_service(
     if use_database:
         # Production: Database-backed session service
         if not connection_string:
-            # Default to SQLite with async driver in the current directory
-            connection_string = "sqlite+aiosqlite:///storyland_sessions.db"
+            # Default to SQLite with async driver in the current directory.
+            # "_v2" suffix: ADK 2.x writes a session schema incompatible with
+            # the 1.x one, and the migration decision was a FRESH DB at
+            # cutover (jobs are minutes-long; the retention sweeper prunes
+            # anyway). A new filename guarantees 2.x never opens a 1.x file;
+            # the old storyland_sessions.db is deleted manually post-deploy.
+            connection_string = "sqlite+aiosqlite:///storyland_sessions_v2.db"
 
         logger.info("session_service_created", type="database", connection_string=connection_string)
         return DatabaseSessionService(db_url=connection_string)
@@ -75,7 +80,7 @@ def create_session_service_from_env():
 
     Examples:
         # In .env file:
-        # DATABASE_URL=sqlite+aiosqlite:///storyland_sessions.db
+        # DATABASE_URL=sqlite+aiosqlite:///storyland_sessions_v2.db
         # USE_DATABASE=true
 
         >>> session_service = create_session_service_from_env()

@@ -33,7 +33,11 @@ def get_user_preferences(tool_context: ToolContext) -> str:
                 "message": "No user preferences found. Using defaults."
             })
     except Exception as e:
-        # Graceful degradation: return defaults on error
+        # Graceful degradation: return defaults on error. DELIBERATE fail-open:
+        # ADK 2.x only auto-retries a tool when the exception PROPAGATES, so
+        # swallowing here opts this tool out of framework retry — correct for a
+        # read of session-local state, where "no preferences" is a valid answer
+        # and a retry could never do better.
         return json.dumps({
             "found": False,
             "preferences": {},

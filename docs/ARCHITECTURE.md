@@ -892,7 +892,7 @@ Combining two books' journeys needs a place identity to intersect on; nothing ex
 Make "done" mechanical (per team engineering-standards): reproducible dependencies, a coverage floor that only ratchets up, a strict vulnerability gate, and a guarded major-version pin — all wired to fail CI, not to report.
 
 ### Implementation
-- **Hash-locked deps:** `requirements.lock` / `requirements-dev.lock` from `uv pip compile --universal --generate-hashes`; the unit workflow (`codex.yml`) installs `--require-hashes` and fails if `make lock` would change the committed lock. Qualifier: `integration-tests.yml` still installs with `pip install -e ".[dev]"` (live resolution) — the lock gates the unit workflow, not yet every CI run.
+- **Hash-locked deps:** `requirements.lock` / `requirements-dev.lock` from `uv pip compile --universal --generate-hashes`; the unit workflow (`codex.yml`) installs `--require-hashes` and fails if `make lock` would change the committed lock. `integration-tests.yml` installs from the same dev lock as of the ADK 2 lift (the previously documented live-resolution gap bit exactly as predicted: a fresh resolve drifted httpx/vcrpy and broke VCR replay with a method-case mismatch the locked env couldn't reproduce).
 - **Coverage ratchet:** `fail_under = 74` in `pyproject.toml` (76% baseline; bare `--cov` honoring `[tool.coverage.run]`). Ratchet, not target — raise, never lower.
 - **Audit gate:** `pip-audit --strict --require-hashes` on the prod lock; ignores are inline with justification + ticket.
 - **ADK pin:** `google-adk[eval]>=1.33.0,<2` in `pyproject.toml` + a CI guard asserting the **locked** resolution stays 1.x (prevents a non-reproducible jump to ADK 2.x).
@@ -990,6 +990,39 @@ Note: the grounding *filters* in `core/extraction.py` and `core/place_to_book.py
 
 ---
 
+## 23. ADK 2.x Migration (Template-First, Graph Runtime Deferred to a Follow-Up PR) (2026-07-19)
+
+### Context
+
+The service ran on `google-adk 1.x` (pinned `<2`) for eight months. ADK 2.0 (GA 2026-05) replaced the hierarchical agent executor with a graph-based workflow runtime and shipped breaking changes (incompatible session schema, removed `Gemini.api_key`, `[db]` extra required for `DatabaseSessionService`). The `<2` cap had two growing costs: five starlette CVE pip-audit ignores (ADK 1.x capped `starlette<1`) and a private-attribute coupling in the Langfuse plugin.
+
+### Decision
+
+Migrate in stages, eval-gated against a two-run pre-migration baseline (storyland_eval pooled avg ≈4.33/5, books_v1 pooled ≈3.14/5 on `gemini-2.5-flash-lite`; gates calibrated to measured judge noise — ±0.17 and ±0.40 respectively — not a flat percentage):
+
+1. **PR 1 — run harness** (ADR #22): all ADK-facing scaffolding behind one seam, behavior-frozen.
+2. **PR 2 — this lift**: `google-adk[db]>=2.4.0,<3` on the still-supported `SequentialAgent`/`ParallelAgent` template workflows (deprecated in 2.x but functional), so the dependency jump and the orchestration rewrite are separately bisectable. Model stays pinned to `gemini-2.5-flash-lite` so eval deltas are attributable to ADK alone. Gate result: PASS (storyland_eval 4.33 — dead-on baseline; books_v1 3.20 — above baseline; per-generation usage audit: 216/216 generations on both sides with non-zero recorded usage).
+3. **PR 3 — graph rewrite** (follow-up): re-express the workflows on `google.adk.workflow` (`Workflow`/`Node`/`Edge`), keeping the two-endpoint HTTP contract. Native HITL pause/resume is deliberately deferred — the discover→select→compose split stays as-is.
+4. **PR 4 — model upgrade** (follow-up): single `gemini-3-flash` + cassette re-record.
+
+**Key 2.x facts this migration verified against the real package** (spike, `google-adk==2.4.0`/`2.5.0`):
+- `tools` + `output_schema` may now coexist on one `LlmAgent` — ADR #2's researcher→formatter split is no longer *forced* by the framework. Collapsing pairs is a separate, eval-gated experiment; the anti-hallucination rationale stands until disproven per-pipeline.
+- `Gemini(api_key=...)` is **silently dropped** on 2.x (pydantic ignores it; auth falls back to env) — the key must go through `client_kwargs={"api_key": ...}`. Both construction sites fixed.
+- Session storage: **fresh DB at cutover** (default file renamed to `storyland_sessions_v2.db` so 2.x never opens a 1.x file). Jobs are minutes-long and the retention sweeper prunes anyway, so no data migration. The v-current schema keeps `sessions.update_time` and exposes the engine as `db_engine`, so the retention sweeper's raw-SQL prune still works — now proven by `tests/integration/test_session_retention_db.py` (previously the prune was fail-open and untested against a real store).
+- The ADR #11 `append_event(state_delta)` persistence contract holds unchanged on both backends.
+- All eight `LangfusePlugin` hooks survive; `CallbackContext.branch` is now **public**, removing the private `_invocation_context` coupling (kept only as a fallback). Token-usage extraction treats absent/None `usage_metadata` as missing (never a zero-token success) and logs a WARNING so cost tracking can't silently zero.
+- ADK 2.x auto-retries a tool only when its exception propagates; `tools/preferences.py` deliberately stays fail-open (documented in place).
+- starlette resolves to >=1.3 → the five PYSEC ignores were removed from `codex.yml` and `Makefile`; the CI pin guard (ADR #17) now asserts a 2.x resolution.
+- `[eval]` extra dropped (nothing imports `google.adk.evaluation`); `[db]` + explicit `greenlet` added.
+
+### Trade-offs
+
+**Benefits:** supported dependency line; five CVE ignores retired; public-API-only plugin; per-stage bisectability with the golden-stream SSE snapshot + eval gates proving "no functionality broken."
+
+**Costs:** template workflows emit deprecation warnings until PR 3; a fresh session DB drops in-flight jobs at the cutover deploy (accepted — deploy in a quiet window); cassettes may need one extra re-record if genai 2.x changed the wire surface before PR 4's planned re-record.
+
+---
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -1014,5 +1047,6 @@ Note: the grounding *filters* in `core/extraction.py` and `core/place_to_book.py
 | **Place→book + server-derived grounding (ADR #20)** | Reverse product flow; grounding labels computed, not self-reported | Two LLM hops; separate endpoint |
 | **Abuse/ops hardening (ADR #21)** | Token spend protected; bounded stores; honest tone; per-branch traces | More knobs to configure |
 | **Shared run harness (ADR #22)** | One ADK-facing scaffold for all flows; explicit per-flow error policy | Flow bodies are nested generators; policy lives in `GuardSpec`, not inline |
+| **ADK 2.x, template-first (ADR #23)** | Supported line; CVE ignores retired; public-API plugin; bisectable stages | Deprecation warnings until the graph rewrite; fresh session DB at cutover |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.

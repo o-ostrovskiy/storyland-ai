@@ -67,8 +67,7 @@ lock:
 # Audit the shipped (prod) lock for known vulnerabilities (same gate CI runs).
 audit:
 	pip-audit --strict --require-hashes -r requirements.lock \
-		--ignore-vuln PYSEC-2026-161 --ignore-vuln PYSEC-2026-248 --ignore-vuln PYSEC-2026-249 \
-		--ignore-vuln PYSEC-2026-2280 --ignore-vuln PYSEC-2026-2281 --ignore-vuln PYSEC-2026-2447
+		--ignore-vuln PYSEC-2026-2447
 
 # =============================================================================
 # Testing
