@@ -862,6 +862,39 @@ After generating a travel itinerary based on a book, readers often want to know 
 
 ---
 
+## 15. Shared Run Harness (Single ADK-Facing Scaffold for All Flows)
+
+### Context
+
+By mid-2026 `core/executor.py` had grown to ~1,700 lines: five endpoint flows (`discover`, `compose`, `local_atmosphere`, `expand`, `recommend_books`) plus the place→book resolver each carried a near-identical copy of the same scaffolding — Runner construction, the event-drain loop with agent→progress mapping, researcher-text capture, final-response tracking, the workflow timeout, and a four-branch `TimeoutError` / `CancelledError` / `Exception` boundary ending in `WorkflowError` + `WorkflowComplete`. Every new flow copy-pasted ~150 lines, and any change to how we drive ADK (e.g. the planned ADK 2.x migration) had to be applied and verified six times.
+
+### Decision
+
+Extract the ADK-facing scaffolding into `core/run_harness.py` as four small primitives, leaving all business logic (guards, caching, merging, grounding filters) in the flows:
+
+- **`pump_events(runner, ...)`** — drains `runner.run_async`, yields at most one `ProgressEvent` per agent (from a per-flow `agent_steps` map), and optionally fills a **`RunCapture`** with per-author text (grounding post-validation input) and the final response.
+- **`run_guarded(body, GuardSpec)`** — wraps a flow body (an async generator) in the workflow timeout and the shared exception boundary. `GuardSpec` parameterizes the per-flow differences that MUST stay different: cleanup policy (`expand`'s exception path clears the lock but does *not* mark the session failed, while its timeout path does both), timeout message, and an optional `map_exception` hook (used by `discover` to classify TaskGroup failures into client-safe typed errors).
+- **`collect_token_usage(plugin)`** / **`error_events(...)`** — the token-usage close-out and the standard `WorkflowError` + `WorkflowComplete` terminal pair.
+
+Runner **construction** deliberately stays in the calling module (`WorkflowExecutor._build_runner` resolves the module-level `Runner` name at call time), preserving the historical test seams — unit tests keep monkeypatching `core.executor.Runner` / `core.place_to_book.Runner` unchanged.
+
+The timeout context wraps the *iteration* of the body, so consumer time (a slow SSE client between events) still counts against the workflow timeout — identical to the historical inline placement.
+
+### Files Affected
+
+- `core/run_harness.py` (new), `core/executor.py` (flows rewritten on the harness), `core/place_to_book.py` (pump + shared `_normalize_text` from `core/extraction.py`)
+- `tests/unit/test_run_harness.py` (harness contract), `tests/unit/test_golden_stream.py` (SSE wire-contract snapshot for discover→compose — the migration safety net)
+
+Note: the grounding *filters* in `core/extraction.py` and `core/place_to_book.py` remain intentionally separate — they have different fail-open contracts (all-dropped is a valid honest not-found for place→book, but a fail-open trigger for book recommendations).
+
+### Trade-offs
+
+**Benefits:** One place to change how we drive ADK (the prerequisite for the ADK 2.x migration); a new flow needs ~30 lines of scaffold instead of ~150; the error-cleanup policy of each flow is now explicit data (`GuardSpec`) instead of five hand-maintained try/except blocks; behavior-frozen — the full pre-existing unit suite passed unmodified.
+
+**Costs:** Flow bodies are nested async generators (one more level of indirection when reading a single flow top-to-bottom); per-flow error policy lives in a spec object rather than inline try/except, so a reader must know the harness contract.
+
+---
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -878,5 +911,6 @@ After generating a travel itinerary based on a book, readers often want to know 
 | **Failure status flag** | Terminal failures visible via /status, retryable | State must be persisted via `append_event`, not in-place mutation |
 | **Gateway secret** | Blocks direct access when deployed behind a gateway | Health endpoint intentionally excluded; leave secret empty for standalone dev |
 | **Local-atmosphere mode** | Lets readers feel a book without traveling; reuses pipeline pattern | Separate endpoint to maintain; LLM-side radius enforcement only |
+| **Shared run harness** | One ADK-facing scaffold for all flows; explicit per-flow error policy | Flow bodies are nested generators; policy lives in `GuardSpec`, not inline |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.

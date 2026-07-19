@@ -20,14 +20,17 @@ Usage (Python SDK — direct import from backend):
 
 Usage (HTTP adapter):
     The API layer wraps the same executor and maps DomainEvent -> SSE events.
+
+Structure note: the ADK-facing scaffolding (event pump, timeout/exception
+boundary, token-usage close-out) lives in core/run_harness.py; each flow here
+keeps only its business logic (guards, caching, merging, grounding filters)
+plus a GuardSpec describing its error-cleanup policy.
 """
 
-import asyncio
 import hashlib
 import uuid
 from typing import AsyncGenerator, List, Optional
 
-from async_timeout import timeout
 from google.genai import types
 
 from core.retry import build_retry_options
@@ -81,6 +84,14 @@ from .regions import (
     enrich_region_analysis,
     get_valid_region_ids,
     validate_region_selection,
+)
+from .run_harness import (
+    GuardSpec,
+    RunCapture,
+    collect_token_usage,
+    error_events,
+    pump_events,
+    run_guarded,
 )
 from .session_state import SessionStateAccessor, SessionStateKeys
 from .types import ExecutorConfig
@@ -208,6 +219,22 @@ class WorkflowExecutor:
             secret_key=self._config.langfuse_secret_key,
             public_key=self._config.langfuse_public_key,
             host=self._config.langfuse_host,
+        )
+
+    def _build_runner(self, workflow, langfuse_plugin=None) -> Runner:
+        """Build a Runner for one workflow run.
+
+        References the module-level ``Runner`` name so tests can keep
+        monkeypatching ``core.executor.Runner`` as the single fake seam.
+        """
+        plugins = [LoggingPlugin()]
+        if langfuse_plugin is not None:
+            plugins.append(langfuse_plugin)
+        return Runner(
+            agent=workflow,
+            app_name=APP_NAME,
+            session_service=self._session_service,
+            plugins=plugins,
         )
 
     async def _emit_cached_discovery(
@@ -355,11 +382,10 @@ class WorkflowExecutor:
             logger.error(
                 "session_create_failed", error=str(e), error_type=type(e).__name__
             )
-            yield WorkflowError(
-                message="Failed to initialize session",
-                error_type="SessionError",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id, "Failed to initialize session", "SessionError"
+            ):
+                yield ev
             return
 
         yield JobStarted(job_id=job_id)
@@ -390,143 +416,111 @@ class WorkflowExecutor:
                 yield ev
             return
 
-        try:
-            async with timeout(self._config.workflow_timeout):
-                # Confirm book metadata from provided title/author (no API lookup needed)
-                exact_title = book_title
-                exact_author = author
+        async def body() -> AsyncGenerator[DomainEvent, None]:
+            # Confirm book metadata from provided title/author (no API lookup needed)
+            exact_title = book_title
+            exact_author = author
 
-                book_metadata = BookMetadata(
-                    book_title=exact_title,
-                    author=exact_author,
-                    book_found=True,
-                )
-
-                yield MetadataReady(metadata=book_metadata.model_dump())
-
-                # Store in session state
-                session = await self._session_service.get_session(
-                    app_name=APP_NAME, user_id=user_id, session_id=job_id
-                )
-                state = SessionStateAccessor(session.state)
-                state.book_metadata = book_metadata.model_dump()
-
-                # Phase 2: Discovery
-                yield ProgressEvent(
-                    phase=Phase.DISCOVERY, step="Starting location discovery"
-                )
-
-                langfuse_plugin = self._create_langfuse_plugin()
-                discovery_workflow = create_discovery_workflow(
-                    self._model, book_title=exact_title, author=exact_author
-                )
-                runner = Runner(
-                    agent=discovery_workflow,
-                    app_name=APP_NAME,
-                    session_service=self._session_service,
-                    plugins=[LoggingPlugin(), langfuse_plugin],
-                )
-
-                prompt = build_discovery_prompt(
-                    exact_title, exact_author, vibe, taste_context
-                )
-                message = types.Content(
-                    role="user", parts=[types.Part(text=prompt)]
-                )
-
-                reported_agents = set()
-                async with runner:
-                    async for event in runner.run_async(
-                        user_id=user_id,
-                        session_id=job_id,
-                        new_message=message,
-                    ):
-                        if (
-                            event.author
-                            and event.author in DISCOVERY_AGENT_STEPS
-                            and event.author not in reported_agents
-                        ):
-                            reported_agents.add(event.author)
-                            yield ProgressEvent(
-                                phase=Phase.DISCOVERY,
-                                step=DISCOVERY_AGENT_STEPS[event.author],
-                                detail=event.author,
-                            )
-
-                # Extract regions from session state
-                session = await self._session_service.get_session(
-                    app_name=APP_NAME, user_id=user_id, session_id=job_id
-                )
-                state = SessionStateAccessor(session.state)
-
-                logger.info(
-                    "regions_discovered",
-                    job_id=job_id[:8],
-                    num_regions=len(state.regions),
-                )
-
-                # Empty-discovery guard: when discovery yields zero regions
-                # (obscure book, failed/empty google_search, extraction miss),
-                # emit a clean NoRegions error instead of a silent, empty-but-
-                # "successful" RegionsReady that dead-ends the user at the
-                # activation moment and is recorded as a success in the funnel.
-                # Mirrors the existing compose() NoRegions guard.
-                if not state.regions:
-                    logger.info("discovery_empty_regions", job_id=job_id[:8])
-                    await self._mark_session_failed(job_id, user_id)
-                    yield WorkflowError(
-                        message=(
-                            "We couldn't map locations for this book. "
-                            "Try another title or check the spelling."
-                        ),
-                        error_type="NoRegions",
-                        phase=Phase.DISCOVERY,
-                    )
-                    yield WorkflowComplete(job_id=job_id)
-                    return
-
-                # Mint the canonical cross-job place_key (MYS-460) before the
-                # payload goes anywhere. Enrich the value we CACHE and the value
-                # we EMIT from the same call, so a cached hit and a fresh run are
-                # byte-identical on the wire. Session state is deliberately left
-                # untouched: its setters are silent no-ops against persisted
-                # state (MYS-172), and compose() keys on region_id, not place_key.
-                region_analysis = enrich_region_analysis(state.region_analysis)
-                regions = region_analysis.get("regions", [])
-
-                # Store on miss: cache only non-empty, schema-validated region
-                # sets so a future hit can safely short-circuit the chain.
-                if self._cache_enabled and regions:
-                    await self._discovery_cache.set(cache_key, region_analysis)
-
-                yield RegionsReady(
-                    job_id=job_id,
-                    regions=regions,
-                    analysis_note=state.analysis_note,
-                )
-
-                # Token usage
-                token_usage = None
-                if langfuse_plugin.enabled:
-                    token_usage = langfuse_plugin.get_session_stats()
-                    await langfuse_plugin.flush()
-
-                yield WorkflowComplete(job_id=job_id, token_usage=token_usage)
-
-        except TimeoutError:
-            logger.error("discover_timeout", job_id=job_id)
-            await self._mark_session_failed(job_id, user_id)
-            yield WorkflowError(
-                message=f"Discovery timed out after {self._config.workflow_timeout}s",
-                error_type="WorkflowTimeoutError",
-                phase=Phase.DISCOVERY,
+            book_metadata = BookMetadata(
+                book_title=exact_title,
+                author=exact_author,
+                book_found=True,
             )
-            yield WorkflowComplete(job_id=job_id)
-        except asyncio.CancelledError:
-            logger.warning("discover_cancelled", job_id=job_id)
-            await self._mark_session_failed(job_id, user_id)
-            raise
-        except Exception as e:
+
+            yield MetadataReady(metadata=book_metadata.model_dump())
+
+            # Store in session state
+            session = await self._session_service.get_session(
+                app_name=APP_NAME, user_id=user_id, session_id=job_id
+            )
+            state = SessionStateAccessor(session.state)
+            state.book_metadata = book_metadata.model_dump()
+
+            # Phase 2: Discovery
+            yield ProgressEvent(
+                phase=Phase.DISCOVERY, step="Starting location discovery"
+            )
+
+            langfuse_plugin = self._create_langfuse_plugin()
+            discovery_workflow = create_discovery_workflow(
+                self._model, book_title=exact_title, author=exact_author
+            )
+            runner = self._build_runner(discovery_workflow, langfuse_plugin)
+
+            prompt = build_discovery_prompt(
+                exact_title, exact_author, vibe, taste_context
+            )
+            message = types.Content(
+                role="user", parts=[types.Part(text=prompt)]
+            )
+
+            async for ev in pump_events(
+                runner,
+                user_id=user_id,
+                session_id=job_id,
+                message=message,
+                phase=Phase.DISCOVERY,
+                agent_steps=DISCOVERY_AGENT_STEPS,
+            ):
+                yield ev
+
+            # Extract regions from session state
+            session = await self._session_service.get_session(
+                app_name=APP_NAME, user_id=user_id, session_id=job_id
+            )
+            state = SessionStateAccessor(session.state)
+
+            logger.info(
+                "regions_discovered",
+                job_id=job_id[:8],
+                num_regions=len(state.regions),
+            )
+
+            # Empty-discovery guard: when discovery yields zero regions
+            # (obscure book, failed/empty google_search, extraction miss),
+            # emit a clean NoRegions error instead of a silent, empty-but-
+            # "successful" RegionsReady that dead-ends the user at the
+            # activation moment and is recorded as a success in the funnel.
+            # Mirrors the existing compose() NoRegions guard.
+            if not state.regions:
+                logger.info("discovery_empty_regions", job_id=job_id[:8])
+                await self._mark_session_failed(job_id, user_id)
+                for ev in error_events(
+                    job_id,
+                    (
+                        "We couldn't map locations for this book. "
+                        "Try another title or check the spelling."
+                    ),
+                    "NoRegions",
+                    phase=Phase.DISCOVERY,
+                ):
+                    yield ev
+                return
+
+            # Mint the canonical cross-job place_key (MYS-460) before the
+            # payload goes anywhere. Enrich the value we CACHE and the value
+            # we EMIT from the same call, so a cached hit and a fresh run are
+            # byte-identical on the wire. Session state is deliberately left
+            # untouched: its setters are silent no-ops against persisted
+            # state (MYS-172), and compose() keys on region_id, not place_key.
+            region_analysis = enrich_region_analysis(state.region_analysis)
+            regions = region_analysis.get("regions", [])
+
+            # Store on miss: cache only non-empty, schema-validated region
+            # sets so a future hit can safely short-circuit the chain.
+            if self._cache_enabled and regions:
+                await self._discovery_cache.set(cache_key, region_analysis)
+
+            yield RegionsReady(
+                job_id=job_id,
+                regions=regions,
+                analysis_note=state.analysis_note,
+            )
+
+            token_usage = await collect_token_usage(langfuse_plugin)
+            yield WorkflowComplete(job_id=job_id, token_usage=token_usage)
+
+        def map_discover_exception(e: Exception) -> WorkflowError:
             # Collapse the async-TaskGroup boundary: a child-task failure
             # arrives here as an ExceptionGroup whose str() is the opaque
             # "unhandled errors in a TaskGroup (...)". Classify it into a
@@ -539,15 +533,29 @@ class WorkflowExecutor:
                 error_type=type(e).__name__,
                 compose_error_kind=compose_error.kind,
             )
-            await self._mark_session_failed(job_id, user_id)
-            yield WorkflowError(
+            return WorkflowError(
                 message=compose_error.message,
                 error_type="DiscoveryComposeError",
                 phase=Phase.DISCOVERY,
                 reason=compose_error.kind,
                 offending_title=compose_error.offending_title,
             )
-            yield WorkflowComplete(job_id=job_id)
+
+        spec = GuardSpec(
+            flow_name="discover",
+            job_id=job_id,
+            timeout_seconds=self._config.workflow_timeout,
+            timeout_message=(
+                f"Discovery timed out after {self._config.workflow_timeout}s"
+            ),
+            phase=Phase.DISCOVERY,
+            on_timeout=lambda: self._mark_session_failed(job_id, user_id),
+            on_cancel=lambda: self._mark_session_failed(job_id, user_id),
+            on_error=lambda: self._mark_session_failed(job_id, user_id),
+            map_exception=map_discover_exception,
+        )
+        async for ev in run_guarded(body(), spec):
+            yield ev
 
     async def compose(
         self,
@@ -576,19 +584,19 @@ class WorkflowExecutor:
                 error=str(e),
                 error_type=type(e).__name__,
             )
-            yield WorkflowError(
-                message="Failed to retrieve session",
-                error_type="SessionError",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id, "Failed to retrieve session", "SessionError"
+            ):
+                yield ev
             return
 
         if session is None:
-            yield WorkflowError(
-                message=f"Job {job_id} not found. Run discover first.",
-                error_type="JobNotFound",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id,
+                f"Job {job_id} not found. Run discover first.",
+                "JobNotFound",
+            ):
+                yield ev
             return
 
         state = SessionStateAccessor(session.state)
@@ -596,12 +604,13 @@ class WorkflowExecutor:
 
         if not all_regions:
             await self._mark_session_failed(job_id, user_id)
-            yield WorkflowError(
-                message="No regions found in session. Discovery may not have completed.",
-                error_type="NoRegions",
+            for ev in error_events(
+                job_id,
+                "No regions found in session. Discovery may not have completed.",
+                "NoRegions",
                 phase=Phase.COMPOSITION,
-            )
-            yield WorkflowComplete(job_id=job_id)
+            ):
+                yield ev
             return
 
         # Validate regions
@@ -611,12 +620,13 @@ class WorkflowExecutor:
         if invalid_ids:
             valid = sorted(get_valid_region_ids(all_regions))
             await self._mark_session_failed(job_id, user_id)
-            yield WorkflowError(
-                message=f"Invalid region_ids: {invalid_ids}. Valid IDs: {valid}",
-                error_type="InvalidRegionIds",
+            for ev in error_events(
+                job_id,
+                f"Invalid region_ids: {invalid_ids}. Valid IDs: {valid}",
+                "InvalidRegionIds",
                 phase=Phase.COMPOSITION,
-            )
-            yield WorkflowComplete(job_id=job_id)
+            ):
+                yield ev
             return
 
         # Persist retry-clear state: unmark failure, clear stale itinerary, record selection.
@@ -638,107 +648,89 @@ class WorkflowExecutor:
         exact_title = state.book_title
         exact_author = state.author
 
-        try:
-            async with timeout(self._config.workflow_timeout):
-                yield ProgressEvent(
+        async def body() -> AsyncGenerator[DomainEvent, None]:
+            yield ProgressEvent(
+                phase=Phase.COMPOSITION,
+                step="Creating personalized itinerary",
+                detail=f"{len(selected_regions)} region(s) selected",
+            )
+
+            langfuse_plugin = self._create_langfuse_plugin()
+            composition_workflow = create_composition_workflow(self._model)
+            runner = self._build_runner(composition_workflow, langfuse_plugin)
+
+            prompt = build_composition_prompt(
+                exact_title, exact_author, selected_regions
+            )
+            message = types.Content(
+                role="user", parts=[types.Part(text=prompt)]
+            )
+
+            capture = RunCapture()
+            async for ev in pump_events(
+                runner,
+                user_id=user_id,
+                session_id=job_id,
+                message=message,
+                phase=Phase.COMPOSITION,
+                agent_steps={},
+                capture=capture,
+                track_final_response=True,
+            ):
+                yield ev
+
+            # Re-fetch session to get output_key data
+            refreshed = await self._session_service.get_session(
+                app_name=APP_NAME, user_id=user_id, session_id=job_id
+            )
+            active_session = refreshed if refreshed is not None else session
+
+            state = SessionStateAccessor(active_session.state)
+            result = extract_itinerary_from_response(
+                capture.final_response, state
+            )
+
+            if result is None:
+                await self._mark_session_failed(job_id, user_id)
+                for ev in error_events(
+                    job_id,
+                    "Failed to extract itinerary from agent response",
+                    "ExtractionError",
                     phase=Phase.COMPOSITION,
-                    step="Creating personalized itinerary",
-                    detail=f"{len(selected_regions)} region(s) selected",
-                )
+                ):
+                    yield ev
+                return
 
-                langfuse_plugin = self._create_langfuse_plugin()
-                composition_workflow = create_composition_workflow(self._model)
-                runner = Runner(
-                    agent=composition_workflow,
-                    app_name=APP_NAME,
-                    session_service=self._session_service,
-                    plugins=[LoggingPlugin(), langfuse_plugin],
-                )
-
-                prompt = build_composition_prompt(
-                    exact_title, exact_author, selected_regions
-                )
-                message = types.Content(
-                    role="user", parts=[types.Part(text=prompt)]
-                )
-
-                final_response = None
-                async with runner:
-                    async for event in runner.run_async(
-                        user_id=user_id,
-                        session_id=job_id,
-                        new_message=message,
-                    ):
-                        if event.is_final_response():
-                            final_response = event
-
-                # Re-fetch session to get output_key data
-                refreshed = await self._session_service.get_session(
-                    app_name=APP_NAME, user_id=user_id, session_id=job_id
-                )
-                if refreshed is not None:
-                    session = refreshed
-
-                state = SessionStateAccessor(session.state)
-                result = extract_itinerary_from_response(
-                    final_response, state
-                )
-
-                if result is not None:
-                    itinerary_data, suggestions = result
-                    suggestions = self._stamp_suggestion_ids(suggestions)
-                    book_recommendation_chip = self._build_book_recommendation_chip()
-                    await self._persist_suggestions(
-                        job_id, user_id, suggestions, itinerary_data,
-                        book_recommendation_chip=book_recommendation_chip,
-                    )
-                    yield ItineraryReady(
-                        itinerary=itinerary_data,
-                        suggestions=suggestions,
-                        book_recommendation_chip=book_recommendation_chip,
-                    )
-                else:
-                    await self._mark_session_failed(job_id, user_id)
-                    yield WorkflowError(
-                        message="Failed to extract itinerary from agent response",
-                        error_type="ExtractionError",
-                        phase=Phase.COMPOSITION,
-                    )
-                    yield WorkflowComplete(job_id=job_id)
-                    return
-
-                # Token usage
-                token_usage = None
-                if langfuse_plugin.enabled:
-                    token_usage = langfuse_plugin.get_session_stats()
-                    await langfuse_plugin.flush()
-
-                yield WorkflowComplete(job_id=job_id, token_usage=token_usage)
-
-        except TimeoutError:
-            logger.error("compose_timeout", job_id=job_id)
-            await self._mark_session_failed(job_id, user_id)
-            yield WorkflowError(
-                message=f"Composition timed out after {self._config.workflow_timeout}s",
-                error_type="WorkflowTimeoutError",
-                phase=Phase.COMPOSITION,
+            itinerary_data, suggestions = result
+            suggestions = self._stamp_suggestion_ids(suggestions)
+            book_recommendation_chip = self._build_book_recommendation_chip()
+            await self._persist_suggestions(
+                job_id, user_id, suggestions, itinerary_data,
+                book_recommendation_chip=book_recommendation_chip,
             )
-            yield WorkflowComplete(job_id=job_id)
-        except asyncio.CancelledError:
-            logger.warning("compose_cancelled", job_id=job_id)
-            await self._mark_session_failed(job_id, user_id)
-            raise
-        except Exception as e:
-            logger.error(
-                "compose_error", error=str(e), error_type=type(e).__name__
+            yield ItineraryReady(
+                itinerary=itinerary_data,
+                suggestions=suggestions,
+                book_recommendation_chip=book_recommendation_chip,
             )
-            await self._mark_session_failed(job_id, user_id)
-            yield WorkflowError(
-                message=str(e),
-                error_type=type(e).__name__,
-                phase=Phase.COMPOSITION,
-            )
-            yield WorkflowComplete(job_id=job_id)
+
+            token_usage = await collect_token_usage(langfuse_plugin)
+            yield WorkflowComplete(job_id=job_id, token_usage=token_usage)
+
+        spec = GuardSpec(
+            flow_name="compose",
+            job_id=job_id,
+            timeout_seconds=self._config.workflow_timeout,
+            timeout_message=(
+                f"Composition timed out after {self._config.workflow_timeout}s"
+            ),
+            phase=Phase.COMPOSITION,
+            on_timeout=lambda: self._mark_session_failed(job_id, user_id),
+            on_cancel=lambda: self._mark_session_failed(job_id, user_id),
+            on_error=lambda: self._mark_session_failed(job_id, user_id),
+        )
+        async for ev in run_guarded(body(), spec):
+            yield ev
 
     async def local_atmosphere(
         self,
@@ -793,150 +785,116 @@ class WorkflowExecutor:
             logger.error(
                 "session_create_failed", error=str(e), error_type=type(e).__name__
             )
-            yield WorkflowError(
-                message="Failed to initialize session",
-                error_type="SessionError",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id, "Failed to initialize session", "SessionError"
+            ):
+                yield ev
             return
 
         yield JobStarted(job_id=job_id)
 
-        try:
-            async with timeout(self._config.workflow_timeout):
-                book_metadata = BookMetadata(
-                    book_title=book_title,
-                    author=author,
-                    book_found=True,
-                )
-                yield MetadataReady(metadata=book_metadata.model_dump())
+        async def body() -> AsyncGenerator[DomainEvent, None]:
+            book_metadata = BookMetadata(
+                book_title=book_title,
+                author=author,
+                book_found=True,
+            )
+            yield MetadataReady(metadata=book_metadata.model_dump())
 
-                session = await self._session_service.get_session(
-                    app_name=APP_NAME, user_id=user_id, session_id=job_id
-                )
-                state = SessionStateAccessor(session.state)
-                state.book_metadata = book_metadata.model_dump()
+            session = await self._session_service.get_session(
+                app_name=APP_NAME, user_id=user_id, session_id=job_id
+            )
+            state = SessionStateAccessor(session.state)
+            state.book_metadata = book_metadata.model_dump()
 
-                yield ProgressEvent(
+            yield ProgressEvent(
+                phase=Phase.COMPOSITION,
+                step="Building local-atmosphere itinerary",
+                detail=f"within ~{radius_km} km of {location_label}",
+            )
+
+            langfuse_plugin = self._create_langfuse_plugin()
+            workflow = create_local_atmosphere_workflow(
+                self._model,
+                book_title=book_title,
+                author=author,
+                location_label=location_label,
+                radius_km=radius_km,
+            )
+            runner = self._build_runner(workflow, langfuse_plugin)
+
+            prompt = build_local_atmosphere_prompt(
+                book_title, author, location_label, radius_km
+            )
+            message = types.Content(
+                role="user", parts=[types.Part(text=prompt)]
+            )
+
+            capture = RunCapture()
+            async for ev in pump_events(
+                runner,
+                user_id=user_id,
+                session_id=job_id,
+                message=message,
+                phase=Phase.COMPOSITION,
+                agent_steps=LOCAL_ATMOSPHERE_AGENT_STEPS,
+                capture=capture,
+                track_final_response=True,
+            ):
+                yield ev
+
+            refreshed = await self._session_service.get_session(
+                app_name=APP_NAME, user_id=user_id, session_id=job_id
+            )
+            active_session = refreshed if refreshed is not None else session
+
+            state = SessionStateAccessor(active_session.state)
+            result = extract_itinerary_from_response(
+                capture.final_response, state
+            )
+
+            if result is None:
+                await self._mark_session_failed(job_id, user_id)
+                for ev in error_events(
+                    job_id,
+                    "Failed to extract local-atmosphere itinerary",
+                    "ExtractionError",
                     phase=Phase.COMPOSITION,
-                    step="Building local-atmosphere itinerary",
-                    detail=f"within ~{radius_km} km of {location_label}",
-                )
+                ):
+                    yield ev
+                return
 
-                langfuse_plugin = self._create_langfuse_plugin()
-                workflow = create_local_atmosphere_workflow(
-                    self._model,
-                    book_title=book_title,
-                    author=author,
-                    location_label=location_label,
-                    radius_km=radius_km,
-                )
-                runner = Runner(
-                    agent=workflow,
-                    app_name=APP_NAME,
-                    session_service=self._session_service,
-                    plugins=[LoggingPlugin(), langfuse_plugin],
-                )
-
-                prompt = build_local_atmosphere_prompt(
-                    book_title, author, location_label, radius_km
-                )
-                message = types.Content(
-                    role="user", parts=[types.Part(text=prompt)]
-                )
-
-                final_response = None
-                reported_agents = set()
-                async with runner:
-                    async for event in runner.run_async(
-                        user_id=user_id,
-                        session_id=job_id,
-                        new_message=message,
-                    ):
-                        if (
-                            event.author
-                            and event.author in LOCAL_ATMOSPHERE_AGENT_STEPS
-                            and event.author not in reported_agents
-                        ):
-                            reported_agents.add(event.author)
-                            yield ProgressEvent(
-                                phase=Phase.COMPOSITION,
-                                step=LOCAL_ATMOSPHERE_AGENT_STEPS[event.author],
-                                detail=event.author,
-                            )
-                        if event.is_final_response():
-                            final_response = event
-
-                refreshed = await self._session_service.get_session(
-                    app_name=APP_NAME, user_id=user_id, session_id=job_id
-                )
-                if refreshed is not None:
-                    session = refreshed
-
-                state = SessionStateAccessor(session.state)
-                result = extract_itinerary_from_response(
-                    final_response, state
-                )
-
-                if result is not None:
-                    itinerary_data, suggestions = result
-                    suggestions = self._stamp_suggestion_ids(suggestions)
-                    book_recommendation_chip = self._build_book_recommendation_chip()
-                    await self._persist_suggestions(
-                        job_id, user_id, suggestions, itinerary_data,
-                        book_recommendation_chip=book_recommendation_chip,
-                    )
-                    yield ItineraryReady(
-                        itinerary=itinerary_data,
-                        suggestions=suggestions,
-                        book_recommendation_chip=book_recommendation_chip,
-                    )
-                else:
-                    await self._mark_session_failed(job_id, user_id)
-                    yield WorkflowError(
-                        message="Failed to extract local-atmosphere itinerary",
-                        error_type="ExtractionError",
-                        phase=Phase.COMPOSITION,
-                    )
-                    yield WorkflowComplete(job_id=job_id)
-                    return
-
-                token_usage = None
-                if langfuse_plugin.enabled:
-                    token_usage = langfuse_plugin.get_session_stats()
-                    await langfuse_plugin.flush()
-
-                yield WorkflowComplete(job_id=job_id, token_usage=token_usage)
-
-        except TimeoutError:
-            logger.error("local_atmosphere_timeout", job_id=job_id)
-            await self._mark_session_failed(job_id, user_id)
-            yield WorkflowError(
-                message=(
-                    f"Local-atmosphere flow timed out after "
-                    f"{self._config.workflow_timeout}s"
-                ),
-                error_type="WorkflowTimeoutError",
-                phase=Phase.COMPOSITION,
+            itinerary_data, suggestions = result
+            suggestions = self._stamp_suggestion_ids(suggestions)
+            book_recommendation_chip = self._build_book_recommendation_chip()
+            await self._persist_suggestions(
+                job_id, user_id, suggestions, itinerary_data,
+                book_recommendation_chip=book_recommendation_chip,
             )
-            yield WorkflowComplete(job_id=job_id)
-        except asyncio.CancelledError:
-            logger.warning("local_atmosphere_cancelled", job_id=job_id)
-            await self._mark_session_failed(job_id, user_id)
-            raise
-        except Exception as e:
-            logger.error(
-                "local_atmosphere_error",
-                error=str(e),
-                error_type=type(e).__name__,
+            yield ItineraryReady(
+                itinerary=itinerary_data,
+                suggestions=suggestions,
+                book_recommendation_chip=book_recommendation_chip,
             )
-            await self._mark_session_failed(job_id, user_id)
-            yield WorkflowError(
-                message=str(e),
-                error_type=type(e).__name__,
-                phase=Phase.COMPOSITION,
-            )
-            yield WorkflowComplete(job_id=job_id)
+
+            token_usage = await collect_token_usage(langfuse_plugin)
+            yield WorkflowComplete(job_id=job_id, token_usage=token_usage)
+
+        spec = GuardSpec(
+            flow_name="local_atmosphere",
+            job_id=job_id,
+            timeout_seconds=self._config.workflow_timeout,
+            timeout_message=(
+                f"Local-atmosphere flow timed out after "
+                f"{self._config.workflow_timeout}s"
+            ),
+            phase=Phase.COMPOSITION,
+            on_timeout=lambda: self._mark_session_failed(job_id, user_id),
+            on_cancel=lambda: self._mark_session_failed(job_id, user_id),
+            on_error=lambda: self._mark_session_failed(job_id, user_id),
+        )
+        async for ev in run_guarded(body(), spec):
+            yield ev
 
     @staticmethod
     def _resolve_trusted_action_prompt(last_suggestions: list, action_id: str) -> str:
@@ -1047,47 +1005,46 @@ class WorkflowExecutor:
                 error=str(e),
                 error_type=type(e).__name__,
             )
-            yield WorkflowError(
-                message="Failed to retrieve session",
-                error_type="SessionError",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id, "Failed to retrieve session", "SessionError"
+            ):
+                yield ev
             return
 
         if session is None:
-            yield WorkflowError(
-                message=f"Job {job_id} not found.",
-                error_type="JobNotFound",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id, f"Job {job_id} not found.", "JobNotFound"
+            ):
+                yield ev
             return
 
         state = SessionStateAccessor(session.state)
 
         if state.failed:
-            yield WorkflowError(
-                message="Job is in a failed state.",
-                error_type="JobFailed",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id, "Job is in a failed state.", "JobFailed"
+            ):
+                yield ev
             return
 
         if state.final_itinerary is None:
-            yield WorkflowError(
-                message="Itinerary not yet composed. Run compose or local-atmosphere first.",
-                error_type="ItineraryNotReady",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id,
+                "Itinerary not yet composed. Run compose or local-atmosphere first.",
+                "ItineraryNotReady",
+            ):
+                yield ev
             return
 
         # Hard cap: refuse if already at max expansions
         expansion_count = state.expansion_count
         if expansion_count >= HARD_EXPANSION_CAP:
-            yield WorkflowError(
-                message=f"Expansion limit reached ({HARD_EXPANSION_CAP} expansions per session).",
-                error_type="ExpansionLimitReached",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id,
+                f"Expansion limit reached ({HARD_EXPANSION_CAP} expansions per session).",
+                "ExpansionLimitReached",
+            ):
+                yield ev
             return
 
         # Always validate action_id against stored suggestions.
@@ -1096,11 +1053,12 @@ class WorkflowExecutor:
         last_suggestions = state.last_suggestions
         valid_ids = {chip.get("id") for chip in last_suggestions if chip.get("id")}
         if action_id not in valid_ids:
-            yield WorkflowError(
-                message="Invalid action_id. It must match a suggestion chip from the last response.",
-                error_type="InvalidActionId",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id,
+                "Invalid action_id. It must match a suggestion chip from the last response.",
+                "InvalidActionId",
+            ):
+                yield ev
             return
 
         # MYS-167: resolve the chip's OWN server-stored action_prompt rather than
@@ -1119,11 +1077,12 @@ class WorkflowExecutor:
 
         # Concurrency guard: block if another expansion is in flight
         if state.expansion_in_progress:
-            yield WorkflowError(
-                message="An expansion is already in progress for this session.",
-                error_type="ExpansionInProgress",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id,
+                "An expansion is already in progress for this session.",
+                "ExpansionInProgress",
+            ):
+                yield ev
             return
 
         # Set the lock
@@ -1136,221 +1095,196 @@ class WorkflowExecutor:
         )
         await self._session_service.append_event(session, lock_event)
 
-        try:
-            async with timeout(self._config.workflow_timeout):
-                yield ProgressEvent(
+        async def body() -> AsyncGenerator[DomainEvent, None]:
+            yield ProgressEvent(
+                phase=Phase.COMPOSITION,
+                step=f"Finding places: {action_label}",
+            )
+
+            # Build dedupe list from current itinerary + prior expansions
+            itinerary = state.final_itinerary or {}
+            existing_names: list[str] = []
+            for city in itinerary.get("cities", []):
+                city_name = city.get("name", "")
+                for stop in city.get("stops", []):
+                    stop_name = stop.get("name", "")
+                    if stop_name:
+                        existing_names.append(f"{stop_name} ({city_name})")
+
+            existing_places = "\n".join(existing_names) if existing_names else "(none)"
+
+            # Determine target city: scan the TRUSTED action_prompt for a known
+            # city name, fall back to the first city so single-city itineraries
+            # always work. (MYS-167: was the client-echoed action_prompt.)
+            cities = itinerary.get("cities", [])
+            parent_city = cities[0].get("name", "") if cities else ""
+            action_prompt_lower = trusted_action_prompt.lower()
+            for city in cities:
+                city_name = city.get("name", "")
+                if city_name and city_name.lower() in action_prompt_lower:
+                    parent_city = city_name
+                    break
+
+            book_title = state.book_title
+            author = state.author
+
+            langfuse_plugin = self._create_langfuse_plugin()
+            expansion_wf = create_expansion_workflow(
+                self._model,
+                google_search,
+                book_title=book_title,
+                author=author,
+                parent_city=parent_city,
+                action_prompt=trusted_action_prompt,
+                existing_places=existing_places,
+            )
+            runner = self._build_runner(expansion_wf, langfuse_plugin)
+
+            prompt = (
+                f"Expand the itinerary for {book_title} by {author}. "
+                f"Find new places in {parent_city} matching: {trusted_action_prompt}"
+            )
+            message = types.Content(
+                role="user", parts=[types.Part(text=prompt)]
+            )
+
+            async for ev in pump_events(
+                runner,
+                user_id=user_id,
+                session_id=job_id,
+                message=message,
+                phase=Phase.COMPOSITION,
+                agent_steps=EXPANSION_AGENT_STEPS,
+            ):
+                yield ev
+
+            # Re-fetch session after agent run
+            refreshed = await self._session_service.get_session(
+                app_name=APP_NAME, user_id=user_id, session_id=job_id
+            )
+            active_session = refreshed if refreshed is not None else session
+
+            run_state = SessionStateAccessor(active_session.state)
+            expansion_data = extract_expansion_from_state(run_state)
+
+            if expansion_data is None:
+                await self._clear_expansion_lock(job_id, user_id)
+                for ev in error_events(
+                    job_id,
+                    "Failed to extract expansion result from agent response",
+                    "ExtractionError",
                     phase=Phase.COMPOSITION,
-                    step=f"Finding places: {action_label}",
+                ):
+                    yield ev
+                return
+
+            # Post-filter: remove duplicates by case-insensitive name match
+            existing_lower = {n.split(" (")[0].lower() for n in existing_names}
+            new_places = [
+                p for p in expansion_data.get("places", [])
+                if p.get("name", "").lower() not in existing_lower
+            ]
+
+            # Force source="expansion" on all new stops
+            for place in new_places:
+                place["source"] = "expansion"
+
+            # Determine actual parent city (match against itinerary cities)
+            returned_city = expansion_data.get("parent_city", parent_city)
+            matched_city = parent_city
+            for city in cities:
+                if city.get("name", "").lower() == returned_city.lower():
+                    matched_city = city["name"]
+                    break
+
+            # Merge new places into final_itinerary in session state
+            updated_itinerary = dict(itinerary)
+            updated_cities = []
+            merged = False
+            for city in updated_itinerary.get("cities", []):
+                city = dict(city)
+                if city.get("name", "").lower() == matched_city.lower():
+                    city["stops"] = list(city.get("stops", [])) + new_places
+                    merged = True
+                updated_cities.append(city)
+
+            if not merged and updated_cities:
+                updated_cities[0] = dict(updated_cities[0])
+                updated_cities[0]["stops"] = (
+                    list(updated_cities[0].get("stops", [])) + new_places
                 )
+                matched_city = updated_cities[0].get("name", parent_city)
 
-                # Build dedupe list from current itinerary + prior expansions
-                itinerary = state.final_itinerary or {}
-                existing_names: list[str] = []
-                for city in itinerary.get("cities", []):
-                    city_name = city.get("name", "")
-                    for stop in city.get("stops", []):
-                        stop_name = stop.get("name", "")
-                        if stop_name:
-                            existing_names.append(f"{stop_name} ({city_name})")
+            updated_itinerary["cities"] = updated_cities
 
-                existing_places = "\n".join(existing_names) if existing_names else "(none)"
+            # Stamp new suggestion ids and apply soft cap
+            new_suggestions = expansion_data.get("suggestions", [])
+            new_expansion_count = expansion_count + 1
+            if new_expansion_count >= SOFT_CHIP_CAP:
+                new_suggestions = []
+            else:
+                new_suggestions = self._stamp_suggestion_ids(new_suggestions)
 
-                # Determine target city: scan the TRUSTED action_prompt for a known
-                # city name, fall back to the first city so single-city itineraries
-                # always work. (MYS-167: was the client-echoed action_prompt.)
-                cities = itinerary.get("cities", [])
-                parent_city = cities[0].get("name", "") if cities else ""
-                action_prompt_lower = trusted_action_prompt.lower()
-                for city in cities:
-                    city_name = city.get("name", "")
-                    if city_name and city_name.lower() in action_prompt_lower:
-                        parent_city = city_name
-                        break
+            # Accumulate this expansion in session state
+            prior_expansions = run_state.expansions
+            this_expansion = {
+                "parent_city": matched_city,
+                "places": new_places,
+                "action_label": action_label,
+                "action_id": action_id,
+            }
 
-                book_title = state.book_title
-                author = state.author
+            persist_event = Event(
+                invocation_id="system",
+                author="system",
+                actions=EventActions(
+                    state_delta={
+                        SessionStateKeys.FINAL_ITINERARY: updated_itinerary,
+                        SessionStateKeys.EXPANSIONS: prior_expansions + [this_expansion],
+                        SessionStateKeys.EXPANSION_COUNT: new_expansion_count,
+                        SessionStateKeys.LAST_SUGGESTIONS: new_suggestions,
+                        SessionStateKeys.EXPANSION_IN_PROGRESS: False,
+                    }
+                ),
+            )
+            await self._session_service.append_event(active_session, persist_event)
 
-                langfuse_plugin = self._create_langfuse_plugin()
-                expansion_wf = create_expansion_workflow(
-                    self._model,
-                    google_search,
-                    book_title=book_title,
-                    author=author,
-                    parent_city=parent_city,
-                    action_prompt=trusted_action_prompt,
-                    existing_places=existing_places,
-                )
-                runner = Runner(
-                    agent=expansion_wf,
-                    app_name=APP_NAME,
-                    session_service=self._session_service,
-                    plugins=[LoggingPlugin(), langfuse_plugin],
-                )
+            token_usage = await collect_token_usage(langfuse_plugin)
 
-                prompt = (
-                    f"Expand the itinerary for {book_title} by {author}. "
-                    f"Find new places in {parent_city} matching: {trusted_action_prompt}"
-                )
-                message = types.Content(
-                    role="user", parts=[types.Part(text=prompt)]
-                )
+            logger.info(
+                "expansion_complete",
+                job_id=job_id[:8],
+                matched_city=matched_city,
+                new_places=len(new_places),
+                expansion_count=new_expansion_count,
+            )
 
-                reported_agents: set[str] = set()
-                async with runner:
-                    async for event in runner.run_async(
-                        user_id=user_id,
-                        session_id=job_id,
-                        new_message=message,
-                    ):
-                        if (
-                            event.author
-                            and event.author in EXPANSION_AGENT_STEPS
-                            and event.author not in reported_agents
-                        ):
-                            reported_agents.add(event.author)
-                            yield ProgressEvent(
-                                phase=Phase.COMPOSITION,
-                                step=EXPANSION_AGENT_STEPS[event.author],
-                                detail=event.author,
-                            )
+            yield ExpansionReady(
+                parent_city=matched_city,
+                places=new_places,
+                suggestions=new_suggestions,
+                book_recommendation_chip=run_state.book_recommendation_chip,
+            )
+            yield WorkflowComplete(job_id=job_id, token_usage=token_usage)
 
-                # Re-fetch session after agent run
-                refreshed = await self._session_service.get_session(
-                    app_name=APP_NAME, user_id=user_id, session_id=job_id
-                )
-                if refreshed is not None:
-                    session = refreshed
-
-                state = SessionStateAccessor(session.state)
-                expansion_data = extract_expansion_from_state(state)
-
-                if expansion_data is None:
-                    await self._clear_expansion_lock(job_id, user_id)
-                    yield WorkflowError(
-                        message="Failed to extract expansion result from agent response",
-                        error_type="ExtractionError",
-                        phase=Phase.COMPOSITION,
-                    )
-                    yield WorkflowComplete(job_id=job_id)
-                    return
-
-                # Post-filter: remove duplicates by case-insensitive name match
-                existing_lower = {n.split(" (")[0].lower() for n in existing_names}
-                new_places = [
-                    p for p in expansion_data.get("places", [])
-                    if p.get("name", "").lower() not in existing_lower
-                ]
-
-                # Force source="expansion" on all new stops
-                for place in new_places:
-                    place["source"] = "expansion"
-
-                # Determine actual parent city (match against itinerary cities)
-                returned_city = expansion_data.get("parent_city", parent_city)
-                matched_city = parent_city
-                for city in cities:
-                    if city.get("name", "").lower() == returned_city.lower():
-                        matched_city = city["name"]
-                        break
-
-                # Merge new places into final_itinerary in session state
-                updated_itinerary = dict(itinerary)
-                updated_cities = []
-                merged = False
-                for city in updated_itinerary.get("cities", []):
-                    city = dict(city)
-                    if city.get("name", "").lower() == matched_city.lower():
-                        city["stops"] = list(city.get("stops", [])) + new_places
-                        merged = True
-                    updated_cities.append(city)
-
-                if not merged and updated_cities:
-                    updated_cities[0] = dict(updated_cities[0])
-                    updated_cities[0]["stops"] = (
-                        list(updated_cities[0].get("stops", [])) + new_places
-                    )
-                    matched_city = updated_cities[0].get("name", parent_city)
-
-                updated_itinerary["cities"] = updated_cities
-
-                # Stamp new suggestion ids and apply soft cap
-                new_suggestions = expansion_data.get("suggestions", [])
-                new_expansion_count = expansion_count + 1
-                if new_expansion_count >= SOFT_CHIP_CAP:
-                    new_suggestions = []
-                else:
-                    new_suggestions = self._stamp_suggestion_ids(new_suggestions)
-
-                # Accumulate this expansion in session state
-                prior_expansions = state.expansions
-                this_expansion = {
-                    "parent_city": matched_city,
-                    "places": new_places,
-                    "action_label": action_label,
-                    "action_id": action_id,
-                }
-
-                persist_event = Event(
-                    invocation_id="system",
-                    author="system",
-                    actions=EventActions(
-                        state_delta={
-                            SessionStateKeys.FINAL_ITINERARY: updated_itinerary,
-                            SessionStateKeys.EXPANSIONS: prior_expansions + [this_expansion],
-                            SessionStateKeys.EXPANSION_COUNT: new_expansion_count,
-                            SessionStateKeys.LAST_SUGGESTIONS: new_suggestions,
-                            SessionStateKeys.EXPANSION_IN_PROGRESS: False,
-                        }
-                    ),
-                )
-                await self._session_service.append_event(session, persist_event)
-
-                token_usage = None
-                if langfuse_plugin.enabled:
-                    token_usage = langfuse_plugin.get_session_stats()
-                    await langfuse_plugin.flush()
-
-                logger.info(
-                    "expansion_complete",
-                    job_id=job_id[:8],
-                    matched_city=matched_city,
-                    new_places=len(new_places),
-                    expansion_count=new_expansion_count,
-                )
-
-                yield ExpansionReady(
-                    parent_city=matched_city,
-                    places=new_places,
-                    suggestions=new_suggestions,
-                    book_recommendation_chip=state.book_recommendation_chip,
-                )
-                yield WorkflowComplete(job_id=job_id, token_usage=token_usage)
-
-        except TimeoutError:
-            logger.error("expand_timeout", job_id=job_id)
+        async def timeout_cleanup() -> None:
             await self._clear_expansion_lock(job_id, user_id)
             await self._mark_session_failed(job_id, user_id)
-            yield WorkflowError(
-                message=f"Expansion timed out after {self._config.workflow_timeout}s",
-                error_type="WorkflowTimeoutError",
-                phase=Phase.COMPOSITION,
-            )
-            yield WorkflowComplete(job_id=job_id)
-        except asyncio.CancelledError:
-            logger.warning("expand_cancelled", job_id=job_id)
-            await self._clear_expansion_lock(job_id, user_id)
-            raise
-        except Exception as e:
-            logger.error(
-                "expand_error", error=str(e), error_type=type(e).__name__
-            )
-            await self._clear_expansion_lock(job_id, user_id)
-            yield WorkflowError(
-                message=str(e),
-                error_type=type(e).__name__,
-                phase=Phase.COMPOSITION,
-            )
-            yield WorkflowComplete(job_id=job_id)
+
+        spec = GuardSpec(
+            flow_name="expand",
+            job_id=job_id,
+            timeout_seconds=self._config.workflow_timeout,
+            timeout_message=(
+                f"Expansion timed out after {self._config.workflow_timeout}s"
+            ),
+            phase=Phase.COMPOSITION,
+            on_timeout=timeout_cleanup,
+            on_cancel=lambda: self._clear_expansion_lock(job_id, user_id),
+            on_error=lambda: self._clear_expansion_lock(job_id, user_id),
+        )
+        async for ev in run_guarded(body(), spec):
+            yield ev
 
     async def recommend_books(
         self,
@@ -1384,66 +1318,67 @@ class WorkflowExecutor:
                 error=str(e),
                 error_type=type(e).__name__,
             )
-            yield WorkflowError(
-                message="Failed to retrieve session",
-                error_type="SessionError",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id, "Failed to retrieve session", "SessionError"
+            ):
+                yield ev
             return
 
         if session is None:
-            yield WorkflowError(
-                message=f"Job {job_id} not found.",
-                error_type="JobNotFound",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id, f"Job {job_id} not found.", "JobNotFound"
+            ):
+                yield ev
             return
 
         state = SessionStateAccessor(session.state)
 
         if state.failed:
-            yield WorkflowError(
-                message="Job is in a failed state.",
-                error_type="JobFailed",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id, "Job is in a failed state.", "JobFailed"
+            ):
+                yield ev
             return
 
         if state.final_itinerary is None:
-            yield WorkflowError(
-                message="Itinerary not yet composed. Run compose or local-atmosphere first.",
-                error_type="ItineraryNotReady",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id,
+                "Itinerary not yet composed. Run compose or local-atmosphere first.",
+                "ItineraryNotReady",
+            ):
+                yield ev
             return
 
         # Hard cap
         book_recommendation_count = state.book_recommendation_count
         if book_recommendation_count >= BOOK_RECOMMENDATION_HARD_CAP:
-            yield WorkflowError(
-                message=f"Book recommendation limit reached ({BOOK_RECOMMENDATION_HARD_CAP} per session).",
-                error_type="BookRecommendationLimitReached",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id,
+                f"Book recommendation limit reached ({BOOK_RECOMMENDATION_HARD_CAP} per session).",
+                "BookRecommendationLimitReached",
+            ):
+                yield ev
             return
 
         # Validate action_id against stored books chip id
         stored_chip_id = state.book_recommendation_chip_id
         if not stored_chip_id or action_id != stored_chip_id:
-            yield WorkflowError(
-                message="Invalid action_id. Use the 'Find books like this' chip id from the itinerary response.",
-                error_type="InvalidActionId",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id,
+                "Invalid action_id. Use the 'Find books like this' chip id from the itinerary response.",
+                "InvalidActionId",
+            ):
+                yield ev
             return
 
         # Concurrency guard
         if state.book_recs_in_progress:
-            yield WorkflowError(
-                message="A book recommendation request is already in progress for this session.",
-                error_type="BookRecsInProgress",
-            )
-            yield WorkflowComplete(job_id=job_id)
+            for ev in error_events(
+                job_id,
+                "A book recommendation request is already in progress for this session.",
+                "BookRecsInProgress",
+            ):
+                yield ev
             return
 
         # Set lock
@@ -1456,183 +1391,151 @@ class WorkflowExecutor:
         )
         await self._session_service.append_event(session, lock_event)
 
-        try:
-            async with timeout(self._config.workflow_timeout):
-                yield ProgressEvent(
+        async def body() -> AsyncGenerator[DomainEvent, None]:
+            yield ProgressEvent(
+                phase=Phase.COMPOSITION,
+                step="Finding books like this",
+            )
+
+            book_title = state.book_title
+            author = state.author
+
+            # Extract destinations from itinerary cities
+            itinerary = state.final_itinerary or {}
+            destinations = ", ".join(
+                city.get("name", "") for city in itinerary.get("cities", [])
+                if city.get("name")
+            ) or "unknown"
+
+            # Extract themes from book context
+            book_context = state.book_context or {}
+            themes_list = book_context.get("themes", [])
+            themes = ", ".join(themes_list) if themes_list else "literary fiction"
+
+            langfuse_plugin = self._create_langfuse_plugin()
+            book_rec_wf = create_book_recommendation_workflow(
+                self._model,
+                google_search,
+                book_title=book_title,
+                author=author,
+                destinations=destinations,
+                themes=themes,
+            )
+            runner = self._build_runner(book_rec_wf, langfuse_plugin)
+
+            prompt = (
+                f"Recommend 5 books for a reader who loved {book_title} by {author} "
+                f"and is travelling to {destinations}."
+            )
+            message = types.Content(
+                role="user", parts=[types.Part(text=prompt)]
+            )
+
+            # Capture the grounded researcher output so we can post-validate
+            # the formatter's titles against it.
+            capture = RunCapture()
+            async for ev in pump_events(
+                runner,
+                user_id=user_id,
+                session_id=job_id,
+                message=message,
+                phase=Phase.COMPOSITION,
+                agent_steps=BOOK_RECOMMENDATION_AGENT_STEPS,
+                capture=capture,
+                capture_authors=("book_recommendation_researcher",),
+            ):
+                yield ev
+
+            # Re-fetch session after agent run
+            refreshed = await self._session_service.get_session(
+                app_name=APP_NAME, user_id=user_id, session_id=job_id
+            )
+            active_session = refreshed if refreshed is not None else session
+
+            run_state = SessionStateAccessor(active_session.state)
+            rec_data = extract_book_recommendations_from_state(run_state)
+
+            # Output-side grounding guard: drop any formatter title that
+            # is not present in the grounded researcher candidates. Pairs
+            # with the relaxed schema floor (min REC_MIN_RESULTS, not a hard
+            # 5) so a thin researcher result yields fewer honest picks rather
+            # than an invented book. Fail-open (see filter docstring).
+            researcher_text = capture.text_for("book_recommendation_researcher")
+            rec_data = filter_grounded_recommendations(rec_data, researcher_text)
+
+            if rec_data is None:
+                await self._clear_book_recs_lock(job_id, user_id)
+                for ev in error_events(
+                    job_id,
+                    "Failed to extract book recommendations from agent response",
+                    "ExtractionError",
                     phase=Phase.COMPOSITION,
-                    step="Finding books like this",
-                )
+                ):
+                    yield ev
+                return
 
-                book_title = state.book_title
-                author = state.author
-
-                # Extract destinations from itinerary cities
-                itinerary = state.final_itinerary or {}
-                destinations = ", ".join(
-                    city.get("name", "") for city in itinerary.get("cities", [])
-                    if city.get("name")
-                ) or "unknown"
-
-                # Extract themes from book context
-                book_context = state.book_context or {}
-                themes_list = book_context.get("themes", [])
-                themes = ", ".join(themes_list) if themes_list else "literary fiction"
-
-                langfuse_plugin = self._create_langfuse_plugin()
-                book_rec_wf = create_book_recommendation_workflow(
-                    self._model,
-                    google_search,
-                    book_title=book_title,
-                    author=author,
-                    destinations=destinations,
-                    themes=themes,
-                )
-                runner = Runner(
-                    agent=book_rec_wf,
-                    app_name=APP_NAME,
-                    session_service=self._session_service,
-                    plugins=[LoggingPlugin(), langfuse_plugin],
-                )
-
-                prompt = (
-                    f"Recommend 5 books for a reader who loved {book_title} by {author} "
-                    f"and is travelling to {destinations}."
-                )
-                message = types.Content(
-                    role="user", parts=[types.Part(text=prompt)]
-                )
-
-                reported_agents: set[str] = set()
-                researcher_text_parts: list[str] = []
-                async with runner:
-                    async for event in runner.run_async(
-                        user_id=user_id,
-                        session_id=job_id,
-                        new_message=message,
-                    ):
-                        # Capture the grounded researcher output so we can
-                        # post-validate the formatter's titles against it.
-                        if (
-                            event.author == "book_recommendation_researcher"
-                            and event.content
-                            and event.content.parts
-                        ):
-                            for part in event.content.parts:
-                                text = getattr(part, "text", None)
-                                if text:
-                                    researcher_text_parts.append(text)
-                        if (
-                            event.author
-                            and event.author in BOOK_RECOMMENDATION_AGENT_STEPS
-                            and event.author not in reported_agents
-                        ):
-                            reported_agents.add(event.author)
-                            yield ProgressEvent(
-                                phase=Phase.COMPOSITION,
-                                step=BOOK_RECOMMENDATION_AGENT_STEPS[event.author],
-                                detail=event.author,
-                            )
-
-                # Re-fetch session after agent run
-                refreshed = await self._session_service.get_session(
-                    app_name=APP_NAME, user_id=user_id, session_id=job_id
-                )
-                if refreshed is not None:
-                    session = refreshed
-
-                state = SessionStateAccessor(session.state)
-                rec_data = extract_book_recommendations_from_state(state)
-
-                # Output-side grounding guard: drop any formatter title that
-                # is not present in the grounded researcher candidates. Pairs
-                # with the relaxed schema floor (min REC_MIN_RESULTS, not a hard
-                # 5) so a thin researcher result yields fewer honest picks rather
-                # than an invented book. Fail-open (see filter docstring).
-                researcher_text = "\n".join(researcher_text_parts)
-                rec_data = filter_grounded_recommendations(rec_data, researcher_text)
-
-                if rec_data is None:
-                    await self._clear_book_recs_lock(job_id, user_id)
-                    yield WorkflowError(
-                        message="Failed to extract book recommendations from agent response",
-                        error_type="ExtractionError",
-                        phase=Phase.COMPOSITION,
-                    )
-                    yield WorkflowComplete(job_id=job_id)
-                    return
-
-                recommendations = rec_data.get("recommendations", [])
-                floor = getattr(self._config, "rec_min_results", 3)
-                if len(recommendations) < floor:
-                    logger.info(
-                        "book_recommendations_below_floor",
-                        count=len(recommendations),
-                        floor=floor,
-                    )
-                # LLM sometimes hallucinates Amazon image IDs. Strip them so BookCard
-                # renders gracefully without a broken img tag; leave other valid URLs.
-                for rec in recommendations:
-                    url: str = rec.get("image_url") or ""
-                    if url and "amazon" in url.lower():
-                        rec["image_url"] = None
-                new_count = book_recommendation_count + 1
-
-                persist_event = Event(
-                    invocation_id="system",
-                    author="system",
-                    actions=EventActions(
-                        state_delta={
-                            SessionStateKeys.LAST_BOOK_RECOMMENDATIONS: rec_data,
-                            SessionStateKeys.BOOK_RECOMMENDATION_COUNT: new_count,
-                            SessionStateKeys.BOOK_RECS_IN_PROGRESS: False,
-                        }
-                    ),
-                )
-                await self._session_service.append_event(session, persist_event)
-
-                token_usage = None
-                if langfuse_plugin.enabled:
-                    token_usage = langfuse_plugin.get_session_stats()
-                    await langfuse_plugin.flush()
-
+            recommendations = rec_data.get("recommendations", [])
+            floor = getattr(self._config, "rec_min_results", 3)
+            if len(recommendations) < floor:
                 logger.info(
-                    "book_recommendations_complete",
-                    job_id=job_id[:8],
+                    "book_recommendations_below_floor",
                     count=len(recommendations),
-                    book_recommendation_count=new_count,
+                    floor=floor,
                 )
+            # LLM sometimes hallucinates Amazon image IDs. Strip them so BookCard
+            # renders gracefully without a broken img tag; leave other valid URLs.
+            for rec in recommendations:
+                url: str = rec.get("image_url") or ""
+                if url and "amazon" in url.lower():
+                    rec["image_url"] = None
+            new_count = book_recommendation_count + 1
 
-                yield BookRecommendationsReady(
-                    recommendations=recommendations,
-                    book_recommendation_count=new_count,
-                )
-                yield WorkflowComplete(job_id=job_id, token_usage=token_usage)
+            persist_event = Event(
+                invocation_id="system",
+                author="system",
+                actions=EventActions(
+                    state_delta={
+                        SessionStateKeys.LAST_BOOK_RECOMMENDATIONS: rec_data,
+                        SessionStateKeys.BOOK_RECOMMENDATION_COUNT: new_count,
+                        SessionStateKeys.BOOK_RECS_IN_PROGRESS: False,
+                    }
+                ),
+            )
+            await self._session_service.append_event(active_session, persist_event)
 
-        except TimeoutError:
-            logger.error("recommend_books_timeout", job_id=job_id)
+            token_usage = await collect_token_usage(langfuse_plugin)
+
+            logger.info(
+                "book_recommendations_complete",
+                job_id=job_id[:8],
+                count=len(recommendations),
+                book_recommendation_count=new_count,
+            )
+
+            yield BookRecommendationsReady(
+                recommendations=recommendations,
+                book_recommendation_count=new_count,
+            )
+            yield WorkflowComplete(job_id=job_id, token_usage=token_usage)
+
+        async def timeout_cleanup() -> None:
             await self._clear_book_recs_lock(job_id, user_id)
             await self._mark_session_failed(job_id, user_id)
-            yield WorkflowError(
-                message=f"Book recommendation timed out after {self._config.workflow_timeout}s",
-                error_type="WorkflowTimeoutError",
-                phase=Phase.COMPOSITION,
-            )
-            yield WorkflowComplete(job_id=job_id)
-        except asyncio.CancelledError:
-            logger.warning("recommend_books_cancelled", job_id=job_id)
-            await self._clear_book_recs_lock(job_id, user_id)
-            raise
-        except Exception as e:
-            logger.error(
-                "recommend_books_error", error=str(e), error_type=type(e).__name__
-            )
-            await self._clear_book_recs_lock(job_id, user_id)
-            yield WorkflowError(
-                message=str(e),
-                error_type=type(e).__name__,
-                phase=Phase.COMPOSITION,
-            )
-            yield WorkflowComplete(job_id=job_id)
+
+        spec = GuardSpec(
+            flow_name="recommend_books",
+            job_id=job_id,
+            timeout_seconds=self._config.workflow_timeout,
+            timeout_message=(
+                f"Book recommendation timed out after {self._config.workflow_timeout}s"
+            ),
+            phase=Phase.COMPOSITION,
+            on_timeout=timeout_cleanup,
+            on_cancel=lambda: self._clear_book_recs_lock(job_id, user_id),
+            on_error=lambda: self._clear_book_recs_lock(job_id, user_id),
+        )
+        async for ev in run_guarded(body(), spec):
+            yield ev
 
     async def _clear_expansion_lock(self, job_id: str, user_id: str) -> None:
         """Clear EXPANSION_IN_PROGRESS flag after error or cancellation."""

@@ -280,7 +280,8 @@ storyland-ai/
 │
 ├── core/                # Transport-agnostic orchestration & SDK
 │   ├── executor.py      # WorkflowExecutor (discover/compose/expand/recommend)
-│   ├── place_to_book.py # PlaceToBookResolver (place→book reverse routing, isolated capability)
+│   ├── run_harness.py   # Shared ADK runner scaffold (event pump, timeout/error policy)
+│   ├── place_to_book.py # PlaceToBookResolver (place→book reverse routing)
 │   ├── cache.py         # In-process TTL/LRU result cache
 │   └── session_state.py # Typed session-state accessor
 │
@@ -370,7 +371,7 @@ reviewer.
 ## Testing
 
 ```bash
-make test                  # Unit tests (442 tests)
+make test                  # Unit tests (744 tests)
 make test-integration      # Integration tests with VCR cassettes (excludes real_api)
 make test-integration-live # Live tests that hit real APIs (real_api marker; uses quota)
 make test-all              # Both

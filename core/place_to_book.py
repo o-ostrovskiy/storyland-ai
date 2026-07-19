@@ -39,6 +39,9 @@ from models.place_to_book import PlaceBookCandidate, PlaceToBookCandidates, Plac
 from services.session_service import create_session_service
 
 from .cache import TTLCache
+from .events import Phase
+from .extraction import _normalize_text
+from .run_harness import RunCapture, pump_events
 from .session_state import SessionStateAccessor
 
 logger = get_logger("storyland.core.place_to_book")
@@ -98,11 +101,11 @@ def cache_key(place: str) -> str:
     return f"{_CACHE_KEY_PREFIX}{normalize_place(place)}"
 
 
-def _normalize_text(text: object) -> str:
-    """Lowercase + collapse whitespace for tolerant substring matching."""
-    if not isinstance(text, str):
-        return ""
-    return re.sub(r"\s+", " ", text).strip().lower()
+# _normalize_text is shared with core.extraction (imported above). The
+# grounding FILTERS themselves stay separate on purpose: this module's filter
+# treats an all-dropped result as a valid honest not-found, while the
+# book-recommendation filter fails open on that outcome — different contracts,
+# documented on each function.
 
 
 def validate_place_to_book_candidates(value: object) -> Optional[List[dict]]:
@@ -278,20 +281,20 @@ class PlaceToBookResolver:
         prompt = f"What should I read before travelling to {place}?"
         message = types.Content(role="user", parts=[types.Part(text=prompt)])
 
-        researcher_parts: List[str] = []
-        async with runner:
-            async for event in runner.run_async(
-                user_id=user_id, session_id=job_id, new_message=message
-            ):
-                if (
-                    event.author == "place_to_book_researcher"
-                    and event.content
-                    and event.content.parts
-                ):
-                    for part in event.content.parts:
-                        text = getattr(part, "text", None)
-                        if text:
-                            researcher_parts.append(text)
+        # Drain via the shared harness pump; no agent_steps means no progress
+        # events are produced — we only capture the grounded researcher text.
+        capture = RunCapture()
+        async for _ in pump_events(
+            runner,
+            user_id=user_id,
+            session_id=job_id,
+            message=message,
+            phase=Phase.COMPOSITION,
+            agent_steps={},
+            capture=capture,
+            capture_authors=("place_to_book_researcher",),
+        ):
+            pass
 
         refreshed = await self._session_service.get_session(
             app_name=APP_NAME, user_id=user_id, session_id=job_id
@@ -301,4 +304,4 @@ class PlaceToBookResolver:
             state = SessionStateAccessor(refreshed.state)
             candidates = extract_place_to_book_from_state(state) or []
 
-        return candidates, "\n".join(researcher_parts)
+        return candidates, capture.text_for("place_to_book_researcher")
