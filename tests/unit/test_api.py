@@ -1107,9 +1107,14 @@ class TestBlankBookTitleRejected:
 
 
 class TestDiscoveryProgressMapping:
-    def test_reader_profile_agent_in_progress_map(self):
-        from core.executor import DISCOVERY_AGENT_STEPS
-        assert "reader_profile_agent" in DISCOVERY_AGENT_STEPS
+    def test_reader_profile_agent_not_in_progress_map(self):
+        """MYS-436: reader_profile_agent was removed from the discovery/
+        local-atmosphere workflows (dead hot-path LLM call producing a
+        constant) -- its progress-step entries must not linger as a
+        reference to an agent that no longer runs."""
+        from core.executor import DISCOVERY_AGENT_STEPS, LOCAL_ATMOSPHERE_AGENT_STEPS
+        assert "reader_profile_agent" not in DISCOVERY_AGENT_STEPS
+        assert "reader_profile_agent" not in LOCAL_ATMOSPHERE_AGENT_STEPS
         assert "reader_profile" not in DISCOVERY_AGENT_STEPS
 
 

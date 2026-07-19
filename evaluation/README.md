@@ -206,9 +206,6 @@ eval_run_YYYYMMDD_v2  (dataset run root — from start_as_current_observation)
 │       │   │   └── gemini-2.5-flash_call  (generation, with token counts)
 │       │   └── book_context_formatter
 │       │       └── gemini-2.5-flash_call
-│       ├── reader_profile_agent
-│       │   ├── gemini-2.5-flash_call
-│       │   └── tool_get_user_preferences
 │       ├── parallel_discovery  (city/landmark/author agents in parallel)
 │       │   └── ...
 │       └── region_analyzer
