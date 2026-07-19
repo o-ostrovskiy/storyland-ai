@@ -466,12 +466,12 @@ class WorkflowExecutor:
             session = await self._session_service.get_session(
                 app_name=APP_NAME, user_id=user_id, session_id=job_id
             )
-            state = SessionStateAccessor(session.state)
+            run_state = SessionStateAccessor(session.state)
 
             logger.info(
                 "regions_discovered",
                 job_id=job_id[:8],
-                num_regions=len(state.regions),
+                num_regions=len(run_state.regions),
             )
 
             # Empty-discovery guard: when discovery yields zero regions
@@ -480,7 +480,7 @@ class WorkflowExecutor:
             # "successful" RegionsReady that dead-ends the user at the
             # activation moment and is recorded as a success in the funnel.
             # Mirrors the existing compose() NoRegions guard.
-            if not state.regions:
+            if not run_state.regions:
                 logger.info("discovery_empty_regions", job_id=job_id[:8])
                 await self._mark_session_failed(job_id, user_id)
                 for ev in error_events(
@@ -501,7 +501,7 @@ class WorkflowExecutor:
             # byte-identical on the wire. Session state is deliberately left
             # untouched: its setters are silent no-ops against persisted
             # state (MYS-172), and compose() keys on region_id, not place_key.
-            region_analysis = enrich_region_analysis(state.region_analysis)
+            region_analysis = enrich_region_analysis(run_state.region_analysis)
             regions = region_analysis.get("regions", [])
 
             # Store on miss: cache only non-empty, schema-validated region
@@ -512,7 +512,7 @@ class WorkflowExecutor:
             yield RegionsReady(
                 job_id=job_id,
                 regions=regions,
-                analysis_note=state.analysis_note,
+                analysis_note=run_state.analysis_note,
             )
 
             token_usage = await collect_token_usage(langfuse_plugin)
@@ -683,9 +683,9 @@ class WorkflowExecutor:
             )
             active_session = refreshed if refreshed is not None else session
 
-            state = SessionStateAccessor(active_session.state)
+            run_state = SessionStateAccessor(active_session.state)
             result = extract_itinerary_from_response(
-                capture.final_response, state
+                capture.final_response, run_state
             )
 
             if result is None:
@@ -846,9 +846,9 @@ class WorkflowExecutor:
             )
             active_session = refreshed if refreshed is not None else session
 
-            state = SessionStateAccessor(active_session.state)
+            run_state = SessionStateAccessor(active_session.state)
             result = extract_itinerary_from_response(
-                capture.final_response, state
+                capture.final_response, run_state
             )
 
             if result is None:

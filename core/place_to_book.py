@@ -39,7 +39,6 @@ from models.place_to_book import PlaceBookCandidate, PlaceToBookCandidates, Plac
 from services.session_service import create_session_service
 
 from .cache import TTLCache
-from .events import Phase
 from .extraction import _normalize_text
 from .run_harness import RunCapture, pump_events
 from .session_state import SessionStateAccessor
@@ -214,6 +213,20 @@ class PlaceToBookResolver:
             ttl_seconds=ttl_seconds, max_entries=max_entries
         )
 
+    def _build_runner(self, workflow) -> Runner:
+        """Build a Runner for one pipeline run.
+
+        Mirrors ``WorkflowExecutor._build_runner`` — references the
+        module-level ``Runner`` name so tests keep monkeypatching
+        ``core.place_to_book.Runner`` as the single fake seam.
+        """
+        return Runner(
+            agent=workflow,
+            app_name=APP_NAME,
+            session_service=self._session_service,
+            plugins=[LoggingPlugin()],
+        )
+
     async def resolve(self, place: str) -> PlaceToBookResult:
         """Resolve ``place`` to a PlaceToBookResult (cached)."""
         normalized = normalize_place(place)
@@ -271,12 +284,7 @@ class PlaceToBookResolver:
         workflow = create_place_to_book_workflow(
             self._model, google_search, place=place
         )
-        runner = Runner(
-            agent=workflow,
-            app_name=APP_NAME,
-            session_service=self._session_service,
-            plugins=[LoggingPlugin()],
-        )
+        runner = self._build_runner(workflow)
 
         prompt = f"What should I read before travelling to {place}?"
         message = types.Content(role="user", parts=[types.Part(text=prompt)])
@@ -289,7 +297,6 @@ class PlaceToBookResolver:
             user_id=user_id,
             session_id=job_id,
             message=message,
-            phase=Phase.COMPOSITION,
             agent_steps={},
             capture=capture,
             capture_authors=("place_to_book_researcher",),
@@ -301,7 +308,7 @@ class PlaceToBookResolver:
         )
         candidates: List[dict] = []
         if refreshed is not None:
-            state = SessionStateAccessor(refreshed.state)
-            candidates = extract_place_to_book_from_state(state) or []
+            run_state = SessionStateAccessor(refreshed.state)
+            candidates = extract_place_to_book_from_state(run_state) or []
 
         return candidates, capture.text_for("place_to_book_researcher")
