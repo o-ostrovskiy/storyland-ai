@@ -33,7 +33,6 @@ from .place_to_book_agent import create_place_to_book_pipeline
 from .expansion_agent import create_expansion_pipeline
 from .local_atmosphere_agent import create_local_atmosphere_pipeline
 from .trip_composer_agent import create_trip_composer_agent
-from .reader_profile_agent import create_reader_profile_agent
 from .region_analyzer_agent import create_region_analyzer_agent
 from .prompts import AgentPrompts, load_prompts
 
@@ -54,7 +53,6 @@ def create_discovery_workflow(
     Architecture:
         SequentialAgent (discovery_workflow)
         ├─ book_context_pipeline [research → format] → state["book_context"]
-        ├─ reader_profile_agent [read preferences] → state["reader_profile"]
         ├─ ParallelAgent (parallel_discovery) ⚡ CONCURRENT
         │  ├─ city_pipeline [research → format] → state["city_discovery"]
         │  ├─ landmark_pipeline [research → format] → state["landmark_discovery"]
@@ -82,7 +80,6 @@ def create_discovery_workflow(
     landmark_pipeline = create_landmark_pipeline(model, google_search, prompts=prompts)
     author_pipeline = create_author_pipeline(model, google_search, prompts=prompts)
 
-    reader_profile = create_reader_profile_agent(model, prompts=prompts)
     region_analyzer = create_region_analyzer_agent(model, prompts=prompts)
 
     # Create parallel discovery agent for concurrent execution
@@ -97,11 +94,19 @@ def create_discovery_workflow(
     # Build discovery workflow
     # WHY SEQUENTIAL: Each stage depends on previous stage's output:
     # - book_context provides setting/theme → discovery agents use this context
-    # - reader_profile provides preferences → trip composer uses these
     # - parallel_discovery provides locations → region_analyzer groups them
+    #
+    # reader_profile_agent (an LlmAgent reading get_user_preferences) was
+    # removed here (MYS-436): no UI has ever collected budget/pace/museums/
+    # kids/genres, so it burned a sequential LLM call on every discovery to
+    # always produce the same "no preferences found, using defaults" turn.
+    # trip_composer's own instruction already falls back to those exact
+    # defaults when it finds no reader_profile turn in conversation history
+    # (agents/prompts/{v1,v2,v3}.json, "reader_profile" is prose consumed via
+    # conversation history, not a `{reader_profile}` template variable -- so
+    # there is no interpolation KeyError risk from removing the writer).
     sub_agents = [
         book_context_pipeline,
-        reader_profile,
         parallel_discovery,
         region_analyzer,
     ]
@@ -130,7 +135,6 @@ def create_local_atmosphere_workflow(
     Architecture:
         SequentialAgent (local_atmosphere_workflow)
         ├─ book_context_pipeline [research → format] → state["book_context"]
-        ├─ reader_profile_agent → state["reader_profile"]
         └─ local_atmosphere_pipeline [research → format] → state["final_itinerary"]
 
     There is no city/landmark/author/region discovery: those agents look at the
@@ -153,7 +157,8 @@ def create_local_atmosphere_workflow(
     book_context_pipeline = create_book_context_pipeline(
         model, google_search, book_title=book_title, author=author, prompts=prompts
     )
-    reader_profile = create_reader_profile_agent(model, prompts=prompts)
+    # reader_profile_agent removed here too (MYS-436) -- same dead hot-path
+    # LLM call as create_discovery_workflow above; see that function's comment.
     local_pipeline = create_local_atmosphere_pipeline(
         model,
         google_search,
@@ -164,7 +169,7 @@ def create_local_atmosphere_workflow(
 
     return SequentialAgent(
         name="local_atmosphere_workflow",
-        sub_agents=[book_context_pipeline, reader_profile, local_pipeline],
+        sub_agents=[book_context_pipeline, local_pipeline],
     )
 
 

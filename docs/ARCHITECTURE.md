@@ -2,6 +2,8 @@
 
 This document explains key design decisions in the StoryLand AI project and the rationale behind them.
 
+> Reconciled against `main` on 2026-07-19 (MYS-554). Per engineering-standards §6, a PR that makes a new architecture decision appends a dated numbered entry here in the same PR.
+
 ---
 
 ## 1. Two-Phase Workflow with Human-in-the-Loop
@@ -19,6 +21,8 @@ Phase 1: Discovery & Region Analysis (LLM agents)
     ↓
 Phase 2: Itinerary Composition (LLM agents)
 ```
+
+**Wire-numbering note (2026-07-19):** the workflow is conceptually two-phase, but `Phase(IntEnum)` in `core/events.py` keeps its legacy values — `BOOK_SEARCH = 1` (retired, ADR #12), `DISCOVERY = 2`, `COMPOSITION = 3` — and SSE `progress` events serialize these ints, so clients receive **2 for discovery and 3 for composition** today. Renumbering the enum is a breaking wire change and must be its own code PR, never a docs edit. In this document, "Phase 1/Phase 2" means the conceptual workflow; anything about events or diagnostics uses the wire values explicitly.
 
 ### Rationale
 
@@ -158,7 +162,7 @@ This pattern appears in:
 - `book_context_agent.py` → BookContext
 - `discovery_agents.py` → CityDiscovery, LandmarkDiscovery, AuthorSites
 
-**Note:** `book_metadata_agent.py` previously followed this pattern (researcher + formatter). It was later removed entirely when the ADK web UI was dropped (see ADR #12 and #13).
+**Note:** `book_metadata_agent.py` previously followed this pattern (researcher + formatter). It was later removed entirely when the ADK web UI was dropped and the Google Books lookup moved to the frontend (see ADR #12).
 
 ---
 
@@ -222,45 +226,53 @@ sub_agents = [
 
 - `book_context` must complete before discovery (discovery needs setting info)
 - `region_analyzer` must wait for all discoveries (needs cities to group)
-- `trip_composer` needs region selection (can't run until Phase 3)
+- `trip_composer` needs region selection (can't run until Phase 2)
 
 **Rule:** Parallelize only when agents have zero data dependencies.
 
 ---
 
-## 4. Bounded Exponential Backoff Retry (Rewritten 2026-07)
+## 4. Bounded Exponential Backoff Retry Strategy (revised)
 
-> **History:** this ADR originally documented an aggressive `exp_base=7`, `attempts=5` schedule (worst case ~400s of blind backoff). That schedule was replaced in Jun 2026 (`f7f7dc9`) because it interacted badly with the workflow timeout — a 429/500/503 burst would sit in multi-minute backoff until the 300s `workflow_timeout` wall fired, surfacing "timed out" to the user precisely when the API was throttling. This section now documents the current, bounded design; the old rationale is preserved in git history.
+> **Revised 2026-07 (doc reconciled 2026-07-19).** The original decision here was aggressive backoff (`exp_base=7`, `attempts=5`, no delay cap, hardcoded inline in `core/executor.py`). It was replaced: its ~400s worst-case cumulative backoff exceeded the 300s `workflow_timeout`, so a 429/500/503 burst sat in multi-minute blind backoff until the timeout wall fired — surfacing a false "timed out" error to the user precisely when the API was throttling.
 
 ### Decision
+Retry transient Gemini errors with **bounded** exponential backoff — `exp_base=2`, an explicit `max_delay` cap, and env-configurable knobs — built in one place, `core/retry.py`, shared by the executor and the eval runner.
 
-Bounded exponential backoff, centralized in `core/retry.py` (`build_retry_options`) and shared by the executor and the evaluation runner so the two can never silently diverge. Defaults (env-tunable):
-
+### Implementation
 ```python
-# common/config.py defaults: RETRY_ATTEMPTS=4, RETRY_EXP_BASE=2.0, RETRY_MAX_DELAY=12.0
+# core/retry.py — build_retry_options(), the single source of truth
+# Defaults (env-overridable via common/config.py):
+#   RETRY_ATTEMPTS=4 · RETRY_EXP_BASE=2.0 · RETRY_MAX_DELAY=12.0
 retry_config = build_retry_options(
-    attempts=4,          # 1 try + up to 3 retries
-    exp_base=2.0,        # 1s -> 2s -> 4s
-    initial_delay=1,
-    max_delay=12.0,      # hard cap on any single delay
-)
-# ADK 2.x: the API key goes through client_kwargs (api_key= was removed).
-model = Gemini(model=..., client_kwargs={"api_key": ...}, retry_options=retry_config)
+    attempts=4, exp_base=2, initial_delay=1, max_delay=12
+)  # called from core/executor.py and evaluation/tools/run_scheduled_eval.py
 ```
-
-Retried status codes: 429, 500, 503, 504 (`RETRY_STATUS_CODES`).
+Retry status codes unchanged: `[429, 500, 503, 504]` (`RETRY_STATUS_CODES` in `core/retry.py`).
 
 ### Rationale
 
-- **Worst-case cumulative backoff stays far under `workflow_timeout`** (1+2+4 = 7s worst case vs a 300s budget), so a throttling burst converts into either a fast success or a clean, fast typed error — never a blind multi-minute hang that masquerades as a workflow timeout.
-- `worst_case_backoff_seconds()` makes the schedule auditable in tests (`tests/unit/test_retry_backoff.py` pins the bound).
-- One construction point (`core/retry.py`) keeps executor and eval-runner retry behavior in parity.
+**Constraint:** every workflow phase runs inside `workflow_timeout` (300s default, ADR #7). The retry schedule must resolve — success or clean error — well inside that window, or backoff converts throttling into false timeouts.
+
+**Backoff schedule (worst case):** 1s → 2s → 4s ≈ **~7s cumulative** (3 retries; the 12s `max_delay` caps any further growth). Two orders of magnitude under the timeout wall.
+
+`core/retry.py` also exposes `worst_case_backoff_seconds()` so the relationship between the retry schedule and `workflow_timeout` is checkable, not folklore.
 
 ### Trade-offs
 
-**Benefits:** transient 429/5xx recovery without user intervention; failures surface quickly and with the real error class; schedule provable against the timeout budget.
+**Benefits:**
+- **No false timeouts:** throttling resolves to a fast success or a fast, honest error.
+- **Single source of truth:** executor and eval runner can't drift apart.
+- **Tunable per environment** via `RETRY_*` env vars without code changes.
 
-**Costs:** under a sustained rate-limit window (free-tier RPM), 3 quick retries may all fail where the old 49s wait might have survived — accepted, because the paid-tier limits in production make sustained throttling rare and the old behavior produced worse UX (opaque timeouts).
+**Costs:**
+- **Less patience with long throttle windows:** a sustained RPM exhaustion fails fast instead of waiting out the window (acceptable: prod runs on a billed key, and the UI surfaces a clean retryable error).
+
+### Alternatives Considered
+
+1. **Aggressive backoff (`exp_base=7`, no cap)** — the original design. Rejected in practice: worst case (~400s) exceeded `workflow_timeout`, producing blind multi-minute waits and false "timed out" errors.
+2. **No retries** — rejected: transient 429/5xx would fail workflows immediately.
+3. **Fixed 60s delay** — rejected: wastes time on non-rate-limit errors.
 
 ---
 
@@ -287,9 +299,9 @@ session.state["selected_regions"] = selected_regions  # User's choice
 
 ### Rationale
 
-**Problem:** Three-phase workflow requires data to flow across Runner instances:
+**Problem:** Two-phase workflow requires data to flow across Runner instances:
 - Phase 1 extracts metadata → Phase 2 needs exact title/author
-- Phase 2 discovers regions → Phase 3 needs user's selected regions
+- The discovery phase produces regions → the composition phase needs the user's selected regions
 - All phases share user preferences → Read from `state["user:preferences"]`
 
 **ADK Session Model:**
@@ -426,8 +438,8 @@ Without timeout: Workflow runs indefinitely, user doesn't know if it's stuck or 
 
 **Diagnostic Value of event_count:**
 - `event_count=5` → Stuck in Phase 1 (metadata extraction)
-- `event_count=50` → Stuck in Phase 2 (discovery running)
-- `event_count=100` → Stuck in Phase 3 (composition)
+- `event_count=50` → Stuck in discovery (wire `phase: 2`)
+- `event_count=100` → Stuck in composition (wire `phase: 3` — legacy enum value, see the wire-numbering note in ADR #1)
 
 Helps debug WHERE the timeout occurred without detailed logs.
 
@@ -449,7 +461,7 @@ Helps debug WHERE the timeout occurred without detailed logs.
 **Typical workflow timing:**
 - Phase 1 (metadata): ~5-10 seconds
 - Phase 2 (discovery): ~30-60 seconds
-- Phase 3 (composition): ~20-30 seconds
+- Composition (wire `phase: 3`): ~20-30 seconds
 - **Total:** ~60-100 seconds
 
 300s provides 3x safety margin.
@@ -507,7 +519,7 @@ Client                          FastAPI Server
 - **Session ID = Job ID:** The ADK session serves as job storage. All intermediate state (metadata, discoveries, regions) persists in `session.state` between the two HTTP calls.
 - **SSE over WebSocket:** SSE is unidirectional (server→client), which matches the workflow pattern. No need for bidirectional communication during streaming.
 - **Errors as SSE events:** Once headers are sent (200 OK), HTTP status can't change. All errors during streaming are emitted as `error` SSE events.
-- **Fresh LangfusePlugin per request:** Isolates token counters between concurrent requests.
+- **Fresh LangfusePlugin per request:** Isolates token counters between concurrent requests. (Later found insufficient under parallel discovery: branches of one request shared scalar generation/span state — now scoped per ParallelAgent branch via `_branch_key()` in `plugins/langfuse_plugin.py`; see ADR #21.)
 
 ### Trade-offs
 
@@ -582,7 +594,7 @@ case RegionsReady(job_id=j, regions=r, analysis_note=n):
 
 ### Rationale
 
-**Problem:** The three-phase workflow was originally built for CLI/Streamlit use (direct Python calls). Adding a web API shouldn't require rewriting the workflow logic — and the API shouldn't be the only way to use the system.
+**Problem:** The two-phase workflow was originally built for CLI/Streamlit use (direct Python calls). Adding a web API shouldn't require rewriting the workflow logic — and the API shouldn't be the only way to use the system.
 
 **Why transport-agnostic core matters:**
 - Evaluation tools import `WorkflowExecutor` directly — no HTTP, no serialization, no service to run
@@ -613,6 +625,27 @@ case RegionsReady(job_id=j, regions=r, analysis_note=n):
 - `core/types.py` — `ExecutorConfig` (plain dataclass, no env coupling)
 - `api/streaming.py` — `domain_event_to_sse()`: the only place domain events become HTTP
 - `api/routes.py` — thin wiring, no business logic
+
+---
+
+## 10. Gateway Service-to-Service Authentication (fail-closed)
+
+*Decided 2026-06-27 → 2026-07-11 (MYS-399); entry backfilled 2026-07-19 — the Patterns table row existed but the section was never written.*
+
+### Decision
+When deployed behind the backend gateway, require a shared secret on every itinerary endpoint and take end-user identity **only** from the trusted `X-User-ID` header the gateway sets after JWT validation. Fail closed.
+
+### Implementation
+- `api/dependencies.py` — `verify_gateway_secret`: when `INTERNAL_API_SECRET` is set, all itinerary endpoints require a matching `X-Internal-Secret` header (`/health` stays open). The secret is compared as **bytes**, constant-time.
+- Identity: the `X-User-ID` header only — the service trusts nothing else from the request. Missing header → 403 (except standalone dev, where identity falls back to the shared `dev_user`).
+- `REQUIRE_GATEWAY_SECRET=true` (`common/config.py`) refuses to **start** with an empty secret — closing the foot-gun where an empty secret silently accepts everyone and `X-User-ID` becomes a forgeable identity.
+
+### Rationale
+The service holds per-user sessions; without the secret gate, anyone who can reach the container could read/mutate any user's sessions by forging `X-User-ID`. The gateway owns real authn (JWT); this service only needs to verify "this request came through the gateway."
+
+### Trade-offs
+**Benefits:** blocks direct access in prod; identity model stays trivially simple; standalone dev still works.
+**Costs:** one more env var to coordinate between gateway and service; `/health` deliberately unauthenticated.
 
 ---
 
@@ -746,7 +779,7 @@ storyland-ai: POST /discover { book_title: "1984", author: "George Orwell" }
 - `tools/google_books.py` — deleted
 - `core/executor.py` — Phase 1 replaced with direct `BookMetadata` construction
 - `api/models.py` — `author` field made required (both `book_title` and `author` required)
-- `agents/book_metadata_agent.py` — deleted (no longer needed; see ADR #13)
+- `agents/book_metadata_agent.py` — deleted (no longer needed; see ADR #12)
 
 ### Trade-offs
 
@@ -819,7 +852,112 @@ After generating a travel itinerary based on a book, readers often want to know 
 
 ---
 
-## 15. Shared Run Harness (Single ADK-Facing Scaffold for All Flows)
+## 15. Persistent, Content-Versioned Discovery Result Cache (2026-06 → 07-01)
+
+### Decision
+Cache Discovery results in a **persistent, SQLite-backed `diskcache`** store that survives restart/redeploy, keyed with a **content fingerprint** so code changes self-invalidate the cache.
+
+### Implementation
+- `core/cache.py` + `core/disk_cache.py`; config `CACHE_ENABLED` (default **true** — a missing env var degrades to caching on, never a correctness bug), `CACHE_BACKEND` (`disk` = persistent SQLite on a docker volume, or in-memory), `CACHE_DIR`, `CACHE_TTL_SECONDS`, `CACHE_MAX_ENTRIES`. Effective config logged at boot.
+- `core/cache_version.py` — `compute_cache_version()` hashes the model name plus the **source of the prompt/schema modules** (`_PROMPT_MODULES`, which includes `models.discovery`, `models.place_key`, `core.regions`). A model/prompt/schema change mints a new namespace; stale entries can never be served after a deploy that changed what a cached result means. **Boundary:** the fingerprint covers module *source*, not data — `agents.prompts`' `CURRENT_PROMPT_VERSION` bump changes the hash, but an in-place edit to the `v2`/`v3` prompt JSON *content* does not, since that JSON is data rather than source read by `inspect.getsource()`. That content gap is tracked separately as MYS-462, not closed by this ADR.
+
+### Rationale
+Discovery is the expensive phase (parallel LLM fan-out + search). Same book → same regions, so recomputing per request wastes tokens and seconds. An earlier `ENABLE_RESULT_CACHE` feature flag was removed — caching is core behavior, not an experiment. Content-fingerprinting removed the post-deploy "cache warmup / manual flush" ritual.
+
+### Trade-offs
+**Benefits:** repeat lookups return in milliseconds at zero token cost; persistence survives redeploys; self-invalidation makes deploys safe by construction.
+**Costs:** a real-API integration test (`tests/integration/test_cache_real_api.py`) is needed to prove the seam; disk growth bounded by `CACHE_MAX_ENTRIES`/TTL.
+
+---
+
+## 16. Canonical Cross-Job `place_key` Identity (2026-07-15, MYS-435/MYS-460)
+
+### Decision
+Mint a canonical `"<cc>:<locality-slug>"` key (ISO-3166-1 alpha-2 country code + canonicalized principal locality) for every grounded region, emitted on the `regions` SSE payload, so the **same real place can be recognized across different book jobs** (combined "readaway" journeys).
+
+### Implementation
+- `models/place_key.py` (~650 lines: ISO table, transliteration, slug hardening) — minting only through the ONE checked seam `mint_checked_place_key()`, which enforces locality-matches-cities and country self-consistency.
+- `core/regions.py` — `enrich_region_analysis()` stamps `place_key` (and `admin_area`) onto each region; `models/discovery.py` — `RegionOption.place_key`.
+- Deliberately **never** derived from `region_id` (a per-response ordinal) or `region_name` (prose). If the checked mint can't be confident it returns `None`: the asymmetry is "a missed combine, never a wrong one."
+- The minting modules are part of the cache-version fingerprint (ADR #15), so the persistent cache could not serve keyless/legacy regions after this landed.
+
+### Rationale
+Combining two books' journeys needs a place identity to intersect on; nothing existing was stable across jobs. Frontend-side name matching would guess; a wrong merge is worse than no merge.
+
+---
+
+## 17. Harness-First CI: Hash-Locked Deps, Coverage Ratchet, Audit Gate, ADK Pin (2026-07-17; pin 2026-06-18)
+
+### Decision
+Make "done" mechanical (per team engineering-standards): reproducible dependencies, a coverage floor that only ratchets up, a strict vulnerability gate, and a guarded major-version pin — all wired to fail CI, not to report.
+
+### Implementation
+- **Hash-locked deps:** `requirements.lock` / `requirements-dev.lock` from `uv pip compile --universal --generate-hashes`; the unit workflow (`codex.yml`) installs `--require-hashes` and fails if `make lock` would change the committed lock. Qualifier: `integration-tests.yml` still installs with `pip install -e ".[dev]"` (live resolution) — the lock gates the unit workflow, not yet every CI run.
+- **Coverage ratchet:** `fail_under = 74` in `pyproject.toml` (76% baseline; bare `--cov` honoring `[tool.coverage.run]`). Ratchet, not target — raise, never lower.
+- **Audit gate:** `pip-audit --strict --require-hashes` on the prod lock; ignores are inline with justification + ticket.
+- **ADK pin:** `google-adk[eval]>=1.33.0,<2` in `pyproject.toml` + a CI guard asserting the **locked** resolution stays 1.x (prevents a non-reproducible jump to ADK 2.x).
+
+### Rationale
+The agent (and everyone else) is only as autonomous as the definition of "done" is mechanical; a green build must mean tests passed, coverage didn't regress, deps are exactly what was reviewed, and no known-vulnerable package ships.
+
+---
+
+## 18. Sentry Error Tracking with Privacy Hardening (2026-07-17/18, MYS-541/543)
+
+### Decision
+Env-gated Sentry for the API — performance tracing **off** by default, logs and metrics **opt-out** (on unless disabled), with aggressive scrubbing, because agent runs are already traced in Langfuse and our payloads carry user reading taste and location data. Setting only `SENTRY_DSN` ships exceptions **plus INFO+ logs plus metrics**; set `SENTRY_ENABLE_LOGS=false` / `SENTRY_ENABLE_METRICS=false` for a genuinely errors-only posture.
+
+### Implementation
+- `api/sentry.py`, gated on `SENTRY_DSN`; `common/logging.py` bridges structlog → Sentry (INFO+ as Logs, auto-counted `log.events` metrics) — both default **on** (`SENTRY_ENABLE_LOGS`/`SENTRY_ENABLE_METRICS` default `true`). Release tagging via `SENTRY_RELEASE` (deployed SHA).
+- Performance tracing off by default: `traces_sample_rate` resolves to `None` (not `0.0`) so inbound trace headers that would bypass scrubbers aren't honored.
+- Privacy: `send_default_pii=False`, `max_request_body_size="never"`, `include_local_variables=False` (frame locals hold prompts, taste context, lat/lng), URL query-string scrubbing across events/logs/breadcrumbs/spans, health-probe noise dropped.
+
+### Rationale
+We need to see production exceptions without shipping user data to a third party; Langfuse owns the "what did the agents do" question, Sentry only the "what broke" question.
+
+---
+
+## 19. Single-Box Deployment via G5-Gated Manual Workflow (2026-06-24 → 07-02)
+
+### Decision
+Decommission ECR-build/ECS-deploy; production is a **single self-hosted Lightsail box** running docker compose, deployed only through a founder-gated manual workflow.
+
+### Implementation
+- `.github/workflows/deploy-ai-prod.yml` — `workflow_dispatch`-only, paused on the `production` GitHub Environment for required-reviewer approval (that pause **is** the G5 gate), then a reusable SSH-deploy workflow.
+- Hardening: just-in-time SSH via OIDC — port 22 opens only during a deploy and closes after (fully closed at rest); `rsync --delete` so removals/rollbacks reach the box; on-box `.env.prod` excluded from rsync. `Dockerfile`: non-root, HEALTHCHECK, digest-pinned base.
+- CI (`.github/workflows/ci-cd.yml`) compiles and tests; it never deploys.
+
+### Rationale
+One small product, one box: ECS added cost and indirection without capacity needs. The founder gate keeps deploys a deliberate act; JIT SSH removes the standing attack surface a always-open management port is.
+
+---
+
+## 20. Place→Book Reverse Routing + Server-Derived Grounding (2026-06-19 → 06-22)
+
+### Decision
+Add an isolated, gateway-internal capability that routes a **place back to books** (the reverse of the main flow), and derive grounding labels **server-side** rather than trusting the model's self-report.
+
+### Implementation
+- `core/place_to_book.py` + `models/place_to_book.py` + `agents/place_to_book_agent.py`, exposed as its own endpoint; follows the researcher→formatter pattern (ADR #2); dedicated eval runner `evaluation/tools/run_place_to_book_eval.py`.
+- Grounding: `CityStop` gained `match_type` (`literal | historical | thematic | vibe`) and `grounding_source`; `match_type` is **derived server-side** so ungrounded literal/historical claims get downgraded regardless of what the model asserts about itself.
+
+### Rationale
+"What should I read for this place?" is the inverse product question and shares the anti-hallucination machinery. The model grading its own grounding is exactly the "uncomputed claim" class the team bans in UI copy — so the server computes it.
+
+---
+
+## 21. API Abuse + Operational Hardening (grouped; 2026-06-23 → 07-17)
+
+Four smaller decisions, recorded together:
+
+- **Rate limiting + concurrency cap** (2026-06-23): per-identity request rate limit and in-flight concurrency cap on discovery endpoints (`api/ratelimit.py`); input-size bounds return 422 **before** any Gemini tokens are spent.
+- **Bounded session retention** (2026-06-24): a periodic retention sweep (`services/session_retention.py`) bounds the in-memory/SQLite session store — extends ADR #6, which predates it.
+- **Recommendation-tone guardrail** (2026-06-28): rec explanations are fit-only and never grade the reader (`core/guardrails/tone_guardrail.py`).
+- **Langfuse per-branch scoping** (2026-07-17, MYS-398): generation/agent-stack/span state is scoped **per ParallelAgent branch** (`_branch_key()` in `plugins/langfuse_plugin.py`) — per-request plugin instances (ADR #8) were not enough under the ADR #3 parallel fan-out.
+
+---
+
+## 22. Shared Run Harness (Single ADK-Facing Scaffold for All Flows) (2026-07-19)
 
 ### Context
 
@@ -852,7 +990,7 @@ Note: the grounding *filters* in `core/extraction.py` and `core/place_to_book.py
 
 ---
 
-## 16. ADK 2.x Migration (Template-First, Graph Runtime Deferred to a Follow-Up PR)
+## 23. ADK 2.x Migration (Template-First, Graph Runtime Deferred to a Follow-Up PR) (2026-07-19)
 
 ### Context
 
@@ -860,11 +998,11 @@ The service ran on `google-adk 1.x` (pinned `<2`) for eight months. ADK 2.0 (GA 
 
 ### Decision
 
-Migrate in stages, eval-gated against a pre-migration baseline (storyland_eval avg 4.42/5, books_v1 avg 3.33/5 on `gemini-2.5-flash-lite`):
+Migrate in stages, eval-gated against a two-run pre-migration baseline (storyland_eval pooled avg ≈4.33/5, books_v1 pooled ≈3.14/5 on `gemini-2.5-flash-lite`; gates calibrated to measured judge noise — ±0.17 and ±0.40 respectively — not a flat percentage):
 
-1. **PR 1 — run harness** (ADR #15): all ADK-facing scaffolding behind one seam, behavior-frozen.
-2. **PR 2 — this lift**: `google-adk[db]>=2.4.0,<3` on the still-supported `SequentialAgent`/`ParallelAgent` template workflows (deprecated in 2.x but functional), so the dependency jump and the orchestration rewrite are separately bisectable. Model stays pinned to `gemini-2.5-flash-lite` so eval deltas are attributable to ADK alone.
-3. **PR 3 — graph rewrite** (follow-up): re-express the six workflows on `google.adk.workflow` (`Workflow`/`Node`/`Edge`), keeping the two-endpoint HTTP contract. Native HITL pause/resume is deliberately deferred — the discover→select→compose split stays as-is.
+1. **PR 1 — run harness** (ADR #22): all ADK-facing scaffolding behind one seam, behavior-frozen.
+2. **PR 2 — this lift**: `google-adk[db]>=2.4.0,<3` on the still-supported `SequentialAgent`/`ParallelAgent` template workflows (deprecated in 2.x but functional), so the dependency jump and the orchestration rewrite are separately bisectable. Model stays pinned to `gemini-2.5-flash-lite` so eval deltas are attributable to ADK alone. Gate result: PASS (storyland_eval 4.33 — dead-on baseline; books_v1 3.20 — above baseline; per-generation usage audit: 216/216 generations on both sides with non-zero recorded usage).
+3. **PR 3 — graph rewrite** (follow-up): re-express the workflows on `google.adk.workflow` (`Workflow`/`Node`/`Edge`), keeping the two-endpoint HTTP contract. Native HITL pause/resume is deliberately deferred — the discover→select→compose split stays as-is.
 4. **PR 4 — model upgrade** (follow-up): single `gemini-3-flash` + cassette re-record.
 
 **Key 2.x facts this migration verified against the real package** (spike, `google-adk==2.4.0`/`2.5.0`):
@@ -872,9 +1010,9 @@ Migrate in stages, eval-gated against a pre-migration baseline (storyland_eval a
 - `Gemini(api_key=...)` is **silently dropped** on 2.x (pydantic ignores it; auth falls back to env) — the key must go through `client_kwargs={"api_key": ...}`. Both construction sites fixed.
 - Session storage: **fresh DB at cutover** (default file renamed to `storyland_sessions_v2.db` so 2.x never opens a 1.x file). Jobs are minutes-long and the retention sweeper prunes anyway, so no data migration. The v-current schema keeps `sessions.update_time` and exposes the engine as `db_engine`, so the retention sweeper's raw-SQL prune still works — now proven by `tests/integration/test_session_retention_db.py` (previously the prune was fail-open and untested against a real store).
 - The ADR #11 `append_event(state_delta)` persistence contract holds unchanged on both backends.
-- All eight `LangfusePlugin` hooks survive; `CallbackContext.branch` is now **public**, removing the private `_invocation_context` coupling (kept only as a fallback). Missing `usage_metadata` now logs a WARNING instead of silently zeroing cost tracking.
+- All eight `LangfusePlugin` hooks survive; `CallbackContext.branch` is now **public**, removing the private `_invocation_context` coupling (kept only as a fallback). Token-usage extraction treats absent/None `usage_metadata` as missing (never a zero-token success) and logs a WARNING so cost tracking can't silently zero.
 - ADK 2.x auto-retries a tool only when its exception propagates; `tools/preferences.py` deliberately stays fail-open (documented in place).
-- starlette resolves to >=1.3 → the five PYSEC ignores were removed from `codex.yml` and `Makefile`; the CI pin guard now asserts a 2.x resolution.
+- starlette resolves to >=1.3 → the five PYSEC ignores were removed from `codex.yml` and `Makefile`; the CI pin guard (ADR #17) now asserts a 2.x resolution.
 - `[eval]` extra dropped (nothing imports `google.adk.evaluation`); `[db]` + explicit `greenlet` added.
 
 ### Trade-offs
@@ -899,8 +1037,16 @@ Migrate in stages, eval-gated against a pre-migration baseline (storyland_eval a
 | **SSE streaming API** | Real-time progress, HITL preserved | Long-lived connections |
 | **Transport-agnostic core SDK** | Library or HTTP consumption, same logic | Interface drift risk between gateway and API layer |
 | **Failure status flag** | Terminal failures visible via /status, retryable | State must be persisted via `append_event`, not in-place mutation |
-| **Gateway secret** | Blocks direct access when deployed behind a gateway | Health endpoint intentionally excluded; leave secret empty for standalone dev |
+| **Gateway secret (ADR #10)** | Blocks direct access when deployed behind a gateway; fail-closed X-User-ID identity | Health endpoint intentionally excluded; leave secret empty for standalone dev |
 | **Local-atmosphere mode** | Lets readers feel a book without traveling; reuses pipeline pattern | Separate endpoint to maintain; LLM-side radius enforcement only |
-| **Shared run harness** | One ADK-facing scaffold for all flows; explicit per-flow error policy | Flow bodies are nested generators; policy lives in `GuardSpec`, not inline |
+| **Persistent versioned cache (ADR #15)** | Repeat lookups free + instant; deploy-safe self-invalidation | Real-API seam test; bounded disk growth |
+| **Cross-job place_key (ADR #16)** | Same real place recognized across book jobs | Missed combine possible (never a wrong one) |
+| **Harness-first CI (ADR #17)** | "Done" is mechanical: locks, ratchet, audit, pin | Lock/relock discipline on every dep change |
+| **Sentry, no-tracing + scrubbed (ADR #18)** | Prod exceptions/logs visible with PII scrubbed | Logs/metrics are opt-out; no perf tracing (Langfuse owns tracing) |
+| **G5-gated single-box deploy (ADR #19)** | Cheap, deliberate, port-22-closed-at-rest deploys | Single box = no horizontal redundancy |
+| **Place→book + server-derived grounding (ADR #20)** | Reverse product flow; grounding labels computed, not self-reported | Two LLM hops; separate endpoint |
+| **Abuse/ops hardening (ADR #21)** | Token spend protected; bounded stores; honest tone; per-branch traces | More knobs to configure |
+| **Shared run harness (ADR #22)** | One ADK-facing scaffold for all flows; explicit per-flow error policy | Flow bodies are nested generators; policy lives in `GuardSpec`, not inline |
+| **ADK 2.x, template-first (ADR #23)** | Supported line; CVE ignores retired; public-API plugin; bisectable stages | Deprecation warnings until the graph rewrite; fresh session DB at cutover |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.

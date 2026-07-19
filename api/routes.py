@@ -92,7 +92,7 @@ async def health_check() -> HealthResponse:
                 "text/event-stream": {
                     "example": (
                         'event: started\ndata: {"event":"started","job_id":"abc-123"}\n\n'
-                        'event: progress\ndata: {"event":"progress","phase":1,"step":"Searching Google Books API"}\n\n'
+                        'event: progress\ndata: {"event":"progress","phase":2,"step":"Starting location discovery"}\n\n'
                         'event: metadata\ndata: {"event":"metadata","book_title":"1984","author":"George Orwell"}\n\n'
                         'event: regions\ndata: {"event":"regions","job_id":"abc-123","regions":[...]}\n\n'
                         'event: done\ndata: {"event":"done","job_id":"abc-123"}\n\n'
@@ -104,12 +104,14 @@ async def health_check() -> HealthResponse:
 )
 async def discover(request: DiscoverRequest, user_id: str = Depends(get_gateway_user_id)):
     """
-    Run book search and location discovery (phases 1-2).
+    Run location discovery (Phase 1). Book metadata arrives pre-confirmed
+    from the gateway (the gateway owns the Google Books lookup; ADR #12) —
+    this service performs no book search.
 
     Streams SSE events as the workflow progresses:
     - **started** — Emitted first; carries `job_id` so a client whose connection drops mid-run can recover via `GET /itinerary/{job_id}/status`
     - **progress** — Step-by-step updates during each phase
-    - **metadata** — Resolved book metadata from Google Books API
+    - **metadata** — Echo of the pre-confirmed book metadata from the request DTO
     - **regions** — Discovered travel regions for user selection (includes `job_id`)
     - **error** — If something goes wrong during processing
     - **done** — Stream complete (includes `job_id` for the compose endpoint)

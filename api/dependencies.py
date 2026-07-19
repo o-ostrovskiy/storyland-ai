@@ -77,7 +77,7 @@ async def initialize() -> AppState:
             "cache_disabled",
             detail=(
                 "Discovery result cache is DISABLED (CACHE_ENABLED=false): "
-                "every discover re-pays live Gemini + Google Books cost. "
+                "every discover re-pays live Gemini cost. "
                 "Unset CACHE_ENABLED to fall back to on."
             ),
         )

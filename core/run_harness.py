@@ -54,13 +54,17 @@ async def pump_events(
     user_id: str,
     session_id: str,
     message,
-    phase: Phase,
     agent_steps: dict[str, str],
+    phase: Optional[Phase] = None,
     capture: Optional[RunCapture] = None,
     capture_authors: tuple[str, ...] = (),
     track_final_response: bool = False,
 ) -> AsyncGenerator[ProgressEvent, None]:
     """Drain ``runner.run_async`` yielding at most one ProgressEvent per agent.
+
+    ``phase`` is required only when ``agent_steps`` is non-empty (it tags the
+    ProgressEvents); a pure drain (empty ``agent_steps`` — e.g. the place→book
+    resolver) passes no phase rather than inventing one.
 
     Capture semantics (both require ``capture``):
       * ``capture_authors``: text parts from these authors are accumulated into
@@ -68,6 +72,8 @@ async def pump_events(
       * ``track_final_response``: the last event for which
         ``is_final_response()`` is true is stored on ``capture.final_response``.
     """
+    if agent_steps and phase is None:
+        raise ValueError("pump_events: phase is required when agent_steps is non-empty")
     reported: set[str] = set()
     async with runner:
         async for event in runner.run_async(
