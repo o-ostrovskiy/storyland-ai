@@ -280,3 +280,94 @@ class TestComposerExplicitGrounding:
             "author-marker",
         ):
             assert marker in prompt, f"composer prompt lost grounding: {marker}"
+
+    async def test_cache_hit_compose_prompt_carries_grounding(self, monkeypatch):
+        """A discovery CACHE HIT must compose with the same grounding as a
+        fresh run (Codex P1 on the first PR-3 head: _emit_cached_discovery
+        replayed only region_analysis, so cache hits — precisely the popular,
+        repeated titles — composed from city names alone)."""
+        import core.executor as ex
+        from core.executor import WorkflowExecutor
+        from core.types import ExecutorConfig
+        from services.session_service import create_session_service
+
+        monkeypatch.setattr(
+            ex, "create_book_to_place_discovery_workflow", lambda *a, **k: object()
+        )
+        monkeypatch.setattr(
+            ex, "create_book_to_place_composition_workflow", lambda *a, **k: object()
+        )
+        config = ExecutorConfig(
+            model_name="gemini-2.0-flash",
+            google_api_key="test-key",
+            cache_enabled=True,  # the point of this test
+        )
+        executor = WorkflowExecutor(
+            config=config,
+            session_service=create_session_service(use_database=False),
+            model=object(),
+        )
+
+        monkeypatch.setattr(
+            ex,
+            "Runner",
+            _state_writing_runner(
+                lambda: {
+                    SessionStateKeys.REGION_ANALYSIS: {
+                        "regions": _REGIONS,
+                        "analysis_note": "note",
+                    },
+                    SessionStateKeys.BOOK_CONTEXT: {"themes": ["cached-theme-marker"]},
+                    SessionStateKeys.CITY_DISCOVERY: {"cities": ["cached-city-marker"]},
+                    SessionStateKeys.LANDMARK_DISCOVERY: {"landmarks": ["cached-landmark-marker"]},
+                    SessionStateKeys.AUTHOR_SITES: {"sites": ["cached-author-marker"]},
+                }
+            ),
+        )
+
+        # Run 1: fresh discovery — populates the cache with the v2 bundle.
+        async for _ in executor.discover(book_title="Persuasion", author="Jane Austen"):
+            pass
+
+        # Run 2: identical request — MUST be a cache hit (no runner needed).
+        monkeypatch.setattr(ex, "Runner", None)  # a fresh run would crash
+        hit_job_id = None
+        async for ev in executor.discover(book_title="Persuasion", author="Jane Austen"):
+            if isinstance(ev, JobStarted):
+                hit_job_id = ev.job_id
+
+        captured_prompts = []
+
+        class _CapturingRunner:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def run_async(self, user_id, session_id, new_message):
+                captured_prompts.append(
+                    "".join(p.text or "" for p in new_message.parts)
+                )
+                if False:
+                    yield None
+
+        monkeypatch.setattr(ex, "Runner", _CapturingRunner)
+        async for _ in executor.compose(job_id=hit_job_id, region_ids=[1]):
+            pass
+
+        assert len(captured_prompts) == 1
+        prompt = captured_prompts[0]
+        for marker in (
+            "cached-theme-marker",
+            "cached-city-marker",
+            "cached-landmark-marker",
+            "cached-author-marker",
+        ):
+            assert marker in prompt, (
+                f"cache-hit compose lost grounding: {marker} — "
+                "_emit_cached_discovery is not replaying the full bundle"
+            )

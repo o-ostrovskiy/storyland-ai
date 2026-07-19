@@ -6,10 +6,18 @@ Three researcher/formatter agent pairs (run as parallel graph branches) that dis
 
 from google.adk.agents import LlmAgent
 from models.discovery import CityDiscovery, LandmarkDiscovery, AuthorSites
-from agents.prompts import AgentPrompts, load_prompts
+from agents.prompts import AgentPrompts, book_facts_block, load_prompts
 
 
-def create_city_agents(model, google_search_tool, prompts: AgentPrompts | None = None):
+def create_city_agents(
+    model,
+    google_search_tool,
+    book_title: str,
+    author: str,
+    vibe: str | None = None,
+    taste_context: dict | None = None,
+    prompts: AgentPrompts | None = None,
+):
     """
     Create the city discovery pipeline.
 
@@ -28,7 +36,11 @@ def create_city_agents(model, google_search_tool, prompts: AgentPrompts | None =
         name="city_researcher",
         model=model,
         tools=[google_search_tool],
-        instruction=prompts.city_researcher,
+        # Graph-scoped context (ADR #24): this researcher's only implicit
+        # input is the BookContext from its direct predecessor, which has
+        # no title/author/vibe — restore them explicitly.
+        instruction=book_facts_block(book_title, author, vibe, taste_context)
+        + prompts.city_researcher,
     )
 
     city_formatter = LlmAgent(
@@ -42,7 +54,15 @@ def create_city_agents(model, google_search_tool, prompts: AgentPrompts | None =
     return city_researcher, city_formatter
 
 
-def create_landmark_agents(model, google_search_tool, prompts: AgentPrompts | None = None):
+def create_landmark_agents(
+    model,
+    google_search_tool,
+    book_title: str,
+    author: str,
+    vibe: str | None = None,
+    taste_context: dict | None = None,
+    prompts: AgentPrompts | None = None,
+):
     """
     Create the landmark discovery pipeline.
 
@@ -61,7 +81,11 @@ def create_landmark_agents(model, google_search_tool, prompts: AgentPrompts | No
         name="landmark_researcher",
         model=model,
         tools=[google_search_tool],
-        instruction=prompts.landmark_researcher,
+        # Graph-scoped context (ADR #24): this researcher's only implicit
+        # input is the BookContext from its direct predecessor, which has
+        # no title/author/vibe — restore them explicitly.
+        instruction=book_facts_block(book_title, author, vibe, taste_context)
+        + prompts.landmark_researcher,
     )
 
     landmark_formatter = LlmAgent(
@@ -75,7 +99,15 @@ def create_landmark_agents(model, google_search_tool, prompts: AgentPrompts | No
     return landmark_researcher, landmark_formatter
 
 
-def create_author_agents(model, google_search_tool, prompts: AgentPrompts | None = None):
+def create_author_agents(
+    model,
+    google_search_tool,
+    book_title: str,
+    author: str,
+    vibe: str | None = None,
+    taste_context: dict | None = None,
+    prompts: AgentPrompts | None = None,
+):
     """
     Create the author sites discovery pipeline.
 
@@ -94,7 +126,11 @@ def create_author_agents(model, google_search_tool, prompts: AgentPrompts | None
         name="author_researcher",
         model=model,
         tools=[google_search_tool],
-        instruction=prompts.author_researcher,
+        # Graph-scoped context (ADR #24): this researcher's only implicit
+        # input is the BookContext from its direct predecessor, which has
+        # no title/author/vibe — restore them explicitly.
+        instruction=book_facts_block(book_title, author, vibe, taste_context)
+        + prompts.author_researcher,
     )
 
     author_formatter = LlmAgent(

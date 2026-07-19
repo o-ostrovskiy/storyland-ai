@@ -30,6 +30,8 @@ from google.adk.sessions import InMemorySessionService
 from google.adk.workflow import JoinNode, START, Workflow
 from google.genai import types
 
+from core.events import Phase
+
 APP = "storyland"
 USER = "graph-test"
 
@@ -221,6 +223,74 @@ class TestGraphSemantics:
         # Branch events keep their agent authorship (progress mapping).
         authors = {e.author for e in events if getattr(e, "author", None)}
         assert {"branch_city", "branch_landmark", "branch_author"} <= authors
+
+
+class TestHarnessPumpAgainstRealGraph:
+    """Drive the REAL harness pump against a REAL graph run (Codex P2 check).
+
+    The concern: Workflow sets ctx.event_author = workflow name, so child
+    events might be workflow-authored, silently breaking pump_events'
+    per-agent progress mapping and capture_authors researcher-text capture.
+    This runs the actual pump_events (not a fake) over an actual
+    Runner(node=Workflow) stream and asserts both mechanisms work — the
+    LLM-content events are agent-authored even though workflow-level events
+    exist alongside them.
+    """
+
+    async def test_pump_progress_and_capture_work_under_graphs(self, monkeypatch):
+        from core.run_harness import RunCapture, pump_events
+
+        researcher = LlmAgent(
+            name="p_researcher",
+            model=_model(),
+            instruction="P-RESEARCH-MARKER: find things.",
+        )
+        formatter = LlmAgent(
+            name="p_formatter",
+            model=_model(),
+            instruction="P-FORMAT-MARKER: structure things.",
+        )
+
+        def script(llm_request):
+            if "P-RESEARCH-MARKER" in _request_text(llm_request):
+                return "captured-researcher-evidence"
+            return "formatted"
+
+        _install_scripted_model(monkeypatch, script)
+
+        service = InMemorySessionService()
+        await service.create_session(
+            app_name=APP, user_id=USER, session_id="pump", state={}
+        )
+        workflow = Workflow(name="p_wf", edges=[(START, researcher, formatter)])
+        runner = Runner(node=workflow, app_name=APP, session_service=service)
+
+        capture = RunCapture()
+        progress = [
+            ev
+            async for ev in pump_events(
+                runner,
+                user_id=USER,
+                session_id="pump",
+                message=types.Content(role="user", parts=[types.Part(text="go")]),
+                phase=Phase.DISCOVERY,
+                agent_steps={
+                    "p_researcher": "Researching",
+                    "p_formatter": "Formatting",
+                },
+                capture=capture,
+                capture_authors=("p_researcher",),
+            )
+        ]
+
+        assert [p.step for p in progress] == ["Researching", "Formatting"], (
+            "per-agent progress mapping broke under the graph runtime — "
+            "child events are no longer agent-authored"
+        )
+        assert capture.text_for("p_researcher") == "captured-researcher-evidence", (
+            "capture_authors recorded nothing — the grounding filter's "
+            "evidence path is dead under graphs"
+        )
 
 
 class TestGraphHistoryScoping:

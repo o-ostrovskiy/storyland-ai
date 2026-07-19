@@ -96,35 +96,50 @@ class TestBookContextAgents:
 
 
 class TestCityAgents:
+    def test_researcher_carries_book_facts(self, model_name, mock_google_search_tool):
+        """Graph-scoped context (ADR #24): the branch researchers never see the
+        discovery user prompt, so title/author/vibe/taste must be baked into
+        their instructions (Codex P1 on the first PR-3 head)."""
+        researcher, _ = create_city_agents(
+            model_name,
+            mock_google_search_tool,
+            book_title="Persuasion",
+            author="Jane Austen",
+            vibe="melancholic coastal",
+            taste_context={"titles": ["Rebecca"], "moods": ["windswept"]},
+        )
+        for needle in ("Persuasion", "Jane Austen", "melancholic coastal", "Rebecca", "windswept"):
+            assert needle in researcher.instruction, needle
+
     def test_pair_names(self, model_name, mock_google_search_tool):
-        researcher, formatter = create_city_agents(model_name, mock_google_search_tool)
+        researcher, formatter = create_city_agents(model_name, mock_google_search_tool, book_title="1984", author="George Orwell")
         assert researcher.name == "city_researcher"
         assert formatter.name == "city_formatter"
 
     def test_formatter_output_key(self, model_name, mock_google_search_tool):
-        _, formatter = create_city_agents(model_name, mock_google_search_tool)
+        _, formatter = create_city_agents(model_name, mock_google_search_tool, book_title="1984", author="George Orwell")
         assert formatter.output_key == "city_discovery"
 
 
 class TestLandmarkAgents:
     def test_pair_names(self, model_name, mock_google_search_tool):
-        researcher, formatter = create_landmark_agents(model_name, mock_google_search_tool)
+        researcher, formatter = create_landmark_agents(model_name, mock_google_search_tool, book_title="1984", author="George Orwell")
         assert researcher.name == "landmark_researcher"
         assert formatter.name == "landmark_formatter"
 
     def test_formatter_output_key(self, model_name, mock_google_search_tool):
-        _, formatter = create_landmark_agents(model_name, mock_google_search_tool)
+        _, formatter = create_landmark_agents(model_name, mock_google_search_tool, book_title="1984", author="George Orwell")
         assert formatter.output_key == "landmark_discovery"
 
 
 class TestAuthorAgents:
     def test_pair_names(self, model_name, mock_google_search_tool):
-        researcher, formatter = create_author_agents(model_name, mock_google_search_tool)
+        researcher, formatter = create_author_agents(model_name, mock_google_search_tool, book_title="1984", author="George Orwell")
         assert researcher.name == "author_researcher"
         assert formatter.name == "author_formatter"
 
     def test_formatter_output_key(self, model_name, mock_google_search_tool):
-        _, formatter = create_author_agents(model_name, mock_google_search_tool)
+        _, formatter = create_author_agents(model_name, mock_google_search_tool, book_title="1984", author="George Orwell")
         assert formatter.output_key == "author_sites"
 
 

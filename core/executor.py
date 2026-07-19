@@ -235,16 +235,20 @@ class WorkflowExecutor:
         user_id: str,
         book_title: str,
         author: str,
-        region_analysis: dict,
+        cached: dict,
     ) -> AsyncGenerator[DomainEvent, None]:
         """Replay a cached discovery result without invoking Gemini.
 
         The session already exists (created by ``discover`` before the cache
-        lookup). This writes the confirmed book metadata and the cached
-        region analysis into session state via ``append_event`` so the
-        downstream discover->compose handoff (which reads ``state.regions``)
-        behaves identically to a fresh run.
+        lookup). ``cached`` is the v2 grounding bundle: region_analysis PLUS
+        book_context and the three discovery payloads. ALL of it is written
+        into session state via ``append_event`` so the downstream
+        discover->compose handoff behaves identically to a fresh run —
+        compose() reads the grounding from state (ADR #24 graph scoping), so
+        a hit that replayed only regions would compose from city names alone
+        on precisely the popular, repeated titles the cache serves most.
         """
+        region_analysis = cached.get("region_analysis") or {}
         # A cache HIT must never replay a region with no place_key: hits land
         # hardest on popular, repeated titles — exactly the book-club case the
         # combined readaway exists for — so a keyless replay would kill the
@@ -263,15 +267,23 @@ class WorkflowExecutor:
         session = await self._session_service.get_session(
             app_name=APP_NAME, user_id=user_id, session_id=job_id
         )
+        state_delta = {
+            SessionStateKeys.BOOK_METADATA: book_metadata.model_dump(),
+            SessionStateKeys.REGION_ANALYSIS: region_analysis,
+        }
+        # Replay the grounding payloads compose() will read from state.
+        for key, value in (
+            (SessionStateKeys.BOOK_CONTEXT, cached.get("book_context")),
+            (SessionStateKeys.CITY_DISCOVERY, cached.get("city_discovery")),
+            (SessionStateKeys.LANDMARK_DISCOVERY, cached.get("landmark_discovery")),
+            (SessionStateKeys.AUTHOR_SITES, cached.get("author_sites")),
+        ):
+            if value:
+                state_delta[key] = value
         cache_event = Event(
             invocation_id="system",
             author="system",
-            actions=EventActions(
-                state_delta={
-                    SessionStateKeys.BOOK_METADATA: book_metadata.model_dump(),
-                    SessionStateKeys.REGION_ANALYSIS: region_analysis,
-                }
-            ),
+            actions=EventActions(state_delta=state_delta),
         )
         await self._session_service.append_event(session, cache_event)
 
@@ -313,7 +325,10 @@ class WorkflowExecutor:
         pref_sig = hashlib.sha1(
             repr(pref_items).encode("utf-8")
         ).hexdigest()
-        key = f"discover:v1:{norm_title}|{norm_author}|{pref_sig}"
+        # v2: the cached value is the full grounding bundle (region_analysis +
+        # book_context + the three discovery payloads), not just region_analysis —
+        # a cache HIT must compose with the same grounding as a fresh run.
+        key = f"discover:v2:{norm_title}|{norm_author}|{pref_sig}"
         norm_vibe = (vibe or "").strip().lower()
         if norm_vibe:
             key += f"|vibe={norm_vibe}"
@@ -403,7 +418,7 @@ class WorkflowExecutor:
                 user_id=user_id,
                 book_title=book_title,
                 author=author,
-                region_analysis=cached_region_analysis,
+                cached=cached_region_analysis,
             ):
                 yield ev
             return
@@ -434,8 +449,15 @@ class WorkflowExecutor:
             )
 
             langfuse_plugin = self._create_langfuse_plugin()
+            # vibe/taste ride the researcher instructions now (ADR #24:
+            # graph-scoped context — branch researchers never see the user
+            # prompt that used to carry them).
             discovery_workflow = create_book_to_place_discovery_workflow(
-                self._model, book_title=exact_title, author=exact_author
+                self._model,
+                book_title=exact_title,
+                author=exact_author,
+                vibe=vibe,
+                taste_context=taste_context,
             )
             runner = self._build_runner(discovery_workflow, langfuse_plugin)
 
@@ -499,9 +521,21 @@ class WorkflowExecutor:
             regions = region_analysis.get("regions", [])
 
             # Store on miss: cache only non-empty, schema-validated region
-            # sets so a future hit can safely short-circuit the chain.
+            # sets so a future hit can safely short-circuit the chain. The
+            # bundle carries the grounding payloads too: on a HIT, compose()
+            # reads them from replayed session state (a hit that composed
+            # from region names alone was the first PR-3 gate failure).
             if self._cache_enabled and regions:
-                await self._discovery_cache.set(cache_key, region_analysis)
+                await self._discovery_cache.set(
+                    cache_key,
+                    {
+                        "region_analysis": region_analysis,
+                        "book_context": run_state.book_context,
+                        "city_discovery": run_state.city_discovery,
+                        "landmark_discovery": run_state.landmark_discovery,
+                        "author_sites": run_state.author_sites,
+                    },
+                )
 
             yield RegionsReady(
                 job_id=job_id,

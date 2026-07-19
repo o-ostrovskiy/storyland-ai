@@ -728,8 +728,9 @@ class TestExecutorWiring:
         # Fresh run: the value we CACHE and the value we EMIT come from the same
         # enriched payload — a cached hit and a fresh run must be identical on the wire.
         assert "region_analysis = enrich_region_analysis(run_state.region_analysis)" in src
-        assert "await self._discovery_cache.set(cache_key, region_analysis)" in src
-        assert "await self._discovery_cache.set(cache_key, run_state.region_analysis)" not in src, (
+        # v2 bundle: the ENRICHED analysis is what goes into the cached bundle.
+        assert '"region_analysis": region_analysis,' in src
+        assert '"region_analysis": run_state.region_analysis' not in src, (
             "caching the RAW analysis would store regions with no place_key"
         )
         # Cache replay path.

@@ -101,7 +101,7 @@ class TestDiscoveryCacheKey:
         assert k1 != k2
 
     def test_versioned_prefix(self):
-        assert self._key("Dune", "Herbert", None).startswith("discover:v1:")
+        assert self._key("Dune", "Herbert", None).startswith("discover:v2:")
 
     def test_absent_vibe_key_is_unchanged(self):
         # An absent vibe must produce the exact pre-vibe key (cache continuity).
@@ -111,7 +111,7 @@ class TestDiscoveryCacheKey:
         explicit_none = WorkflowExecutor._discovery_cache_key(
             "Dune", "Herbert", None, None
         )
-        assert with_default == explicit_none == "discover:v1:dune|herbert|" + (
+        assert with_default == explicit_none == "discover:v2:dune|herbert|" + (
             with_default.split("|")[-1]
         )
 
@@ -210,7 +210,9 @@ class TestExecutorCacheHit:
         # MYS-460: a cached entry carries the grounded geo fields, and the replay
         # must mint the place_key from them. This is the AC stated as behaviour —
         # a HIT can never hand the wire a region with no cross-job identity.
-        cached = {
+        # v2 bundle shape: region_analysis + the grounding payloads compose()
+        # reads from replayed state (ADR #24).
+        region_analysis = {
             "regions": [
                 {
                     "region_id": 1,
@@ -223,6 +225,10 @@ class TestExecutorCacheHit:
                 }
             ],
             "analysis_note": "cached note",
+        }
+        cached = {
+            "region_analysis": region_analysis,
+            "book_context": {"themes": ["southern gothic"]},
         }
         # The executor namespaces keys with the model/prompt version, so prime
         # the store through the same helper discover() uses.
@@ -242,7 +248,7 @@ class TestExecutorCacheHit:
         assert len(regions_events) == 1
         replayed = regions_events[0].regions
         # The cached payload is relayed intact...
-        assert replayed == [{**cached["regions"][0], "place_key": "us:atlanta"}]
+        assert replayed == [{**region_analysis["regions"][0], "place_key": "us:atlanta"}]
         # ...and the identity is on it. Cache hits land hardest on popular,
         # repeated titles — exactly the book-club case the combined readaway is
         # for — so a keyless replay would kill the feature on precisely the books

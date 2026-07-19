@@ -48,6 +48,8 @@ def create_book_to_place_discovery_workflow(
     model,
     book_title: str,
     author: str,
+    vibe: str | None = None,
+    taste_context: dict | None = None,
     prompts: AgentPrompts | None = None,
 ):
     """
@@ -91,13 +93,31 @@ def create_book_to_place_discovery_workflow(
         model, google_search, book_title=book_title, author=author, prompts=prompts
     )
     city_researcher, city_formatter = create_city_agents(
-        model, google_search, prompts=prompts
+        model,
+        google_search,
+        book_title=book_title,
+        author=author,
+        vibe=vibe,
+        taste_context=taste_context,
+        prompts=prompts,
     )
     landmark_researcher, landmark_formatter = create_landmark_agents(
-        model, google_search, prompts=prompts
+        model,
+        google_search,
+        book_title=book_title,
+        author=author,
+        vibe=vibe,
+        taste_context=taste_context,
+        prompts=prompts,
     )
     author_researcher, author_formatter = create_author_agents(
-        model, google_search, prompts=prompts
+        model,
+        google_search,
+        book_title=book_title,
+        author=author,
+        vibe=vibe,
+        taste_context=taste_context,
+        prompts=prompts,
     )
     region_analyzer = create_region_analyzer_agent(model, prompts=prompts)
     join = JoinNode(name="discovery_join")
