@@ -322,7 +322,10 @@ class LangfusePlugin(BasePlugin):
             usage = self._extract_token_usage(llm_response)
             model_name = self._models.get(key, "")
 
-            if usage:
+            # Explicit None check: _extract_token_usage never returns an
+            # all-zero TokenUsage, and a dataclass instance is always truthy,
+            # so `if usage:` would mask a missing-usage response.
+            if usage is not None:
                 # Update running totals. Plain += on dataclass fields/floats
                 # is safe to share across branches: asyncio is single-
                 # threaded and these statements contain no `await`, so each
@@ -392,28 +395,43 @@ class LangfusePlugin(BasePlugin):
             response: Gemini API response object
 
         Returns:
-            TokenUsage object or None if not available
+            TokenUsage object, or None if usage is absent OR carries no
+            counts. LlmResponse is pydantic, so ``usage_metadata`` is a
+            declared field and ``hasattr`` is ALWAYS true — when the value is
+            None, ``getattr(None, ..., 0)`` used to fabricate a truthy
+            TokenUsage(0, 0, 0) that sailed through the ``if usage`` success
+            branch and recorded a zero-cost generation without ever firing
+            the missing-usage warning. A real generation can never be 0/0/0
+            (the prompt alone costs tokens), so all-zero is normalized to
+            None here and the caller's warning path owns it.
         """
         try:
-            # Try to extract from usage_metadata attribute
-            if hasattr(response, 'usage_metadata'):
-                metadata = response.usage_metadata
-                return TokenUsage(
+            usage = None
+            # Try the usage_metadata attribute (guarding the None value the
+            # declared-field hasattr check can't catch).
+            metadata = getattr(response, 'usage_metadata', None)
+            if metadata is not None:
+                usage = TokenUsage(
                     input_tokens=getattr(metadata, 'prompt_token_count', 0) or 0,
                     output_tokens=getattr(metadata, 'candidates_token_count', 0) or 0,
                     total_tokens=getattr(metadata, 'total_token_count', 0) or 0,
                 )
-
-            # Alternative: Try dict-like access
-            if isinstance(response, dict) and 'usage_metadata' in response:
-                metadata = response['usage_metadata']
-                return TokenUsage(
-                    input_tokens=metadata.get('prompt_token_count') or 0,
-                    output_tokens=metadata.get('candidates_token_count') or 0,
-                    total_tokens=metadata.get('total_token_count') or 0,
+            # Alternative: dict-like access
+            elif isinstance(response, dict) and response.get('usage_metadata'):
+                md = response['usage_metadata']
+                usage = TokenUsage(
+                    input_tokens=md.get('prompt_token_count') or 0,
+                    output_tokens=md.get('candidates_token_count') or 0,
+                    total_tokens=md.get('total_token_count') or 0,
                 )
 
-            return None
+            if usage is None or (
+                usage.input_tokens == 0
+                and usage.output_tokens == 0
+                and usage.total_tokens == 0
+            ):
+                return None
+            return usage
         except Exception as e:
             logger.debug("token_usage_extraction_failed", error=str(e))
             return None
