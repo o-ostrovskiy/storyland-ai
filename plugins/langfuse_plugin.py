@@ -168,20 +168,22 @@ class LangfusePlugin(BasePlugin):
         branch, so they safely share one key -- only ParallelAgent forks,
         and this plugin only needs to isolate exactly that boundary.
 
-        `branch` has no public accessor on Context/CallbackContext, so this
-        reads the private `_invocation_context` attribute directly; that's
-        a real coupling to google-adk's internals, which is why the repo
-        pins `google-adk[eval]>=1.33.0,<2` (tested 1.x line, no silent
-        jump to a breaking 2.x). Falls back to a constant key when `branch`
-        is unset (sequential-only paths, and the try/except below in case a
-        future ADK version renames the attribute) -- a single shared key is
-        exactly what non-parallel invocations already had, and correct for
-        them since there's never more than one in-flight generation there.
+        ADK 2.x exposes `branch` as a PUBLIC property on Context (and thus
+        CallbackContext/ToolContext), which removed the private
+        `_invocation_context` coupling this plugin carried on the 1.x line
+        (the coupling that motivated the old `<2` pin). The private
+        attribute is kept as a fallback only for defense in depth. Falls
+        back to a constant key when `branch` is unset (sequential-only
+        paths) -- a single shared key is exactly what non-parallel
+        invocations already had, and correct for them since there's never
+        more than one in-flight generation there.
         """
-        try:
-            branch = callback_context._invocation_context.branch
-        except AttributeError:
-            branch = None
+        branch = getattr(callback_context, "branch", None)
+        if branch is None:
+            try:
+                branch = callback_context._invocation_context.branch
+            except AttributeError:
+                branch = None
         return branch or "_root"
 
     async def on_user_message_callback(
@@ -356,6 +358,17 @@ class LangfusePlugin(BasePlugin):
                     output_tokens=usage.output_tokens,
                     cost_usd=cost,
                     branch=key,
+                )
+            else:
+                # A None here means the response carried no recognizable
+                # usage_metadata — after an SDK/ADK upgrade that's the first
+                # (and previously ONLY silent) sign that cost tracking has
+                # zeroed out. Loud by design; never raises.
+                logger.warning(
+                    "langfuse_token_usage_missing",
+                    model=model_name,
+                    branch=key,
+                    response_type=type(llm_response).__name__,
                 )
 
             generation.end()

@@ -207,9 +207,12 @@ class WorkflowExecutor:
             initial_delay=1,
             max_delay=self._config.retry_max_delay,
         )
+        # ADK 2.x removed the api_key field (a leftover api_key= kwarg is
+        # silently DROPPED by pydantic, falling back to env auth) — the key
+        # must go through client_kwargs, which Gemini passes to genai.Client.
         return Gemini(
             model=self._config.model_name,
-            api_key=self._config.google_api_key,
+            client_kwargs={"api_key": self._config.google_api_key},
             retry_options=retry_config,
         )
 

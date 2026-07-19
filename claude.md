@@ -18,8 +18,8 @@ CI runs `make test-ci` (unit tests + the coverage ratchet, `fail_under` in `pypr
 Dependencies are **reproducible and hash-pinned**. `pyproject.toml` `[project.dependencies]` holds the floors/caps (source of truth); the generated locks are `requirements.lock` (prod — the Docker image installs it with `--require-hashes`) and `requirements-dev.lock` (prod + dev, CI installs it).
 
 - **To add/bump a dependency:** edit `pyproject.toml` → `make lock` (needs `pip install uv==0.11.29`) → commit `pyproject.toml` **and** both `*.lock` files in the **same PR**. CI's "Verify lockfiles are up to date" step fails if you skip the relock.
-- **`google-adk` stays `<2`** (reproducible 1.x line); the CI guard asserts the locked resolution is 1.x.
-- **`make audit`** runs `pip-audit` against the prod lock (same gate CI runs). New HIGH/CRITICAL with a fix → bump-and-relock; unfixable/blocked → inline `--ignore-vuln <ID>` in `codex.yml` with a justification + ticket. (Currently accepted: starlette CVEs blocked by the `google-adk<2` cap, and a fixless diskcache advisory — see the ignore block in `codex.yml`.)
+- **`google-adk` stays `<3`** (reproducible 2.x line, `google-adk[db]>=2.4.0,<3`); the CI guard asserts the locked resolution is 2.x. The `[db]` extra is required (sqlalchemy is not a core dep on 2.x) and `greenlet` is pinned explicitly for the async engine.
+- **`make audit`** runs `pip-audit` against the prod lock (same gate CI runs). New HIGH/CRITICAL with a fix → bump-and-relock; unfixable/blocked → inline `--ignore-vuln <ID>` in `codex.yml` with a justification + ticket. (Currently accepted: a fixless diskcache advisory — see the ignore block in `codex.yml`. The five starlette ignores were removed with the ADK 2.x upgrade, which lifted starlette to >=1.3.)
 
 ## Documentation Requirements
 

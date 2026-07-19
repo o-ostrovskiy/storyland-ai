@@ -38,10 +38,10 @@ jobs:
           pip install --require-hashes -r requirements-dev.lock
           pip install -e . --no-deps
 
-      - name: Assert google-adk pinned to the tested 1.x line
+      - name: Assert google-adk pinned to the tested 2.x line
         # Now validates the LOCKED resolution (strictly stronger than a live resolve).
         run: |
-          python -c "import importlib.metadata as m, sys; v = m.version('google-adk'); print('resolved google-adk', v); sys.exit(0 if v.split('.')[0] == '1' else 'ERROR: google-adk resolved to %s; expected the pinned 1.x major (>=1.33.0,<2)' % v)"
+          python -c "import importlib.metadata as m, sys; v = m.version('google-adk'); print('resolved google-adk', v); sys.exit(0 if v.split('.')[0] == '2' else 'ERROR: google-adk resolved to %s; expected the pinned 2.x major (>=2.4.0,<3)' % v)"
 
       - name: Verify lockfiles are up to date
         # A pyproject dependency/cap edit without a regenerated lock is silent drift.
@@ -58,15 +58,13 @@ jobs:
         run: |
           pip install pip-audit==2.10.1
           pip-audit --strict --require-hashes -r requirements.lock \
-            --ignore-vuln PYSEC-2026-161 --ignore-vuln PYSEC-2026-248 --ignore-vuln PYSEC-2026-249 \
-            --ignore-vuln PYSEC-2026-2280 --ignore-vuln PYSEC-2026-2281 \
             --ignore-vuln PYSEC-2026-2447
-            # starlette 0.52.1 CVEs (161/248/249/2280/2281): fixes are all >=1.0, but
-            # google-adk (pinned <2 for a reproducible agent line) hard-caps
-            # starlette<1. Unreachable without an ADK 2.x major upgrade — tracked as a
-            # founder-facing security follow-up. diskcache 2447: no upstream fix.
-            # storyland-ai is an internal upstream behind the gateway, not directly
-            # internet-facing, which lowers the Host-header DoS exposure.
+            # The five starlette 0.52.1 ignores (PYSEC-2026-161/248/249/2280/2281)
+            # were removed with the ADK 2.x upgrade: the lock now resolves
+            # starlette>=1.3, which carries all the fixes. diskcache 2447: no
+            # upstream fix. storyland-ai is an internal upstream behind the
+            # gateway, not directly internet-facing, which lowers the
+            # Host-header DoS exposure.
 
       - name: Create .env file for unit tests
         run: |

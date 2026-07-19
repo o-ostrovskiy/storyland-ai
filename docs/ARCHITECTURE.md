@@ -228,82 +228,39 @@ sub_agents = [
 
 ---
 
-## 4. Exponential Backoff Retry Strategy
+## 4. Bounded Exponential Backoff Retry (Rewritten 2026-07)
+
+> **History:** this ADR originally documented an aggressive `exp_base=7`, `attempts=5` schedule (worst case ~400s of blind backoff). That schedule was replaced in Jun 2026 (`f7f7dc9`) because it interacted badly with the workflow timeout — a 429/500/503 burst would sit in multi-minute backoff until the 300s `workflow_timeout` wall fired, surfacing "timed out" to the user precisely when the API was throttling. This section now documents the current, bounded design; the old rationale is preserved in git history.
 
 ### Decision
-Configure HTTP retries with aggressive exponential backoff (exp_base=7) for rate limits.
 
-### Implementation
+Bounded exponential backoff, centralized in `core/retry.py` (`build_retry_options`) and shared by the executor and the evaluation runner so the two can never silently diverge. Defaults (env-tunable):
+
 ```python
-retry_config = types.HttpRetryOptions(
-    attempts=5,           # Retry up to 5 times
-    exp_base=7,           # Aggressive backoff: 1s → 7s → 49s
-    initial_delay=1,      # Start with 1 second
-    http_status_codes=[429, 500, 503, 504]
+# common/config.py defaults: RETRY_ATTEMPTS=4, RETRY_EXP_BASE=2.0, RETRY_MAX_DELAY=12.0
+retry_config = build_retry_options(
+    attempts=4,          # 1 try + up to 3 retries
+    exp_base=2.0,        # 1s -> 2s -> 4s
+    initial_delay=1,
+    max_delay=12.0,      # hard cap on any single delay
 )
-model = Gemini(model=config.model_name, retry_options=retry_config)
+# ADK 2.x: the API key goes through client_kwargs (api_key= was removed).
+model = Gemini(model=..., client_kwargs={"api_key": ...}, retry_options=retry_config)
 ```
+
+Retried status codes: 429, 500, 503, 504 (`RETRY_STATUS_CODES`).
 
 ### Rationale
 
-**Problem:** Gemini API free tier has **15 requests per minute (RPM)** limit. With:
-- 6+ agents in workflow
-- Parallel discovery (3 concurrent agents)
-- Each agent making multiple Google Search calls
-- Total: 20-30 API calls in <30 seconds
-
-We frequently hit 429 (Too Many Requests) errors.
-
-**Backoff Schedule:**
-- 1st retry: 1 second delay
-- 2nd retry: 7 seconds delay
-- 3rd retry: 49 seconds delay
-- 4th retry: 343 seconds delay (5.7 minutes)
-- 5th retry: 2,401 seconds delay (40 minutes)
-
-**Why aggressive (exp_base=7)?**
-- RPM limits reset after 60 seconds
-- Small delays (1s, 2s) don't help if limit window hasn't reset
-- 7-second delay gives time for window to partially reset
-- 49-second delay almost guarantees new rate limit window
-- Better to wait once than fail permanently
+- **Worst-case cumulative backoff stays far under `workflow_timeout`** (1+2+4 = 7s worst case vs a 300s budget), so a throttling burst converts into either a fast success or a clean, fast typed error — never a blind multi-minute hang that masquerades as a workflow timeout.
+- `worst_case_backoff_seconds()` makes the schedule auditable in tests (`tests/unit/test_retry_backoff.py` pins the bound).
+- One construction point (`core/retry.py`) keeps executor and eval-runner retry behavior in parity.
 
 ### Trade-offs
 
-**Benefits:**
-- **Reliability:** Workflows succeed despite rate limits
-- **No user intervention:** Automatic recovery from transient errors
-- **Covers server errors:** Also retries 500, 503, 504 (server overload)
+**Benefits:** transient 429/5xx recovery without user intervention; failures surface quickly and with the real error class; schedule provable against the timeout budget.
 
-**Costs:**
-- **Potential long waits:** 49s delay feels slow to users
-- **Delayed failures:** 5 retries can take minutes before final error
-- **Masking problems:** Retry might hide persistent issues
-
-### Alternatives Considered
-
-1. **Linear backoff (exp_base=2)**
-   - Rejected: 1s → 2s → 4s delays too short for RPM window reset
-   - Would burn through all retries before rate limit expires
-
-2. **No retries**
-   - Rejected: Workflow fails immediately on rate limit
-   - Poor UX for free tier users
-
-3. **Fixed delay (e.g., 60s)**
-   - Considered: Always wait 60s for rate limit reset
-   - Rejected: Wastes time on non-rate-limit errors (500, 503)
-
-4. **Jittered backoff**
-   - Considered: Add randomness to delays (7s ± 2s)
-   - Not implemented: ADK HttpRetryOptions doesn't support jitter
-   - Would help if multiple users hit limits simultaneously
-
-### Future Improvements
-
-1. **Adaptive backoff** based on `Retry-After` header (if Gemini provides it)
-2. **Circuit breaker** pattern to fail fast after sustained errors
-3. **Rate limit tracking** to proactively slow down before hitting limits
+**Costs:** under a sustained rate-limit window (free-tier RPM), 3 quick retries may all fail where the old 49s wait might have survived — accepted, because the paid-tier limits in production make sustained throttling rare and the old behavior produced worse UX (opaque timeouts).
 
 ---
 
@@ -892,6 +849,39 @@ Note: the grounding *filters* in `core/extraction.py` and `core/place_to_book.py
 **Benefits:** One place to change how we drive ADK (the prerequisite for the ADK 2.x migration); a new flow needs ~30 lines of scaffold instead of ~150; the error-cleanup policy of each flow is now explicit data (`GuardSpec`) instead of five hand-maintained try/except blocks; behavior-frozen — the full pre-existing unit suite passed unmodified.
 
 **Costs:** Flow bodies are nested async generators (one more level of indirection when reading a single flow top-to-bottom); per-flow error policy lives in a spec object rather than inline try/except, so a reader must know the harness contract.
+
+---
+
+## 16. ADK 2.x Migration (Template-First, Graph Runtime Deferred to a Follow-Up PR)
+
+### Context
+
+The service ran on `google-adk 1.x` (pinned `<2`) for eight months. ADK 2.0 (GA 2026-05) replaced the hierarchical agent executor with a graph-based workflow runtime and shipped breaking changes (incompatible session schema, removed `Gemini.api_key`, `[db]` extra required for `DatabaseSessionService`). The `<2` cap had two growing costs: five starlette CVE pip-audit ignores (ADK 1.x capped `starlette<1`) and a private-attribute coupling in the Langfuse plugin.
+
+### Decision
+
+Migrate in stages, eval-gated against a pre-migration baseline (storyland_eval avg 4.42/5, books_v1 avg 3.33/5 on `gemini-2.5-flash-lite`):
+
+1. **PR 1 — run harness** (ADR #15): all ADK-facing scaffolding behind one seam, behavior-frozen.
+2. **PR 2 — this lift**: `google-adk[db]>=2.4.0,<3` on the still-supported `SequentialAgent`/`ParallelAgent` template workflows (deprecated in 2.x but functional), so the dependency jump and the orchestration rewrite are separately bisectable. Model stays pinned to `gemini-2.5-flash-lite` so eval deltas are attributable to ADK alone.
+3. **PR 3 — graph rewrite** (follow-up): re-express the six workflows on `google.adk.workflow` (`Workflow`/`Node`/`Edge`), keeping the two-endpoint HTTP contract. Native HITL pause/resume is deliberately deferred — the discover→select→compose split stays as-is.
+4. **PR 4 — model upgrade** (follow-up): single `gemini-3-flash` + cassette re-record.
+
+**Key 2.x facts this migration verified against the real package** (spike, `google-adk==2.4.0`/`2.5.0`):
+- `tools` + `output_schema` may now coexist on one `LlmAgent` — ADR #2's researcher→formatter split is no longer *forced* by the framework. Collapsing pairs is a separate, eval-gated experiment; the anti-hallucination rationale stands until disproven per-pipeline.
+- `Gemini(api_key=...)` is **silently dropped** on 2.x (pydantic ignores it; auth falls back to env) — the key must go through `client_kwargs={"api_key": ...}`. Both construction sites fixed.
+- Session storage: **fresh DB at cutover** (default file renamed to `storyland_sessions_v2.db` so 2.x never opens a 1.x file). Jobs are minutes-long and the retention sweeper prunes anyway, so no data migration. The v-current schema keeps `sessions.update_time` and exposes the engine as `db_engine`, so the retention sweeper's raw-SQL prune still works — now proven by `tests/integration/test_session_retention_db.py` (previously the prune was fail-open and untested against a real store).
+- The ADR #11 `append_event(state_delta)` persistence contract holds unchanged on both backends.
+- All eight `LangfusePlugin` hooks survive; `CallbackContext.branch` is now **public**, removing the private `_invocation_context` coupling (kept only as a fallback). Missing `usage_metadata` now logs a WARNING instead of silently zeroing cost tracking.
+- ADK 2.x auto-retries a tool only when its exception propagates; `tools/preferences.py` deliberately stays fail-open (documented in place).
+- starlette resolves to >=1.3 → the five PYSEC ignores were removed from `codex.yml` and `Makefile`; the CI pin guard now asserts a 2.x resolution.
+- `[eval]` extra dropped (nothing imports `google.adk.evaluation`); `[db]` + explicit `greenlet` added.
+
+### Trade-offs
+
+**Benefits:** supported dependency line; five CVE ignores retired; public-API-only plugin; per-stage bisectability with the golden-stream SSE snapshot + eval gates proving "no functionality broken."
+
+**Costs:** template workflows emit deprecation warnings until PR 3; a fresh session DB drops in-flight jobs at the cutover deploy (accepted — deploy in a quiet window); cassettes may need one extra re-record if genai 2.x changed the wire surface before PR 4's planned re-record.
 
 ---
 

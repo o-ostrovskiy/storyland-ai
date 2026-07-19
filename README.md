@@ -417,7 +417,7 @@ amount of quota; it skips when the key is absent.
 
 ## Database Reference
 
-When `USE_DATABASE=true`, ADK's `DatabaseSessionService` creates a `sessions` table:
+When `USE_DATABASE=true`, ADK's `DatabaseSessionService` creates a `sessions` table. On the ADK 2.x line the default DB file is `storyland_sessions_v2.db` (fresh at the 2.x cutover — the 1.x schema is incompatible), and a fresh database is created on the "v1" internal schema, which adds an `adk_internal_metadata` bookkeeping table alongside the four data tables. The `sessions` table columns are unchanged:
 
 ```sql
 CREATE TABLE sessions (
