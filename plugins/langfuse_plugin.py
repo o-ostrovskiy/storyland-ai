@@ -103,6 +103,7 @@ class LangfusePlugin(BasePlugin):
         public_key: Optional[str] = None,
         host: Optional[str] = None,
         enabled: bool = True,
+        root_name: Optional[str] = None,
     ):
         """
         Initialize Langfuse plugin.
@@ -112,8 +113,15 @@ class LangfusePlugin(BasePlugin):
             public_key: Langfuse public key (from env LANGFUSE_PUBLIC_KEY)
             host: Langfuse host URL (from env LANGFUSE_HOST)
             enabled: Enable/disable plugin (auto-disabled if credentials missing)
+            root_name: Trace-name identity for the run's root workflow. Under
+                Runner(node=...) ADK 2.5 builds InvocationContext with
+                agent=None (and node_path=None at user-message time), so the
+                plugin cannot recover the root identity from the context —
+                the caller that builds the Runner KNOWS the workflow and
+                injects its name here (see WorkflowExecutor._build_runner).
         """
         super().__init__(name="langfuse_plugin")
+        self.root_name = root_name
         self.enabled = enabled and LANGFUSE_AVAILABLE
         self.client: Optional[Langfuse] = None
         self._token_usage = TokenUsage()
@@ -153,6 +161,30 @@ class LangfusePlugin(BasePlugin):
         else:
             logger.info("langfuse_disabled", reason="missing_credentials")
             self.enabled = False
+
+    def _resolve_root_name(self, invocation_context: InvocationContext) -> str:
+        """Trace-name identity for this invocation, explicit-first.
+
+        NOT the getattr(x, 'attr', default) idiom: when
+        ``invocation_context.agent`` is None (every Runner(node=...) root on
+        ADK 2.5), that idiom silently returns the default — the third
+        silent-wrong-answer of its kind in this migration (after the
+        usage_metadata declared-field trap). Explicit chain instead: real
+        agent name → injected root_name → loud WARNING + 'unknown_agent'.
+        """
+        agent = invocation_context.agent
+        if agent is not None:
+            name = getattr(agent, "name", None)
+            if name:
+                return name
+        if self.root_name:
+            return self.root_name
+        logger.warning(
+            "langfuse_root_identity_missing",
+            invocation_id=getattr(invocation_context, "invocation_id", None),
+            hint="pass root_name= or set plugin.root_name before Runner construction",
+        )
+        return "unknown_agent"
 
     @staticmethod
     def _branch_key(callback_context: CallbackContext) -> str:
@@ -197,7 +229,7 @@ class LangfusePlugin(BasePlugin):
             return None
 
         try:
-            agent_name = getattr(invocation_context.agent, 'name', 'unknown_agent')
+            agent_name = self._resolve_root_name(invocation_context)
             user_id = invocation_context.user_id
             session_id = invocation_context.session.id if invocation_context.session else None
 

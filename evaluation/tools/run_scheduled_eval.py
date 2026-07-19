@@ -499,6 +499,7 @@ async def _run_evaluation_case(
             discovery_workflow = create_book_to_place_discovery_workflow(
                 model, book_title=exact_title, author=exact_author, prompts=prompts
             )
+            langfuse_plugin.root_name = discovery_workflow.name
             discovery_runner = Runner(
                 node=discovery_workflow,
                 app_name="storyland",
@@ -590,6 +591,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
 
         try:
             composition_workflow = create_book_to_place_composition_workflow(model, prompts=prompts)
+            langfuse_plugin.root_name = composition_workflow.name
             composition_runner = Runner(
                 node=composition_workflow,
                 app_name="storyland",

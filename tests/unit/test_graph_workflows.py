@@ -353,3 +353,49 @@ class TestGraphHistoryScoping:
         text = _request_text(second_requests[0])
         assert "FIRST-INVOCATION-OUTPUT" not in text
         assert "prompt-one" not in text
+
+
+class TestNodeRootInvocationIdentity:
+    """Pin the ADK fact behind the root_name injection (Codex #7): under
+    Runner(node=...), InvocationContext reaches plugins with agent=None and
+    node_path=None at user-message time — there is nothing to scavenge, which
+    is WHY LangfusePlugin.root_name is injected at the _build_runner seam.
+    If an ADK upgrade starts populating agent for node roots, this reds and
+    the injection (plus its two call sites) can be retired.
+    """
+
+    async def test_agent_is_none_for_workflow_roots(self, monkeypatch):
+        from google.adk.plugins import BasePlugin
+
+        _install_scripted_model(monkeypatch, lambda r: "x")
+        seen = {}
+
+        class _Recorder(BasePlugin):
+            def __init__(self):
+                super().__init__(name="recorder")
+
+            async def on_user_message_callback(self, *, invocation_context, user_message):
+                seen["agent"] = invocation_context.agent
+                seen["node_path"] = getattr(invocation_context, "node_path", None)
+                return None
+
+        agent = LlmAgent(name="solo", model=_model(), instruction="i")
+        workflow = Workflow(name="identity_wf", edges=[(START, agent)])
+        service = InMemorySessionService()
+        await service.create_session(
+            app_name=APP, user_id=USER, session_id="ident", state={}
+        )
+        runner = Runner(
+            node=workflow, app_name=APP, session_service=service, plugins=[_Recorder()]
+        )
+        async with runner:
+            async for _ in runner.run_async(
+                user_id=USER,
+                session_id="ident",
+                new_message=types.Content(role="user", parts=[types.Part(text="go")]),
+            ):
+                pass
+
+        assert "agent" in seen, "on_user_message_callback never fired"
+        assert seen["agent"] is None
+        assert seen["node_path"] is None

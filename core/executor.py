@@ -221,6 +221,10 @@ class WorkflowExecutor:
         """
         plugins = [LoggingPlugin()]
         if langfuse_plugin is not None:
+            # Inject the trace-name identity: under Runner(node=...) ADK builds
+            # InvocationContext with agent=None, so the plugin cannot recover
+            # the root name from the context (see LangfusePlugin.root_name).
+            langfuse_plugin.root_name = getattr(workflow, "name", None)
             plugins.append(langfuse_plugin)
         return Runner(
             node=workflow,
