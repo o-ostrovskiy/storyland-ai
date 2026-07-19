@@ -43,7 +43,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          # Hash-locked install (same tree the unit workflow tests) — a live
+          # resolve here once drifted httpx/vcrpy and broke cassette replay
+          # with behavior the locked env can't reproduce. Editable pkg last,
+          # --no-deps, so the resolver can't re-touch the pinned tree.
+          pip install --require-hashes -r requirements-dev.lock
+          pip install -e . --no-deps
 
       - name: Create .env file for tests
         run: |
@@ -109,7 +114,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          # Hash-locked install (same tree the unit workflow tests) — a live
+          # resolve here once drifted httpx/vcrpy and broke cassette replay
+          # with behavior the locked env can't reproduce. Editable pkg last,
+          # --no-deps, so the resolver can't re-touch the pinned tree.
+          pip install --require-hashes -r requirements-dev.lock
+          pip install -e . --no-deps
 
       - name: Create .env file for tests
         run: |

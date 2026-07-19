@@ -892,7 +892,7 @@ Combining two books' journeys needs a place identity to intersect on; nothing ex
 Make "done" mechanical (per team engineering-standards): reproducible dependencies, a coverage floor that only ratchets up, a strict vulnerability gate, and a guarded major-version pin — all wired to fail CI, not to report.
 
 ### Implementation
-- **Hash-locked deps:** `requirements.lock` / `requirements-dev.lock` from `uv pip compile --universal --generate-hashes`; the unit workflow (`codex.yml`) installs `--require-hashes` and fails if `make lock` would change the committed lock. Qualifier: `integration-tests.yml` still installs with `pip install -e ".[dev]"` (live resolution) — the lock gates the unit workflow, not yet every CI run.
+- **Hash-locked deps:** `requirements.lock` / `requirements-dev.lock` from `uv pip compile --universal --generate-hashes`; the unit workflow (`codex.yml`) installs `--require-hashes` and fails if `make lock` would change the committed lock. `integration-tests.yml` installs from the same dev lock as of the ADK 2 lift (the previously documented live-resolution gap bit exactly as predicted: a fresh resolve drifted httpx/vcrpy and broke VCR replay with a method-case mismatch the locked env couldn't reproduce).
 - **Coverage ratchet:** `fail_under = 74` in `pyproject.toml` (76% baseline; bare `--cov` honoring `[tool.coverage.run]`). Ratchet, not target — raise, never lower.
 - **Audit gate:** `pip-audit --strict --require-hashes` on the prod lock; ignores are inline with justification + ticket.
 - **ADK pin:** `google-adk[eval]>=1.33.0,<2` in `pyproject.toml` + a CI guard asserting the **locked** resolution stays 1.x (prevents a non-reproducible jump to ADK 2.x).

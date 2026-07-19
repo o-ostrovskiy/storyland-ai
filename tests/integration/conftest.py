@@ -37,6 +37,27 @@ def normalize_query_string(url):
     ))
 
 
+def _match_method_case_insensitive(r1, r2):
+    """Case-insensitive HTTP-method matcher.
+
+    The ADK 2.x / google-genai 2.x client stack reports request methods
+    lowercased ("post") where the 1.x-era cassettes recorded "POST"; VCR's
+    built-in "method" matcher is a case-sensitive string compare, so every
+    replay failed with `POST != post` on an otherwise-identical request.
+    Method casing is semantically meaningless in HTTP, so match it
+    case-insensitively instead of re-recording every cassette (PR 4 of the
+    ADK 2 migration re-records them anyway, for the model bump).
+    """
+    assert r1.method.upper() == r2.method.upper(), f"{r1.method} != {r2.method}"
+
+
+@pytest.fixture(scope="module")
+def vcr(vcr):
+    """Shadow pytest-vcr's instance fixture to register the custom matcher."""
+    vcr.register_matcher("method_ci", _match_method_case_insensitive)
+    return vcr
+
+
 @pytest.fixture(scope="module")
 def vcr_config():
     """
@@ -63,7 +84,7 @@ def vcr_config():
     return {
         "cassette_library_dir": str(cassette_dir),
         "record_mode": "once",  # Record once, replay thereafter
-        "match_on": ["method", "scheme", "host", "port", "path", "query"],
+        "match_on": ["method_ci", "scheme", "host", "port", "path", "query"],
         "filter_headers": ["authorization", "x-goog-api-key"],  # Don't record auth headers
         "filter_query_parameters": ["key"],  # Redact API key from cassettes
         "decode_compressed_response": True,
