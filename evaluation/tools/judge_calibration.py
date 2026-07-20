@@ -28,6 +28,7 @@ read-mostly tool doesn't need.
 import argparse
 import json
 import sys
+import time
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -235,17 +236,45 @@ def collect_candidates(
     return interleave_by_run(per_dataset_runs)
 
 
-def hydrate_candidate(langfuse: Any, host: str, candidate: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def hydrate_candidate(
+    langfuse: Any,
+    host: str,
+    candidate: Dict[str, Any],
+    attempts: int = 3,
+    retry_delays: tuple = (2, 5),
+) -> Optional[Dict[str, Any]]:
     """
     Fetch the candidate's trace; return a manifest entry, or None (logged)
     if the trace has no itinerary output or can't be fetched.
+
+    Trace fetches retry on failure — the Langfuse trace endpoint times out
+    transiently under burst reads, and a dropped candidate here silently
+    shrinks the labeling pack.
     """
-    try:
-        trace = langfuse.api.trace.get(candidate["trace_id"])
-    except Exception as e:
-        logger.warning("trace_fetch_failed", trace_id=candidate["trace_id"], error=str(e))
-        print(f"  ! Dropped {candidate['item_id']} ({candidate['run_name']}): trace fetch failed: {e}")
-        return None
+    trace = None
+    for attempt in range(attempts):
+        try:
+            trace = langfuse.api.trace.get(candidate["trace_id"])
+            break
+        except Exception as e:
+            if attempt < attempts - 1:
+                delay = retry_delays[min(attempt, len(retry_delays) - 1)]
+                logger.warning(
+                    "trace_fetch_retry",
+                    trace_id=candidate["trace_id"],
+                    attempt=attempt + 1,
+                    delay=delay,
+                )
+                time.sleep(delay)
+            else:
+                logger.warning(
+                    "trace_fetch_failed", trace_id=candidate["trace_id"], error=str(e)
+                )
+                print(
+                    f"  ! Dropped {candidate['item_id']} ({candidate['run_name']}): "
+                    f"trace fetch failed after {attempts} attempts: {e}"
+                )
+                return None
 
     output = trace.output
     if not isinstance(output, dict) or not output:
@@ -325,7 +354,7 @@ def ensure_queue(langfuse: Any, queue_name: str, score_config_ids: List[str]) ->
     except Exception as e:
         logger.warning("queue_list_failed", error=str(e))
 
-    queue = langfuse.api.annotation_queues.create_queue(
+    queue_obj = langfuse.api.annotation_queues.create_queue(
         name=queue_name,
         score_config_ids=score_config_ids,
         description=(
@@ -335,8 +364,42 @@ def ensure_queue(langfuse: Any, queue_name: str, score_config_ids: List[str]) ->
             "preferences); do not look at the existing judge scores first."
         ),
     )
-    print(f"  Created queue: {queue_name} ({queue.id})")
-    return queue.id
+    print(f"  Created queue: {queue_name} ({queue_obj.id})")
+    return queue_obj.id
+
+
+def get_enqueued_trace_ids(langfuse: Any, queue_id: str) -> set:
+    """Trace ids already in the queue — enqueue must be idempotent so a
+    re-run (e.g. after transient trace-fetch drops) only backfills."""
+    trace_ids = set()
+    page = 1
+    while True:
+        try:
+            response = langfuse.api.annotation_queues.list_queue_items(
+                queue_id, page=page, limit=100
+            )
+        except Exception as e:
+            logger.warning("queue_items_list_failed", queue_id=queue_id, error=str(e))
+            break
+        for item in response.data:
+            trace_ids.add(item.object_id)
+        if len(response.data) < 100:
+            break
+        page += 1
+    return trace_ids
+
+
+def merge_manifest_items(
+    existing: List[Dict[str, Any]],
+    new: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Union by trace_id, new entries winning — a re-run must never drop a
+    previously manifested (and possibly already-labeled) item just because
+    its trace fetch failed this time."""
+    merged = {item["trace_id"]: item for item in existing}
+    for item in new:
+        merged[item["trace_id"]] = item
+    return list(merged.values())
 
 
 # ---------------------------------------------------------------------------
@@ -390,8 +453,13 @@ def cmd_build_queue(args: argparse.Namespace) -> int:
     )
 
     print("Enqueuing traces...")
+    already_enqueued = get_enqueued_trace_ids(langfuse, queue_id)
     enqueued = 0
+    skipped = 0
     for entry in entries:
+        if entry["trace_id"] in already_enqueued:
+            skipped += 1
+            continue
         try:
             langfuse.api.annotation_queues.create_queue_item(
                 queue_id, object_id=entry["trace_id"], object_type="TRACE"
@@ -402,7 +470,16 @@ def cmd_build_queue(args: argparse.Namespace) -> int:
                 "queue_item_create_failed", trace_id=entry["trace_id"], error=str(e)
             )
             print(f"  ! Failed to enqueue {entry['item_id']}: {e}")
-    print(f"  {enqueued}/{len(entries)} enqueued")
+    print(f"  {enqueued} enqueued, {skipped} already in queue")
+
+    manifest_path = Path(args.manifest)
+    if manifest_path.exists():
+        with open(manifest_path) as f:
+            previous = json.load(f)
+        entries = merge_manifest_items(previous.get("items", []), entries)
+        print(f"  Merged with existing manifest: {len(entries)} total items")
+        shape_counts = Counter(e["has_preferences"] for e in entries)
+        dataset_counts = Counter(e["dataset"] for e in entries)
 
     manifest = {
         "created_at": datetime.now().isoformat(),
@@ -419,14 +496,13 @@ def cmd_build_queue(args: argparse.Namespace) -> int:
         },
         "items": entries,
     }
-    manifest_path = Path(args.manifest)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
     print(f"\nManifest written: {manifest_path}")
     print(
         f"Label here: {host} → Annotation Queues → {args.queue_name} "
-        f"({enqueued} items). Score from the trace output, judge scores untouched."
+        f"({enqueued + skipped} items). Score from the trace output, judge scores untouched."
     )
     return 0
 

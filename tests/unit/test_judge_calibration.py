@@ -11,8 +11,10 @@ from evaluation.tools.judge_calibration import (
     DIMENSIONS,
     compute_agreement,
     fetch_human_scores,
+    get_enqueued_trace_ids,
     hydrate_candidate,
     interleave_by_run,
+    merge_manifest_items,
     select_candidates,
 )
 from evaluation.tools.llm_scorer import SCORING_CRITERIA
@@ -232,9 +234,58 @@ class TestHydrateCandidate:
             langfuse, "h", _candidate("books_v1", "q1", "run1")
         ) is None
 
-    def test_fetch_error_drops_candidate(self):
+    def test_fetch_error_drops_candidate_after_retries(self):
         langfuse = MagicMock()
-        langfuse.api.trace.get.side_effect = Exception("404")
+        langfuse.api.trace.get.side_effect = Exception("timeout")
         assert hydrate_candidate(
-            langfuse, "h", _candidate("books_v1", "q1", "run1")
+            langfuse, "h", _candidate("books_v1", "q1", "run1"),
+            attempts=3, retry_delays=(0,),
         ) is None
+        assert langfuse.api.trace.get.call_count == 3
+
+    def test_transient_fetch_error_recovers(self):
+        langfuse = MagicMock()
+        langfuse.api.trace.get.side_effect = [
+            Exception("timeout"),
+            self._trace(
+                output={"summary": "x"},
+                scores=[self._judge_score("engagement", 3.0)],
+            ),
+        ]
+        entry = hydrate_candidate(
+            langfuse, "h", _candidate("books_v1", "q1", "run1"),
+            attempts=3, retry_delays=(0,),
+        )
+        assert entry is not None
+
+
+class TestMergeManifestItems:
+    def test_new_wins_and_old_preserved(self):
+        existing = [
+            {"trace_id": "t1", "book_title": "Old"},
+            {"trace_id": "t2", "book_title": "Kept"},
+        ]
+        new = [
+            {"trace_id": "t1", "book_title": "New"},
+            {"trace_id": "t3", "book_title": "Added"},
+        ]
+        merged = {i["trace_id"]: i["book_title"] for i in merge_manifest_items(existing, new)}
+        assert merged == {"t1": "New", "t2": "Kept", "t3": "Added"}
+
+
+class TestGetEnqueuedTraceIds:
+    def test_paginates_until_short_page(self):
+        langfuse = MagicMock()
+        full_page = MagicMock(data=[MagicMock(object_id=f"t{i}") for i in range(100)])
+        short_page = MagicMock(data=[MagicMock(object_id="t100")])
+        langfuse.api.annotation_queues.list_queue_items.side_effect = [
+            full_page, short_page
+        ]
+        trace_ids = get_enqueued_trace_ids(langfuse, "q1")
+        assert len(trace_ids) == 101
+        assert langfuse.api.annotation_queues.list_queue_items.call_count == 2
+
+    def test_list_failure_returns_partial(self):
+        langfuse = MagicMock()
+        langfuse.api.annotation_queues.list_queue_items.side_effect = Exception("down")
+        assert get_enqueued_trace_ids(langfuse, "q1") == set()
