@@ -30,6 +30,11 @@ def make_langfuse_annotation_checker():
     directly (no callable) when Langfuse credentials are not configured —
     the weekly CI job has them, a bare local checkout may not.
     """
+    # CI provides creds via the .env file (same as run_scheduled_eval's
+    # load_config path), not exported env vars — load it before reading.
+    from dotenv import load_dotenv
+    load_dotenv()
+
     secret_key = os.getenv("LANGFUSE_SECRET_KEY")
     public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
     if not (secret_key and public_key):
