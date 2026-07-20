@@ -285,7 +285,13 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
         items = items[:max_cases]
 
     run_name = f"la_eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    run_metadata = {"dataset_name": DATASET_NAME, "evaluation_type": "local_atmosphere"}
+    # model_under_test labels every record: baselines are model-bound, and a
+    # model lift must read as a re-baseline, not a quality regression.
+    run_metadata = {
+        "dataset_name": DATASET_NAME,
+        "evaluation_type": "local_atmosphere",
+        "model_under_test": config.model_name,
+    }
     case_results: List[Dict[str, Any]] = []
 
     logger.info("starting_local_atmosphere_eval", dataset=DATASET_NAME,
@@ -457,6 +463,7 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
     summary = {
         "dataset_name": DATASET_NAME,
         "run_name": run_name,
+        "model_under_test": config.model_name,
         "timestamp": datetime.now().isoformat(),
         "total": len(case_results),
         "evaluated": len(evaluated),
