@@ -20,6 +20,130 @@ from common.logging import get_logger
 logger = get_logger("storyland.eval_dashboard")
 
 
+def make_langfuse_annotation_checker():
+    """
+    Build a checker that reports whether a trace has human annotation scores.
+
+    Returns a callable trace_id -> Optional[bool]: True if any
+    ANNOTATION-source score exists on the trace, False if none, None if the
+    status can't be determined (no credentials, API error). Returns None
+    directly (no callable) when Langfuse credentials are not configured —
+    the weekly CI job has them, a bare local checkout may not.
+    """
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
+    if not (secret_key and public_key):
+        return None
+
+    try:
+        from langfuse import Langfuse
+    except ImportError:
+        return None
+
+    langfuse = Langfuse(
+        secret_key=secret_key,
+        public_key=public_key,
+        host=os.getenv("LANGFUSE_HOST") or "https://cloud.langfuse.com",
+    )
+
+    def checker(trace_id: str) -> Optional[bool]:
+        try:
+            response = langfuse.api.scores_v3.get_many_v3(
+                trace_id=trace_id, source="ANNOTATION", limit=1
+            )
+            return bool(response.data)
+        except Exception as e:
+            logger.warning(
+                "annotation_check_failed", trace_id=trace_id, error=str(e)
+            )
+            return None
+
+    return checker
+
+
+def build_spot_check_section(
+    results: List[Dict[str, Any]],
+    annotation_checker=None,
+    now: Optional[datetime] = None,
+) -> List[str]:
+    """
+    Render the "Human spot-checks" report section from loaded results files.
+
+    Every flagged case in the window gets a row; a case stays listed as
+    PENDING (with its age) until an ANNOTATION-source score exists on its
+    trace, so skipped reviews accumulate visibly instead of disappearing.
+
+    Args:
+        results: Loaded results-file dicts (each may carry human_spot_check)
+        annotation_checker: Optional trace_id -> Optional[bool] (True =
+            reviewed). None means review status can't be verified.
+        now: Clock override for age computation (tests)
+
+    Returns:
+        Markdown lines (empty list if no run in the window flagged cases)
+    """
+    now = now or datetime.now()
+    rows = []
+    pending_count = 0
+
+    for result in results:
+        spot_check = result.get("human_spot_check")
+        if not spot_check or not spot_check.get("selected"):
+            continue
+
+        selected_at = spot_check.get("selected_at", "")
+        age_days = None
+        try:
+            age_days = (now - datetime.fromisoformat(selected_at)).days
+        except (ValueError, TypeError):
+            pass
+
+        for case in spot_check["selected"]:
+            trace_id = case.get("trace_id")
+            reviewed = (
+                annotation_checker(trace_id)
+                if annotation_checker and trace_id
+                else None
+            )
+            if reviewed is True:
+                status = "✅ Reviewed"
+            elif reviewed is False:
+                pending_count += 1
+                age = f", {age_days}d old" if age_days is not None else ""
+                status = f"⏳ PENDING{age}"
+            else:
+                status = "❓ Unknown (no Langfuse credentials)"
+
+            date = selected_at.split("T")[0] if "T" in selected_at else selected_at
+            rows.append(
+                f"| {date} | {case.get('dataset', '?')} | "
+                f"{case.get('item_id', '?')} | {case.get('book_title', '?')} | "
+                f"{status} |"
+            )
+
+    if not rows:
+        return []
+
+    lines = [
+        "## Human spot-checks",
+        "",
+        "Randomly flagged cases awaiting hand review (judge-calibration "
+        "spot-checks). Pending rows persist until the trace carries a "
+        "human annotation score in Langfuse.",
+        "",
+        "| Flagged | Dataset | Case | Book | Review status |",
+        "|---------|---------|------|------|---------------|",
+        *rows,
+        "",
+    ]
+    if pending_count:
+        lines.extend([
+            f"**⚠️ {pending_count} spot-check(s) awaiting human review.**",
+            "",
+        ])
+    return lines
+
+
 class EvalDashboard:
     """
     Dashboard for tracking evaluation quality metrics over time.
@@ -136,6 +260,13 @@ class EvalDashboard:
                     status = "✅ Complete" if cases > 0 else "⚠️ No data"
 
                     report_lines.append(f"| {date} | {dataset_name} | {cases} | {status} |")
+
+            spot_check_lines = build_spot_check_section(
+                results, annotation_checker=make_langfuse_annotation_checker()
+            )
+            if spot_check_lines:
+                report_lines.append("")
+                report_lines.extend(spot_check_lines)
 
             report_lines.extend([
                 "",
