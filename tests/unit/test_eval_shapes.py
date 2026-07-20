@@ -119,3 +119,50 @@ class TestModelDefault:
         self._base_env(monkeypatch)
         monkeypatch.setenv("MODEL_NAME", "gemini-3.5-flash")
         assert load_config().model_name == "gemini-3.5-flash"
+
+
+class TestJudgeDimensionContract:
+    """Codex P2 on PR #228: preference_adherence is Optional for the
+    no-preference shape, so a judge omitting it on a preference-CARRYING case
+    would silently average 5 dims — the API-contract shape passing without
+    adherence measured. The scorer now raises into its scoring-failed path
+    instead. (Audit of all four PR-4 eval runs on disk: zero occurrences —
+    latent, not fired; this pins it shut.)"""
+
+    def test_scores_model_allows_none(self):
+        # The model itself stays permissive (no-pref shape needs None)...
+        s = ItineraryScores(
+            book_relevance=3, completeness=3, actionability=3,
+            geographical_accuracy=3, engagement=3,
+        )
+        assert s.preference_adherence is None
+
+    async def test_missing_demanded_dimension_fails_scoring(self, monkeypatch):
+        """score_itinerary with preferences must FAIL (not 5-dim-average) when
+        the judge response omits preference_adherence."""
+        import json as _json
+        from types import SimpleNamespace
+
+        from evaluation.tools import llm_scorer
+
+        class _FakeModels:
+            def generate_content(self, **kwargs):
+                return SimpleNamespace(
+                    text=_json.dumps({
+                        "book_relevance": 4, "completeness": 4,
+                        "actionability": 4, "geographical_accuracy": 4,
+                        "engagement": 4,
+                    }),
+                    usage_metadata=None,
+                )
+
+        monkeypatch.setattr(
+            llm_scorer.genai, "Client",
+            lambda **kw: SimpleNamespace(models=_FakeModels()),
+        )
+        with pytest.raises(Exception):
+            await llm_scorer.score_itinerary(
+                api_key="k", book_title="B", author="A", input_text="i",
+                itinerary={"cities": []},
+                preferences={"pace": "fast"},
+            )
