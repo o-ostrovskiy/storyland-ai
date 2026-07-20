@@ -65,6 +65,7 @@ jobs:
           echo "LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}" >> .env
           echo "LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}" >> .env
           echo "LANGFUSE_HOST=${{ secrets.LANGFUSE_HOST }}" >> .env
+          echo "LANGFUSE_REVIEW_QUEUE_ID=${{ vars.LANGFUSE_REVIEW_QUEUE_ID }}" >> .env
 
       - name: Sync Langfuse datasets
         timeout-minutes: 5
