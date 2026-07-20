@@ -56,12 +56,18 @@ def _summarize_by_shape(case_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     shapes: Dict[str, Dict[str, Any]] = {}
     for shape_name, wants in (("with_preferences", True), ("without_preferences", False)):
-        scored = [
+        in_shape = [
             c for c in case_results
-            if c.get("scores") and bool(c.get("has_preferences")) == wants
+            if "has_preferences" in c and bool(c.get("has_preferences")) == wants
         ]
+        scored = [c for c in in_shape if c.get("scores")]
+        # Evaluated-but-unscored cases (e.g. the judge omitted a demanded
+        # dimension and scoring failed) must stay VISIBLE in the cell — a
+        # shrinking n with no marker would be a silent case-count
+        # inconsistency replacing the silent dimension-count one (#229 review).
+        n_unscored = len(in_shape) - len(scored)
         if not scored:
-            shapes[shape_name] = {"n": 0}
+            shapes[shape_name] = {"n": 0, "n_unscored": n_unscored}
             continue
         averages = [c["scores"]["average"] for c in scored]
         tokens = [
@@ -71,6 +77,7 @@ def _summarize_by_shape(case_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         ]
         shapes[shape_name] = {
             "n": len(scored),
+            "n_unscored": n_unscored,
             "mean_average": round(sum(averages) / len(averages), 3),
             "mean_total_tokens": round(sum(tokens) / len(tokens)) if tokens else None,
         }
