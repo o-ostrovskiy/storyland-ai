@@ -27,6 +27,7 @@ import pytest
 from fastapi import HTTPException
 
 import api.dependencies as deps
+from common.config import load_config
 
 
 @pytest.fixture
@@ -175,7 +176,9 @@ def test_empty_config_accepts_every_caller_and_that_is_a_misconfiguration(instal
     here would turn a misconfigured deploy into a silent total outage of the
     discovery chain. What changed is that the state is no longer invisible: boot
     logs ``gateway_auth_disabled`` (see the initialize tests below), and
-    ``REQUIRE_GATEWAY_SECRET=true`` makes it fatal at startup.
+    ``REQUIRE_GATEWAY_SECRET=true`` — the default since the 2026-07 flip — makes
+    it fatal at startup, so this state is only reachable behind an explicit
+    ``REQUIRE_GATEWAY_SECRET=false`` opt-out.
 
     If this test ever fails, someone made the empty case reject at request time.
     That may well be right — but it is an outage-shaped change, and it must be a
@@ -282,3 +285,59 @@ async def test_require_gateway_secret_boots_normally_when_secret_present(boot):
     assert state.config.require_gateway_secret is True
     assert logger.events("critical") == []
     assert "gateway_auth_disabled" not in logger.events("warning")
+
+
+# --------------------------------------------------------------------------
+# load_config() — REQUIRE_GATEWAY_SECRET defaults CLOSED (the 2026-07 flip)
+# --------------------------------------------------------------------------
+
+
+_REQUIRED_ENV = {
+    "GOOGLE_API_KEY": "test-key",
+    "USE_DATABASE": "false",
+    "SESSION_MAX_EVENTS": "20",
+    "MAX_CONTEXT_TOKENS": "30000",
+    "MODEL_NAME": "test-model",
+    "WORKFLOW_TIMEOUT": "300",
+    "AGENT_TIMEOUT": "60",
+    "LOG_LEVEL": "INFO",
+    "ENABLE_ADK_DEBUG": "false",
+}
+
+
+@pytest.fixture
+def config_env(monkeypatch):
+    """Minimal valid environment for load_config, gateway vars guaranteed unset.
+
+    delenv matters: load_dotenv() ran at import, so a developer's local .env
+    could otherwise leak REQUIRE_GATEWAY_SECRET/INTERNAL_API_SECRET into the
+    default-value assertions below.
+    """
+    for key, value in _REQUIRED_ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("REQUIRE_GATEWAY_SECRET", raising=False)
+    monkeypatch.delenv("INTERNAL_API_SECRET", raising=False)
+    return monkeypatch
+
+
+def test_require_gateway_secret_defaults_to_true(config_env):
+    """The default flip: an unset REQUIRE_GATEWAY_SECRET now fails CLOSED.
+
+    Before 2026-07-19 the default was false, so a fresh deploy with no secret
+    came up open (every caller accepted, X-User-ID forgeable) behind nothing
+    but a boot warning. If this test fails, the service is open by default
+    again — that must be a deliberate, reviewed decision.
+    """
+    assert load_config().require_gateway_secret is True
+
+
+def test_require_gateway_secret_explicit_opt_out(config_env):
+    """REQUIRE_GATEWAY_SECRET=false is the standalone/dev escape hatch."""
+    config_env.setenv("REQUIRE_GATEWAY_SECRET", "false")
+    assert load_config().require_gateway_secret is False
+
+
+def test_require_gateway_secret_explicit_true_still_true(config_env):
+    """Setting it to "true" explicitly matches the default."""
+    config_env.setenv("REQUIRE_GATEWAY_SECRET", "true")
+    assert load_config().require_gateway_secret is True

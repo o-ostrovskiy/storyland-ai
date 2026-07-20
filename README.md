@@ -239,7 +239,8 @@ All configuration is via environment variables in `.env`. Copy `.env.example` to
 | `SENTRY_ENABLE_METRICS` | Emit Sentry metrics. Every non-debug structlog event is auto-counted as `log.events` `{event, level}`, making timeouts/cache-hits/failures chartable; new call sites can use `sentry_sdk.metrics` directly (examples in `api/sentry.py`). | `true` |
 | `SENTRY_TRACES_SAMPLE_RATE` | Sentry performance-tracing sample rate (0.0–1.0) | `0.0` |
 | `CORS_ORIGINS` | Allowed CORS origins for API (comma-separated) | `*` |
-| `INTERNAL_API_SECRET` | Shared secret with the gateway service — when set, all itinerary endpoints require an `X-Internal-Secret` header with this value. The health endpoint (`/health`) is always open. Leave empty for standalone/dev use. | — |
+| `INTERNAL_API_SECRET` | Shared secret with the gateway service — when set, all itinerary endpoints require an `X-Internal-Secret` header with this value. The health endpoint (`/health`) is always open. Leaving it empty (standalone/dev use) also requires `REQUIRE_GATEWAY_SECRET=false`, otherwise the service refuses to start. | — |
+| `REQUIRE_GATEWAY_SECRET` | Fail-closed switch for gateway auth: when `true`, an empty `INTERNAL_API_SECRET` is a fatal boot error instead of an open service that trusts the forgeable `X-User-ID` header. Set `false` explicitly for standalone/dev use without a gateway (`.env.example` ships this opt-out). | `true` |
 
 Free tier includes 15 RPM and 200 requests/day — sufficient for development.
 
