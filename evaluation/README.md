@@ -130,6 +130,17 @@ Each case logs a Langfuse dataset run (`exp_eval_YYYYMMDD_HHMMSS`) with scores:
 `case_pass`, `no_duplicates`, `source_stamped`, `places_schema_valid`,
 `chip_ids_stamped` (all 0/1), `new_places_count`, and `chips_available`.
 
+### Which model runs where
+
+Two models participate in every judged eval run — keep them straight when reading results:
+
+| Role | Model | Where it's set |
+|------|-------|----------------|
+| **System under test** — the agent workflows being evaluated (discovery, composition, local-atmosphere, expansion, place→book) | `MODEL_NAME` env var (repo default `gemini-3.1-flash-lite`, `common/config.py`; the CI eval workflow sets the same) | Stamped as `model_under_test` in each dedicated runner's Langfuse run metadata and results JSON — baselines are model-bound, and a model lift must read as a re-baseline, not a regression. |
+| **LLM-as-judge** — scores the outputs | `gemini-2.5-flash-lite`, fixed | Default in `llm_scorer.score_itinerary`, passed explicitly by `run_scheduled_eval.py`. Deliberately decoupled from `MODEL_NAME`: a fixed judge keeps scores comparable across system-model lifts (changing both at once would confound every delta). |
+
+Production reads `MODEL_NAME` from `.env.prod` on the box (deploys never overwrite it), so the prod value can drift from the repo default — check recent `production`-env generations in Langfuse for the authoritative answer (the plugin records the configured model string per generation).
+
 ### Eval protocol
 
 Rules that apply to every evalset and eval report in this repo:
@@ -205,17 +216,18 @@ Use `--prompt-version <label>` to tag a run in Langfuse before merging a prompt 
 
 ### Current Gemini Pricing
 
-Pricing is model-aware (as of May 2026, standard non-batch rates):
+Pricing is model-aware (as of Jul 2026, standard non-batch rates):
 
 | Model | Input / 1M | Output / 1M |
 |---|---|---|
+| gemini-3.1-flash-lite | $0.25 | $1.50 |
 | gemini-2.5-flash | $0.30 | $2.50 |
 | gemini-2.5-flash-lite | $0.10 | $0.40 |
 | gemini-2.0-flash | $0.10 | $0.40 |
 | gemini-1.5-flash | $0.075 | $0.30 |
 | gemini-1.5-pro | $1.25 | $5.00 |
 
-Unknown models fall back to gemini-2.5-flash rates. Source: [Google AI Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing).
+Matching is by substring with longest-key-first (so a `-preview` alias bills at its base model's rates). Unknown models fall back to gemini-2.5-flash rates. Source: [Google AI Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing).
 
 ### Enabling the Plugin
 
