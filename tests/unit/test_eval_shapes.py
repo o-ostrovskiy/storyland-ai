@@ -85,3 +85,37 @@ class TestEvalsetShapeSplit:
                 ), case["eval_id"]
         assert shapes[True] >= 3, "API-contract shape underrepresented"
         assert shapes[False] >= 3, "prod shape underrepresented"
+
+
+class TestModelDefault:
+    def _base_env(self, monkeypatch):
+        # load_config's full required-env set (same as test_retry_backoff).
+        for k, v in {
+            "GOOGLE_API_KEY": "k",
+            "USE_DATABASE": "false",
+            "SESSION_MAX_EVENTS": "100",
+            "MAX_CONTEXT_TOKENS": "1000",
+            "WORKFLOW_TIMEOUT": "300",
+            "AGENT_TIMEOUT": "60",
+            "LOG_LEVEL": "INFO",
+            "ENABLE_ADK_DEBUG": "false",
+        }.items():
+            monkeypatch.setenv(k, v)
+
+    def test_model_name_defaults_without_env(self, monkeypatch):
+        """A deploy missing MODEL_NAME boots on the code default (old footgun:
+        _require_env crashed at startup)."""
+        from common.config import DEFAULT_MODEL_NAME, load_config
+
+        self._base_env(monkeypatch)
+        monkeypatch.delenv("MODEL_NAME", raising=False)
+        config = load_config()
+        assert config.model_name == DEFAULT_MODEL_NAME
+        assert DEFAULT_MODEL_NAME == "gemini-3.1-flash-lite"
+
+    def test_model_name_env_wins(self, monkeypatch):
+        from common.config import load_config
+
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("MODEL_NAME", "gemini-3.5-flash")
+        assert load_config().model_name == "gemini-3.5-flash"
