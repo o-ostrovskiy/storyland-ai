@@ -120,8 +120,9 @@ def downgrade_ungrounded_match_types(
     The trust core of the hallucination guardrail: the formatter self-labels each
     stop's ``match_type``, but a self-label is not evidence. Here we *derive* the
     label server-side from a real check — any stop the formatter marked
-    ``literal``/``historical`` whose name does not appear in the grounded
-    discovery research (city/landmark/author/context) is downgraded to the
+    ``literal``/``historical`` whose name is not grounded in the discovery
+    research (city/landmark/author/context; see ``is_title_grounded`` for the
+    token-overlap matching rule) is downgraded to the
     weakest claim (``vibe``) and has its ``grounding_source`` cleared, since the
     cited evidence didn't hold up. Stops are never dropped and never upgraded.
 
@@ -133,7 +134,7 @@ def downgrade_ungrounded_match_types(
     if not itinerary_dict:
         return itinerary_dict
 
-    haystack = _normalize_text(grounding_text)
+    haystack = grounding_token_set(grounding_text)
     if not haystack:
         return itinerary_dict
 
@@ -142,8 +143,7 @@ def downgrade_ungrounded_match_types(
         for stop in city.get("stops") or []:
             if stop.get("match_type") not in _GROUNDED_MATCH_TYPES:
                 continue
-            name = _normalize_text(stop.get("name"))
-            if name and name in haystack:
+            if is_title_grounded(stop.get("name"), haystack):
                 continue
             stop["match_type"] = _DOWNGRADE_TARGET
             stop["grounding_source"] = None
@@ -250,11 +250,50 @@ def extract_book_recommendations_from_state(state_accessor) -> Optional[dict]:
     )
 
 
-def _normalize_text(text: object) -> str:
-    """Lowercase + collapse whitespace for tolerant substring matching."""
+# Leading/interior articles carry no grounding signal and are the usual source
+# of surface-form mismatches ("Pump Room" vs "The Grand Pump Room").
+_ARTICLES = frozenset({"the", "a", "an"})
+
+# 1-2 token titles require every token in the grounding text; 3+ token titles
+# tolerate exactly this many missing tokens, which absorbs surface variants
+# like "The Grand Pump Room" vs "Pump Room". A flat overlap ratio is
+# deliberately avoided: it would let long titles pass with several unsupported
+# tokens, and long place names are where scattered-word false matches bite.
+_GROUNDING_MAX_MISSING = 1
+
+
+def grounding_token_set(text: object) -> frozenset:
+    """Tokenize grounding text once for repeated is_title_grounded() checks.
+
+    Word tokens (unicode-aware, lowercased, punctuation stripped). An empty
+    result means "no usable evidence" — every caller treats that as its
+    fail-open branch, same as the old empty-string check.
+    """
     if not isinstance(text, str):
-        return ""
-    return re.sub(r"\s+", " ", text).strip().lower()
+        return frozenset()
+    return frozenset(re.findall(r"\w+", text.lower()))
+
+
+def is_title_grounded(title: object, haystack_tokens: frozenset) -> bool:
+    """Shared grounding-match primitive for the output-side guards.
+
+    Token containment replacing naive substring matching, which failed in
+    both directions: "The Mill" false-matched any text containing the
+    substring (e.g. "the millionaire"), while a grounded "The Grand Pump
+    Room" was missed when the research said "Pump Room". Matching on whole
+    word tokens fixes the former; tolerating at most one missing token on
+    3+ token titles fixes the latter. The allowance is a fixed count, not a
+    ratio, so a long title cannot pass on scattered partial support.
+
+    A title with no significant tokens (empty/None/articles-only) is never
+    grounded — identical to the old empty-normalized-title behavior.
+    """
+    title_tokens = grounding_token_set(title) - _ARTICLES
+    if not title_tokens:
+        return False
+    missing = len(title_tokens - haystack_tokens)
+    allowed_missing = _GROUNDING_MAX_MISSING if len(title_tokens) >= 3 else 0
+    return missing <= allowed_missing
 
 
 def filter_grounded_recommendations(
@@ -264,7 +303,8 @@ def filter_grounded_recommendations(
 
     The book-recommendation formatter is tool-less and instructed never to
     invent books, but as a defensive post-validation we drop any recommendation
-    whose title does not appear in the grounded researcher candidate text. This
+    whose title is not grounded in the researcher candidate text (per the
+    ``is_title_grounded`` token-overlap rule). This
     is the output-side complement to relaxing the schema floor: relaxing the
     floor removes the *pressure* to fabricate; this removes any title that was
     fabricated anyway.
@@ -281,15 +321,11 @@ def filter_grounded_recommendations(
         return None
 
     recs = rec_data.get("recommendations") or []
-    haystack = _normalize_text(researcher_text)
+    haystack = grounding_token_set(researcher_text)
     if not haystack:
         return rec_data
 
-    grounded = [
-        rec
-        for rec in recs
-        if _normalize_text(rec.get("title")) and _normalize_text(rec.get("title")) in haystack
-    ]
+    grounded = [rec for rec in recs if is_title_grounded(rec.get("title"), haystack)]
 
     if not grounded or len(grounded) == len(recs):
         return rec_data

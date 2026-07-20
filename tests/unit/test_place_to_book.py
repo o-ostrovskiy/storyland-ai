@@ -170,6 +170,23 @@ class TestGroundingFilter:
         assert filter_grounded_candidates([], "text") == []
         assert filter_grounded_candidates(None, "text") == []
 
+    def test_no_substring_false_positive_for_short_title(self):
+        # "The Mill" formerly substring-matched "the millionaire" — and here
+        # dropping to empty is the valid honest not-found outcome.
+        cands = [_candidate("The Mill")]
+        out = filter_grounded_candidates(cands, "a profile of the millionaire founder")
+        assert out == []
+
+    def test_surface_variant_title_kept(self):
+        cands = [_candidate("The Grand Pump Room")]
+        out = filter_grounded_candidates(cands, "scenes set in the Pump Room at Bath")
+        assert [c["title"] for c in out] == ["The Grand Pump Room"]
+
+    def test_exact_title_kept(self):
+        cands = [_candidate("Real Title")]
+        out = filter_grounded_candidates(cands, "the researcher covered Real Title fully")
+        assert [c["title"] for c in out] == ["Real Title"]
+
 
 # ---------------------------------------------------------------------------
 # Label invariants

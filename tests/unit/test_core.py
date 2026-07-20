@@ -36,6 +36,8 @@ from core.extraction import (
     extract_expansion_from_state,
     extract_book_recommendations_from_state,
     downgrade_ungrounded_match_types,
+    grounding_token_set,
+    is_title_grounded,
 )
 from core.events import ExpansionReady
 from core.executor import WorkflowExecutor
@@ -1006,6 +1008,62 @@ class TestDowngradeUngroundedMatchTypes:
 
     def test_none_itinerary_returns_none(self):
         assert downgrade_ungrounded_match_types(None, _RESEARCH) is None
+
+    def test_short_generic_name_no_substring_false_positive(self):
+        # "The Mill" used to substring-match "the millionaire" in unrelated text.
+        itin = _itinerary_with_stops([_stop("The Mill", "literal", grounding_source="x")])
+        research = "A tour of the millionaire's mansion district in Atlanta."
+        out = downgrade_ungrounded_match_types(itin, research)
+        stop = out["cities"][0]["stops"][0]
+        assert stop["match_type"] == "vibe"
+        assert stop["grounding_source"] is None
+
+    def test_surface_variant_name_still_grounded(self):
+        # One missing token ("Grand") must not downgrade a grounded stop.
+        itin = _itinerary_with_stops(
+            [_stop("The Grand Pump Room", "literal", grounding_source="ch. 2")]
+        )
+        research = "Austen's characters take the waters at the Pump Room in Bath."
+        out = downgrade_ungrounded_match_types(itin, research)
+        stop = out["cities"][0]["stops"][0]
+        assert stop["match_type"] == "literal"
+        assert stop["grounding_source"] == "ch. 2"
+
+
+class TestGroundingTokenMatch:
+    """The shared matching primitive behind all three grounding guards."""
+
+    def test_exact_match(self):
+        haystack = grounding_token_set("Visit the Margaret Mitchell House today")
+        assert is_title_grounded("Margaret Mitchell House", haystack)
+
+    def test_two_token_title_requires_both_tokens(self):
+        haystack = grounding_token_set("only the pump is mentioned here")
+        assert not is_title_grounded("Pump Room", haystack)
+
+    def test_three_token_title_tolerates_one_missing(self):
+        haystack = grounding_token_set("scenes at the pump room in bath")
+        assert is_title_grounded("Grand Pump Room", haystack)
+
+    def test_long_title_never_tolerates_two_missing(self):
+        # The allowance is a fixed count, not a ratio: a flat 0.6 threshold
+        # would pass this 5-token title on 3/5 scattered support.
+        haystack = grounding_token_set("the pump room and roman spa")
+        assert not is_title_grounded("Grand Pump Room Roman Baths", haystack)
+
+    def test_word_boundaries_respected(self):
+        haystack = grounding_token_set("the millionaire's mansion")
+        assert not is_title_grounded("The Mill", haystack)
+
+    def test_empty_or_articles_only_title_never_grounded(self):
+        haystack = grounding_token_set("the a an anything")
+        assert not is_title_grounded("The", haystack)
+        assert not is_title_grounded("", haystack)
+        assert not is_title_grounded(None, haystack)
+
+    def test_non_string_grounding_text_yields_empty_set(self):
+        assert grounding_token_set(None) == frozenset()
+        assert grounding_token_set(42) == frozenset()
 
 
 class TestGroundingResearchText:
