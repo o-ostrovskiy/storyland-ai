@@ -52,18 +52,27 @@ class TestSummarizeByShape:
             self._case(True, 4.0, 2000),
             self._case(True, 3.0, 1000),
             self._case(False, 2.0, 500),
-            {"has_preferences": False},  # unscored (failed) case: excluded
+            {"has_preferences": False},  # unscored (failed) case
         ]
         shapes = _summarize_by_shape(results)
         assert shapes["with_preferences"] == {
-            "n": 2, "mean_average": 3.5, "mean_total_tokens": 1500,
+            "n": 2, "n_unscored": 0, "mean_average": 3.5, "mean_total_tokens": 1500,
         }
         assert shapes["without_preferences"]["n"] == 1
         assert shapes["without_preferences"]["mean_average"] == 2.0
+        # The unscored case stays VISIBLE in its cell, never silently dropped.
+        assert shapes["without_preferences"]["n_unscored"] == 1
 
     def test_empty_shape_reports_zero(self):
         shapes = _summarize_by_shape([self._case(True, 4.0)])
-        assert shapes["without_preferences"] == {"n": 0}
+        assert shapes["without_preferences"] == {"n": 0, "n_unscored": 0}
+
+    def test_all_unscored_shape_still_visible(self):
+        """A shape where every case failed scoring reports n=0 but a nonzero
+        n_unscored — the difference between 'no cases ran' and 'cases ran and
+        none could be scored' must be readable from the artifact."""
+        shapes = _summarize_by_shape([{"has_preferences": True}])
+        assert shapes["with_preferences"] == {"n": 0, "n_unscored": 1}
 
 
 class TestEvalsetShapeSplit:
@@ -119,3 +128,55 @@ class TestModelDefault:
         self._base_env(monkeypatch)
         monkeypatch.setenv("MODEL_NAME", "gemini-3.5-flash")
         assert load_config().model_name == "gemini-3.5-flash"
+
+
+class TestJudgeDimensionContract:
+    """Codex P2 on PR #228: preference_adherence is Optional for the
+    no-preference shape, so a judge omitting it on a preference-CARRYING case
+    would silently average 5 dims — the API-contract shape passing without
+    adherence measured. The scorer now raises into its scoring-failed path
+    instead. (Audit of all four PR-4 eval runs on disk: zero occurrences —
+    latent, not fired; this pins it shut.)"""
+
+    def test_scores_model_allows_none(self):
+        # The model itself stays permissive (no-pref shape needs None)...
+        s = ItineraryScores(
+            book_relevance=3, completeness=3, actionability=3,
+            geographical_accuracy=3, engagement=3,
+        )
+        assert s.preference_adherence is None
+
+    async def test_missing_demanded_dimension_fails_scoring(self, monkeypatch):
+        """score_itinerary with preferences must FAIL (not 5-dim-average) when
+        the judge response omits preference_adherence."""
+        import json as _json
+        from types import SimpleNamespace
+
+        from evaluation.tools import llm_scorer
+
+        class _FakeModels:
+            def generate_content(self, **kwargs):
+                return SimpleNamespace(
+                    text=_json.dumps({
+                        "book_relevance": 4, "completeness": 4,
+                        "actionability": 4, "geographical_accuracy": 4,
+                        "engagement": 4,
+                    }),
+                    usage_metadata=None,
+                )
+
+        monkeypatch.setattr(
+            llm_scorer.genai, "Client",
+            lambda **kw: SimpleNamespace(models=_FakeModels()),
+        )
+        # Narrow by review: pytest.raises(Exception) would pass on ANY failure
+        # — a mis-wired fake raising AttributeError before the parse would go
+        # green with the guard never exercised (the same
+        # success-over-the-thing-it-checks class this PR closes). The match
+        # pins that THE GUARD is what fired.
+        with pytest.raises(ValueError, match="omitted preference_adherence"):
+            await llm_scorer.score_itinerary(
+                api_key="k", book_title="B", author="A", input_text="i",
+                itinerary={"cities": []},
+                preferences={"pace": "fast"},
+            )

@@ -319,6 +319,17 @@ Respond with ONLY a valid JSON object (no markdown, no explanation) with these e
         if not score_preferences and scores.preference_adherence is not None:
             # Judge scored a dimension it was told to skip — force honesty.
             scores = scores.model_copy(update={"preference_adherence": None})
+        if score_preferences and scores.preference_adherence is None:
+            # The inverse gap (Codex P2 on PR #228): the field is Optional for
+            # the no-preference shape, so a judge that OMITS it on a
+            # preference-carrying case would silently produce a 5-dimension
+            # average — the API-contract shape passing without adherence ever
+            # being measured. A missing demanded dimension is a scoring
+            # FAILURE, not a thinner success: raise into the existing
+            # scoring-failed path so the case shows up unscored and visible.
+            raise ValueError(
+                "judge omitted preference_adherence on a preference-carrying case"
+            )
 
         usage = response.usage_metadata
         get_client().update_current_generation(
