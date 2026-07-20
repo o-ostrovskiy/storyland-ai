@@ -38,10 +38,12 @@ Create Langfuse datasets from evalset files (one-time):
 make eval-setup
 ```
 
-This creates two datasets in Langfuse:
+This creates the Langfuse datasets:
 - `storyland_eval` — 8 diverse scenarios for comprehensive testing
 - `books_v1` — 10 cases with expected outputs and book-specific scoring criteria
 - `place_to_book_v1` — 11 cases for the **place→book reverse-routing** grounding gate (literal/vibe labelling + not-found state). Register with `make eval-setup-one EVALSET_FILE=evaluation/place_to_book_v1.evalset.json`.
+- `local_atmosphere_v1` — 8 cases for the **local-atmosphere** ("book near me") flow: mixed preference shapes (4 with / 4 without `user:preferences`), LLM judge + deterministic envelope/radius gate.
+- `expansion_v1` — 5 cases for the **expansion** (suggestion-chip) flow: deterministic two-step gate (compose → expand), no judge.
 
 ## Quality Evaluation
 
@@ -75,6 +77,81 @@ and `grounding_clean` (0/1 — every `literal` has a `maps_to`, every `vibe` has
 > Note: `_extract_input_from_case` stores `{place}` (not `{book_title, author}`) for
 > place→book cases, and carries the grounding expectations (`expect`, `min_literal`,
 > `expected_literal_examples`) into item metadata so the runner has a target to score.
+
+### Local-atmosphere eval ("book near me")
+
+The `local_atmosphere_v1` dataset evaluates the single-phase local-atmosphere flow
+(`WorkflowExecutor.local_atmosphere` — the same code path as
+`POST /itinerary/local-atmosphere`): given a book plus a user location
+(`location_label`, `lat`, `lng`) and a `radius_km`, compose a nearby itinerary whose
+mood evokes the book. Two layers of scoring:
+
+- **Deterministic gate** — the result must validate as a `ComposerEnvelope`, plus an
+  opportunistic haversine radius check over any geo fields in the payload (`CityStop`
+  carries no coordinates today, so this normally reports `no_geo_fields` and radius
+  adherence is asserted via each case's `geographical_accuracy` judge criterion).
+- **LLM judge** — the standard `llm_scorer.score_itinerary` path (6 dimensions).
+
+```bash
+make eval-local-atmosphere
+# Or directly (re-registers the dataset items from the evalset, then runs all cases):
+python evaluation/tools/run_local_atmosphere_eval.py [--max-cases N] [--no-register]
+```
+
+Each case logs a Langfuse dataset run (`la_eval_YYYYMMDD_HHMMSS`) with scores:
+`case_pass` (0/1), `envelope_valid` (0/1), `radius_within` (0/1 — only when geo fields
+were found), the judge dimensions, and `judge_average`. Per the eval protocol,
+`preference_adherence` is reported **only for cases that carry `user:preferences`**,
+and the report includes per-preference-shape aggregation plus a `mechanism` section.
+
+### Expansion eval (suggestion chips)
+
+The `expansion_v1` dataset is a **deterministic two-step gate** for the expansion flow
+(no LLM judge — like the place→book gate). Each case drives the live
+`WorkflowExecutor` end to end: `discover` → `compose` (first region) → pick a
+suggestion chip (`chip_keyword` substring match on label/action_prompt, else the first
+chip) → `expand`. The harness deliberately uses the executor rather than the raw
+workflow: the invariants under test — `source="expansion"` stamping, the dedupe
+post-filter, chip-id stamping, trusted-chip resolution (MYS-167) — are executor logic.
+
+Checks per case: at least `min_new_places` new stops; every new stop stamped
+`source="expansion"`; no duplicates against the base itinerary (case-insensitive name
+match); every new stop validates as a `CityStop`; follow-up chips (≤4) carry non-empty
+unique server-stamped ids. A compose that legally returns zero chips is recorded as
+`no_chips` and counted skipped, never failed.
+
+```bash
+make eval-expansion
+# Or directly:
+python evaluation/tools/run_expansion_eval.py [--max-cases N] [--no-register]
+```
+
+Each case logs a Langfuse dataset run (`exp_eval_YYYYMMDD_HHMMSS`) with scores:
+`case_pass`, `no_duplicates`, `source_stamped`, `places_schema_valid`,
+`chip_ids_stamped` (all 0/1), `new_places_count`, and `chips_available`.
+
+### Eval protocol
+
+Rules that apply to every evalset and eval report in this repo:
+
+1. **`flow` routing.** Every evalset declares a top-level `"flow"` field
+   (`itinerary` [default when absent], `place_to_book`, `local_atmosphere`,
+   `expansion`). The dataset sync records it in `evaluation/langfuse_datasets.json`,
+   and `run_scheduled_eval.py`'s auto-discovery only consumes `flow: itinerary`
+   datasets — others are logged as routed to their dedicated runner (INFO, not a
+   failure). This prevents the scheduled itinerary runner from either skip-failing on
+   format-incompatible datasets or silently running them through the wrong flow.
+   A new evalset for a non-itinerary flow **must** carry the field (pinned by
+   `tests/unit/test_eval_dataset_routing.py`).
+2. **Per-shape aggregation.** Wherever preferences are involved, reports aggregate
+   judge scores separately for cases with and without `user:preferences`. The
+   preference-free aggregate excludes `preference_adherence` (the judge always emits
+   all 6 dimensions, but with no preferences it is judged against nothing), and
+   preference-free cases must not carry a `preference_adherence` quality criterion
+   (the dataset sync warns on violations).
+3. **`mechanism` section.** Every eval report (results JSON + printed summary) carries
+   a `mechanism` block stating how scores were produced: which checks are
+   deterministic, which are LLM-judged and by what model, and the pass rule.
 
 ### View Results
 
@@ -235,7 +312,7 @@ runner = Runner(agent=my_agent, plugins=[LoggingPlugin()])
 3. Enable **"Fast (Preview)"** toggle (top-right) for real-time ingestion — requires Langfuse SDK v4 ✓
 4. **Traces** — One trace per eval case; contains the full span tree above
 5. **Observations** — Filterable list of all spans and generations across all traces
-6. **Datasets** — Open `storyland_eval` or `books_v1`, select a Run to see per-item scores and trace links
+6. **Datasets** — Open `storyland_eval`, `books_v1`, `place_to_book_v1`, `local_atmosphere_v1`, or `expansion_v1`, select a Run to see per-item scores and trace links
 7. **Scores** — Quality scores (book_relevance, completeness, etc.) attached to each trace
 
 ## Directory Structure
@@ -246,6 +323,8 @@ evaluation/
 ├── tools/                         # Evaluation scripts
 │   ├── run_scheduled_eval.py      # Itinerary (book→place) eval runner — LLM-as-judge
 │   ├── run_place_to_book_eval.py  # Place→book reverse-routing grounding eval runner
+│   ├── run_local_atmosphere_eval.py  # Local-atmosphere eval runner (judge + deterministic gate)
+│   ├── run_expansion_eval.py      # Expansion (suggestion-chip) deterministic eval runner
 │   ├── eval_dashboard.py          # Dashboard and reporting
 │   ├── langfuse_eval.py           # Dataset creation pipeline
 │   ├── llm_scorer.py              # LLM-as-judge quality scoring
@@ -253,7 +332,9 @@ evaluation/
 ├── storyland_eval.evalset.json    # Dataset (8 diverse books)
 ├── books_v1.evalset.json          # Dataset (10 books with expected output + criteria)
 ├── place_to_book_v1.evalset.json  # Dataset (11 place→book reverse-routing grounding cases)
-├── langfuse_datasets.json         # Dataset registry (gitignored)
+├── local_atmosphere_v1.evalset.json  # Dataset (8 local-atmosphere cases, mixed preference shapes)
+├── expansion_v1.evalset.json      # Dataset (5 expansion two-step deterministic cases)
+├── langfuse_datasets.json         # Dataset registry incl. per-dataset flow (gitignored)
 ├── results/                       # Evaluation run results (gitignored)
 ├── trend_report.md                # Generated trend report (tracked)
 └── metrics.json                   # Exported metrics (gitignored)

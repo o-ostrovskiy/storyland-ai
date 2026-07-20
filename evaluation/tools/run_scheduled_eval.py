@@ -47,6 +47,42 @@ except ImportError:
 logger = get_logger("storyland.scheduled_eval")
 
 
+# Dedicated runner per non-itinerary flow, for the routing log message.
+DEDICATED_RUNNERS = {
+    "place_to_book": "evaluation/tools/run_place_to_book_eval.py",
+    "local_atmosphere": "evaluation/tools/run_local_atmosphere_eval.py",
+    "expansion": "evaluation/tools/run_expansion_eval.py",
+}
+
+
+def select_itinerary_datasets(
+    datasets_info: Dict[str, Any],
+) -> tuple[List[str], List[Dict[str, str]]]:
+    """Split registry entries into itinerary datasets vs. routed-away ones.
+
+    The scheduled runner only knows how to drive the itinerary (book→place)
+    workflow; datasets registered with any other ``flow`` (place_to_book,
+    local_atmosphere, expansion) have dedicated runners and must not be fed
+    through this script — their cases would either all skip (failing CI) or,
+    worse, run through the wrong flow and produce plausible-but-bogus judge
+    scores. A missing ``flow`` means "itinerary" (registries written before
+    the field existed contain only itinerary datasets).
+
+    Returns:
+        (selected_dataset_names, routed_entries) where each routed entry is
+        ``{"dataset_name": ..., "flow": ...}``.
+    """
+    selected: List[str] = []
+    routed: List[Dict[str, str]] = []
+    for entry in datasets_info.get("datasets", []):
+        flow = entry.get("flow", "itinerary")
+        if flow == "itinerary":
+            selected.append(entry["dataset_name"])
+        else:
+            routed.append({"dataset_name": entry["dataset_name"], "flow": flow})
+    return selected, routed
+
+
 def select_first_region(region_analysis: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Automated region selection for evaluation mode - Issue #97.
@@ -851,10 +887,24 @@ async def run_all_evaluations(
             try:
                 with open(datasets_file, 'r') as f:
                     datasets_info = json.load(f)
-                    datasets = [
-                        d["dataset_name"]
-                        for d in datasets_info.get("datasets", [])
-                    ]
+                    datasets, routed = select_itinerary_datasets(datasets_info)
+                    for entry in routed:
+                        # Routed, not failed, not silent: these datasets are
+                        # healthy — they just belong to a dedicated runner.
+                        logger.info(
+                            "dataset_routed_to_dedicated_runner",
+                            dataset_name=entry["dataset_name"],
+                            flow=entry["flow"],
+                            runner=DEDICATED_RUNNERS.get(entry["flow"], "unknown"),
+                        )
+                    if not datasets:
+                        logger.warning(
+                            "no_itinerary_datasets_discovered",
+                            file=str(datasets_file),
+                            message="Registry has no itinerary-flow datasets; "
+                                    "falling back to defaults",
+                        )
+                        datasets = ["storyland_eval", "books_v1"]
                     logger.info(
                         "loaded_datasets_from_file",
                         file=str(datasets_file),

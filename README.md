@@ -386,6 +386,7 @@ The unit suite (`tests/unit/`) by area — per-module counts rot with every PR, 
 | Caching | `test_cache.py`, `test_disk_cache.py`, `test_cache_version.py` |
 | Place features | `test_place_key.py`, `test_place_to_book.py`, `test_place_to_book_eval.py` |
 | Quality & guardrails | `test_llm_scorer.py`, `test_tone_guardrail.py`, `test_recommendation_floor.py` |
+| Eval harnesses | `test_local_atmosphere_eval.py`, `test_expansion_eval.py`, `test_eval_dataset_routing.py` |
 | Observability | `test_sentry.py`, `test_langfuse_plugin_concurrency.py`, `test_langfuse_pricing.py` |
 | Sessions & ops | `test_services.py`, `test_session_retention.py` |
 
