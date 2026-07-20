@@ -156,9 +156,19 @@ flowchart TB
 
 **Technology Stack:**
 - [Google Agent Development Kit (ADK)](https://github.com/google/adk-python)
-- Google Gemini 2.0/2.5 models (configurable)
+- Google Gemini models (see "Which model runs where" below)
 - Pydantic for data validation
 - SQLite for persistence
+
+**Which model runs where:**
+
+| Role | Model | Where it's set |
+|------|-------|----------------|
+| All agent workflows — discovery, composition, local-atmosphere, expansion, book recommendations, place→book | `gemini-3.1-flash-lite` (default) | `MODEL_NAME` env var; code default `DEFAULT_MODEL_NAME` in `common/config.py`. One shared model — every workflow runs on the executor's single `Gemini` instance. |
+| Eval system-under-test (CI eval runs) | `gemini-3.1-flash-lite` | `.github/workflows/scheduled-eval.yml` `.env` step; the runners stamp the effective value as `model_under_test` in run metadata and results JSON. |
+| Eval LLM-as-judge | `gemini-2.5-flash-lite` (fixed) | Default in `evaluation/tools/llm_scorer.py::score_itinerary`, passed explicitly by `run_scheduled_eval.py`. Intentionally decoupled from `MODEL_NAME`: keeping the judge fixed keeps scores comparable across system-model lifts. |
+
+> Production note: the deployed box reads `MODEL_NAME` from its own `.env.prod`, which deploys never overwrite — the value there can drift from the repo default (see ADR #23 outcome note in `docs/ARCHITECTURE.md`).
 
 ### API (FastAPI SSE)
 
@@ -213,7 +223,7 @@ Failed jobs can be retried by calling `/compose` again with the same `job_id`; t
 
 ### AI Models
 
-StoryLand AI uses Google Gemini models (default: `gemini-2.5-flash-lite`) for all agents, chosen for native ADK integration, fast parallel execution (sub-2s response times), and excellent structured output adherence across 16 Pydantic data models. The complete workflow takes 60-100 seconds end-to-end with parallel discovery providing 3x speedup over sequential execution.
+StoryLand AI uses Google Gemini models (default: `gemini-3.1-flash-lite`) for all agents, chosen for native ADK integration, fast parallel execution (sub-2s response times), and excellent structured output adherence across 16 Pydantic data models. The complete workflow takes 60-100 seconds end-to-end with parallel discovery providing 3x speedup over sequential execution.
 
 ## Configuration
 
@@ -222,7 +232,7 @@ All configuration is via environment variables in `.env`. Copy `.env.example` to
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `GOOGLE_API_KEY` | **Required.** Google AI API key from [AI Studio](https://aistudio.google.com/app/apikey) | — |
-| `MODEL_NAME` | Gemini model to use | `gemini-2.5-flash-lite` |
+| `MODEL_NAME` | Gemini model to use | `gemini-3.1-flash-lite` (code default — a deploy without MODEL_NAME no longer crashes at boot) |
 | `USE_DATABASE` | Enable SQLite persistence | `false` |
 | `DATABASE_URL` | SQLite database path | `sqlite+aiosqlite:///storyland_sessions.db` |
 | `SESSION_MAX_EVENTS` | Max events in session | `20` |
@@ -239,7 +249,8 @@ All configuration is via environment variables in `.env`. Copy `.env.example` to
 | `SENTRY_ENABLE_METRICS` | Emit Sentry metrics. Every non-debug structlog event is auto-counted as `log.events` `{event, level}`, making timeouts/cache-hits/failures chartable; new call sites can use `sentry_sdk.metrics` directly (examples in `api/sentry.py`). | `true` |
 | `SENTRY_TRACES_SAMPLE_RATE` | Sentry performance-tracing sample rate (0.0–1.0) | `0.0` |
 | `CORS_ORIGINS` | Allowed CORS origins for API (comma-separated) | `*` |
-| `INTERNAL_API_SECRET` | Shared secret with the gateway service — when set, all itinerary endpoints require an `X-Internal-Secret` header with this value. The health endpoint (`/health`) is always open. Leave empty for standalone/dev use. | — |
+| `INTERNAL_API_SECRET` | Shared secret with the gateway service — when set, all itinerary endpoints require an `X-Internal-Secret` header with this value. The health endpoint (`/health`) is always open. Leaving it empty (standalone/dev use) also requires `REQUIRE_GATEWAY_SECRET=false`, otherwise the service refuses to start. | — |
+| `REQUIRE_GATEWAY_SECRET` | Fail-closed switch for gateway auth: when `true`, an empty `INTERNAL_API_SECRET` is a fatal boot error instead of an open service that trusts the forgeable `X-User-ID` header. Set `false` explicitly for standalone/dev use without a gateway (`.env.example` ships this opt-out). | `true` |
 
 Free tier includes 15 RPM and 200 requests/day — sufficient for development.
 
@@ -386,6 +397,7 @@ The unit suite (`tests/unit/`) by area — per-module counts rot with every PR, 
 | Caching | `test_cache.py`, `test_disk_cache.py`, `test_cache_version.py` |
 | Place features | `test_place_key.py`, `test_place_to_book.py`, `test_place_to_book_eval.py` |
 | Quality & guardrails | `test_llm_scorer.py`, `test_tone_guardrail.py`, `test_recommendation_floor.py` |
+| Eval harnesses | `test_local_atmosphere_eval.py`, `test_expansion_eval.py`, `test_eval_dataset_routing.py` |
 | Observability | `test_sentry.py`, `test_langfuse_plugin_concurrency.py`, `test_langfuse_pricing.py` |
 | Sessions & ops | `test_services.py`, `test_session_retention.py` |
 

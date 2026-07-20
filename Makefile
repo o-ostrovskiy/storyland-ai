@@ -1,7 +1,7 @@
 # StoryLand AI - Makefile
 # Common commands for development and demo
 
-.PHONY: help install install-dev lock audit test test-ci test-cov test-agents test-models test-tools test-services test-api test-integration test-integration-live test-integration-vcr-record test-all eval eval-setup eval-setup-one eval-run eval-place-to-book eval-summary eval-report eval-export run-api db-reset db-show db-users clean check-env
+.PHONY: help install install-dev lock audit test test-ci test-cov test-agents test-models test-tools test-services test-api test-integration test-integration-live test-integration-vcr-record test-all eval eval-setup eval-setup-one eval-run eval-place-to-book eval-local-atmosphere eval-expansion eval-summary eval-report eval-export run-api db-reset db-show db-users clean check-env
 
 # Default target
 help:
@@ -28,6 +28,8 @@ help:
 	@echo "  make eval-setup-one EVALSET_FILE=<path>  Register a single evalset file"
 	@echo "  make eval-run      Run scheduled evaluations (itinerary, book->place)"
 	@echo "  make eval-place-to-book      Run the place->book reverse-routing grounding eval"
+	@echo "  make eval-local-atmosphere   Run the local-atmosphere (book near me) eval"
+	@echo "  make eval-expansion          Run the expansion (suggestion-chip) eval"
 	@echo "  make eval-report   Generate evaluation trend report"
 	@echo "  make eval-summary  Show evaluation summary"
 	@echo ""
@@ -129,6 +131,12 @@ eval-run:
 
 eval-place-to-book:
 	PYTHONIOENCODING=utf-8 .venv/bin/python evaluation/tools/run_place_to_book_eval.py --output-dir evaluation/results
+
+eval-local-atmosphere:
+	PYTHONIOENCODING=utf-8 .venv/bin/python evaluation/tools/run_local_atmosphere_eval.py --output-dir evaluation/results
+
+eval-expansion:
+	PYTHONIOENCODING=utf-8 .venv/bin/python evaluation/tools/run_expansion_eval.py --output-dir evaluation/results
 
 eval-summary:
 	.venv/bin/python evaluation/tools/eval_dashboard.py --action summary --days 7

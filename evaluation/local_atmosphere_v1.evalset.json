@@ -1,0 +1,195 @@
+{
+  "eval_set_id": "local_atmosphere_v1",
+  "name": "Local-atmosphere (book near me) eval v1",
+  "description": "Single-phase local-atmosphere flow: given a book and a user location + radius, compose a nearby itinerary whose mood evokes the book (used when the reader cannot travel to the book's actual setting). Deterministic gate: the result must validate as a ComposerEnvelope, plus an opportunistic radius check over any geo fields (CityStop carries no coordinates today, so radius adherence is primarily asserted via per-case geographical_accuracy judge criteria). Quality: the existing LLM-as-judge path (llm_scorer.score_itinerary). Cases carry BOTH request shapes — with and without user:preferences — and preference-free cases must NOT carry a preference_adherence quality criterion (eval protocol: reports aggregate per shape).",
+  "version": "1.0",
+  "flow": "local_atmosphere",
+  "eval_cases": [
+    {
+      "eval_id": "la_nyc_gatsby",
+      "book_title": "The Great Gatsby",
+      "author": "F. Scott Fitzgerald",
+      "location_label": "New York, NY",
+      "lat": 40.7128,
+      "lng": -74.006,
+      "radius_km": 15,
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user",
+        "state": {
+          "user:preferences": {
+            "budget": "moderate",
+            "pace": "relaxed",
+            "interests": ["jazz age", "architecture", "cocktail bars", "museums"]
+          }
+        }
+      },
+      "quality_criteria": {
+        "book_relevance": "Expect Fitzgerald-era Manhattan anchors (e.g. The Plaza Hotel, Queensboro Bridge views, jazz-age bars), not generic NYC tourism; each stop should be tied to the novel's mood or era",
+        "preference_adherence": "Relaxed pace and jazz-age/architecture interests should shape the stops; cocktail-bar and museum picks should be specific",
+        "geographical_accuracy": "All stops must be real places within ~15 km of lower Manhattan; penalize anything requiring a long drive (e.g. Long Island's actual East Egg area is outside this walking-scale radius)"
+      },
+      "creation_timestamp": 1784332800.0
+    },
+    {
+      "eval_id": "la_london_sherlock",
+      "book_title": "The Adventures of Sherlock Holmes",
+      "author": "Arthur Conan Doyle",
+      "location_label": "London, UK",
+      "lat": 51.5074,
+      "lng": -0.1278,
+      "radius_km": 20,
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "quality_criteria": {
+        "book_relevance": "Expect Baker Street / Victorian-London anchors (Sherlock Holmes Museum, gaslit pubs, fog-and-hansom-cab atmosphere), connected to specific stories where possible",
+        "geographical_accuracy": "All stops must be real London places within ~20 km of central London"
+      },
+      "creation_timestamp": 1784332800.0
+    },
+    {
+      "eval_id": "la_dublin_ulysses",
+      "book_title": "Ulysses",
+      "author": "James Joyce",
+      "location_label": "Dublin, Ireland",
+      "lat": 53.3498,
+      "lng": -6.2603,
+      "radius_km": 10,
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user",
+        "state": {
+          "user:preferences": {
+            "budget": "budget",
+            "pace": "moderate",
+            "interests": ["literature", "pubs", "walking"]
+          }
+        }
+      },
+      "quality_criteria": {
+        "book_relevance": "Dublin IS the book's setting — expect literal Bloomsday anchors (Sweny's Pharmacy, Davy Byrne's, Sandymount Strand, James Joyce Centre) rather than vibe-only picks",
+        "preference_adherence": "Budget focus: free or cheap stops, walkable ordering; pub picks should note affordable options",
+        "geographical_accuracy": "Walking-scale radius: every stop within ~10 km of central Dublin"
+      },
+      "creation_timestamp": 1784332800.0
+    },
+    {
+      "eval_id": "la_boston_alcott",
+      "book_title": "Little Women",
+      "author": "Louisa May Alcott",
+      "location_label": "Boston, MA",
+      "lat": 42.3601,
+      "lng": -71.0589,
+      "radius_km": 80,
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "quality_criteria": {
+        "book_relevance": "Orchard House in Concord (~30 km away) is squarely in range and should anchor the itinerary; Boston literary sites and New England domestic-era atmosphere are fair additions",
+        "geographical_accuracy": "All stops within ~80 km of Boston; Concord sites are expected, anything beyond (e.g. New York) is out of range"
+      },
+      "creation_timestamp": 1784332800.0
+    },
+    {
+      "eval_id": "la_edinburgh_hp",
+      "book_title": "Harry Potter and the Philosopher's Stone",
+      "author": "J.K. Rowling",
+      "location_label": "Edinburgh, Scotland",
+      "lat": 55.9533,
+      "lng": -3.1883,
+      "radius_km": 40,
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user",
+        "state": {
+          "user:preferences": {
+            "budget": "moderate",
+            "pace": "moderate",
+            "group": "family",
+            "interests": ["castles", "cafés", "family-friendly activities"]
+          }
+        }
+      },
+      "quality_criteria": {
+        "book_relevance": "Expect writing-of-the-book anchors (The Elephant House / Spoon café claims handled honestly, Greyfriars Kirkyard names, Victoria Street as a Diagon Alley model, Edinburgh Castle atmosphere) — the book is not SET in Edinburgh, so match_type labelling should be honest (historical/thematic/vibe, not literal)",
+        "preference_adherence": "Family group: stops should be child-friendly with practical notes; café picks should suit kids",
+        "geographical_accuracy": "All stops within ~40 km of Edinburgh"
+      },
+      "creation_timestamp": 1784332800.0
+    },
+    {
+      "eval_id": "la_seattle_twilight",
+      "book_title": "Twilight",
+      "author": "Stephenie Meyer",
+      "location_label": "Seattle, WA",
+      "lat": 47.6062,
+      "lng": -122.3321,
+      "radius_km": 150,
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "quality_criteria": {
+        "book_relevance": "Forks, WA — the book's actual setting — sits near the 150 km edge of range and is the strongest possible anchor; Olympic Peninsula rainforest atmosphere (mist, moss, grey skies) is the vibe to capture",
+        "geographical_accuracy": "All stops within ~150 km of Seattle; penalize stops beyond it (e.g. Portland). Note ferry/drive logistics honestly for peninsula stops"
+      },
+      "creation_timestamp": 1784332800.0
+    },
+    {
+      "eval_id": "la_paris_hemingway",
+      "book_title": "A Moveable Feast",
+      "author": "Ernest Hemingway",
+      "location_label": "Paris, France",
+      "lat": 48.8566,
+      "lng": 2.3522,
+      "radius_km": 15,
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user",
+        "state": {
+          "user:preferences": {
+            "budget": "luxury",
+            "pace": "relaxed",
+            "interests": ["fine dining", "literary cafés", "bookshops"]
+          }
+        }
+      },
+      "quality_criteria": {
+        "book_relevance": "Paris IS the memoir's setting — expect literal anchors (Shakespeare and Company, Les Deux Magots, Closerie des Lilas, Luxembourg Gardens, rue du Cardinal-Lemoine) tied to specific passages",
+        "preference_adherence": "Luxury budget: named high-end dining and classic literary cafés rather than budget substitutes; relaxed pacing with few stops per day",
+        "engagement": "Descriptions should evoke the memoir's voice — hunger, café work sessions, 1920s Left Bank — without pastiche",
+        "geographical_accuracy": "All stops within ~15 km of central Paris (intra-muros plus close suburbs only)"
+      },
+      "creation_timestamp": 1784332800.0
+    },
+    {
+      "eval_id": "la_sf_steinbeck",
+      "book_title": "East of Eden",
+      "author": "John Steinbeck",
+      "location_label": "San Francisco, CA",
+      "lat": 37.7749,
+      "lng": -122.4194,
+      "radius_km": 150,
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "quality_criteria": {
+        "book_relevance": "The Salinas Valley — the novel's actual setting — lies ~150 km south and is in range: expect the National Steinbeck Center, Salinas Valley farmland vistas, and Monterey-area Steinbeck sites as anchors",
+        "geographical_accuracy": "All stops within ~150 km of San Francisco; Salinas/Monterey are in range, Los Angeles is not"
+      },
+      "creation_timestamp": 1784332800.0
+    }
+  ],
+  "usage_notes": [
+    "Run with evaluation/tools/run_local_atmosphere_eval.py — NOT the itinerary runner (flow: local_atmosphere routes it away from run_scheduled_eval auto-discovery)",
+    "4 cases carry user:preferences and 4 do not — reports must aggregate the two shapes separately",
+    "Preference-free cases deliberately omit the preference_adherence quality criterion; the runner also withholds the preference_adherence judge score from Langfuse for those cases",
+    "radius_km values span walking-scale (10-20), default-ish (40-80), and day-trip (150) to exercise the radius instruction at both extremes",
+    "Books were chosen so some locations ARE the book's setting (Ulysses/Dublin, A Moveable Feast/Paris) and some are vibe-only (Gatsby-era Manhattan, Sherlock's London today) — match_type honesty is part of book_relevance"
+  ],
+  "creation_timestamp": 1784332800.0
+}

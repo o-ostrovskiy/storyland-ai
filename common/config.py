@@ -6,6 +6,14 @@ All configuration loaded from environment variables - no defaults.
 
 import os
 from typing import Optional
+
+# Default model when MODEL_NAME is unset. gemini-3.1-flash-lite (stable,
+# $0.25/$1.50 per 1M tok): the like-for-like modern replacement for the
+# deprecated 2.x-family lite tier, chosen over the pricier 3-flash/3.5-flash
+# tiers (PR 4 decision; eval gate validates). Having a CODE default also
+# fixes the old boot-crash footgun where a deploy missing MODEL_NAME died
+# at startup even though README implied a default existed.
+DEFAULT_MODEL_NAME = "gemini-3.1-flash-lite"
 from dataclasses import dataclass
 from dotenv import load_dotenv
 
@@ -42,13 +50,14 @@ class Config:
     # start, rather than accepting unauthenticated callers (who may then forge
     # X-User-ID and read/mutate any user's sessions).
     #
-    # Default FALSE, deliberately: the value actually present in .env.prod on the
-    # box is not knowable from CI (prod env files are uncommitted), so defaulting
-    # this on would turn a possible misconfiguration into a certain outage on the
-    # next deploy. Instead, boot now ALWAYS states the effective setting
-    # (gateway_auth_effective, plus a loud gateway_auth_disabled warning when the
-    # secret is empty) — so an operator can read one log line, confirm the secret
-    # is present, and set REQUIRE_GATEWAY_SECRET=true to make it permanent.
+    # Default TRUE since 2026-07-19 (July 2026 architecture review): a fresh
+    # deploy that never set the secret used to come up open — every caller
+    # accepted, X-User-ID a forgeable identity — with only the
+    # gateway_auth_disabled boot warning to say so. Running open is now an
+    # explicit operator act: set REQUIRE_GATEWAY_SECRET=false (standalone/local
+    # dev; .env.example ships that opt-out). Deploys that set
+    # INTERNAL_API_SECRET (prod does, in .env.prod) are unaffected — the switch
+    # only bites when the secret is empty.
     require_gateway_secret: bool
     # Local-dev only escape hatch. When ALLOW_DEV_USER=true and no trusted
     # X-User-ID header is present, identity falls back to the shared
@@ -161,9 +170,10 @@ def load_config() -> Config:
         - INTERNAL_API_SECRET: shared gateway secret; when empty the gateway
           check accepts every caller (loudly warned at boot). (default: "")
         - REQUIRE_GATEWAY_SECRET: when "true", refuse to start if
-          INTERNAL_API_SECRET is empty (fail closed). Default false so that
-          enabling enforcement is a deliberate operator act — see the field
-          comment on Config.require_gateway_secret. (default: false)
+          INTERNAL_API_SECRET is empty (fail closed). Default TRUE — secure by
+          default; running without service-to-service auth requires an explicit
+          "false" (standalone/dev, see .env.example) — see the field comment on
+          Config.require_gateway_secret. (default: true)
         - ALLOW_DEV_USER: local-dev only; when "true", a request with no
           trusted X-User-ID header resolves to the shared "dev_user".
           Default false (production fails closed with 403). (default: false)
@@ -198,7 +208,7 @@ def load_config() -> Config:
         use_database=_require_env_bool("USE_DATABASE"),
         session_max_events=_require_env_int("SESSION_MAX_EVENTS"),
         max_context_tokens=_require_env_int("MAX_CONTEXT_TOKENS"),
-        model_name=_require_env("MODEL_NAME"),
+        model_name=os.environ.get("MODEL_NAME") or DEFAULT_MODEL_NAME,
         workflow_timeout=_require_env_int("WORKFLOW_TIMEOUT"),
         agent_timeout=_require_env_int("AGENT_TIMEOUT"),
         log_level=_require_env("LOG_LEVEL").upper(),
@@ -208,7 +218,7 @@ def load_config() -> Config:
         langfuse_host=os.getenv("LANGFUSE_HOST"),
         environment=os.getenv("ENVIRONMENT", "local"),
         internal_api_secret=os.getenv("INTERNAL_API_SECRET", ""),
-        require_gateway_secret=_env_bool("REQUIRE_GATEWAY_SECRET", False),
+        require_gateway_secret=_env_bool("REQUIRE_GATEWAY_SECRET", True),
         allow_dev_user=_env_bool("ALLOW_DEV_USER", False),
         cache_enabled=_env_bool("CACHE_ENABLED", True),
         cache_ttl_seconds=_env_int("CACHE_TTL_SECONDS", 86400),

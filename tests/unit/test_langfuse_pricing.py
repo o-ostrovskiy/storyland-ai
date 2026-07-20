@@ -15,6 +15,9 @@ from plugins.langfuse_plugin import _GEMINI_PRICING, _pricing_for
 class TestPricingFor:
     def test_flash_lite_gets_its_own_rate_not_plain_flash(self):
         assert _pricing_for("gemini-2.5-flash-lite") == _GEMINI_PRICING["gemini-2.5-flash-lite"]
+        # PR 4 default: the 3.1 lite tier must resolve to its own rates (and
+        # must never fall through to the default-pricing tuple).
+        assert _pricing_for("gemini-3.1-flash-lite") == _GEMINI_PRICING["gemini-3.1-flash-lite"]
         assert _pricing_for("gemini-2.5-flash-lite") != _GEMINI_PRICING["gemini-2.5-flash"]
 
     def test_plain_flash_still_gets_its_own_rate(self):
