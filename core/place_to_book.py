@@ -39,7 +39,7 @@ from models.place_to_book import PlaceBookCandidate, PlaceToBookCandidates, Plac
 from services.session_service import create_session_service
 
 from .cache import TTLCache
-from .extraction import _normalize_text
+from .extraction import grounding_token_set, is_title_grounded
 from .run_harness import RunCapture, pump_events
 from .session_state import SessionStateAccessor
 
@@ -100,9 +100,10 @@ def cache_key(place: str) -> str:
     return f"{_CACHE_KEY_PREFIX}{normalize_place(place)}"
 
 
-# _normalize_text is shared with core.extraction (imported above). The
-# grounding FILTERS themselves stay separate on purpose: this module's filter
-# treats an all-dropped result as a valid honest not-found, while the
+# The grounding-match primitive (grounding_token_set / is_title_grounded) is
+# shared with core.extraction (imported above). The grounding FILTERS
+# themselves stay separate on purpose: this module's filter treats an
+# all-dropped result as a valid honest not-found, while the
 # book-recommendation filter fails open on that outcome — different contracts,
 # documented on each function.
 
@@ -137,7 +138,8 @@ def extract_place_to_book_from_state(state_accessor) -> Optional[List[dict]]:
 def filter_grounded_candidates(
     candidates: Optional[List[dict]], researcher_text: str
 ) -> List[dict]:
-    """Drop candidates whose title is not present in the grounded researcher text.
+    """Drop candidates whose title is not grounded in the researcher text
+    (per the shared ``is_title_grounded`` token-overlap rule).
 
     Output-side complement to the formatter's "never invent" instruction. Unlike
     the book-recommendation filter, dropping every candidate is a VALID outcome
@@ -148,14 +150,10 @@ def filter_grounded_candidates(
     """
     if not candidates:
         return []
-    haystack = _normalize_text(researcher_text)
+    haystack = grounding_token_set(researcher_text)
     if not haystack:
         return list(candidates)
-    grounded = [
-        c
-        for c in candidates
-        if _normalize_text(c.get("title")) and _normalize_text(c.get("title")) in haystack
-    ]
+    grounded = [c for c in candidates if is_title_grounded(c.get("title"), haystack)]
     if len(grounded) != len(candidates):
         logger.info(
             "place_to_book_grounding_filtered",

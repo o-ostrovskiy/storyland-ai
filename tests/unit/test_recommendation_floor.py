@@ -108,3 +108,20 @@ class TestFilterGroundedRecommendations:
 
     def test_none_input_returns_none(self):
         assert filter_grounded_recommendations(None, "anything") is None
+
+    def test_no_substring_false_positive_for_short_title(self):
+        # "The Mill" formerly substring-matched "the millionaire"; paired with a
+        # grounded title so the all-dropped fail-open cannot mask the drop.
+        data = self._data("Beloved", "The Mill")
+        researcher = "Candidate: Beloved by Toni Morrison, set near the millionaire's estate."
+        out = filter_grounded_recommendations(data, researcher)
+        titles = [r["title"] for r in out["recommendations"]]
+        assert titles == ["Beloved"]
+        assert out["limited_matches"] is True
+
+    def test_surface_variant_title_kept(self):
+        data = self._data("The Grand Budapest Hotel", "Phantom")
+        researcher = "The researcher found Budapest Hotel among the candidates."
+        out = filter_grounded_recommendations(data, researcher)
+        titles = [r["title"] for r in out["recommendations"]]
+        assert titles == ["The Grand Budapest Hotel"]
