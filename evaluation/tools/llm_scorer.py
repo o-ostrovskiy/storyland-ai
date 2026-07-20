@@ -97,22 +97,32 @@ class ItineraryScores(BaseModel):
     """Structured output model for LLM-as-judge scoring."""
 
     book_relevance: int = Field(..., ge=1, le=5, description="Connection to book's settings, themes, or author")
-    preference_adherence: int = Field(..., ge=1, le=5, description="Respect for user preferences")
+    # Optional: not scored when the case supplies no preferences (prod-shape
+    # cases post-MYS-392) — a judge grading adherence to nothing is noise.
+    preference_adherence: Optional[int] = Field(None, ge=1, le=5, description="Respect for user preferences")
     completeness: int = Field(..., ge=1, le=5, description="Comprehensive details included")
     actionability: int = Field(..., ge=1, le=5, description="Practical and actionable information")
     geographical_accuracy: int = Field(..., ge=1, le=5, description="Accuracy of locations")
     engagement: int = Field(..., ge=1, le=5, description="Engaging descriptions that evoke book's spirit")
 
     def average_score(self) -> float:
-        """Calculate average score across all dimensions."""
-        return (
-            self.book_relevance
-            + self.preference_adherence
-            + self.completeness
-            + self.actionability
-            + self.geographical_accuracy
-            + self.engagement
-        ) / 6
+        """Average across the dimensions that were actually scored.
+
+        preference_adherence is None for no-preference (prod-shape) cases and
+        is excluded — a 5-dimension average — so the two shapes are each
+        internally consistent and are compared per-shape, never blended
+        silently (see run_scheduled_eval's by_shape summary).
+        """
+        dims = [
+            self.book_relevance,
+            self.preference_adherence,
+            self.completeness,
+            self.actionability,
+            self.geographical_accuracy,
+            self.engagement,
+        ]
+        present = [d for d in dims if d is not None]
+        return sum(present) / len(present)
 
 
 def _build_scoring_prompt(
@@ -258,12 +268,27 @@ async def score_itinerary(
         # Call model requesting JSON output in prompt
         # Note: Using simple prompt-based JSON request instead of response_schema
         # for broader model compatibility
-        json_instruction = """
+        score_preferences = bool(preferences)
+        if score_preferences:
+            json_instruction = """
 
 Respond with ONLY a valid JSON object (no markdown, no explanation) with these exact fields:
 {
   "book_relevance": <integer 1-5>,
   "preference_adherence": <integer 1-5>,
+  "completeness": <integer 1-5>,
+  "actionability": <integer 1-5>,
+  "geographical_accuracy": <integer 1-5>,
+  "engagement": <integer 1-5>
+}
+"""
+        else:
+            json_instruction = """
+
+No reader preferences were provided for this case, so do NOT score preference adherence.
+Respond with ONLY a valid JSON object (no markdown, no explanation) with these exact fields:
+{
+  "book_relevance": <integer 1-5>,
   "completeness": <integer 1-5>,
   "actionability": <integer 1-5>,
   "geographical_accuracy": <integer 1-5>,
@@ -291,6 +316,9 @@ Respond with ONLY a valid JSON object (no markdown, no explanation) with these e
         response_text = response_text.strip()
 
         scores = ItineraryScores.model_validate_json(response_text)
+        if not score_preferences and scores.preference_adherence is not None:
+            # Judge scored a dimension it was told to skip — force honesty.
+            scores = scores.model_copy(update={"preference_adherence": None})
 
         usage = response.usage_metadata
         get_client().update_current_generation(

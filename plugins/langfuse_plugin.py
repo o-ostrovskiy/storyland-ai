@@ -28,10 +28,11 @@ except ImportError:
     LANGFUSE_AVAILABLE = False
 
 
-# Gemini standard (non-batch) pricing per 1M tokens (as of May 2026).
+# Gemini standard (non-batch) pricing per 1M tokens (as of Jul 2026).
 # Source: https://ai.google.dev/gemini-api/docs/pricing
 _GEMINI_PRICING: dict[str, tuple[float, float]] = {
     # (input_per_1m, output_per_1m)
+    "gemini-3.1-flash-lite": (0.25, 1.50),
     "gemini-2.5-flash": (0.30, 2.50),
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.0-flash": (0.10, 0.40),

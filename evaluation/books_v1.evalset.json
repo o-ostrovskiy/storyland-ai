@@ -1,7 +1,7 @@
 {
   "eval_set_id": "books_v1",
   "name": "Book Evaluation Dataset v1 + v2",
-  "description": "Combined evaluation dataset: Lord of the Rings (v1) + 9 additional cases covering fantasy, sci-fi, memoir, romance, and edge cases (v2).",
+  "description": "Books evalset v1 \u2014 BOTH request shapes (PR-4 step zero): five cases carry user:preferences (the documented API-contract path) and five carry none (the shape 100% of prod traffic takes since MYS-392, issue #221). Preference-free cases are scored on 5 dimensions (no preference_adherence); gates read the shapes separately via the by_shape summary.",
   "version": "2.0",
   "eval_cases": [
     {
@@ -93,18 +93,7 @@
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user",
-        "state": {
-          "user:preferences": {
-            "budget": "budget",
-            "pace": "moderate",
-            "duration_days": 4,
-            "interests": [
-              "literary pilgrimage",
-              "history",
-              "road trips"
-            ]
-          }
-        }
+        "state": {}
       },
       "expected_output": {
         "locations": [
@@ -148,7 +137,6 @@
       },
       "quality_criteria": {
         "book_relevance": "Must surface real Maine/New England locations as the geographic inspiration for the fictional Walk route; should correctly identify King's Bangor connections",
-        "preference_adherence": "Budget travel should feature free or low-cost sites; road trip suggestions appropriate for the linear route format",
         "completeness": "Should cover Bangor (King biography), the Maine coastal corridor, and at least acknowledge the Walk's fictional endpoint near Boston",
         "actionability": "Should include practical road-trip routing along US-1 and specific King-related addresses",
         "geographical_accuracy": "All locations must be real and in Maine or New England; fictional Gatlin or Walk checkpoints should not be treated as real places",
@@ -202,7 +190,7 @@
           {
             "city": "Houston",
             "country": "USA",
-            "description": "NASA Johnson Space Center — the closest real-world hub to the series' space exploration themes",
+            "description": "NASA Johnson Space Center \u2014 the closest real-world hub to the series' space exploration themes",
             "must_visit": [
               "NASA Johnson Space Center",
               "Space Center Houston",
@@ -240,21 +228,7 @@
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user",
-        "state": {
-          "user:preferences": {
-            "budget": "moderate",
-            "pace": "relaxed",
-            "duration_days": 10,
-            "interests": [
-              "romance",
-              "history",
-              "architecture",
-              "cafés",
-              "royal heritage"
-            ],
-            "group": "couple"
-          }
-        }
+        "state": {}
       },
       "expected_output": {
         "locations": [
@@ -267,7 +241,7 @@
               "St James's Park (Henry and Alex's secret meeting spot)",
               "Buckingham Palace forecourt",
               "Notting Hill (neighbourhood scenes)",
-              "The Wolseley café on Piccadilly"
+              "The Wolseley caf\u00e9 on Piccadilly"
             ]
           },
           {
@@ -303,18 +277,17 @@
       },
       "quality_criteria": {
         "book_relevance": "Must include London royal landmarks (Kensington Palace, St James's Park), Washington DC First Family locations (White House area, Georgetown), and NYC MoMA scene; should connect each stop to specific plot moments",
-        "preference_adherence": "Romantic couple framing should prioritise intimate cafés, park walks, and neighbourhood strolls over mass-tourism sites; relaxed pace means max 2-3 stops per day",
-        "completeness": "Should cover London (Henry's world), Washington DC (Alex's world), and at least one shared neutral city such as NYC; hidden gem cafés should feature at each stop",
-        "actionability": "Should include specific café and restaurant recommendations, Kensington Palace booking guidance, and a suggested split of days between cities",
-        "geographical_accuracy": "All locations must be real and correctly placed; fictional White House interiors should not be treated as visitable spaces — focus on surrounding public areas",
-        "engagement": "Should capture the novel's wit, warmth, and the tension of a very public romance — framing each location through the lens of stolen moments and political scrutiny"
+        "completeness": "Should cover London (Henry's world), Washington DC (Alex's world), and at least one shared neutral city such as NYC; hidden gem caf\u00e9s should feature at each stop",
+        "actionability": "Should include specific caf\u00e9 and restaurant recommendations, Kensington Palace booking guidance, and a suggested split of days between cities",
+        "geographical_accuracy": "All locations must be real and correctly placed; fictional White House interiors should not be treated as visitable spaces \u2014 focus on surrounding public areas",
+        "engagement": "Should capture the novel's wit, warmth, and the tension of a very public romance \u2014 framing each location through the lens of stolen moments and political scrutiny"
       },
       "creation_timestamp": 1773934021.2773013
     },
     {
       "eval_id": "query_015",
       "book_title": "One Hundred Years of Solitude",
-      "author": "Gabriel García Márquez",
+      "author": "Gabriel Garc\u00eda M\u00e1rquez",
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user",
@@ -337,9 +310,9 @@
           {
             "city": "Aracataca",
             "country": "Colombia",
-            "description": "García Márquez's birthplace and the real-world model for the fictional Macondo",
+            "description": "Garc\u00eda M\u00e1rquez's birthplace and the real-world model for the fictional Macondo",
             "must_visit": [
-              "Casa Museo Gabriel García Márquez (birthplace)",
+              "Casa Museo Gabriel Garc\u00eda M\u00e1rquez (birthplace)",
               "Aracataca train station",
               "Banana plantation ruins"
             ]
@@ -347,22 +320,22 @@
           {
             "city": "Cartagena de Indias",
             "country": "Colombia",
-            "description": "Where García Márquez spent much of his later life; the walled city appears in several of his works",
+            "description": "Where Garc\u00eda M\u00e1rquez spent much of his later life; the walled city appears in several of his works",
             "must_visit": [
               "Ciudad Amurallada (walled city)",
-              "Getsemaní neighbourhood",
-              "Casa de Rafael Núñez"
+              "Getseman\u00ed neighbourhood",
+              "Casa de Rafael N\u00fa\u00f1ez"
             ]
           },
           {
-            "city": "Bogotá",
+            "city": "Bogot\u00e1",
             "country": "Colombia",
-            "description": "Colombia's capital and home to the García Márquez foundation and major literary institutions",
+            "description": "Colombia's capital and home to the Garc\u00eda M\u00e1rquez foundation and major literary institutions",
             "must_visit": [
               "La Candelaria historic centre",
               "Biblioteca Nacional de Colombia",
               "Museo Botero",
-              "Chapinero literary cafés"
+              "Chapinero literary caf\u00e9s"
             ]
           }
         ],
@@ -374,12 +347,12 @@
         "duration": "8-10 days"
       },
       "quality_criteria": {
-        "book_relevance": "Must identify Aracataca as Macondo's inspiration and connect Cartagena and Bogotá to the author's biography and Colombian historical context",
+        "book_relevance": "Must identify Aracataca as Macondo's inspiration and connect Cartagena and Bogot\u00e1 to the author's biography and Colombian historical context",
         "preference_adherence": "Budget options must be highlighted: free museums, street food, budget guesthouses in La Candelaria and Cartagena",
-        "completeness": "Should cover Aracataca (literary pilgrimage), Cartagena (author's city), and Bogotá (cultural capital) with specific landmarks",
+        "completeness": "Should cover Aracataca (literary pilgrimage), Cartagena (author's city), and Bogot\u00e1 (cultural capital) with specific landmarks",
         "actionability": "Should include practical travel notes between cities (bus vs. flight costs) and free/low-cost museum entry days",
         "geographical_accuracy": "All Colombian locations must be real and accurately located; fictional Macondo should be clearly distinguished from Aracataca",
-        "engagement": "Should evoke the humid Caribbean heat and cyclical melancholy of the Buendía family saga"
+        "engagement": "Should evoke the humid Caribbean heat and cyclical melancholy of the Buend\u00eda family saga"
       },
       "creation_timestamp": 1773934021.2773013
     },
@@ -390,19 +363,7 @@
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user",
-        "state": {
-          "user:preferences": {
-            "budget": "moderate",
-            "pace": "moderate",
-            "duration_days": 7,
-            "interests": [
-              "cultural heritage",
-              "diaspora communities",
-              "history",
-              "architecture"
-            ]
-          }
-        }
+        "state": {}
       },
       "expected_output": {
         "locations": [
@@ -446,7 +407,6 @@
       },
       "quality_criteria": {
         "book_relevance": "Must include Fremont's Little Kabul community, San Francisco Bay Area Amir connections, and Kabul cultural sites",
-        "preference_adherence": "Cultural and heritage interests should drive recommendations toward community spaces, food, and historical sites rather than generic tourism",
         "completeness": "Should cover both the US diaspora locations and Afghan cultural heritage, with the Kabul section framed appropriately given current travel conditions",
         "actionability": "Must include a responsible travel advisory for Afghanistan and practical guidance on experiencing Afghan culture safely in the Bay Area as an alternative",
         "geographical_accuracy": "Accurate California geography and Afghan locations; Fremont's Little Kabul area must be correctly identified",
@@ -482,7 +442,7 @@
             "country": "Russia",
             "description": "The entire novel unfolds in the streets, canals, and tenements of 19th-century St. Petersburg",
             "must_visit": [
-              "Sennaya Square (Haymarket — Raskolnikov's neighbourhood)",
+              "Sennaya Square (Haymarket \u2014 Raskolnikov's neighbourhood)",
               "Stolyarny Lane (location of Raskolnikov's garret)",
               "Dostoevsky Memorial Museum (Kuznechny Lane)",
               "Griboedov Canal embankment (pawnbroker's building)",
@@ -514,19 +474,7 @@
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user",
-        "state": {
-          "user:preferences": {
-            "budget": "budget",
-            "pace": "moderate",
-            "duration_days": 14,
-            "interests": [
-              "hiking",
-              "solo adventure",
-              "nature",
-              "camping"
-            ]
-          }
-        }
+        "state": {}
       },
       "expected_output": {
         "locations": [
@@ -580,11 +528,10 @@
       },
       "quality_criteria": {
         "book_relevance": "Must include the Mojave starting stretch, Kennedy Meadows, Oregon sections, and Cascade Locks Bridge of the Gods ending; locations must match Strayed's actual route",
-        "preference_adherence": "Budget focus should include campsite costs, permit requirements, and free resupply options; solo hiking safety notes appropriate",
         "completeness": "Should cover Southern California start, Sierra Nevada midpoint, and Oregon finish with resupply town logistics",
         "actionability": "Must include PCT permit information, resupply town options, and recommended gear for each section",
         "geographical_accuracy": "All PCT sections must be real and accurately placed in California and Oregon; no fictional trail segments",
-        "engagement": "Should capture the physical and emotional arc of the hike — isolation, endurance, and catharsis"
+        "engagement": "Should capture the physical and emotional arc of the hike \u2014 isolation, endurance, and catharsis"
       },
       "creation_timestamp": 1773934021.2773013
     },
@@ -617,7 +564,7 @@
             "country": "Romania",
             "description": "Gateway to Transylvania; base for visiting Bran Castle (the popular Dracula castle)",
             "must_visit": [
-              "Bran Castle (accessibility: partial — lower floors accessible, tower stairs not)",
+              "Bran Castle (accessibility: partial \u2014 lower floors accessible, tower stairs not)",
               "Brasov old town",
               "Peles Castle in nearby Sinaia (good accessibility)"
             ]
@@ -627,7 +574,7 @@
             "country": "England",
             "description": "Where Dracula's ship runs aground; Whitby Abbey is the novel's most iconic English location",
             "must_visit": [
-              "Whitby Abbey (note: 199 steps to abbey — mobility alternative is the lower viewing area)",
+              "Whitby Abbey (note: 199 steps to abbey \u2014 mobility alternative is the lower viewing area)",
               "St Mary's Church (Dracula's earth box scene)",
               "Whitby Museum",
               "Dracula Experience attraction"
@@ -652,7 +599,7 @@
         "duration": "8-10 days"
       },
       "quality_criteria": {
-        "book_relevance": "Must include Bran Castle/Transylvania, Whitby Abbey, and London locations; should note that Bran Castle is associated by tourism rather than explicit text — Stoker based the castle on descriptions of Slains Castle",
+        "book_relevance": "Must include Bran Castle/Transylvania, Whitby Abbey, and London locations; should note that Bran Castle is associated by tourism rather than explicit text \u2014 Stoker based the castle on descriptions of Slains Castle",
         "preference_adherence": "Accessibility requirements must be addressed at every location: step counts, lift availability, alternative viewpoints, and wheelchair-accessible routes must be specified",
         "completeness": "Should cover Romania (Transylvania) and England (Whitby + London) with specific sites at each",
         "actionability": "Must include specific accessibility notes per site and suggest relaxed daily schedules with rest stops",
@@ -668,20 +615,7 @@
       "session_input": {
         "app_name": "storyland",
         "user_id": "eval_user",
-        "state": {
-          "user:preferences": {
-            "budget": "luxury",
-            "pace": "relaxed",
-            "duration_days": 11,
-            "interests": [
-              "castles",
-              "traditional culture",
-              "samurai history",
-              "fine dining",
-              "tea ceremony"
-            ]
-          }
-        }
+        "state": {}
       },
       "expected_output": {
         "locations": [
@@ -711,7 +645,7 @@
           {
             "city": "Himeji",
             "country": "Japan",
-            "description": "Himeji Castle is Japan's finest surviving feudal castle — the model for Clavell's fictional Osaka castle interiors",
+            "description": "Himeji Castle is Japan's finest surviving feudal castle \u2014 the model for Clavell's fictional Osaka castle interiors",
             "must_visit": [
               "Himeji Castle (UNESCO World Heritage)",
               "Koko-en Garden",
@@ -738,7 +672,6 @@
       },
       "quality_criteria": {
         "book_relevance": "Must include Osaka Castle, Kyoto imperial culture, and Himeji Castle; should connect each location to specific scenes or themes from the novel",
-        "preference_adherence": "Luxury preference must be reflected with specific high-end ryokan recommendations, private castle tours, and kaiseki dining; pace should allow extended time at each location",
         "completeness": "Should cover Osaka (castle/power), Kyoto (court culture/geisha/tea ceremony), Himeji (finest castle), and a luxury ryokan base",
         "actionability": "Should include specific luxury ryokan names, tea ceremony booking guidance, and private guide recommendations",
         "geographical_accuracy": "All Japanese locations must be real, accurately placed, and correctly attributed to feudal history",
