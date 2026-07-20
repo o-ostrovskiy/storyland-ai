@@ -569,5 +569,6 @@
       },
       "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/7f85b9bb7a6ed4f28519705ddf54f217"
     }
-  ]
+  ],
+  "labels_source": "Model labels: Claude Fable 5, approved by Olga 2026-07-20 in lieu of hand labels (entered via API + UI, human_* score names). NOT human ground truth - agreement analysis measures judge-vs-Claude, not judge-vs-human."
 }

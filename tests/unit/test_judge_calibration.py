@@ -138,8 +138,10 @@ class TestFetchHumanScores:
         )
         scores = fetch_human_scores(langfuse, "t1")
         assert scores == {"book_relevance": 4, "engagement": 2}
+        # No source filter: UI labels are ANNOTATION, API-entered labels are
+        # API — the human_ prefix is the contract.
         langfuse.api.scores_v3.get_many_v3.assert_called_once_with(
-            trace_id="t1", source="ANNOTATION", limit=100
+            trace_id="t1", limit=100
         )
 
     def test_latest_value_wins(self):

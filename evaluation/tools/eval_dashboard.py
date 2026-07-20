@@ -52,11 +52,17 @@ def make_langfuse_annotation_checker():
     )
 
     def checker(trace_id: str) -> Optional[bool]:
+        # Reviewed = any human_* label score on the trace. The name prefix,
+        # not the score source, is the contract: UI labels arrive as
+        # ANNOTATION, API-entered labels as API.
         try:
             response = langfuse.api.scores_v3.get_many_v3(
-                trace_id=trace_id, source="ANNOTATION", limit=1
+                trace_id=trace_id, limit=100
             )
-            return bool(response.data)
+            return any(
+                (getattr(score, "name", "") or "").startswith("human_")
+                for score in response.data
+            )
         except Exception as e:
             logger.warning(
                 "annotation_check_failed", trace_id=trace_id, error=str(e)

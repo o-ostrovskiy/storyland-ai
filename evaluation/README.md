@@ -226,7 +226,7 @@ is recorded in the results JSON under `human_spot_check` with
 `status: pending_review`, and the trend report renders a "Human spot-checks"
 section where unreviewed cases stay listed with their age — skipped reviews
 are visible, not silent. A case counts as reviewed once its trace carries any
-ANNOTATION-source score in Langfuse.
+`human_*` label score in Langfuse (entered via the annotation UI or the API).
 
 Set `LANGFUSE_REVIEW_QUEUE_ID` (e.g. as a GitHub Actions variable) to have
 flagged traces auto-enqueued into an annotation queue; enqueue failures are

@@ -508,13 +508,17 @@ def cmd_build_queue(args: argparse.Namespace) -> int:
 
 
 def fetch_human_scores(langfuse: Any, trace_id: str) -> Dict[str, int]:
-    """Latest ANNOTATION-source human_<dimension> score per dimension."""
+    """Latest human_<dimension> label score per dimension.
+
+    Labels are identified by the human_ name prefix, NOT by score source:
+    labels entered through the annotation UI arrive as ANNOTATION, labels
+    entered via the API (e.g. the Claude-labeled 2026-07 pack) as API. The
+    prefix is the contract — judge scores are unprefixed.
+    """
     try:
-        response = langfuse.api.scores_v3.get_many_v3(
-            trace_id=trace_id, source="ANNOTATION", limit=100
-        )
+        response = langfuse.api.scores_v3.get_many_v3(trace_id=trace_id, limit=100)
     except Exception as e:
-        logger.warning("annotation_scores_fetch_failed", trace_id=trace_id, error=str(e))
+        logger.warning("label_scores_fetch_failed", trace_id=trace_id, error=str(e))
         return {}
 
     human_scores: Dict[str, int] = {}

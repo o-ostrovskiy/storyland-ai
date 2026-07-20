@@ -1,0 +1,485 @@
+{
+  "n_manifest_items": 30,
+  "n_labeled_items": 30,
+  "per_dimension": {
+    "book_relevance": {
+      "n": 29,
+      "mean_abs_diff": 1.172,
+      "bias": -0.897,
+      "large_disagreements": 12
+    },
+    "preference_adherence": {
+      "n": 16,
+      "mean_abs_diff": 0.875,
+      "bias": -0.75,
+      "large_disagreements": 3
+    },
+    "completeness": {
+      "n": 29,
+      "mean_abs_diff": 1.0,
+      "bias": -0.862,
+      "large_disagreements": 11
+    },
+    "actionability": {
+      "n": 29,
+      "mean_abs_diff": 0.759,
+      "bias": -0.69,
+      "large_disagreements": 7
+    },
+    "geographical_accuracy": {
+      "n": 29,
+      "mean_abs_diff": 1.241,
+      "bias": -0.759,
+      "large_disagreements": 10
+    },
+    "engagement": {
+      "n": 30,
+      "mean_abs_diff": 0.7,
+      "bias": -0.5,
+      "large_disagreements": 6
+    }
+  },
+  "large_disagreements": [
+    {
+      "dimension": "book_relevance",
+      "dataset": "storyland_eval",
+      "item_id": "d48fbd3c",
+      "run_name": "eval_run_20260720_202412_v3",
+      "book_title": "Under the Tuscan Sun",
+      "judge": 5,
+      "human": 3
+    },
+    {
+      "dimension": "book_relevance",
+      "dataset": "books_v1",
+      "item_id": "query_011",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "The Lord of the Rings",
+      "judge": 3,
+      "human": 5
+    },
+    {
+      "dimension": "book_relevance",
+      "dataset": "books_v1",
+      "item_id": "query_012",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "The Long Walk",
+      "judge": 1,
+      "human": 3
+    },
+    {
+      "dimension": "book_relevance",
+      "dataset": "books_v1",
+      "item_id": "query_014",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "Red, White & Royal Blue",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "book_relevance",
+      "dataset": "books_v1",
+      "item_id": "query_016",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "The Kite Runner",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "book_relevance",
+      "dataset": "books_v1",
+      "item_id": "query_017",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "Crime and Punishment",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "book_relevance",
+      "dataset": "books_v1",
+      "item_id": "query_020",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "Shogun",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "book_relevance",
+      "dataset": "books_v1",
+      "item_id": "query_014",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Red, White & Royal Blue",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "book_relevance",
+      "dataset": "books_v1",
+      "item_id": "query_017",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Crime and Punishment",
+      "judge": 2,
+      "human": 5
+    },
+    {
+      "dimension": "book_relevance",
+      "dataset": "books_v1",
+      "item_id": "query_018",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Wild",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "book_relevance",
+      "dataset": "books_v1",
+      "item_id": "query_020",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Shogun",
+      "judge": 1,
+      "human": 3
+    },
+    {
+      "dimension": "book_relevance",
+      "dataset": "books_v1",
+      "item_id": "query_012",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "The Long Walk",
+      "judge": 2,
+      "human": 5
+    },
+    {
+      "dimension": "preference_adherence",
+      "dataset": "books_v1",
+      "item_id": "query_017",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "Crime and Punishment",
+      "judge": 1,
+      "human": 4
+    },
+    {
+      "dimension": "preference_adherence",
+      "dataset": "books_v1",
+      "item_id": "query_017",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Crime and Punishment",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "preference_adherence",
+      "dataset": "books_v1",
+      "item_id": "query_019",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Dracula",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "completeness",
+      "dataset": "books_v1",
+      "item_id": "query_012",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "The Long Walk",
+      "judge": 1,
+      "human": 3
+    },
+    {
+      "dimension": "completeness",
+      "dataset": "books_v1",
+      "item_id": "query_014",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "Red, White & Royal Blue",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "completeness",
+      "dataset": "books_v1",
+      "item_id": "query_016",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "The Kite Runner",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "completeness",
+      "dataset": "books_v1",
+      "item_id": "query_018",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "Wild",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "completeness",
+      "dataset": "books_v1",
+      "item_id": "query_020",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "Shogun",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "completeness",
+      "dataset": "books_v1",
+      "item_id": "query_014",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Red, White & Royal Blue",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "completeness",
+      "dataset": "books_v1",
+      "item_id": "query_017",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Crime and Punishment",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "completeness",
+      "dataset": "books_v1",
+      "item_id": "query_018",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Wild",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "completeness",
+      "dataset": "books_v1",
+      "item_id": "query_019",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Dracula",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "completeness",
+      "dataset": "books_v1",
+      "item_id": "query_020",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Shogun",
+      "judge": 1,
+      "human": 3
+    },
+    {
+      "dimension": "completeness",
+      "dataset": "books_v1",
+      "item_id": "query_012",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "The Long Walk",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "actionability",
+      "dataset": "books_v1",
+      "item_id": "query_014",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "Red, White & Royal Blue",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "actionability",
+      "dataset": "books_v1",
+      "item_id": "query_018",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "Wild",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "actionability",
+      "dataset": "books_v1",
+      "item_id": "query_014",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Red, White & Royal Blue",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "actionability",
+      "dataset": "books_v1",
+      "item_id": "query_017",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Crime and Punishment",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "actionability",
+      "dataset": "books_v1",
+      "item_id": "query_018",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Wild",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "actionability",
+      "dataset": "books_v1",
+      "item_id": "query_019",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Dracula",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "actionability",
+      "dataset": "books_v1",
+      "item_id": "query_020",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Shogun",
+      "judge": 1,
+      "human": 3
+    },
+    {
+      "dimension": "geographical_accuracy",
+      "dataset": "books_v1",
+      "item_id": "query_011",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "The Lord of the Rings",
+      "judge": 3,
+      "human": 5
+    },
+    {
+      "dimension": "geographical_accuracy",
+      "dataset": "books_v1",
+      "item_id": "query_012",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "The Long Walk",
+      "judge": 1,
+      "human": 3
+    },
+    {
+      "dimension": "geographical_accuracy",
+      "dataset": "books_v1",
+      "item_id": "query_013",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "Leviathan Wakes",
+      "judge": 5,
+      "human": 2
+    },
+    {
+      "dimension": "geographical_accuracy",
+      "dataset": "books_v1",
+      "item_id": "query_016",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "The Kite Runner",
+      "judge": 2,
+      "human": 5
+    },
+    {
+      "dimension": "geographical_accuracy",
+      "dataset": "books_v1",
+      "item_id": "query_017",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "Crime and Punishment",
+      "judge": 1,
+      "human": 4
+    },
+    {
+      "dimension": "geographical_accuracy",
+      "dataset": "books_v1",
+      "item_id": "query_016",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "The Kite Runner",
+      "judge": 3,
+      "human": 5
+    },
+    {
+      "dimension": "geographical_accuracy",
+      "dataset": "books_v1",
+      "item_id": "query_017",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Crime and Punishment",
+      "judge": 2,
+      "human": 5
+    },
+    {
+      "dimension": "geographical_accuracy",
+      "dataset": "books_v1",
+      "item_id": "query_019",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Dracula",
+      "judge": 3,
+      "human": 5
+    },
+    {
+      "dimension": "geographical_accuracy",
+      "dataset": "books_v1",
+      "item_id": "query_020",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Shogun",
+      "judge": 1,
+      "human": 4
+    },
+    {
+      "dimension": "geographical_accuracy",
+      "dataset": "books_v1",
+      "item_id": "query_012",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "The Long Walk",
+      "judge": 1,
+      "human": 4
+    },
+    {
+      "dimension": "engagement",
+      "dataset": "books_v1",
+      "item_id": "query_014",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "Red, White & Royal Blue",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "engagement",
+      "dataset": "books_v1",
+      "item_id": "query_017",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "Crime and Punishment",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "engagement",
+      "dataset": "books_v1",
+      "item_id": "query_020",
+      "run_name": "eval_run_20260720_033838_v3",
+      "book_title": "Shogun",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "engagement",
+      "dataset": "books_v1",
+      "item_id": "query_017",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Crime and Punishment",
+      "judge": 2,
+      "human": 4
+    },
+    {
+      "dimension": "engagement",
+      "dataset": "books_v1",
+      "item_id": "query_020",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "Shogun",
+      "judge": 1,
+      "human": 3
+    },
+    {
+      "dimension": "engagement",
+      "dataset": "books_v1",
+      "item_id": "query_012",
+      "run_name": "eval_run_20260720_033038_v3",
+      "book_title": "The Long Walk",
+      "judge": 2,
+      "human": 4
+    }
+  ]
+}
