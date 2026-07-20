@@ -115,7 +115,6 @@ DISCOVERY_AGENT_STEPS: dict[str, str] = {
 LOCAL_ATMOSPHERE_AGENT_STEPS: dict[str, str] = {
     "book_context_researcher": "Researching book mood and themes",
     "book_context_formatter": "Capturing book atmosphere",
-    "book_context_pipeline": "Analyzing book atmosphere",
     "local_atmosphere_researcher": "Finding atmospheric places near you",
     "local_atmosphere_formatter": "Composing your local outing",
 }

@@ -6,6 +6,14 @@ All configuration loaded from environment variables - no defaults.
 
 import os
 from typing import Optional
+
+# Default model when MODEL_NAME is unset. gemini-3.1-flash-lite (stable,
+# $0.25/$1.50 per 1M tok): the like-for-like modern replacement for the
+# deprecated 2.x-family lite tier, chosen over the pricier 3-flash/3.5-flash
+# tiers (PR 4 decision; eval gate validates). Having a CODE default also
+# fixes the old boot-crash footgun where a deploy missing MODEL_NAME died
+# at startup even though README implied a default existed.
+DEFAULT_MODEL_NAME = "gemini-3.1-flash-lite"
 from dataclasses import dataclass
 from dotenv import load_dotenv
 
@@ -200,7 +208,7 @@ def load_config() -> Config:
         use_database=_require_env_bool("USE_DATABASE"),
         session_max_events=_require_env_int("SESSION_MAX_EVENTS"),
         max_context_tokens=_require_env_int("MAX_CONTEXT_TOKENS"),
-        model_name=_require_env("MODEL_NAME"),
+        model_name=os.environ.get("MODEL_NAME") or DEFAULT_MODEL_NAME,
         workflow_timeout=_require_env_int("WORKFLOW_TIMEOUT"),
         agent_timeout=_require_env_int("AGENT_TIMEOUT"),
         log_level=_require_env("LOG_LEVEL").upper(),
