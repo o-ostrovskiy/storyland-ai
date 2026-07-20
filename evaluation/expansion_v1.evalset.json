@@ -1,0 +1,82 @@
+{
+  "eval_set_id": "expansion_v1",
+  "name": "Expansion (suggestion-chip) deterministic eval v1",
+  "description": "Two-step harness for the expansion flow: compose a base itinerary (discover -> compose via WorkflowExecutor), then click one suggestion chip (executor.expand) and deterministically verify the expansion contract: at least min_new_places new stops, every new stop stamped source='expansion', no duplicates against the base itinerary (case-insensitive name match — the executor's own dedupe key), every new stop validates as a CityStop, and follow-up chips (<=4) carry server-stamped unique ids. Modeled on the place_to_book_v1 deterministic gate. No LLM judge and no preference shapes — per-shape aggregation is not applicable to this set.",
+  "version": "1.0",
+  "flow": "expansion",
+  "scoring": {
+    "pass": "ExpansionReady received AND n_new_places >= min_new_places AND every place has source='expansion' AND no place name duplicates the base itinerary AND every place validates as CityStop AND every follow-up chip has a non-empty unique id.",
+    "no_chips": "Compose legally returned zero suggestion chips — recorded as skipped (chips_available=0), not failed, so LLM chip-yield flakiness never reads as a deterministic-gate failure."
+  },
+  "eval_cases": [
+    {
+      "eval_id": "exp_pride_prejudice",
+      "book_title": "Pride and Prejudice",
+      "author": "Jane Austen",
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "region_selection": "first",
+      "chip_keyword": "tea",
+      "min_new_places": 1,
+      "notes": "Keyword likely matches a tea/food chip in Austen country; falls back to the first chip if not."
+    },
+    {
+      "eval_id": "exp_gatsby",
+      "book_title": "The Great Gatsby",
+      "author": "F. Scott Fitzgerald",
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "region_selection": "first",
+      "min_new_places": 1,
+      "notes": "No chip_keyword — deliberately exercises the first-chip fallback path."
+    },
+    {
+      "eval_id": "exp_sherlock",
+      "book_title": "The Adventures of Sherlock Holmes",
+      "author": "Arthur Conan Doyle",
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "region_selection": "first",
+      "chip_keyword": "museum",
+      "min_new_places": 1
+    },
+    {
+      "eval_id": "exp_da_vinci",
+      "book_title": "The Da Vinci Code",
+      "author": "Dan Brown",
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "region_selection": "first",
+      "chip_keyword": "art",
+      "min_new_places": 1
+    },
+    {
+      "eval_id": "exp_hobbit",
+      "book_title": "The Hobbit",
+      "author": "J.R.R. Tolkien",
+      "session_input": {
+        "app_name": "storyland",
+        "user_id": "eval_user"
+      },
+      "region_selection": "first",
+      "min_new_places": 1,
+      "notes": "Oxford-centric region; single-region itineraries exercise the parent-city fallback in executor.expand."
+    }
+  ],
+  "usage_notes": [
+    "Run with evaluation/tools/run_expansion_eval.py — NOT the itinerary runner (flow: expansion routes it away from run_scheduled_eval auto-discovery)",
+    "Each case costs a full discover + compose + expand pipeline (~3 workflow runs) — the set is intentionally small",
+    "The harness drives WorkflowExecutor, never the raw expansion workflow: source stamping, dedupe, chip-id stamping, and trusted-chip resolution (MYS-167) are executor logic, so a raw-workflow harness would assert nothing",
+    "The SOFT_CHIP_CAP=6 empty-chips branch is not exercised live (it would cost 6 paid expands per case); the observable one-expansion contract is asserted instead and the cap branch stays pinned by unit tests",
+    "region_selection is 'first' on every case for cost control"
+  ],
+  "creation_timestamp": 1784332800.0
+}

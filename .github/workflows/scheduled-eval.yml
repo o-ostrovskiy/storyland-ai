@@ -3,8 +3,18 @@ name: Scheduled Evaluation
 on:
   workflow_dispatch: # Allow manual trigger
     inputs:
+      runner:
+        description: 'Which eval runner to execute. itinerary = scheduled book->place eval (default); the others run their dedicated deterministic/judge runners.'
+        required: false
+        type: choice
+        default: 'itinerary'
+        options:
+          - itinerary
+          - local_atmosphere
+          - expansion
+          - place_to_book
       datasets:
-        description: 'Datasets to evaluate (space-separated). Leave empty to auto-discover all datasets from evaluation/langfuse_datasets.json'
+        description: 'Itinerary runner only: datasets to evaluate (space-separated). Leave empty to auto-discover itinerary-flow datasets from evaluation/langfuse_datasets.json'
         required: false
         default: ''
       max_cases:
@@ -62,13 +72,16 @@ jobs:
           python evaluation/tools/langfuse_eval.py --create-datasets --evalset-dir evaluation
 
       - name: Run scheduled evaluations
+        if: github.event.inputs.runner == '' || github.event.inputs.runner == 'itinerary'
         timeout-minutes: 60
         run: |
           # Set default parameters (used for both scheduled and manual runs)
           DEFAULT_MAX_CASES=7
 
           # Determine datasets argument
-          # If not specified, the script will auto-discover from evaluation/langfuse_datasets.json
+          # If not specified, the script will auto-discover itinerary-flow
+          # datasets from evaluation/langfuse_datasets.json (non-itinerary
+          # flows are routed to their dedicated runners below)
           DATASETS_ARG=""
           if [ -n "${{ github.event.inputs.datasets }}" ]; then
             DATASETS_ARG="--datasets ${{ github.event.inputs.datasets }}"
@@ -87,8 +100,23 @@ jobs:
             --timeout-minutes 55 \
             $DATASETS_ARG
 
+      - name: Run dedicated eval runner
+        if: github.event.inputs.runner != '' && github.event.inputs.runner != 'itinerary'
+        timeout-minutes: 60
+        run: |
+          MAX_CASES_ARG=""
+          if [ -n "${{ github.event.inputs.max_cases }}" ]; then
+            MAX_CASES_ARG="--max-cases ${{ github.event.inputs.max_cases }}"
+          fi
+
+          python "evaluation/tools/run_${{ github.event.inputs.runner }}_eval.py" \
+            --output-dir evaluation/results \
+            $MAX_CASES_ARG
+
       - name: Generate evaluation report
-        if: success()
+        # Trend report covers the itinerary eval only; dedicated runners ship
+        # their results via the artifact upload below.
+        if: success() && (github.event.inputs.runner == '' || github.event.inputs.runner == 'itinerary')
         timeout-minutes: 5
         run: |
           python evaluation/tools/eval_dashboard.py --action report --days 30
@@ -104,7 +132,7 @@ jobs:
           retention-days: 90
 
       - name: Commit updated trend report
-        if: success()
+        if: success() && (github.event.inputs.runner == '' || github.event.inputs.runner == 'itinerary')
         timeout-minutes: 5
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"

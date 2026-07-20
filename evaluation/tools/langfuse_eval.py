@@ -136,6 +136,22 @@ class LangfuseEvalPipeline:
                         unknown_keys=sorted(unknown_keys),
                         valid_keys=sorted(valid_keys),
                     )
+                # Eval protocol: a preference-free case must not carry a
+                # preference_adherence criterion — there is nothing to adhere
+                # to, and the judged score would pollute per-shape aggregates.
+                case_preferences = (
+                    case.get('session_input', {}).get('state', {}).get('user:preferences')
+                )
+                if 'preference_adherence' in quality_criteria and not case_preferences:
+                    logger.warning(
+                        "preference_adherence_without_preferences",
+                        eval_id=eval_id,
+                        message=(
+                            "Case has a preference_adherence quality criterion but no "
+                            "user:preferences in session_input — drop the criterion or "
+                            "add preferences"
+                        ),
+                    )
 
             # Add metadata
             metadata = {
@@ -143,12 +159,22 @@ class LangfuseEvalPipeline:
                 'session_input': case.get('session_input', {}),
                 'creation_timestamp': case.get('creation_timestamp'),
                 'quality_criteria': quality_criteria,
+                # Which dedicated runner owns this dataset ("itinerary" is the
+                # scheduled runner's flow; see select_itinerary_datasets).
+                'flow': evalset.get('flow', 'itinerary'),
             }
-            # Reverse-routing (place→book) grounding expectations, when present.
-            # These drive run_place_to_book_eval.py's pass/fail scoring; without
-            # them the item carries no usable target (the generic itinerary
-            # extractor would otherwise store an empty {book_title, author}).
-            for key in ('expect', 'min_literal', 'expected_literal_examples', 'notes'):
+            # Flow-specific expectation keys, when present. These drive the
+            # dedicated runners' pass/fail scoring; without them the item
+            # carries no usable target (the generic itinerary extractor would
+            # otherwise store an empty {book_title, author}).
+            #   place→book:       expect, min_literal, expected_literal_examples
+            #   local-atmosphere: location_label, lat, lng, radius_km
+            #   expansion:        chip_keyword, region_selection, min_new_places
+            for key in (
+                'expect', 'min_literal', 'expected_literal_examples', 'notes',
+                'location_label', 'lat', 'lng', 'radius_km',
+                'chip_keyword', 'region_selection', 'min_new_places',
+            ):
                 if key in case:
                     metadata[key] = case[key]
 
@@ -163,16 +189,30 @@ class LangfuseEvalPipeline:
         logger.info("langfuse_dataset_created", dataset_name=dataset_name)
         return dataset_name
 
-    def _extract_input_from_case(self, case: Dict[str, Any]) -> Dict[str, Any]:
+    @staticmethod
+    def _extract_input_from_case(case: Dict[str, Any]) -> Dict[str, Any]:
         """Extract input data from eval case.
 
-        Supports both evalset shapes:
-        - itinerary (book→place): ``{book_title, author}``
+        Supports the evalset shapes:
         - reverse-routing (place→book): ``{place}`` — the resolver input for
           ``run_place_to_book_eval.py``.
+        - local-atmosphere: ``{book_title, author, location_label, lat, lng,
+          radius_km}`` — the executor input for ``run_local_atmosphere_eval.py``.
+        - itinerary (book→place) AND expansion: ``{book_title, author}``.
+          Expansion deliberately shares the itinerary input shape — the
+          disambiguator is the dataset-level ``flow`` field, never the input.
         """
         if case.get('place'):
             return {'place': case['place']}
+        if 'location_label' in case:
+            return {
+                'book_title': case.get('book_title', ''),
+                'author': case.get('author', ''),
+                'location_label': case['location_label'],
+                'lat': case.get('lat'),
+                'lng': case.get('lng'),
+                'radius_km': case.get('radius_km', 80),
+            }
         return {
             'book_title': case.get('book_title', ''),
             'author': case.get('author', ''),
@@ -359,10 +399,16 @@ def create_dataset_from_evalsets(
     created_datasets = []
 
     for ef in evalset_files:
+        # Record each evalset's flow in the registry so run_scheduled_eval's
+        # auto-discovery can route non-itinerary datasets to their dedicated
+        # runners instead of choking on the format mismatch.
+        with open(ef, 'r') as f:
+            flow = json.load(f).get('flow', 'itinerary')
         dataset_name = pipeline.create_dataset_from_evalset(str(ef))
         created_datasets.append({
             'evalset_file': str(ef),
             'dataset_name': dataset_name,
+            'flow': flow,
             'created_at': datetime.now().isoformat(),
         })
 
