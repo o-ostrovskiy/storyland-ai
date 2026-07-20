@@ -102,10 +102,11 @@ async def initialize() -> AppState:
             logger.critical(
                 "gateway_auth_misconfigured",
                 detail=(
-                    "INTERNAL_API_SECRET is empty but REQUIRE_GATEWAY_SECRET=true: "
-                    "refusing to start. Set INTERNAL_API_SECRET (the backend "
-                    "gateway reads the same variable) or unset "
-                    "REQUIRE_GATEWAY_SECRET to start without service-to-service auth."
+                    "INTERNAL_API_SECRET is empty but REQUIRE_GATEWAY_SECRET=true "
+                    "(the default): refusing to start. Set INTERNAL_API_SECRET "
+                    "(the backend gateway reads the same variable) or explicitly "
+                    "set REQUIRE_GATEWAY_SECRET=false to run standalone (dev only) "
+                    "without service-to-service auth."
                 ),
                 environment=config.environment,
             )
@@ -121,8 +122,9 @@ async def initialize() -> AppState:
                 "then an unverified, forgeable identity — any caller able to reach "
                 "this service can drive Gemini spend and read or mutate any user's "
                 "sessions and itineraries. Set INTERNAL_API_SECRET (the backend "
-                "gateway reads the same variable), then set REQUIRE_GATEWAY_SECRET=true "
-                "to make this state fatal instead of merely loud."
+                "gateway reads the same variable), then remove "
+                "REQUIRE_GATEWAY_SECRET=false (the default is true) so this state "
+                "is fatal instead of merely loud."
             ),
             environment=config.environment,
         )
@@ -171,8 +173,10 @@ def verify_gateway_secret(request: Request) -> None:
     * secret configured -> the header MUST match, else HTTP 403 (fail closed).
     * secret empty       -> every caller is accepted. This is a misconfiguration,
       not a feature. It is no longer silent: boot logs ``gateway_auth_disabled``
-      (WARNING), and with ``REQUIRE_GATEWAY_SECRET=true`` the service refuses to
-      start at all (see ``initialize``). The check is left permissive HERE rather
+      (WARNING), and with ``REQUIRE_GATEWAY_SECRET=true`` — the default — the
+      service refuses to start at all (see ``initialize``), so this permissive
+      state is only reachable behind an explicit ``REQUIRE_GATEWAY_SECRET=false``
+      opt-out. The check is left permissive HERE rather
       than 403-ing at request time so that the failure mode of a misconfigured
       deploy is a loud log, not a silent total outage of the discovery chain.
 

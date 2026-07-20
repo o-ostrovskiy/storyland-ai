@@ -213,7 +213,7 @@ Failed jobs can be retried by calling `/compose` again with the same `job_id`; t
 
 ### AI Models
 
-StoryLand AI uses Google Gemini models (default: `gemini-2.5-flash-lite`) for all agents, chosen for native ADK integration, fast parallel execution (sub-2s response times), and excellent structured output adherence across 16 Pydantic data models. The complete workflow takes 60-100 seconds end-to-end with parallel discovery providing 3x speedup over sequential execution.
+StoryLand AI uses Google Gemini models (default: `gemini-3.1-flash-lite`) for all agents, chosen for native ADK integration, fast parallel execution (sub-2s response times), and excellent structured output adherence across 16 Pydantic data models. The complete workflow takes 60-100 seconds end-to-end with parallel discovery providing 3x speedup over sequential execution.
 
 ## Configuration
 
@@ -222,7 +222,7 @@ All configuration is via environment variables in `.env`. Copy `.env.example` to
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `GOOGLE_API_KEY` | **Required.** Google AI API key from [AI Studio](https://aistudio.google.com/app/apikey) | — |
-| `MODEL_NAME` | Gemini model to use | `gemini-2.5-flash-lite` |
+| `MODEL_NAME` | Gemini model to use | `gemini-3.1-flash-lite` (code default — a deploy without MODEL_NAME no longer crashes at boot) |
 | `USE_DATABASE` | Enable SQLite persistence | `false` |
 | `DATABASE_URL` | SQLite database path | `sqlite+aiosqlite:///storyland_sessions.db` |
 | `SESSION_MAX_EVENTS` | Max events in session | `20` |
@@ -239,7 +239,8 @@ All configuration is via environment variables in `.env`. Copy `.env.example` to
 | `SENTRY_ENABLE_METRICS` | Emit Sentry metrics. Every non-debug structlog event is auto-counted as `log.events` `{event, level}`, making timeouts/cache-hits/failures chartable; new call sites can use `sentry_sdk.metrics` directly (examples in `api/sentry.py`). | `true` |
 | `SENTRY_TRACES_SAMPLE_RATE` | Sentry performance-tracing sample rate (0.0–1.0) | `0.0` |
 | `CORS_ORIGINS` | Allowed CORS origins for API (comma-separated) | `*` |
-| `INTERNAL_API_SECRET` | Shared secret with the gateway service — when set, all itinerary endpoints require an `X-Internal-Secret` header with this value. The health endpoint (`/health`) is always open. Leave empty for standalone/dev use. | — |
+| `INTERNAL_API_SECRET` | Shared secret with the gateway service — when set, all itinerary endpoints require an `X-Internal-Secret` header with this value. The health endpoint (`/health`) is always open. Leaving it empty (standalone/dev use) also requires `REQUIRE_GATEWAY_SECRET=false`, otherwise the service refuses to start. | — |
+| `REQUIRE_GATEWAY_SECRET` | Fail-closed switch for gateway auth: when `true`, an empty `INTERNAL_API_SECRET` is a fatal boot error instead of an open service that trusts the forgeable `X-User-ID` header. Set `false` explicitly for standalone/dev use without a gateway (`.env.example` ships this opt-out). | `true` |
 
 Free tier includes 15 RPM and 200 requests/day — sufficient for development.
 

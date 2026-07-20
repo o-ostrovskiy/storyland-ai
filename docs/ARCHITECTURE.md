@@ -634,7 +634,7 @@ case RegionsReady(job_id=j, regions=r, analysis_note=n):
 
 ## 10. Gateway Service-to-Service Authentication (fail-closed)
 
-*Decided 2026-06-27 → 2026-07-11 (MYS-399); entry backfilled 2026-07-19 — the Patterns table row existed but the section was never written.*
+*Decided 2026-06-27 → 2026-07-11 (MYS-399); entry backfilled 2026-07-19 — the Patterns table row existed but the section was never written. Default flipped to fail-closed 2026-07-19 (July 2026 architecture review).*
 
 ### Decision
 When deployed behind the backend gateway, require a shared secret on every itinerary endpoint and take end-user identity **only** from the trusted `X-User-ID` header the gateway sets after JWT validation. Fail closed.
@@ -642,7 +642,8 @@ When deployed behind the backend gateway, require a shared secret on every itine
 ### Implementation
 - `api/dependencies.py` — `verify_gateway_secret`: when `INTERNAL_API_SECRET` is set, all itinerary endpoints require a matching `X-Internal-Secret` header (`/health` stays open). The secret is compared as **bytes**, constant-time.
 - Identity: the `X-User-ID` header only — the service trusts nothing else from the request. Missing header → 403 (except standalone dev, where identity falls back to the shared `dev_user`).
-- `REQUIRE_GATEWAY_SECRET=true` (`common/config.py`) refuses to **start** with an empty secret — closing the foot-gun where an empty secret silently accepts everyone and `X-User-ID` becomes a forgeable identity.
+- `REQUIRE_GATEWAY_SECRET` (`common/config.py`) refuses to **start** with an empty secret — closing the foot-gun where an empty secret silently accepts everyone and `X-User-ID` becomes a forgeable identity.
+- **Default flip (2026-07-19):** `REQUIRE_GATEWAY_SECRET` originally defaulted to `false` — enforcement was opt-in, and a fresh deploy that never set the secret came up open with only the `gateway_auth_disabled` boot warning. The July 2026 architecture review called this the cheapest real risk on the board, so the default is now **`true`**: running open requires an explicit `REQUIRE_GATEWAY_SECRET=false` (standalone/local dev; `.env.example` ships that opt-out). Prod is unaffected — `.env.prod` on the deploy box already sets `INTERNAL_API_SECRET`, and the switch only bites when the secret is empty.
 
 ### Rationale
 The service holds per-user sessions; without the secret gate, anyone who can reach the container could read/mutate any user's sessions by forging `X-User-ID`. The gateway owns real authn (JWT); this service only needs to verify "this request came through the gateway."
@@ -899,7 +900,7 @@ Make "done" mechanical (per team engineering-standards): reproducible dependenci
 - **Hash-locked deps:** `requirements.lock` / `requirements-dev.lock` from `uv pip compile --universal --generate-hashes`; the unit workflow (`codex.yml`) installs `--require-hashes` and fails if `make lock` would change the committed lock. `integration-tests.yml` installs from the same dev lock as of the ADK 2 lift (the previously documented live-resolution gap bit exactly as predicted: a fresh resolve drifted httpx/vcrpy and broke VCR replay with a method-case mismatch the locked env couldn't reproduce).
 - **Coverage ratchet:** `fail_under = 74` in `pyproject.toml` (76% baseline; bare `--cov` honoring `[tool.coverage.run]`). Ratchet, not target — raise, never lower.
 - **Audit gate:** `pip-audit --strict --require-hashes` on the prod lock; ignores are inline with justification + ticket.
-- **ADK pin:** `google-adk[eval]>=1.33.0,<2` in `pyproject.toml` + a CI guard asserting the **locked** resolution stays 1.x (prevents a non-reproducible jump to ADK 2.x).
+- **ADK pin:** `google-adk[db]>=2.4.0,<3` in `pyproject.toml` + a CI guard asserting the **locked** resolution stays 2.x (prevents a non-reproducible jump to the next major). Historical: this was `google-adk[eval]>=1.33.0,<2` guarded at 1.x until the ADK 2 lift (ADR #23), which moved the pin one major and swapped the extra — `[db]` restores the `DatabaseSessionService` deps that are no longer core on 2.x, and nothing imports `google.adk.evaluation`. The mechanism is unchanged: the guard tracks the tested major, it does not forbid a particular one.
 
 ### Rationale
 The agent (and everyone else) is only as autonomous as the definition of "done" is mechanical; a green build must mean tests passed, coverage didn't regress, deps are exactly what was reviewed, and no known-vulnerable package ships.
@@ -1075,7 +1076,7 @@ Kept deliberately: the researcher/formatter split (ADK 2.x would allow tools + o
 | **SSE streaming API** | Real-time progress, HITL preserved | Long-lived connections |
 | **Transport-agnostic core SDK** | Library or HTTP consumption, same logic | Interface drift risk between gateway and API layer |
 | **Failure status flag** | Terminal failures visible via /status, retryable | State must be persisted via `append_event`, not in-place mutation |
-| **Gateway secret (ADR #10)** | Blocks direct access when deployed behind a gateway; fail-closed X-User-ID identity | Health endpoint intentionally excluded; leave secret empty for standalone dev |
+| **Gateway secret (ADR #10)** | Blocks direct access when deployed behind a gateway; fail-closed X-User-ID identity; empty secret is a fatal boot error by default | Health endpoint intentionally excluded; standalone dev needs explicit `REQUIRE_GATEWAY_SECRET=false` |
 | **Local-atmosphere mode** | Lets readers feel a book without traveling; reuses pipeline pattern | Separate endpoint to maintain; LLM-side radius enforcement only |
 | **Persistent versioned cache (ADR #15)** | Repeat lookups free + instant; deploy-safe self-invalidation | Real-API seam test; bounded disk growth |
 | **Cross-job place_key (ADR #16)** | Same real place recognized across book jobs | Missed combine possible (never a wrong one) |
