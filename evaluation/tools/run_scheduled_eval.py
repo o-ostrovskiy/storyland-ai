@@ -47,6 +47,36 @@ except ImportError:
 logger = get_logger("storyland.scheduled_eval")
 
 
+def _summarize_by_shape(case_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate scored cases by preference shape.
+
+    Returns {"with_preferences": {...}, "without_preferences": {...}}, each
+    carrying n, mean average, and mean total tokens — the recorded artifact
+    the per-shape gate and the mechanism check read.
+    """
+    shapes: Dict[str, Dict[str, Any]] = {}
+    for shape_name, wants in (("with_preferences", True), ("without_preferences", False)):
+        scored = [
+            c for c in case_results
+            if c.get("scores") and bool(c.get("has_preferences")) == wants
+        ]
+        if not scored:
+            shapes[shape_name] = {"n": 0}
+            continue
+        averages = [c["scores"]["average"] for c in scored]
+        tokens = [
+            c["token_usage"]["total_tokens"]
+            for c in scored
+            if c.get("token_usage") and c["token_usage"].get("total_tokens")
+        ]
+        shapes[shape_name] = {
+            "n": len(scored),
+            "mean_average": round(sum(averages) / len(averages), 3),
+            "mean_total_tokens": round(sum(tokens) / len(tokens)) if tokens else None,
+        }
+    return shapes
+
+
 def select_first_region(region_analysis: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Automated region selection for evaluation mode - Issue #97.
@@ -337,6 +367,11 @@ async def run_evaluation_on_dataset(
         "failed_cases": failed_cases,
         "skipped_cases": skipped_cases,  # Cases that couldn't be parsed
         "case_results": case_results,
+        # Per-shape aggregation (PR-4 step zero): preference-carrying cases
+        # exercise the API-contract path; preference-free cases are the shape
+        # 100% of prod traffic takes (MYS-392). Gates read the shapes
+        # separately — never a silent blend.
+        "by_shape": _summarize_by_shape(case_results),
     }
 
     logger.info(
@@ -717,11 +752,12 @@ Find cities, landmarks, and author-related sites, then group them into practical
                     value=scores.book_relevance,
                     comment="LLM-as-judge: Connection to book's settings, themes, or author (1-5)",
                 )
-                root_span.score_trace(
-                    name="preference_adherence",
-                    value=scores.preference_adherence,
-                    comment="LLM-as-judge: Respect for user preferences (1-5)",
-                )
+                if scores.preference_adherence is not None:
+                    root_span.score_trace(
+                        name="preference_adherence",
+                        value=scores.preference_adherence,
+                        comment="LLM-as-judge: Respect for user preferences (1-5)",
+                    )
                 root_span.score_trace(
                     name="completeness",
                     value=scores.completeness,
@@ -746,7 +782,6 @@ Find cities, landmarks, and author-related sites, then group them into practical
                 # Prepare scores for local result storage
                 scores_data = {
                     "book_relevance": scores.book_relevance,
-                    "preference_adherence": scores.preference_adherence,
                     "completeness": scores.completeness,
                     "actionability": scores.actionability,
                     "geographical_accuracy": scores.geographical_accuracy,
@@ -755,6 +790,9 @@ Find cities, landmarks, and author-related sites, then group them into practical
                     "scoring_method": "llm_judge_gemini_flash_lite",
                     "scored_at": datetime.now().isoformat(),
                 }
+                # Present only when scored (no-preference cases average 5 dims).
+                if scores.preference_adherence is not None:
+                    scores_data["preference_adherence"] = scores.preference_adherence
 
                 logger.info(
                     "eval_scoring_complete",
@@ -783,6 +821,11 @@ Find cities, landmarks, and author-related sites, then group them into practical
             "book_title": exact_title,
             "author": exact_author,
             "input": book_title,
+            # Shape marker for per-shape gating: preference-carrying cases
+            # exercise the API-contract path; preference-free cases are the
+            # shape 100% of prod traffic takes (MYS-392). Derived from
+            # initial_state (always bound), not the scoring-block local.
+            "has_preferences": bool(initial_state.get("user:preferences")),
             "itinerary_created": itinerary_data is not None,
             "num_cities": len(itinerary_data.get("cities", [])) if itinerary_data else 0,
             "num_regions": len(selected_regions),

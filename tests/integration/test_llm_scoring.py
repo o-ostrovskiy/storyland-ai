@@ -119,9 +119,19 @@ async def test_score_itinerary_without_preferences():
     assert isinstance(scores, ItineraryScores)
     assert 1 <= scores.book_relevance <= 5
 
-    # Preference adherence should be lower when no preferences are given
-    # (or the model should score based on general travel quality)
-    assert 1 <= scores.preference_adherence <= 5
+    # PR-4 step zero: with no preferences there is no adherence target — the
+    # dimension is NOT scored (None) and the average covers the 5 scored
+    # dimensions. A judge grading adherence to nothing is noise, and blending
+    # it into the average polluted the prod-shape signal.
+    assert scores.preference_adherence is None
+    scored_dims = [
+        scores.book_relevance,
+        scores.completeness,
+        scores.actionability,
+        scores.geographical_accuracy,
+        scores.engagement,
+    ]
+    assert scores.average_score() == pytest.approx(sum(scored_dims) / 5)
 
 
 @pytest.mark.integration
