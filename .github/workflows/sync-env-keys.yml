@@ -1,0 +1,123 @@
+name: Sync rotated env keys to box
+
+# Pushes the rotated key values (GOOGLE_API_KEY, LANGFUSE_SECRET_KEY,
+# LANGFUSE_PUBLIC_KEY) from this repo's GitHub secrets into the box's
+# .env.prod and restarts the AI service. Exists because GitHub secrets are
+# WRITE-ONLY — nothing can read them back out, but a workflow can USE them,
+# so this is the no-human-pastes-values rotation path: values flow
+# GitHub vault → runner → box over SSH, never through a chat or a terminal
+# scrollback (2026-07-21 key-rotation incident).
+#
+# SAFETY:
+# - workflow_dispatch ONLY, gated by the `production` Environment (Olga's
+#   approval click) — same G5 gate as deploys; fork PRs can never reach it.
+# - PRE-FLIGHT VERIFY, runner-side: generateContent on the prod model and a
+#   Langfuse-authenticated call must BOTH return 200 before SSH ever opens.
+#   A red run here means "the secret in GitHub is bad" and the box was
+#   never touched.
+# - Values are piped to the remote shell via stdin (never remote argv from
+#   the runner side); GitHub masks secret values in logs; no set -x.
+# - .env.prod is backed up on the box (.env.prod.pre-sync) before edit.
+# - JIT SSH: port 22 opened for the runner only, always closed after —
+#   mirrors deploy-ai-prod.yml (keep-in-sync rule).
+#
+# After a green run: re-upload .env.prod to the 1Password item (standing
+# habit) — this workflow changes the box copy, making 1Password stale.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-ai-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # OIDC token for the just-in-time SSH role
+
+jobs:
+  sync:
+    name: Verify secrets, push to box, restart AI
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Pre-flight — prove the GitHub secrets are valid BEFORE touching the box
+        env:
+          GK: ${{ secrets.GOOGLE_API_KEY }}
+          LSK: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LPK: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+        run: |
+          [ -n "$GK" ] && [ -n "$LSK" ] && [ -n "$LPK" ] || { echo "::error::a secret is empty"; exit 1; }
+          G=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" \
+              -H "x-goog-api-key: $GK" -d '{"contents":[{"parts":[{"text":"hi"}]}]}' \
+              "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent")
+          L=$(curl -s -o /dev/null -w "%{http_code}" -u "$LPK:$LSK" https://us.cloud.langfuse.com/api/public/projects)
+          echo "generateContent: $G · langfuse: $L"
+          [ "$G" = "200" ] || { echo "::error::GOOGLE_API_KEY in GitHub secrets is INVALID (generateContent $G) — fix the secret, box untouched"; exit 1; }
+          [ "$L" = "200" ] || { echo "::error::LANGFUSE key pair in GitHub secrets is INVALID (auth $L) — fix the secrets, box untouched"; exit 1; }
+
+      - name: Validate JIT-SSH configuration
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          [ -n "$AWS_DEPLOY_ROLE_ARN" ] || { echo "::error::Repo variable AWS_DEPLOY_ROLE_ARN is not set"; exit 1; }
+
+      - name: Assume deploy role (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Open SSH for this runner (just-in-time)
+        run: |
+          RUNNER_IP="$(curl -sf https://checkip.amazonaws.com)"
+          # ipv6Cidrs must be explicitly empty — Lightsail defaults it to ::/0
+          # when omitted (open to the whole IPv6 internet).
+          aws lightsail open-instance-public-ports \
+            --instance-name storyland \
+            --port-info "{\"fromPort\":22,\"toPort\":22,\"protocol\":\"tcp\",\"cidrs\":[\"$RUNNER_IP/32\"],\"ipv6Cidrs\":[]}"
+
+      - name: Set up SSH key + pinned known_hosts
+        env:
+          LIGHTSAIL_SSH_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          BOX_IP: ${{ secrets.BOX_IP }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$LIGHTSAIL_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$BOX_IP" >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Push values into .env.prod and restart the AI service
+        env:
+          BOX_IP: ${{ secrets.BOX_IP }}
+          GK: ${{ secrets.GOOGLE_API_KEY }}
+          LSK: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LPK: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+        run: |
+          SSH_CMD="ssh -i ~/.ssh/deploy_key -o ServerAliveInterval=30 -o ConnectTimeout=10"
+          for i in $(seq 1 6); do
+            $SSH_CMD "ubuntu@$BOX_IP" "true" && break
+            [ "$i" = 6 ] && { echo "::error::Box unreachable over SSH after JIT port opening"; exit 1; }
+            sleep 5
+          done
+          # Values travel via stdin, one per line; the remote side reads them
+          # into variables and applies with sed. --wait gates on the ai
+          # container's own healthcheck.
+          printf '%s\n%s\n%s\n' "$GK" "$LSK" "$LPK" | $SSH_CMD "ubuntu@$BOX_IP" '
+            set -euo pipefail
+            IFS= read -r GK; IFS= read -r LSK; IFS= read -r LPK
+            cd ~/storyland/storyland-infrastructure/deploy
+            cp .env.prod .env.prod.pre-sync && chmod 600 .env.prod.pre-sync
+            sed -i "s|^GOOGLE_API_KEY=.*|GOOGLE_API_KEY=$GK|; s|^LANGFUSE_SECRET_KEY=.*|LANGFUSE_SECRET_KEY=$LSK|; s|^LANGFUSE_PUBLIC_KEY=.*|LANGFUSE_PUBLIC_KEY=$LPK|" .env.prod
+            docker compose -f docker-compose.prod.yml --env-file .env.prod --env-file .env.release up -d --no-deps --wait storyland-ai
+            docker compose -f docker-compose.prod.yml ps storyland-ai --format "{{.Name}} {{.Status}}"
+          '
+
+      - name: Close SSH (at-rest state)
+        if: always()
+        run: |
+          aws lightsail close-instance-public-ports \
+            --instance-name storyland \
+            --port-info "fromPort=22,toPort=22,protocol=tcp"
