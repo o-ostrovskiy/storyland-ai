@@ -167,6 +167,21 @@ jobs:
           # a non-empty dummy so the fail-closed gateway check (MYS-446)
           # passes AND stays enforced.
           services:
+            # MYS-611: same engine+major as prod (postgres:16-alpine) so the
+            # backend's alembic migrations validate against the PROD dialect,
+            # not SQLite. Fresh volume every run — no prod data.
+            db:
+              image: postgres:16-alpine
+              environment:
+                - POSTGRES_USER=storyland
+                - POSTGRES_PASSWORD=stage-dummy
+                - POSTGRES_DB=storyland
+              healthcheck:
+                test: ["CMD-SHELL", "pg_isready -U storyland -d storyland"]
+                interval: 5s
+                timeout: 5s
+                retries: 6
+                start_period: 10s
             storyland-ai:
               image: ghcr.io/o-ostrovskiy/storyland-ai:prod
               environment:
@@ -194,11 +209,10 @@ jobs:
                 start_period: 30s
             backend:
               image: ghcr.io/o-ostrovskiy/storyland-backend:prod
-              volumes: ["/app/data"]
               environment:
                 - PORT=8090
                 - UPSTREAM_URL=http://storyland-ai:8080
-                - DATABASE_URL=sqlite+aiosqlite:////app/data/storyland.db
+                - DATABASE_URL=postgresql+asyncpg://storyland:stage-dummy@db:5432/storyland
                 - JWT_SECRET=stage-dummy
                 - CORS_ORIGINS=http://localhost:18080
                 - INTERNAL_API_SECRET=stage-dummy
@@ -211,6 +225,7 @@ jobs:
                 start_period: 30s
               depends_on:
                 storyland-ai: {condition: service_healthy}
+                db: {condition: service_healthy}
             frontend:
               image: ghcr.io/o-ostrovskiy/storyland-frontend:prod
               environment: ["BACKEND_URL=http://backend:8090"]
@@ -224,6 +239,10 @@ jobs:
                 backend: {condition: service_healthy}
           YML
           STAGE=(docker compose -p stage -f /tmp/docker-compose.stage.yml)
+          # Timeout re-derived for the pg-backed stack (MYS-611): worst-case
+          # serial chain = db healthy (~15s) → backend boot + alembic on
+          # empty pg (80s ceiling) → frontend (~25s), ai's 80s ceiling in
+          # parallel ≈ 120-175s worst case. 240 keeps ~40% headroom.
           if "${STAGE[@]}" up -d --wait --wait-timeout 240; then
             echo "Stage PASS: full stack healthy from the images about to ship."
             "${STAGE[@]}" ps
