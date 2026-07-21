@@ -17,4 +17,10 @@ on:
 
 jobs:
   gitleaks:
+    # Explicit grant: a called workflow's job permissions must be a subset of
+    # what the caller passes — omitting this caused an opaque startup_failure
+    # on infra#52's first run.
+    permissions:
+      contents: read
+      pull-requests: read
     uses: o-ostrovskiy/storyland-infrastructure/.github/workflows/reusable-gitleaks.yml@main
