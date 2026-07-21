@@ -1,19 +1,20 @@
 # StoryLand AI - Evaluation Trends
 
-**Report Generated:** 2026-07-20 20:25:42
+**Report Generated:** 2026-07-21 01:17:33
 **Period:** Last 30 days
 **Total Evaluation Runs:** 1
 
 ## Overview
 
-- **Total Test Cases Evaluated:** 2
-- **Latest Evaluation:** 2026-07-20T20:25:41.922217
+- **Total Test Cases Evaluated:** 18
+- **Latest Evaluation:** 2026-07-21T01:17:32.923787
 
 ## Recent Evaluations
 
 | Date | Dataset | Cases | Status |
 |------|---------|-------|--------|
-| 2026-07-20 | storyland_eval | 2 | ✅ Complete |
+| 2026-07-21 | storyland_eval | 8 | ✅ Complete |
+| 2026-07-21 | books_v1 | 10 | ✅ Complete |
 
 ## Human spot-checks
 
@@ -21,8 +22,10 @@ Randomly flagged cases awaiting hand review (judge-calibration spot-checks). Pen
 
 | Flagged | Dataset | Case | Book | Review status |
 |---------|---------|------|------|---------------|
-| 2026-07-20 | storyland_eval | be0a4460 | Agatha Christie's works | ❓ Unknown (no Langfuse credentials) |
-| 2026-07-20 | storyland_eval | d48fbd3c | Under the Tuscan Sun | ❓ Unknown (no Langfuse credentials) |
+| 2026-07-21 | books_v1 | query_014 | Red, White & Royal Blue | ⏳ PENDING, 0d old |
+| 2026-07-21 | storyland_eval | 725d84f6 | The Da Vinci Code | ⏳ PENDING, 0d old |
+
+**⚠️ 2 spot-check(s) awaiting human review.**
 
 
 ## Viewing Results
