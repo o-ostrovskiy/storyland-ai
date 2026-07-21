@@ -88,6 +88,15 @@ jobs:
       - name: Record approval
         run: echo "G5 production deploy approved — proceeding to deploy storyland-ai (ref='${{ inputs.ref || github.ref_name }}', image_tag='${{ inputs.image_tag }}')."
 
+      # Fail-fast BEFORE any registry mutation (matches infra's step order —
+      # the keep-in-sync rule): an unset role ARN must not let build+push
+      # move :prod to an image the box then never pulls.
+      - name: Validate JIT-SSH configuration
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          [ -n "$AWS_DEPLOY_ROLE_ARN" ] || { echo "::error::Repo variable AWS_DEPLOY_ROLE_ARN is not set"; exit 1; }
+
       - name: Checkout caller repo source
         uses: actions/checkout@v4
         with:
@@ -126,12 +135,6 @@ jobs:
           docker buildx imagetools create -t "$IMAGE:prod" "$IMAGE:$IMAGE_TAG"
 
       # SSH opens only now — the (slow) build happens with port 22 still shut.
-      - name: Validate JIT-SSH configuration
-        env:
-          AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-        run: |
-          [ -n "$AWS_DEPLOY_ROLE_ARN" ] || { echo "::error::Repo variable AWS_DEPLOY_ROLE_ARN is not set"; exit 1; }
-
       - name: Assume deploy role (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -184,6 +187,12 @@ jobs:
           # :prod is always authoritative. Needs the one-time
           # `docker login ghcr.io` with a read:packages PAT on the box
           # (see infra deploy/README.md) — images are private.
+          # --wait gates this step on the ai container's OWN healthcheck —
+          # the later edge poll curls the SPA, which answers 200 with the ai
+          # container stopped, crash-looping, or refusing to boot on an
+          # empty INTERNAL_API_SECRET (the documented four-paths trap); the
+          # ai service isn't publicly exposed at all, so the box step is the
+          # only place its health can gate the deploy.
           # `docker image prune -f` (dangling only) reclaims the previous
           # :prod's orphaned layers; `|| true` because cleanup must never
           # fail a deploy that worked.
@@ -191,7 +200,7 @@ jobs:
             "cd ~/storyland/storyland-infrastructure/deploy && \
              printf 'SENTRY_RELEASE=%s\n' \"$RELEASE\" > .env.release && \
              docker pull $IMAGE:prod && \
-             docker compose -f docker-compose.prod.yml --env-file .env.prod --env-file .env.release up -d --no-deps storyland-ai && \
+             docker compose -f docker-compose.prod.yml --env-file .env.prod --env-file .env.release up -d --no-deps --wait storyland-ai && \
              docker compose -f docker-compose.prod.yml ps storyland-ai && \
              { docker image prune -f || true; }"
 
@@ -220,7 +229,13 @@ jobs:
           done
 
       - name: Prune old GHCR image versions (keep newest 15)
-        if: success()
+        # FORWARD deploys only — never on the rollback path. A rollback to a
+        # sha older than the retention window would otherwise succeed, then
+        # this step would delete the very version :prod now points at (prune
+        # keeps the newest 15 BY DATE): the running container survives, and
+        # the next recreate/pull fails on a tag that no longer exists — a
+        # green rollback manufacturing a latent outage.
+        if: success() && inputs.image_tag == ''
         # Retention is cleanup — it must never red a green deploy. Bounds the
         # rollback lever to ~15 deploys back; a rollback meant to persist
         # should be re-landed via ref=<old sha> (see infra deploy/README.md).
