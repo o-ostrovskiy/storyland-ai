@@ -68,3 +68,14 @@ Documentation files:
   ```
   Expected: No matches (0 results).
 - When adding new API integrations, add their auth headers/parameters to VCR filters and regenerate cassettes with `--vcr-record=all`
+
+## Pull request bodies (enforced by a required check)
+
+Every PR body MUST contain the four sections `## Why`, `## What`, `## Docs`,
+`## Verification` — the required status check "Require Why/What/Docs/
+Verification" reds the PR otherwise (MYS-617). Templates do NOT apply to
+agent-opened PRs (`gh pr create --body` and the API bypass them), so include
+the headings explicitly. Revert-titled PRs and Dependabot are exempt.
+§Docs means: what will a reader believe this change covers, and where is that
+written down — a pointer to another repo's doc counts, and "no doc impact"
+is valid if argued, not asserted.
