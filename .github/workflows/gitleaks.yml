@@ -2,13 +2,15 @@ name: Gitleaks
 
 # MYS-440 / MYS-629 layer 3: full-history secret scan on every push/PR.
 # THIS repo is public — a pushed key is exposed at push time (MYS-623 was
-# exactly that, this afternoon), so this scan is the last automated line
-# after the pre-commit hook and GitHub push protection.
+# exactly that), so this scan is the last automated line after the
+# pre-commit hook and GitHub push protection.
 #
-# Delegates to the shared reusable workflow in storyland-infrastructure
-# (Actions access level "user" grants this repo access). If that access is
-# ever revoked and this job errors with "workflow was not found", the
-# fallback is inlining the reusable workflow's two steps here.
+# INLINE, not the shared reusable workflow: a PUBLIC repo cannot call a
+# reusable workflow that lives in a PRIVATE repo (storyland-infrastructure's
+# "user" Actions access covers private-to-private only — confirmed
+# empirically on this PR: the cross-repo call failed at resolution with
+# zero jobs). These two steps mirror reusable-gitleaks.yml exactly; if the
+# infra repo ever goes public, re-point to the reusable version.
 on:
   push:
     branches: [main]
@@ -17,10 +19,22 @@ on:
 
 jobs:
   gitleaks:
-    # Explicit grant: a called workflow's job permissions must be a subset of
-    # what the caller passes — omitting this caused an opaque startup_failure
-    # on infra#52's first run.
+    name: gitleaks
+    runs-on: ubuntu-latest
     permissions:
       contents: read
+      # The action lists the PR's commits via the API on pull_request events;
+      # without this it dies with 403 "Resource not accessible by integration".
       pull-requests: read
-    uses: o-ostrovskiy/storyland-infrastructure/.github/workflows/reusable-gitleaks.yml@main
+    steps:
+      - name: Checkout repository (full history)
+        uses: actions/checkout@v4
+        with:
+          # Full clone: the scan covers every commit, not just the PR head —
+          # a secret added-then-removed inside one PR must still be caught.
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
