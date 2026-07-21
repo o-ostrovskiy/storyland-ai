@@ -52,7 +52,12 @@ jobs:
               -H "x-goog-api-key: $GK" -d '{"contents":[{"parts":[{"text":"hi"}]}]}' \
               "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent")
           L=$(curl -s -o /dev/null -w "%{http_code}" -u "$LPK:$LSK" https://us.cloud.langfuse.com/api/public/projects)
-          echo "generateContent: $G · langfuse: $L"
+          # Books: informational only, never gates — the Books API has ambient
+          # 503 flakiness (fallback exists for it), and until the key's project
+          # has Books API enabled this prints 403 SERVICE_DISABLED. The value
+          # is still synced either way; this line makes the state visible.
+          B=$(curl -s -o /dev/null -w "%{http_code}" "https://www.googleapis.com/books/v1/volumes?q=intitle:test&maxResults=1&key=$GK")
+          echo "generateContent: $G · langfuse: $L · books(informational): $B"
           [ "$G" = "200" ] || { echo "::error::GOOGLE_API_KEY in GitHub secrets is INVALID (generateContent $G) — fix the secret, box untouched"; exit 1; }
           [ "$L" = "200" ] || { echo "::error::LANGFUSE key pair in GitHub secrets is INVALID (auth $L) — fix the secrets, box untouched"; exit 1; }
 
@@ -110,7 +115,11 @@ jobs:
             IFS= read -r GK; IFS= read -r LSK; IFS= read -r LPK
             cd ~/storyland/storyland-infrastructure/deploy
             cp .env.prod .env.prod.pre-sync && chmod 600 .env.prod.pre-sync
-            sed -i "s|^GOOGLE_API_KEY=.*|GOOGLE_API_KEY=$GK|; s|^LANGFUSE_SECRET_KEY=.*|LANGFUSE_SECRET_KEY=$LSK|; s|^LANGFUSE_PUBLIC_KEY=.*|LANGFUSE_PUBLIC_KEY=$LPK|" .env.prod
+            # GOOGLE_BOOKS_API_KEY gets the SAME value — the box convention is
+            # one Google key for both Gemini and Books (verified 2026-07-21:
+            # the two vars held an identical value). Rotating only one var
+            # orphans the other on a dead key.
+            sed -i "s|^GOOGLE_API_KEY=.*|GOOGLE_API_KEY=$GK|; s|^GOOGLE_BOOKS_API_KEY=.*|GOOGLE_BOOKS_API_KEY=$GK|; s|^LANGFUSE_SECRET_KEY=.*|LANGFUSE_SECRET_KEY=$LSK|; s|^LANGFUSE_PUBLIC_KEY=.*|LANGFUSE_PUBLIC_KEY=$LPK|" .env.prod
             docker compose -f docker-compose.prod.yml --env-file .env.prod --env-file .env.release up -d --no-deps --wait storyland-ai
             docker compose -f docker-compose.prod.yml ps storyland-ai --format "{{.Name}} {{.Status}}"
           '
