@@ -190,6 +190,45 @@ Each evaluation is scored on 6 dimensions (1-5 scale):
 
 LLM-as-judge scoring is implemented in `evaluation/tools/llm_scorer.py` using Gemini to evaluate itineraries against these criteria.
 
+For books_v1, the dataset's book-specific `quality_criteria` are **not** injected
+into the quality judge — they are scored separately as **`criteria_coverage`**
+(1–5, compliance with the listed criteria only, never blended into the quality
+average). The MYS-586 ablation showed the injection made the judge grade
+compliance-with-specifics rather than quality (divergence vs a second model's
+reading: −0.95 with injection, +0.07 without). One number carrying two meanings
+means a reader can't tell which half moved. The local-atmosphere runner still
+injects its criteria into the judge deliberately (radius adherence rides on it).
+
+### Gate status & caveats (post-calibration, 2026-07)
+
+Full evidence: `evaluation/calibration/agreement_report.md` and
+`evaluation/calibration/rebaseline_2026-07.md`. The short version every reader
+of eval numbers needs:
+
+- **Both dataset gates are catastrophe detectors, not quality floors.** The
+  conservative derivation (pooled − 2×historical maxΔ) puts storyland_eval at
+  ≥ 4.03 against a pooled 4.37 and books_v1 at ≥ 2.14 against 2.94 — far below
+  their means by construction. Passing a gate means "no catastrophe," nothing
+  more.
+- **The storyland_eval judge is trustworthy** (±0.3 of a careful independent
+  reading; stable across the MYS-586 prompt changes). Trusting the judge and
+  trusting the gate are different claims — the gate is still loose.
+- **books_v1 deltas are not quality signal** until re-baselined under the
+  quality/`criteria_coverage` split. Under the pre-split judge they were
+  dominated by similarity-to-reference mechanics. A different-but-good
+  itinerary scored low; a model change that writes differently will move the
+  number without quality moving.
+- **The judge cannot fact-check geography.** `geographical_accuracy` scored 5
+  on an itinerary placing "Portland Observatory" in Oregon (it's in Maine) and
+  1–2 on verifiably correct St. Petersburg addresses. Deterministic checks
+  (e.g. the local-atmosphere radius gate) are the instrument for geographic
+  claims; never cite this dimension alone as evidence of a geographic error.
+- **The 2026-07 calibration labels are model labels** (Claude Fable 5,
+  Olga-approved), not human ground truth: agreement numbers are
+  judge-vs-second-model divergence. Weekly spot-checks are the channel where
+  true human anchors accumulate — a flagged case stays `pending_review` until
+  a real `human_*` score lands, so the absence of human anchors stays visible.
+
 ### Judge Calibration (human labels)
 
 The judge has never been anchored to human labels, and its run-to-run noise is

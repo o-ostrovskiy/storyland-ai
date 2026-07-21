@@ -37,7 +37,7 @@ from google.genai import types
 import uuid
 
 # LLM-as-judge scorer (Issue #96)
-from evaluation.tools.llm_scorer import score_itinerary
+from evaluation.tools.llm_scorer import score_itinerary, score_criteria_coverage
 
 try:
     from langfuse import Langfuse
@@ -865,6 +865,10 @@ Find cities, landmarks, and author-related sites, then group them into practical
                 # Get user preferences from session state
                 preferences = session.state.get("user:preferences", {})
 
+                # quality_criteria deliberately NOT passed to the quality
+                # judge (MYS-586 ablation: the injection made books_v1 grade
+                # compliance-with-specifics, not quality — divergence −0.95
+                # with it, +0.07 without). Compliance is its own score below.
                 scores = await score_itinerary(
                     api_key=config.google_api_key,
                     book_title=exact_title,
@@ -872,7 +876,6 @@ Find cities, landmarks, and author-related sites, then group them into practical
                     input_text=book_title,
                     itinerary=itinerary_data,
                     preferences=preferences,
-                    quality_criteria=quality_criteria,
                     expected_output=expected_output,
                     model_name="gemini-2.5-flash-lite",
                 )
@@ -924,6 +927,34 @@ Find cities, landmarks, and author-related sites, then group them into practical
                 # Present only when scored (no-preference cases average 5 dims).
                 if scores.preference_adherence is not None:
                     scores_data["preference_adherence"] = scores.preference_adherence
+
+                # Compliance with book-specific criteria: a SEPARATE score,
+                # never blended into the quality average — one number carrying
+                # quality and compliance meant a reader couldn't tell which
+                # half moved. Failure records a visible null, not an absence.
+                if quality_criteria:
+                    try:
+                        coverage = await score_criteria_coverage(
+                            api_key=config.google_api_key,
+                            book_title=exact_title,
+                            author=exact_author,
+                            quality_criteria=quality_criteria,
+                            itinerary=itinerary_data,
+                            model_name="gemini-2.5-flash-lite",
+                        )
+                        scores_data["criteria_coverage"] = coverage
+                        root_span.score_trace(
+                            name="criteria_coverage",
+                            value=coverage,
+                            comment="Compliance with book-specific criteria (1-5) — separate from quality",
+                        )
+                    except Exception as coverage_error:
+                        scores_data["criteria_coverage"] = None
+                        logger.warning(
+                            "criteria_coverage_failed",
+                            error=str(coverage_error),
+                            book_title=exact_title,
+                        )
 
                 logger.info(
                     "eval_scoring_complete",
