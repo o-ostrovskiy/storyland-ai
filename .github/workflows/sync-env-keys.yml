@@ -44,10 +44,17 @@ jobs:
       - name: Pre-flight — prove the GitHub secrets are valid BEFORE touching the box
         env:
           GK: ${{ secrets.GOOGLE_API_KEY }}
+          # Separate Books key (2026-07-21): the Gemini key's AI-Studio project
+          # gets 401 keys-not-supported from the legacy Books API, while the
+          # ORIGINAL project is grandfathered (fails 503 at worst, which is the
+          # branch the backend's Open Library fallback catches). Optional —
+          # empty falls back to GK (the pre-incident same-key convention).
+          BKS: ${{ secrets.GOOGLE_BOOKS_API_KEY }}
           LSK: ${{ secrets.LANGFUSE_SECRET_KEY }}
           LPK: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
         run: |
           [ -n "$GK" ] && [ -n "$LSK" ] && [ -n "$LPK" ] || { echo "::error::a secret is empty"; exit 1; }
+          BK="${BKS:-$GK}"
           GRESP=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" \
               -H "x-goog-api-key: $GK" -d '{"contents":[{"parts":[{"text":"hi"}]}]}' \
               "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent")
@@ -60,7 +67,10 @@ jobs:
           # 503 flakiness (fallback exists for it), and until the key's project
           # has Books API enabled this prints 403 SERVICE_DISABLED. The value
           # is still synced either way; this line makes the state visible.
-          B=$(curl -s -o /dev/null -w "%{http_code}" "https://www.googleapis.com/books/v1/volumes?q=intitle:test&maxResults=1&key=$GK")
+          B=$(curl -s -o /dev/null -w "%{http_code}" "https://www.googleapis.com/books/v1/volumes?q=intitle:test&maxResults=1&key=$BK")
+          # 401 from Books bypasses the backend fallback (it only catches the
+          # 503 branch) — warn loudly, though still non-gating.
+          [ "$B" = "401" ] && echo "::warning::Books key gets 401 keys-not-supported — the backend fallback will NOT fire on this; use a key from the grandfathered original project (GOOGLE_BOOKS_API_KEY secret)."
           echo "generateContent: $G · langfuse: $L · books(informational): $B"
           [ "$G" = "200" ] || { echo "::error::GOOGLE_API_KEY in GitHub secrets is INVALID (generateContent $G) — fix the secret, box untouched"; exit 1; }
           [ "$L" = "200" ] || { echo "::error::LANGFUSE key pair in GitHub secrets is INVALID (auth $L) — fix the secrets, box untouched"; exit 1; }
@@ -103,6 +113,7 @@ jobs:
         env:
           BOX_IP: ${{ secrets.BOX_IP }}
           GK: ${{ secrets.GOOGLE_API_KEY }}
+          BKS: ${{ secrets.GOOGLE_BOOKS_API_KEY }}
           LSK: ${{ secrets.LANGFUSE_SECRET_KEY }}
           LPK: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
         run: |
@@ -115,18 +126,24 @@ jobs:
           # Values travel via stdin, one per line; the remote side reads them
           # into variables and applies with sed. --wait gates on the ai
           # container's own healthcheck.
-          printf '%s\n%s\n%s\n' "$GK" "$LSK" "$LPK" | $SSH_CMD "ubuntu@$BOX_IP" '
+          BK="${BKS:-$GK}"
+          printf '%s\n%s\n%s\n%s\n' "$GK" "$BK" "$LSK" "$LPK" | $SSH_CMD "ubuntu@$BOX_IP" '
             set -euo pipefail
-            IFS= read -r GK; IFS= read -r LSK; IFS= read -r LPK
+            IFS= read -r GK; IFS= read -r BK; IFS= read -r LSK; IFS= read -r LPK
             cd ~/storyland/storyland-infrastructure/deploy
             cp .env.prod .env.prod.pre-sync && chmod 600 .env.prod.pre-sync
             # GOOGLE_BOOKS_API_KEY gets the SAME value — the box convention is
             # one Google key for both Gemini and Books (verified 2026-07-21:
             # the two vars held an identical value). Rotating only one var
             # orphans the other on a dead key.
-            sed -i "s|^GOOGLE_API_KEY=.*|GOOGLE_API_KEY=$GK|; s|^GOOGLE_BOOKS_API_KEY=.*|GOOGLE_BOOKS_API_KEY=$GK|; s|^LANGFUSE_SECRET_KEY=.*|LANGFUSE_SECRET_KEY=$LSK|; s|^LANGFUSE_PUBLIC_KEY=.*|LANGFUSE_PUBLIC_KEY=$LPK|" .env.prod
-            docker compose -f docker-compose.prod.yml --env-file .env.prod --env-file .env.release up -d --no-deps --wait storyland-ai
-            docker compose -f docker-compose.prod.yml ps storyland-ai --format "{{.Name}} {{.Status}}"
+            sed -i "s|^GOOGLE_API_KEY=.*|GOOGLE_API_KEY=$GK|; s|^GOOGLE_BOOKS_API_KEY=.*|GOOGLE_BOOKS_API_KEY=$BK|; s|^LANGFUSE_SECRET_KEY=.*|LANGFUSE_SECRET_KEY=$LSK|; s|^LANGFUSE_PUBLIC_KEY=.*|LANGFUSE_PUBLIC_KEY=$LPK|" .env.prod
+            # BOTH consumers restart: storyland-ai (GOOGLE_API_KEY, LANGFUSE_*)
+            # AND backend (GOOGLE_BOOKS_API_KEY) — the 2026-07-21 incident hour
+            # where only the ai restarted left the backend serving on a dead
+            # key from memory. --wait gates on their healthchecks (backend has
+            # one from infra #33 onward; harmless before).
+            docker compose -f docker-compose.prod.yml --env-file .env.prod --env-file .env.release up -d --no-deps --wait storyland-ai backend
+            docker compose -f docker-compose.prod.yml ps storyland-ai backend --format "{{.Name}} {{.Status}}"
           '
 
       - name: Close SSH (at-rest state)
