@@ -1,0 +1,72 @@
+name: PR body sections
+
+# The ENFORCEMENT half of the PR template (MYS-617). GitHub PR templates are
+# client-side: they seed the web UI and gh's interactive editor, but the REST
+# API ignores them and `gh pr create --body` bypasses them — and every PR in
+# this org is agent-opened with an explicit body, so the template alone fires
+# on none of them. This check is what actually binds: it reds any PR whose
+# body lacks the four required sections.
+#
+# Triggers UNCONDITIONALLY on every PR — no path filters — per the org
+# convention (2026-07-18): a required check that can skip freezes merges or
+# slips through, depending on the direction of the skip. `edited` is included
+# so fixing the body re-runs the check without a push.
+#
+# EXEMPTIONS (review-blocked without them): revert PRs and Dependabot skip
+# the check via job-level `if:`. Rollback = revert here (no feature flags),
+# and GitHub's Revert button generates a body with no headings — a required
+# check that gates the rollback lever is worse than the gap it closes; same
+# shape for Dependabot security updates. Job-level `if:` is the safe form:
+# the workflow still triggers and reports the job as SKIPPED, which
+# satisfies a required status check — unlike a path-filtered workflow that
+# never reports and wedges the PR at "Expected" (the reason behind the
+# unconditional-trigger convention). Known, accepted spoof: the revert
+# exemption keys on the title prefix, so any PR titled "Revert…" skips the
+# check. At this org's scale the incident path outranks the gaming risk;
+# a reviewer reading a fake "Revert…" title has bigger findings to file.
+#
+# KNOWN LIMIT (stated per review, not silently narrowed): this asserts the
+# four HEADINGS exist, not that anything was written under them. A web-UI
+# PR with the template untouched — four headings, four unedited comment
+# prompts — passes green. Deliberate: the target failure mode is
+# agent-opened PRs omitting sections entirely; content-quality checking via
+# comment-stripping is fragile and the marginal catch is small. Do not
+# trust this check as "the description is good" — it means "the sections
+# are present."
+#
+# To make it REQUIRED (the binding step, done once in repo settings by Olga):
+# Settings → Branches → main protection → require status check
+# "Require Why/What/Docs/Verification".
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-body:
+    name: Require Why/What/Docs/Verification
+    # Exemptions — see header. Skipped satisfies a required check.
+    if: >-
+      github.actor != 'dependabot[bot]' &&
+      !startsWith(github.event.pull_request.title, 'Revert ')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the four sections exist
+        env:
+          # Via env, never inline-interpolated into the script: PR bodies are
+          # attacker-controlled text (storyland-ai is public) and an inline
+          # ${{ }} expansion inside `run:` would be shell injection.
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          missing=""
+          for h in "## Why" "## What" "## Docs" "## Verification"; do
+            printf '%s' "$BODY" | grep -qF "$h" || missing="$missing '$h'"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::PR body is missing required section(s):$missing. The template (.github/pull_request_template.md) defines them, but templates are client-side — agent-opened PRs (gh --body / API) must include the headings explicitly (MYS-617). Edit the PR description; this check re-runs on edit."
+            exit 1
+          fi
+          echo "All four sections present."
