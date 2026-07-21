@@ -213,11 +213,12 @@ of eval numbers needs:
 - **The storyland_eval judge is trustworthy** (±0.3 of a careful independent
   reading; stable across the MYS-586 prompt changes). Trusting the judge and
   trusting the gate are different claims — the gate is still loose.
-- **books_v1 deltas are not quality signal** until re-baselined under the
-  quality/`criteria_coverage` split. Under the pre-split judge they were
-  dominated by similarity-to-reference mechanics. A different-but-good
-  itinerary scored low; a model change that writes differently will move the
-  number without quality moving.
+- **books_v1 quality deltas are believable post-split** (re-baselined
+  2026-07-21, pooled 3.90: `rebaseline_split_2026-07.md`). The split-config
+  judge matched the second-model reading at +0.07 bias / 0.45 MAD; pre-split
+  numbers (≤2.94-era) were similarity-dominated and are not comparable.
+  `criteria_coverage` is the separate compliance read (~2.3–2.4 currently) —
+  never blend it back into quality when quoting either.
 - **The judge cannot fact-check geography.** `geographical_accuracy` scored 5
   on an itinerary placing "Portland Observatory" in Oregon (it's in Maine) and
   1–2 on verifiably correct St. Petersburg addresses. Deterministic checks
