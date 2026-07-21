@@ -176,6 +176,14 @@ def _build_scoring_prompt(
         reference_section = ""
 
     def _criterion_block(key: str, number: int, label: str) -> str:
+        # Calibration ablation (MYS-586): injecting per-book requirements here
+        # is the DOMINANT similarity mechanism — the judge grades compliance
+        # with expected specifics, not quality (books_v1 divergence −0.95 with
+        # them, +0.07 without, vs a second model's read). The itinerary runner
+        # therefore no longer passes quality_criteria to the quality judge;
+        # compliance is scored separately (score_criteria_coverage). The
+        # injection remains for callers that WANT a compliance-inflected judge
+        # (local-atmosphere asserts radius adherence through it, by design).
         block = f"**{number}. {label} (1-5)**\n{SCORING_CRITERIA[key]}"
         if quality_criteria and quality_criteria.get(key):
             block += f"\n\nBook-specific requirement: {quality_criteria[key]}"
@@ -376,6 +384,133 @@ Respond with ONLY a valid JSON object (no markdown, no explanation) with these e
         )
         logger.error(
             "llm_scoring_failed",
+            error=str(e),
+            error_type=type(e).__name__,
+            book_title=book_title,
+        )
+        raise
+
+
+class CriteriaCoverage(BaseModel):
+    """Structured output for the book-specific criteria-coverage score."""
+
+    criteria_coverage: int = Field(
+        ..., ge=1, le=5,
+        description="How fully the itinerary satisfies the book-specific criteria",
+    )
+
+
+COVERAGE_RUBRIC = (
+    "Score 1-5 where:\n"
+    "5 = Every listed criterion clearly satisfied\n"
+    "4 = Most criteria satisfied, minor gaps\n"
+    "3 = Roughly half the criteria satisfied\n"
+    "2 = Few criteria satisfied\n"
+    "1 = The listed criteria are essentially unmet"
+)
+
+
+def _build_coverage_prompt(
+    book_title: str,
+    author: str,
+    quality_criteria: Dict[str, str],
+    itinerary: Dict[str, Any],
+) -> str:
+    """Build the compliance prompt: coverage of the dataset's book-specific
+    criteria, deliberately separated from the quality judge (MYS-586: one
+    number carrying quality AND compliance meant a reader couldn't tell which
+    half moved)."""
+    criteria_lines = "\n".join(
+        f"- ({key}) {text}" for key, text in quality_criteria.items()
+    )
+    itinerary_json = json.dumps(itinerary, indent=2)
+    return f"""How fully does this travel itinerary for "{book_title}" by {author} satisfy the following book-specific criteria?
+
+This is a COMPLIANCE check against the listed criteria only — do not judge overall quality, style, or anything not listed.
+
+**CRITERIA**:
+{criteria_lines}
+
+{COVERAGE_RUBRIC}
+
+**GENERATED ITINERARY**:
+{itinerary_json}
+
+---
+
+Respond with ONLY a valid JSON object (no markdown, no explanation):
+{{
+  "criteria_coverage": <integer 1-5>
+}}
+"""
+
+
+@observe(name="llm_score_criteria_coverage", as_type="generation")
+async def score_criteria_coverage(
+    api_key: str,
+    book_title: str,
+    author: str,
+    quality_criteria: Dict[str, str],
+    itinerary: Dict[str, Any],
+    model_name: str = "gemini-2.5-flash-lite",
+) -> int:
+    """Score coverage of book-specific criteria (1-5), separate from quality.
+
+    Raises on any failure — the caller records a visible null rather than a
+    silent absence (same discipline as a judge omitting a demanded dimension).
+    """
+    prompt = _build_coverage_prompt(book_title, author, quality_criteria, itinerary)
+
+    get_client().update_current_generation(
+        model=model_name,
+        input={"book_title": book_title, "criteria_keys": list(quality_criteria.keys())},
+        metadata={"scoring_method": "llm_criteria_coverage"},
+    )
+
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(temperature=0.0),
+        )
+
+        response_text = response.text.strip()
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        if response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
+
+        coverage = CriteriaCoverage.model_validate_json(response_text)
+
+        usage = response.usage_metadata
+        get_client().update_current_generation(
+            output={"criteria_coverage": coverage.criteria_coverage},
+            usage_details={
+                "input": usage.prompt_token_count or 0,
+                "output": usage.candidates_token_count or 0,
+                "total": usage.total_token_count or 0,
+            } if usage else None,
+            level="DEFAULT",
+            status_message="Coverage scoring completed",
+        )
+        logger.info(
+            "criteria_coverage_complete",
+            book_title=book_title,
+            criteria_coverage=coverage.criteria_coverage,
+        )
+        return coverage.criteria_coverage
+
+    except Exception as e:
+        get_client().update_current_generation(
+            level="ERROR",
+            status_message=f"Coverage scoring failed: {str(e)}",
+        )
+        logger.error(
+            "criteria_coverage_failed",
             error=str(e),
             error_type=type(e).__name__,
             book_title=book_title,

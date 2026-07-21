@@ -391,3 +391,59 @@ class TestBuildScoringPromptWithExpectedOutput:
             expected_output=None,
         )
         assert "REFERENCE EXAMPLE" not in prompt
+
+
+class TestCriteriaCoverageSplit:
+    """MYS-586: compliance is scored separately from quality."""
+
+    def _criteria(self):
+        return {
+            "book_relevance": "Must include the Limestone start and Freeport",
+            "geographical_accuracy": "Route must follow US-1 south",
+        }
+
+    def test_coverage_prompt_lists_criteria_and_compliance_framing(self):
+        from evaluation.tools.llm_scorer import _build_coverage_prompt
+
+        prompt = _build_coverage_prompt(
+            "The Long Walk", "Stephen King", self._criteria(), {"cities": []}
+        )
+        assert "COMPLIANCE check" in prompt
+        assert "Limestone start" in prompt
+        assert "US-1 south" in prompt
+        assert "do not judge overall quality" in prompt
+        assert "criteria_coverage" in prompt
+
+    def test_coverage_model_bounds(self):
+        from evaluation.tools.llm_scorer import CriteriaCoverage
+
+        assert CriteriaCoverage(criteria_coverage=5).criteria_coverage == 5
+        with pytest.raises(ValidationError):
+            CriteriaCoverage(criteria_coverage=6)
+        with pytest.raises(ValidationError):
+            CriteriaCoverage(criteria_coverage=0)
+
+    def test_quality_prompt_without_qc_has_no_requirement_blocks(self):
+        # The itinerary runner no longer passes quality_criteria to the
+        # quality judge — this is what the ablation-B configuration looks
+        # like, and what run_scheduled_eval now produces.
+        prompt = _build_scoring_prompt(
+            book_title="The Long Walk",
+            author="Stephen King",
+            input_text="The Long Walk",
+            itinerary={"cities": []},
+            quality_criteria=None,
+        )
+        assert "Book-specific requirement" not in prompt
+
+    def test_quality_prompt_with_qc_still_injects_for_la_runner(self):
+        # local-atmosphere asserts radius adherence through the injection,
+        # by design — the capability must survive the itinerary-runner split.
+        prompt = _build_scoring_prompt(
+            book_title="The Long Walk",
+            author="Stephen King",
+            input_text="The Long Walk",
+            itinerary={"cities": []},
+            quality_criteria=self._criteria(),
+        )
+        assert "Book-specific requirement" in prompt
