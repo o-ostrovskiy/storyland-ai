@@ -181,3 +181,7 @@ site/
 *.tar.gz
 *.rar
 AGENTS.md
+
+# Any .env variant, incl. backups (.env.bak-*): a live-secret file in the
+# worktree is one careless git-add from a public-repo leak (2026-07-21).
+.env*
