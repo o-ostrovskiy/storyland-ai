@@ -230,7 +230,7 @@ jobs:
               image: ghcr.io/o-ostrovskiy/storyland-frontend:prod
               environment: ["BACKEND_URL=http://backend:8090"]
               healthcheck:
-                test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:80/"]
+                test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/"]
                 interval: 10s
                 timeout: 5s
                 retries: 5
