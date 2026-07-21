@@ -48,9 +48,13 @@ jobs:
           LPK: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
         run: |
           [ -n "$GK" ] && [ -n "$LSK" ] && [ -n "$LPK" ] || { echo "::error::a secret is empty"; exit 1; }
-          G=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" \
+          GRESP=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" \
               -H "x-goog-api-key: $GK" -d '{"contents":[{"parts":[{"text":"hi"}]}]}' \
               "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent")
+          G=$(printf '%s' "$GRESP" | tail -1)
+          # On failure, surface Google's own reason (no secret material in it)
+          # so a red run self-diagnoses: API-not-enabled vs restriction vs bad key.
+          [ "$G" = "200" ] || printf '%s' "$GRESP" | head -n -1 | head -c 600
           L=$(curl -s -o /dev/null -w "%{http_code}" -u "$LPK:$LSK" https://us.cloud.langfuse.com/api/public/projects)
           # Books: informational only, never gates — the Books API has ambient
           # 503 flakiness (fallback exists for it), and until the key's project
@@ -68,6 +72,7 @@ jobs:
           [ -n "$AWS_DEPLOY_ROLE_ARN" ] || { echo "::error::Repo variable AWS_DEPLOY_ROLE_ARN is not set"; exit 1; }
 
       - name: Assume deploy role (OIDC)
+        id: aws
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
@@ -125,7 +130,10 @@ jobs:
           '
 
       - name: Close SSH (at-rest state)
-        if: always()
+        # Only meaningful if AWS credentials were configured (i.e., we got at
+        # least as far as the role assumption) — otherwise the port was never
+        # opened and this step would just error with NoRegion noise.
+        if: always() && steps.aws.conclusion == 'success' 
         run: |
           aws lightsail close-instance-public-ports \
             --instance-name storyland \
