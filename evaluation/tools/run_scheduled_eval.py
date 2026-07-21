@@ -9,6 +9,7 @@ import os
 import sys
 import json
 import time
+import random
 import asyncio
 from datetime import datetime
 from pathlib import Path
@@ -118,6 +119,90 @@ def _summarize_by_shape(case_results: List[Dict[str, Any]]) -> Dict[str, Any]:
             "mean_total_tokens": round(sum(tokens) / len(tokens)) if tokens else None,
         }
     return shapes
+
+
+def select_spot_check_cases(
+    dataset_results: List[Dict[str, Any]],
+    k: int = 2,
+    seed: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Select up to k scored cases across all datasets for human spot-check review.
+
+    Selection is seeded (run-date string by default) so a re-run of the same
+    day's evaluation flags the same cases. Only cases that completed with
+    judge scores are eligible — a case the judge couldn't score needs a
+    failure investigation, not a calibration label.
+
+    Args:
+        dataset_results: Per-dataset result dicts (each with case_results)
+        k: Maximum number of cases to flag
+        seed: Seed for deterministic selection
+
+    Returns:
+        List of flagged-case descriptors (dataset, item_id, run_name,
+        trace_id, book_title), sorted for stable output
+    """
+    candidates = []
+    for dataset_result in dataset_results:
+        for case in dataset_result.get("case_results", []):
+            if case.get("status") == "evaluated" and case.get("scores"):
+                candidates.append({
+                    "dataset": dataset_result.get("dataset_name"),
+                    "item_id": case.get("item_id"),
+                    "run_name": case.get("run_name"),
+                    "trace_id": case.get("trace_id"),
+                    "book_title": case.get("book_title"),
+                })
+
+    if not candidates:
+        return []
+
+    rng = random.Random(seed)
+    selected = rng.sample(candidates, min(k, len(candidates)))
+    return sorted(selected, key=lambda c: (c["dataset"] or "", c["item_id"] or ""))
+
+
+def enqueue_for_human_review(
+    langfuse: Any,
+    queue_id: str,
+    selected: List[Dict[str, Any]],
+) -> int:
+    """
+    Add flagged traces to a Langfuse annotation queue for human review.
+
+    Non-fatal by design: an enqueue failure must never fail the eval run —
+    the pending_review record in the results JSON is the source of truth
+    either way.
+
+    Returns:
+        Number of items successfully enqueued
+    """
+    enqueued = 0
+    for case in selected:
+        trace_id = case.get("trace_id")
+        if not trace_id:
+            logger.warning(
+                "spot_check_enqueue_skipped",
+                item_id=case.get("item_id"),
+                reason="no trace_id recorded",
+            )
+            continue
+        try:
+            langfuse.api.annotation_queues.create_queue_item(
+                queue_id,
+                object_id=trace_id,
+                object_type="TRACE",
+            )
+            enqueued += 1
+        except Exception as e:
+            logger.warning(
+                "spot_check_enqueue_failed",
+                item_id=case.get("item_id"),
+                trace_id=trace_id,
+                error=str(e),
+            )
+    return enqueued
 
 
 def select_first_region(region_analysis: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -353,6 +438,9 @@ async def run_evaluation_on_dataset(
             case_result = {
                 "item_id": item.id,
                 "run_name": run_name,
+                # Langfuse trace link — lets the human spot-check and the
+                # calibration tooling find this exact generation later.
+                "trace_id": root_span.trace_id,
                 **result,  # Include all result fields (status, scores, token_usage, etc.)
             }
             case_results.append(case_result)
@@ -873,6 +961,11 @@ Find cities, landmarks, and author-related sites, then group them into practical
             "num_cities": len(itinerary_data.get("cities", [])) if itinerary_data else 0,
             "num_regions": len(selected_regions),
             "token_usage": token_stats,
+            # Full payload + the preferences the judge saw, so results JSONs
+            # are self-contained for human review and judge calibration
+            # (previously only Langfuse traces carried the itinerary).
+            "preferences": initial_state.get("user:preferences"),
+            "itinerary": itinerary_data,
         }
 
         # Add scores if scoring succeeded
@@ -1025,6 +1118,45 @@ async def run_all_evaluations(
                 "evaluated_cases": 0,
             })
 
+    # Human spot-check: flag 1-2 scored cases per run for hand review.
+    # The record lives in the results JSON regardless of what happens in
+    # Langfuse, so a review that never happens stays visible as
+    # pending_review in the trend report — skipped, not silent.
+    selected = select_spot_check_cases(
+        results, k=2, seed=datetime.now().strftime("%Y%m%d")
+    )
+    human_spot_check: Dict[str, Any] = {
+        "selected": selected,
+        "status": "pending_review" if selected else "no_scored_cases",
+        "selected_at": datetime.now().isoformat(),
+        "review_queue_id": None,
+        "enqueued": 0,
+    }
+    review_queue_id = os.getenv("LANGFUSE_REVIEW_QUEUE_ID")
+    if selected and review_queue_id and LANGFUSE_AVAILABLE:
+        try:
+            langfuse = Langfuse(
+                secret_key=config.langfuse_secret_key,
+                public_key=config.langfuse_public_key,
+                host=config.langfuse_host or "https://cloud.langfuse.com",
+            )
+            human_spot_check["enqueued"] = enqueue_for_human_review(
+                langfuse, review_queue_id, selected
+            )
+            human_spot_check["review_queue_id"] = review_queue_id
+        except Exception as e:
+            logger.warning(
+                "spot_check_queue_unavailable",
+                queue_id=review_queue_id,
+                error=str(e),
+            )
+    logger.info(
+        "spot_check_selected",
+        num_selected=len(selected),
+        items=[c["item_id"] for c in selected],
+        enqueued=human_spot_check["enqueued"],
+    )
+
     # Save results
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(
@@ -1036,6 +1168,7 @@ async def run_all_evaluations(
         json.dump({
             'timestamp': datetime.now().isoformat(),
             'results': results,
+            'human_spot_check': human_spot_check,
         }, f, indent=2)
 
     logger.info("all_evaluations_complete", output_file=output_file)

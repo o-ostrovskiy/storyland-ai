@@ -190,6 +190,52 @@ Each evaluation is scored on 6 dimensions (1-5 scale):
 
 LLM-as-judge scoring is implemented in `evaluation/tools/llm_scorer.py` using Gemini to evaluate itineraries against these criteria.
 
+### Judge Calibration (human labels)
+
+The judge has never been anchored to human labels, and its run-to-run noise is
+large (books_v1 ±0.40, storyland_eval ±0.17 on identical code) — so judge
+scores gate only catastrophes until calibrated. `evaluation/tools/judge_calibration.py`
+manages the calibration loop against Langfuse annotation queues:
+
+```bash
+# 1. Build the labeling queue: pulls ~30 judge-scored itineraries from recent
+#    dataset runs, creates human_<dimension> score configs (1-5, exact rubric
+#    text from SCORING_CRITERIA), enqueues the traces, writes a manifest to
+#    evaluation/calibration/. Needs LANGFUSE_* creds in .env.
+python evaluation/tools/judge_calibration.py build-queue          # --dry-run to preview
+
+# 2. Hand-label in Langfuse: Annotation Queues → judge-calibration-2026-07.
+#    Score from the trace OUTPUT (itinerary) + INPUT (book, preferences);
+#    don't look at the judge's existing scores first.
+
+# 3. Compute judge-vs-human agreement (per-dimension mean absolute difference
+#    and direction bias, |Δ|≥2 disagreement list):
+python evaluation/tools/judge_calibration.py agreement
+```
+
+The manifest (`evaluation/calibration/queue_manifest_*.json`) is the join key
+between judge scores and human labels — commit it. Rubric re-anchoring edits
+to `SCORING_CRITERIA` and gate-threshold recomputation are driven by the
+agreement report.
+
+### Weekly Human Spot-Check
+
+Each scheduled eval run randomly flags up to 2 scored cases for human review
+(seeded by run date, so a same-day re-run flags the same cases). The selection
+is recorded in the results JSON under `human_spot_check` with
+`status: pending_review`, and the trend report renders a "Human spot-checks"
+section where unreviewed cases stay listed with their age — skipped reviews
+are visible, not silent. A case counts as reviewed once its trace carries any
+`human_*` label score in Langfuse (entered via the annotation UI or the API).
+
+Set `LANGFUSE_REVIEW_QUEUE_ID` (e.g. as a GitHub Actions variable) to have
+flagged traces auto-enqueued into an annotation queue; enqueue failures are
+non-fatal and the JSON record remains the source of truth.
+
+Results JSONs also now carry the full `itinerary` payload, the `preferences`
+the judge saw, and the Langfuse `trace_id` per case, so review and calibration
+work from artifacts alone.
+
 ### Automated Evaluations
 
 Evaluations run automatically via GitHub Actions:
@@ -340,6 +386,7 @@ evaluation/
 │   ├── eval_dashboard.py          # Dashboard and reporting
 │   ├── langfuse_eval.py           # Dataset creation pipeline
 │   ├── llm_scorer.py              # LLM-as-judge quality scoring
+│   ├── judge_calibration.py       # Human-label queue + judge-vs-human agreement
 │   └── setup_langfuse_eval.sh     # Setup script
 ├── storyland_eval.evalset.json    # Dataset (8 diverse books)
 ├── books_v1.evalset.json          # Dataset (10 books with expected output + criteria)
@@ -347,6 +394,7 @@ evaluation/
 ├── local_atmosphere_v1.evalset.json  # Dataset (8 local-atmosphere cases, mixed preference shapes)
 ├── expansion_v1.evalset.json      # Dataset (5 expansion two-step deterministic cases)
 ├── langfuse_datasets.json         # Dataset registry incl. per-dataset flow (gitignored)
+├── calibration/                   # Judge-calibration manifests + agreement reports (tracked)
 ├── results/                       # Evaluation run results (gitignored)
 ├── trend_report.md                # Generated trend report (tracked)
 └── metrics.json                   # Exported metrics (gitignored)

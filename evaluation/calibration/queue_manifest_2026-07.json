@@ -1,0 +1,574 @@
+{
+  "created_at": "2026-07-20T16:36:01.774117",
+  "queue_name": "judge-calibration-2026-07",
+  "queue_id": "cmrtojx07064cad0ebpl7rhj9",
+  "langfuse_host": "https://us.cloud.langfuse.com",
+  "score_config_ids": {
+    "human_book_relevance": "c339e998-12c0-4028-9b1f-f8dbb3ca57b8",
+    "human_preference_adherence": "52726832-a14a-48dd-bc01-77cae792717b",
+    "human_completeness": "f98161f7-9ef9-4dd1-a85d-afe7d660e79c",
+    "human_actionability": "58806674-7017-47cb-9b0c-f05436b79526",
+    "human_geographical_accuracy": "453fd909-8d4c-4831-af7b-13850d66fb68",
+    "human_engagement": "b43682a2-f7b6-48f0-aa9f-ceb8632d7bb6"
+  },
+  "dimensions": [
+    "book_relevance",
+    "preference_adherence",
+    "completeness",
+    "actionability",
+    "geographical_accuracy",
+    "engagement"
+  ],
+  "counts": {
+    "total": 30,
+    "with_preferences": 16,
+    "without_preferences": 14,
+    "by_dataset": {
+      "storyland_eval": 10,
+      "books_v1": 20
+    }
+  },
+  "items": [
+    {
+      "dataset": "storyland_eval",
+      "item_id": "be0a4460",
+      "run_name": "eval_run_20260720_202412_v3",
+      "trace_id": "1f2a84ab46104f3ea58ad84bec304cbe",
+      "book_title": "Agatha Christie's works",
+      "author": "Agatha Christie",
+      "has_preferences": false,
+      "judge_scores": {
+        "book_relevance": 5,
+        "preference_adherence": 5,
+        "completeness": 5,
+        "actionability": 4,
+        "geographical_accuracy": 5,
+        "engagement": 4
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/1f2a84ab46104f3ea58ad84bec304cbe"
+    },
+    {
+      "dataset": "storyland_eval",
+      "item_id": "d48fbd3c",
+      "run_name": "eval_run_20260720_202412_v3",
+      "trace_id": "66bb5006f6b0cd741e2541aa5cfa7c47",
+      "book_title": "Under the Tuscan Sun",
+      "author": "Frances Mayes",
+      "has_preferences": true,
+      "judge_scores": {
+        "book_relevance": 5,
+        "preference_adherence": 4,
+        "completeness": 4,
+        "actionability": 4,
+        "geographical_accuracy": 5,
+        "engagement": 4
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/66bb5006f6b0cd741e2541aa5cfa7c47"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_011",
+      "run_name": "eval_run_20260720_033838_v3",
+      "trace_id": "e501c16d416498b49ab39a45d74a5e63",
+      "book_title": "The Lord of the Rings",
+      "author": "J.R.R. Tolkien",
+      "has_preferences": true,
+      "judge_scores": {
+        "book_relevance": 3,
+        "preference_adherence": 3,
+        "completeness": 3,
+        "actionability": 3,
+        "geographical_accuracy": 3,
+        "engagement": 3
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/e501c16d416498b49ab39a45d74a5e63"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_012",
+      "run_name": "eval_run_20260720_033838_v3",
+      "trace_id": "388350af5fbb436502222d7b66c4560f",
+      "book_title": "The Long Walk",
+      "author": "Stephen King",
+      "has_preferences": false,
+      "judge_scores": {
+        "book_relevance": 1,
+        "preference_adherence": null,
+        "completeness": 1,
+        "actionability": 1,
+        "geographical_accuracy": 1,
+        "engagement": 1
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/388350af5fbb436502222d7b66c4560f"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_013",
+      "run_name": "eval_run_20260720_033838_v3",
+      "trace_id": "4ae3ed9a44b162ab7efe8988477b9731",
+      "book_title": "Leviathan Wakes",
+      "author": "James S. A. Corey",
+      "has_preferences": true,
+      "judge_scores": {
+        "book_relevance": 3,
+        "preference_adherence": 2,
+        "completeness": 3,
+        "actionability": 3,
+        "geographical_accuracy": 5,
+        "engagement": 3
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/4ae3ed9a44b162ab7efe8988477b9731"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_014",
+      "run_name": "eval_run_20260720_033838_v3",
+      "trace_id": "23d2851b1fb14597119b510b8b79cc74",
+      "book_title": "Red, White & Royal Blue",
+      "author": "Casey McQuiston",
+      "has_preferences": false,
+      "judge_scores": {
+        "book_relevance": 2,
+        "preference_adherence": null,
+        "completeness": 2,
+        "actionability": 2,
+        "geographical_accuracy": 4,
+        "engagement": 2
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/23d2851b1fb14597119b510b8b79cc74"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_015",
+      "run_name": "eval_run_20260720_033838_v3",
+      "trace_id": "fc2950bc980333c536bc9ca1f1e968a3",
+      "book_title": "One Hundred Years of Solitude",
+      "author": "Gabriel Garc\u00eda M\u00e1rquez",
+      "has_preferences": true,
+      "judge_scores": {
+        "book_relevance": 4,
+        "preference_adherence": 4,
+        "completeness": 3,
+        "actionability": 3,
+        "geographical_accuracy": 4,
+        "engagement": 4
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/fc2950bc980333c536bc9ca1f1e968a3"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_016",
+      "run_name": "eval_run_20260720_033838_v3",
+      "trace_id": "3e3ad36b0669afdb82b5f8f3e2239459",
+      "book_title": "The Kite Runner",
+      "author": "Khaled Hosseini",
+      "has_preferences": false,
+      "judge_scores": {
+        "book_relevance": 2,
+        "preference_adherence": null,
+        "completeness": 2,
+        "actionability": 2,
+        "geographical_accuracy": 2,
+        "engagement": 3
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/3e3ad36b0669afdb82b5f8f3e2239459"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_017",
+      "run_name": "eval_run_20260720_033838_v3",
+      "trace_id": "81fb24a5f4b8032ac510ae3ec261b6cb",
+      "book_title": "Crime and Punishment",
+      "author": "Fyodor Dostoevsky",
+      "has_preferences": true,
+      "judge_scores": {
+        "book_relevance": 2,
+        "preference_adherence": 1,
+        "completeness": 2,
+        "actionability": 2,
+        "geographical_accuracy": 1,
+        "engagement": 2
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/81fb24a5f4b8032ac510ae3ec261b6cb"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_018",
+      "run_name": "eval_run_20260720_033838_v3",
+      "trace_id": "0e98f0fa925083f55c7088cb7d48d406",
+      "book_title": "Wild",
+      "author": "Cheryl Strayed",
+      "has_preferences": false,
+      "judge_scores": {
+        "book_relevance": 2,
+        "preference_adherence": null,
+        "completeness": 2,
+        "actionability": 2,
+        "geographical_accuracy": 3,
+        "engagement": 3
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/0e98f0fa925083f55c7088cb7d48d406"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_019",
+      "run_name": "eval_run_20260720_033838_v3",
+      "trace_id": "97ce7b58840c393d5b689715abd0106b",
+      "book_title": "Dracula",
+      "author": "Bram Stoker",
+      "has_preferences": true,
+      "judge_scores": {
+        "book_relevance": 4,
+        "preference_adherence": 4,
+        "completeness": 4,
+        "actionability": 4,
+        "geographical_accuracy": 5,
+        "engagement": 4
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/97ce7b58840c393d5b689715abd0106b"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_020",
+      "run_name": "eval_run_20260720_033838_v3",
+      "trace_id": "d71c3514dbaa456704053b5358d468b9",
+      "book_title": "Shogun",
+      "author": "James Clavell",
+      "has_preferences": false,
+      "judge_scores": {
+        "book_relevance": 2,
+        "preference_adherence": null,
+        "completeness": 2,
+        "actionability": 2,
+        "geographical_accuracy": 4,
+        "engagement": 2
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/d71c3514dbaa456704053b5358d468b9"
+    },
+    {
+      "dataset": "storyland_eval",
+      "item_id": "c63c401b",
+      "run_name": "eval_run_20260720_033531_v3",
+      "trace_id": "a4366a688015ada157ae677d345d0a43",
+      "book_title": "Harry Potter and the Philosopher's Stone",
+      "author": "J.K. Rowling",
+      "has_preferences": true,
+      "judge_scores": {
+        "book_relevance": 5,
+        "preference_adherence": 4,
+        "completeness": 4,
+        "actionability": 4,
+        "geographical_accuracy": 5,
+        "engagement": 4
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/a4366a688015ada157ae677d345d0a43"
+    },
+    {
+      "dataset": "storyland_eval",
+      "item_id": "725d84f6",
+      "run_name": "eval_run_20260720_033531_v3",
+      "trace_id": "5084446d7ba70d6e7da93b884c8c75c7",
+      "book_title": "The Da Vinci Code",
+      "author": "Dan Brown",
+      "has_preferences": true,
+      "judge_scores": {
+        "book_relevance": 5,
+        "preference_adherence": 5,
+        "completeness": 4,
+        "actionability": 4,
+        "geographical_accuracy": 5,
+        "engagement": 4
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/5084446d7ba70d6e7da93b884c8c75c7"
+    },
+    {
+      "dataset": "storyland_eval",
+      "item_id": "413ae6ad",
+      "run_name": "eval_run_20260720_033531_v3",
+      "trace_id": "a96b493588eea78c6f443e7e5d685f3a",
+      "book_title": "Ernest Hemingway's works",
+      "author": "Ernest Hemingway",
+      "has_preferences": false,
+      "judge_scores": {
+        "book_relevance": 5,
+        "preference_adherence": null,
+        "completeness": 4,
+        "actionability": 4,
+        "geographical_accuracy": 5,
+        "engagement": 4
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/a96b493588eea78c6f443e7e5d685f3a"
+    },
+    {
+      "dataset": "storyland_eval",
+      "item_id": "b7c3445d",
+      "run_name": "eval_run_20260720_033531_v3",
+      "trace_id": "50a1997b32eec1b0bf3bdd2ff73791a2",
+      "book_title": "The Girl with the Dragon Tattoo",
+      "author": "Stieg Larsson",
+      "has_preferences": true,
+      "judge_scores": {
+        "book_relevance": 4,
+        "preference_adherence": 4,
+        "completeness": 4,
+        "actionability": 4,
+        "geographical_accuracy": 5,
+        "engagement": 4
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/50a1997b32eec1b0bf3bdd2ff73791a2"
+    },
+    {
+      "dataset": "storyland_eval",
+      "item_id": "be0a4460",
+      "run_name": "eval_run_20260720_033531_v3",
+      "trace_id": "62e07c88654bd3673d66def62efd7fed",
+      "book_title": "Agatha Christie's works",
+      "author": "Agatha Christie",
+      "has_preferences": false,
+      "judge_scores": {
+        "book_relevance": 5,
+        "preference_adherence": null,
+        "completeness": 5,
+        "actionability": 4,
+        "geographical_accuracy": 5,
+        "engagement": 4
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/62e07c88654bd3673d66def62efd7fed"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_013",
+      "run_name": "eval_run_20260720_033038_v3",
+      "trace_id": "5a4f3450305e11e0b1143ae1f749cf8e",
+      "book_title": "Leviathan Wakes",
+      "author": "James S. A. Corey",
+      "has_preferences": true,
+      "judge_scores": {
+        "book_relevance": 3,
+        "preference_adherence": 3,
+        "completeness": 3,
+        "actionability": 3,
+        "geographical_accuracy": 4,
+        "engagement": 3
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/5a4f3450305e11e0b1143ae1f749cf8e"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_014",
+      "run_name": "eval_run_20260720_033038_v3",
+      "trace_id": "3505b842962e76246b2f67a00494d1fa",
+      "book_title": "Red, White & Royal Blue",
+      "author": "Casey McQuiston",
+      "has_preferences": false,
+      "judge_scores": {
+        "book_relevance": 2,
+        "preference_adherence": null,
+        "completeness": 2,
+        "actionability": 2,
+        "geographical_accuracy": 3,
+        "engagement": 3
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/3505b842962e76246b2f67a00494d1fa"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_015",
+      "run_name": "eval_run_20260720_033038_v3",
+      "trace_id": "45fdd91c46dddf7115429ce8cf2dd512",
+      "book_title": "One Hundred Years of Solitude",
+      "author": "Gabriel Garc\u00eda M\u00e1rquez",
+      "has_preferences": true,
+      "judge_scores": {
+        "book_relevance": 3,
+        "preference_adherence": 3,
+        "completeness": 3,
+        "actionability": 3,
+        "geographical_accuracy": 3,
+        "engagement": 4
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/45fdd91c46dddf7115429ce8cf2dd512"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_016",
+      "run_name": "eval_run_20260720_033038_v3",
+      "trace_id": "a2a2e54253fc95b5ef2349346e6393cb",
+      "book_title": "The Kite Runner",
+      "author": "Khaled Hosseini",
+      "has_preferences": false,
+      "judge_scores": {
+        "book_relevance": 3,
+        "preference_adherence": null,
+        "completeness": 3,
+        "actionability": 3,
+        "geographical_accuracy": 3,
+        "engagement": 4
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/a2a2e54253fc95b5ef2349346e6393cb"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_017",
+      "run_name": "eval_run_20260720_033038_v3",
+      "trace_id": "67de6370f713366aa1288011c47f8edf",
+      "book_title": "Crime and Punishment",
+      "author": "Fyodor Dostoevsky",
+      "has_preferences": true,
+      "judge_scores": {
+        "book_relevance": 2,
+        "preference_adherence": 2,
+        "completeness": 2,
+        "actionability": 2,
+        "geographical_accuracy": 2,
+        "engagement": 2
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/67de6370f713366aa1288011c47f8edf"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_018",
+      "run_name": "eval_run_20260720_033038_v3",
+      "trace_id": "777ca936c32b5e50d83c21791206d5be",
+      "book_title": "Wild",
+      "author": "Cheryl Strayed",
+      "has_preferences": false,
+      "judge_scores": {
+        "book_relevance": 2,
+        "preference_adherence": null,
+        "completeness": 2,
+        "actionability": 2,
+        "geographical_accuracy": 2,
+        "engagement": 3
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/777ca936c32b5e50d83c21791206d5be"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_019",
+      "run_name": "eval_run_20260720_033038_v3",
+      "trace_id": "dfd7ab95735d19093171562971958b0a",
+      "book_title": "Dracula",
+      "author": "Bram Stoker",
+      "has_preferences": true,
+      "judge_scores": {
+        "book_relevance": 3,
+        "preference_adherence": 2,
+        "completeness": 2,
+        "actionability": 2,
+        "geographical_accuracy": 3,
+        "engagement": 3
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/dfd7ab95735d19093171562971958b0a"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_020",
+      "run_name": "eval_run_20260720_033038_v3",
+      "trace_id": "3d1cc1eaf3ef3b83c8b529bcecb97a2b",
+      "book_title": "Shogun",
+      "author": "James Clavell",
+      "has_preferences": false,
+      "judge_scores": {
+        "book_relevance": 1,
+        "preference_adherence": null,
+        "completeness": 1,
+        "actionability": 1,
+        "geographical_accuracy": 1,
+        "engagement": 1
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/3d1cc1eaf3ef3b83c8b529bcecb97a2b"
+    },
+    {
+      "dataset": "storyland_eval",
+      "item_id": "794b0031",
+      "run_name": "eval_run_20260720_033531_v3",
+      "trace_id": "da70bd86879a63a22f38b1d4f302282c",
+      "book_title": "Pride and Prejudice",
+      "author": "Jane Austen",
+      "has_preferences": false,
+      "judge_scores": {
+        "book_relevance": 5,
+        "preference_adherence": null,
+        "completeness": 4,
+        "actionability": 4,
+        "geographical_accuracy": 5,
+        "engagement": 4
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/da70bd86879a63a22f38b1d4f302282c"
+    },
+    {
+      "dataset": "storyland_eval",
+      "item_id": "808f3d4f",
+      "run_name": "eval_run_20260720_033531_v3",
+      "trace_id": "1ec8446f805bca0986bb284ceafeb6cf",
+      "book_title": "The Great Gatsby",
+      "author": "F. Scott Fitzgerald",
+      "has_preferences": true,
+      "judge_scores": {
+        "book_relevance": 5,
+        "preference_adherence": 5,
+        "completeness": 5,
+        "actionability": 4,
+        "geographical_accuracy": 5,
+        "engagement": 5
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/1ec8446f805bca0986bb284ceafeb6cf"
+    },
+    {
+      "dataset": "storyland_eval",
+      "item_id": "d48fbd3c",
+      "run_name": "eval_run_20260720_033531_v3",
+      "trace_id": "52825b89b6e4c45d0fe1856b7050f151",
+      "book_title": "Under the Tuscan Sun",
+      "author": "Frances Mayes",
+      "has_preferences": true,
+      "judge_scores": {
+        "book_relevance": 4,
+        "preference_adherence": 3,
+        "completeness": 4,
+        "actionability": 4,
+        "geographical_accuracy": 5,
+        "engagement": 4
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/52825b89b6e4c45d0fe1856b7050f151"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_011",
+      "run_name": "eval_run_20260720_033038_v3",
+      "trace_id": "7adf1527e52b79c411610ed1b6515699",
+      "book_title": "The Lord of the Rings",
+      "author": "J.R.R. Tolkien",
+      "has_preferences": true,
+      "judge_scores": {
+        "book_relevance": 4,
+        "preference_adherence": 4,
+        "completeness": 4,
+        "actionability": 4,
+        "geographical_accuracy": 5,
+        "engagement": 4
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/7adf1527e52b79c411610ed1b6515699"
+    },
+    {
+      "dataset": "books_v1",
+      "item_id": "query_012",
+      "run_name": "eval_run_20260720_033038_v3",
+      "trace_id": "7f85b9bb7a6ed4f28519705ddf54f217",
+      "book_title": "The Long Walk",
+      "author": "Stephen King",
+      "has_preferences": false,
+      "judge_scores": {
+        "book_relevance": 2,
+        "preference_adherence": null,
+        "completeness": 2,
+        "actionability": 2,
+        "geographical_accuracy": 1,
+        "engagement": 2
+      },
+      "trace_url": "https://us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/traces/7f85b9bb7a6ed4f28519705ddf54f217"
+    }
+  ],
+  "labels_source": "Model labels: Claude Fable 5, approved by Olga 2026-07-20 in lieu of hand labels (entered via API + UI, human_* score names). NOT human ground truth - agreement analysis measures judge-vs-Claude, not judge-vs-human."
+}
