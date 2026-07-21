@@ -239,11 +239,18 @@ jobs:
                 backend: {condition: service_healthy}
           YML
           STAGE=(docker compose -p stage -f /tmp/docker-compose.stage.yml)
-          # Timeout re-derived for the pg-backed stack (MYS-611): worst-case
-          # serial chain = db healthy (~15s) → backend boot + alembic on
-          # empty pg (80s ceiling) → frontend (~25s), ai's 80s ceiling in
-          # parallel ≈ 120-175s worst case. 240 keeps ~40% headroom.
-          if "${STAGE[@]}" up -d --wait --wait-timeout 240; then
+          # Timeout derivation (MYS-611 review-corrected — the first version
+          # understated two ceilings). Time-to-verdict ceiling per service is
+          # start_period + retries x interval:
+          #   db       10 + 6x5  = 40s
+          #   ai       30 + 5x10 = 80s   (parallel with db)
+          #   backend  30 + 5x10 = 80s   (after max(db, ai))
+          #   frontend 15 + 5x10 = 65s   (after backend)
+          # Critical path = max(40, 80) + 80 + 65 = 225s. 300 gives ~75s
+          # (~25%) headroom; the gate exits the moment the stack is healthy,
+          # so the ceiling costs nothing on the happy path. If you tune any
+          # start_period/retries/interval above, RE-DO this sum.
+          if "${STAGE[@]}" up -d --wait --wait-timeout 300; then
             echo "Stage PASS: full stack healthy from the images about to ship."
             "${STAGE[@]}" ps
           else
