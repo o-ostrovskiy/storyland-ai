@@ -373,12 +373,16 @@ class TestBuildScoringPromptWithExpectedOutput:
             itinerary={"cities": ["Matamata"]},
             expected_output=expected_output,
         )
-        assert "REFERENCE OUTPUT" in prompt
+        assert "REFERENCE EXAMPLE" in prompt
+        # MYS-586: the reference must be framed as context, never a benchmark
+        # to resemble — that framing made books_v1 a similarity metric.
+        assert "benchmark" not in prompt
+        assert "do NOT penalize valid choices" in prompt
         assert "Matamata" in prompt
         assert "10-14 days" in prompt
 
     def test_no_expected_output_no_reference_section(self):
-        """No REFERENCE OUTPUT section when expected_output is None."""
+        """No reference section when expected_output is None."""
         prompt = _build_scoring_prompt(
             book_title="The Lord of the Rings",
             author="J.R.R. Tolkien",
@@ -386,4 +390,4 @@ class TestBuildScoringPromptWithExpectedOutput:
             itinerary={"cities": ["Matamata"]},
             expected_output=None,
         )
-        assert "REFERENCE OUTPUT" not in prompt
+        assert "REFERENCE EXAMPLE" not in prompt
