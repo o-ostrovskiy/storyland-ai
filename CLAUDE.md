@@ -69,6 +69,17 @@ Documentation files:
   Expected: No matches (0 results).
 - When adding new API integrations, add their auth headers/parameters to VCR filters and regenerate cassettes with `--vcr-record=all`
 
+### Committing (MYS-629 — binds agent sessions too)
+
+- **Stage explicit paths — never `git add -A` or `git add .`.** MYS-623 (keys
+  pushed to this PUBLIC repo) was blanket staging of untracked files — on a
+  public repo the exposure happens at push time, before any CI runs.
+- One-time per clone: `pip install pre-commit && pre-commit install` — the
+  hooks scan the staged diff for secrets (gitleaks) and block
+  `.DS_Store` / `*.backup` / `.env*` before a commit exists.
+- Server-side backstops: GitHub push protection (provider-pattern keys) and
+  the full-history gitleaks CI scan (`.github/workflows/gitleaks.yml`).
+
 ## Pull request bodies (enforced by a required check)
 
 Every PR body MUST contain the four sections `## Why`, `## What`, `## Docs`,

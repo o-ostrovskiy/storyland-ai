@@ -1,0 +1,36 @@
+# MYS-629: client-side guardrails that fire BEFORE history is written — the
+# only layer that can stop a `git add -A` incident. MYS-623 (Google + Langfuse
+# keys pushed to THIS public repo, 2026-07-21) was exactly that, and on a
+# public repo the exposure happens at push time — CI is already too late.
+# GitHub push protection (enabled) covers provider-pattern keys server-side;
+# these hooks cover the generic/unknown-format ones it misses.
+#
+# One-time setup per clone:
+#   pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      # Scans the STAGED diff (protect mode). Default ruleset — add a
+      # .gitleaks.toml only when a real allowlist need appears (e.g. a VCR
+      # cassette false positive; prefer fixing the cassette filter instead).
+      - id: gitleaks
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=1000"]
+      - id: check-merge-conflict
+
+  - repo: local
+    hooks:
+      - id: forbid-junk-and-env-files
+        name: forbid .DS_Store / *.backup / .env* (committing one is always a mistake)
+        entry: >-
+          .DS_Store, *.backup and .env* files must never be committed —
+          MYS-158 and MYS-623 were exactly this. Unstage the file
+          (git restore --staged <path>) and stage explicit paths instead.
+        language: fail
+        files: '(^|/)(\.DS_Store|[^/]*\.backup|\.env(\.[^/]*)?)$'
+        exclude: '(^|/)\.env\.example$'
