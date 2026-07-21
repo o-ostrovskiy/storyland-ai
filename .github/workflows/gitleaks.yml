@@ -1,0 +1,20 @@
+name: Gitleaks
+
+# MYS-440 / MYS-629 layer 3: full-history secret scan on every push/PR.
+# THIS repo is public — a pushed key is exposed at push time (MYS-623 was
+# exactly that, this afternoon), so this scan is the last automated line
+# after the pre-commit hook and GitHub push protection.
+#
+# Delegates to the shared reusable workflow in storyland-infrastructure
+# (Actions access level "user" grants this repo access). If that access is
+# ever revoked and this job errors with "workflow was not found", the
+# fallback is inlining the reusable workflow's two steps here.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  gitleaks:
+    uses: o-ostrovskiy/storyland-infrastructure/.github/workflows/reusable-gitleaks.yml@main
