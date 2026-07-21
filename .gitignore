@@ -3,9 +3,16 @@
 # ========================================
 # Environment & Secrets
 # ========================================
-.env
-.env.local
-.env.*.local
+# Prefix-match EVERY .env variant. MYS-623 (2026-07-21): a local backup named
+# `.env.bak-2026-07-20` was swept into a commit on this PUBLIC repo by
+# `git add -A`, exposing a live GOOGLE_API_KEY and LANGFUSE_SECRET_KEY. It
+# matched none of the patterns below it -- not `.env` (exact), not
+# `.env.local` (exact), not `.env.*.local` (needs the .local suffix), and not
+# `*.bak` (needs a .bak SUFFIX; that file ended in `-2026-07-20`). Enumerating
+# suffixes cannot work, because the next backup will be named something else.
+# Match the prefix. Already-tracked files are unaffected by gitignore, so a
+# committed .env*.example stays tracked.
+.env*
 *.pem
 *.key
 service-account*.json
