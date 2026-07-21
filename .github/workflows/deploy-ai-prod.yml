@@ -202,7 +202,7 @@ jobs:
                 - REQUIRE_GATEWAY_SECRET=true
                 - LOG_LEVEL=INFO
               healthcheck:
-                test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/v1/health')"]
+                test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/v1/health')"]
                 interval: 10s
                 timeout: 10s
                 retries: 5
@@ -218,7 +218,7 @@ jobs:
                 - INTERNAL_API_SECRET=stage-dummy
                 - LOG_LEVEL=INFO
               healthcheck:
-                test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/api/v1/health')"]
+                test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/api/v1/health')"]
                 interval: 10s
                 timeout: 10s
                 retries: 5
