@@ -27,7 +27,8 @@ SCORING_CRITERIA = {
     "book_relevance": (
         "Evaluate if the travel itinerary locations are directly connected to the book's "
         "settings, themes, characters, or author. Each suggested place should have a clear "
-        "and meaningful connection to the literary work.\n\n"
+        "and meaningful connection to the literary work. Evaluate connections against "
+        "your knowledge of the book itself, not against any reference list of locations.\n\n"
         "Score 1-5 where:\n"
         "5 = All locations strongly connected to book\n"
         "4 = Most locations clearly relevant\n"
@@ -49,7 +50,8 @@ SCORING_CRITERIA = {
     "completeness": (
         "Evaluate if the response includes a comprehensive itinerary with cities, landmarks, "
         "and author-related sites. The itinerary should provide enough detail for the traveler "
-        "to plan their trip.\n\n"
+        "to plan their trip. Completeness means the itinerary's own components and plannable "
+        "detail — not coverage of every location a reference might include.\n\n"
         "Score 1-5 where:\n"
         "5 = Comprehensive with all components\n"
         "4 = Good coverage of main elements\n"
@@ -71,7 +73,10 @@ SCORING_CRITERIA = {
     "geographical_accuracy": (
         "Evaluate if the locations mentioned are real places that can be visited. "
         "Cities and landmarks should be correctly associated with their countries. "
-        "The geographical information should be accurate.\n\n"
+        "The geographical information should be accurate. Judge the itinerary's own "
+        "locations for real-world validity: a location is not wrong merely because it "
+        "differs from a reference, and invented stop labels that are not real visitable "
+        "places should lower the score.\n\n"
         "Score 1-5 where:\n"
         "5 = All locations accurate and real\n"
         "4 = Minor geographical details off\n"
@@ -158,7 +163,15 @@ def _build_scoring_prompt(
 
     # Format expected output section (only when provided)
     if expected_output:
-        reference_section = f"**REFERENCE OUTPUT** (use this as benchmark when scoring):\n{json.dumps(expected_output, indent=2)}\n"
+        # Calibration finding (MYS-586): "use as benchmark" turned the judge
+        # into a reference-similarity metric on books_v1 (divergence ~1.2 vs
+        # a second model's read; ~0.2 on reference-free storyland_eval).
+        reference_section = (
+            "**REFERENCE EXAMPLE** — one valid solution, for context only. "
+            "Score the generated itinerary on its own merits against the "
+            "criteria; do NOT penalize valid choices that differ from this "
+            f"example:\n{json.dumps(expected_output, indent=2)}\n"
+        )
     else:
         reference_section = ""
 
