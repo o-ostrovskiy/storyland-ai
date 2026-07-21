@@ -5,9 +5,20 @@ name: Deploy AI (prod)
 # SELF-CONTAINED on purpose: storyland-ai is a PUBLIC repo, and a public repo
 # cannot call a reusable workflow that lives in a PRIVATE repo
 # (storyland-infrastructure). So unlike the frontend/backend callers, this
-# workflow inlines the SSH-deploy steps instead of `uses:`-ing
+# workflow inlines the deploy steps instead of `uses:`-ing
 # infra/.github/workflows/deploy-service.yml. The deploy logic mirrors that
-# reusable workflow (and deploy.sh) exactly for service=storyland-ai.
+# reusable workflow exactly for service=storyland-ai — keep the two in sync.
+#
+# IMAGE-BASED DEPLOY (infra #38): the image is built ON THE RUNNER and pushed
+# to GHCR (ghcr.io/o-ostrovskiy/storyland-ai — immutable :<short-sha> tag plus
+# the moving :prod tag), then the box does `docker pull :prod` +
+# `compose up -d --no-deps storyland-ai`. The box never builds on this path
+# (no build CPU/memory contention with live traffic), source is no longer
+# rsynced by this workflow, and rollback is a REGISTRY-side re-tag: pass the
+# `image_tag` input with an old short-sha and GHCR's :prod is repointed at it
+# server-side before the box pulls — registry and box can never disagree.
+# Laptop fallback (infra deploy.sh + docker-compose.build.yml) still rsyncs
+# and builds on the box if GHCR/Actions is down.
 #
 # workflow_dispatch-ONLY, so it is INERT until a human runs it from the Actions
 # tab — merging it changes nothing in prod. There is no pull_request trigger, so
@@ -23,17 +34,19 @@ name: Deploy AI (prod)
 # never echoed; GitHub also masks secret values in logs.
 #
 # Runtime config (.env.prod: GOOGLE_API_KEY, INTERNAL_API_SECRET, LANGFUSE_*,
-# CACHE_TTL_SECONDS, CACHE_MAX_ENTRIES) lives ONLY on the box and is deliberately
-# excluded from the rsync, so a rebuild never clobbers it — the acute
-# config-drift area for AI.
+# CACHE_TTL_SECONDS, CACHE_MAX_ENTRIES) lives ONLY on the box; images carry no
+# secrets and env is injected by compose at run time, so the acute AI
+# config-drift area is untouched by deploys.
 #
 # POST-MERGE RELEASE ONLY: it does not run tests and MUST NEVER trigger an eval
 # (eval = real Gemini spend, founder-gated). The QA factual-grounding /
 # Langfuse eval-before-merge gate stays in CI.
 #
-# DEPENDENCY NOTE: on the box, restarting `storyland-ai` via docker compose can
-# also recreate its depends_on services. This mirrors deploy.sh's existing
-# behaviour; the `--no-deps` refinement is tracked separately.
+# CONCURRENCY: the group below serializes ai deploys against each other.
+# Known residual gap (accepted): GitHub concurrency groups are repo-scoped,
+# so an ai deploy cannot serialize against a frontend/backend deploy running
+# from their repos. With a solo G5 approver the race requires approving two
+# deploys simultaneously; a box-side flock is the fix if that ever changes.
 #
 # JUST-IN-TIME SSH: port 22 on the box is CLOSED at rest
 # (storyland-infrastructure/deploy/terraform-lightsail). This workflow assumes
@@ -50,6 +63,10 @@ on:
         description: "Git ref of storyland-ai to deploy (default: the branch this run was dispatched from)."
         required: false
         default: ""
+      image_tag:
+        description: "Existing GHCR short-sha tag to redeploy WITHOUT building (rollback lever — see infra deploy/README.md; rehearse before relying on it)."
+        required: false
+        default: ""
 
 concurrency:
   group: deploy-ai-prod
@@ -58,6 +75,7 @@ concurrency:
 permissions:
   contents: read
   id-token: write # OIDC token for the just-in-time SSH role
+  packages: write # push the built image to GHCR
 
 jobs:
   deploy:
@@ -68,13 +86,46 @@ jobs:
     environment: production
     steps:
       - name: Record approval
-        run: echo "G5 production deploy approved — proceeding to deploy storyland-ai (ref='${{ inputs.ref || github.ref_name }}')."
+        run: echo "G5 production deploy approved — proceeding to deploy storyland-ai (ref='${{ inputs.ref || github.ref_name }}', image_tag='${{ inputs.image_tag }}')."
 
       - name: Checkout caller repo source
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
 
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push image (runner-side — the box never builds)
+        if: inputs.image_tag == ''
+        run: |
+          IMAGE="ghcr.io/o-ostrovskiy/storyland-ai"
+          # Immutable per-commit tag from the CHECKED-OUT tree (a `ref` input
+          # deploy tags that ref, not the triggering commit) + moving :prod.
+          TAG="$(git rev-parse --short HEAD)"
+          docker build -t "$IMAGE:$TAG" -t "$IMAGE:prod" .
+          docker push "$IMAGE:$TAG"
+          docker push "$IMAGE:prod"
+
+      - name: Retag rollback image IN THE REGISTRY
+        if: inputs.image_tag != ''
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          # Registry-side manifest retag (no pull, no rebuild): after this,
+          # GHCR's :prod IS the rollback image, so the box's plain
+          # `docker pull :prod` — and any future pull by anyone — agrees
+          # with what's running. A box-local `docker tag` would leave the
+          # registry pointing at the rolled-away image, and the next
+          # innocent pull would silently re-land it.
+          IMAGE="ghcr.io/o-ostrovskiy/storyland-ai"
+          docker buildx imagetools create -t "$IMAGE:prod" "$IMAGE:$IMAGE_TAG"
+
+      # SSH opens only now — the (slow) build happens with port 22 still shut.
       - name: Validate JIT-SSH configuration
         env:
           AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
@@ -109,53 +160,40 @@ jobs:
           ssh-keyscan -H "$BOX_IP" >> ~/.ssh/known_hosts 2>/dev/null
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Rsync source to the box
+      - name: Pull + restart storyland-ai on the box (no build)
         env:
           BOX_IP: ${{ secrets.BOX_IP }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
-          # storyland-ai source -> ~/storyland/storyland-ai/ (the compose build context).
           SSH_CMD="ssh -i ~/.ssh/deploy_key -o ServerAliveInterval=30 -o ConnectTimeout=10"
           # The just-in-time firewall change can take a few seconds to propagate.
           for i in $(seq 1 6); do
-            $SSH_CMD "ubuntu@$BOX_IP" "mkdir -p ~/storyland/storyland-ai" && break
+            $SSH_CMD "ubuntu@$BOX_IP" "true" && break
             [ "$i" = 6 ] && { echo "::error::Box unreachable over SSH after JIT port opening"; exit 1; }
             sleep 5
           done
-          # Excludes mirror deploy.sh; .env/.env.prod are excluded so the box's
-          # runtime config (source of truth) is never clobbered. .claude/.mcp.json
-          # are excluded so no local agent config / credentials can ride to the box.
-          # --delete propagates file removals/rollbacks to the box (stale files
-          # were otherwise rebaked into the image by `COPY . .`). Safe: the source
-          # is a fresh, complete actions/checkout, and rsync never deletes receiver
-          # files matching an --exclude unless --delete-excluded is set.
-          rsync -az --delete \
-            --exclude '.git' --exclude 'node_modules' --exclude '__pycache__' --exclude '*.pyc' \
-            --exclude 'dist' --exclude 'build' --exclude '.venv' --exclude 'venv' \
-            --exclude '.terraform' --exclude '*.tfstate*' --exclude '.env' --exclude '.env.prod' \
-            --exclude '.claude' --exclude '.mcp.json' --exclude '.DS_Store' \
-            -e "$SSH_CMD" \
-            ./ "ubuntu@$BOX_IP:~/storyland/storyland-ai/"
-
-      - name: Build + restart storyland-ai on the box
-        env:
-          BOX_IP: ${{ secrets.BOX_IP }}
-        run: |
-          # Mirrors deploy.sh's per-service compose path exactly (build context +
-          # --env-file .env.prod live on the box). Like deploy.sh, this can recreate
-          # depends_on services; the `--no-deps` refinement is tracked separately.
-          # .env.release persists the Sentry release tag (deployed git short
-          # SHA) across deploys; every compose call reads it (--env-file), and
-          # only ai deploys rewrite it — keep in sync with deploy.sh and
-          # infra's deploy-service.yml (the usual two-places JIT-SSH caveat).
-          # Derived from the CHECKED-OUT workspace, not GITHUB_SHA: a manual
-          # dispatch with the `ref` input (rollback/tag deploy) checks out and
-          # deploys that ref, while GITHUB_SHA stays the triggering commit.
-          RELEASE="$(git rev-parse --short HEAD)"
-          ssh -i ~/.ssh/deploy_key -o ServerAliveInterval=30 "ubuntu@$BOX_IP" \
+          IMAGE="ghcr.io/o-ostrovskiy/storyland-ai"
+          # Sentry release = the deployed image's source short-sha. On the
+          # rollback path the tag IS that sha; on the build path it comes
+          # from the checked-out tree, not GITHUB_SHA. .env.release persists
+          # across ALL deploys (every compose call reads it); only ai deploys
+          # rewrite it — keep in sync with deploy.sh and infra's
+          # deploy-service.yml (the usual two-places caveat).
+          RELEASE="${IMAGE_TAG:-$(git rev-parse --short HEAD)}"
+          # One pull path regardless of build vs rollback: the registry's
+          # :prod is always authoritative. Needs the one-time
+          # `docker login ghcr.io` with a read:packages PAT on the box
+          # (see infra deploy/README.md) — images are private.
+          # `docker image prune -f` (dangling only) reclaims the previous
+          # :prod's orphaned layers; `|| true` because cleanup must never
+          # fail a deploy that worked.
+          $SSH_CMD "ubuntu@$BOX_IP" \
             "cd ~/storyland/storyland-infrastructure/deploy && \
              printf 'SENTRY_RELEASE=%s\n' \"$RELEASE\" > .env.release && \
-             docker compose -f docker-compose.prod.yml --env-file .env.prod --env-file .env.release up -d --build storyland-ai && \
-             docker compose -f docker-compose.prod.yml ps storyland-ai"
+             docker pull $IMAGE:prod && \
+             docker compose -f docker-compose.prod.yml --env-file .env.prod --env-file .env.release up -d --no-deps storyland-ai && \
+             docker compose -f docker-compose.prod.yml ps storyland-ai && \
+             { docker image prune -f || true; }"
 
       - name: Close SSH (at-rest state)
         if: always()
@@ -165,3 +203,30 @@ jobs:
           aws lightsail close-instance-public-ports \
             --instance-name storyland \
             --port-info "fromPort=22,toPort=22,protocol=tcp"
+
+      # Post-close (touches only the public site, mirrors the reusable
+      # workflow's non-backend branch): don't-race-the-restart gate. A red
+      # here means the site never answered after the deploy — investigate;
+      # it does NOT auto-rollback.
+      - name: Wait for the site to answer healthy
+        run: |
+          for i in $(seq 1 12); do
+            CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://mystoryland.ai/ || true)"
+            case "$CODE" in
+              2??|3??) echo "Healthy (HTTP $CODE) after $i attempt(s)."; exit 0 ;;
+            esac
+            [ "$i" = 12 ] && { echo "::error::site never answered healthy after deploy"; exit 1; }
+            sleep 5
+          done
+
+      - name: Prune old GHCR image versions (keep newest 15)
+        if: success()
+        # Retention is cleanup — it must never red a green deploy. Bounds the
+        # rollback lever to ~15 deploys back; a rollback meant to persist
+        # should be re-landed via ref=<old sha> (see infra deploy/README.md).
+        continue-on-error: true
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: storyland-ai
+          package-type: container
+          min-versions-to-keep: 15
