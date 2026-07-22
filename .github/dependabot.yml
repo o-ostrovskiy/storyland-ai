@@ -1,0 +1,18 @@
+# MYS-440 scope 2: automated dependency update PRs. Both ecosystems weekly —
+# this repo's deps are hash-locked (requirements*.lock), so a Dependabot pip
+# PR still needs a relock before merge (see CLAUDE.md's dependency section);
+# its value here is the NOTIFICATION that a floor moved for a security fix.
+# Dependabot PRs are exempt from the PR-body-sections check by author.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
