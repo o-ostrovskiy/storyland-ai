@@ -65,7 +65,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: integration-test-results
           path: |
@@ -123,7 +123,7 @@ jobs:
           make test-integration-vcr-record
 
       - name: Upload new cassettes
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vcr-cassettes
           path: tests/integration/cassettes/
