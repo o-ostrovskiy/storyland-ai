@@ -16,6 +16,7 @@ from google.adk.runners import Runner
 from google.adk.agents import LlmAgent, SequentialAgent
 from google.genai import types
 
+from common.config import DEFAULT_MODEL_NAME
 from plugins.langfuse_plugin import LangfusePlugin
 from services.session_service import create_session_service
 
@@ -52,7 +53,7 @@ class TestLangfusePluginIntegration:
         """Create a simple LLM agent for testing."""
         return LlmAgent(
             name="test_agent",
-            model="gemini-2.0-flash-lite",
+            model=DEFAULT_MODEL_NAME,
             instruction="You are a helpful assistant. Respond briefly to user questions.",
         )
 
@@ -210,7 +211,7 @@ class TestLangfuseWithRealWorkflow:
         # not the specific agent under test.
         pipeline = LlmAgent(
             name="book_metadata_pipeline",
-            model="gemini-2.0-flash-lite",
+            model=DEFAULT_MODEL_NAME,
             instruction="You are a helpful assistant. Respond briefly.",
         )
 
@@ -279,13 +280,13 @@ class TestLangfuseWithRealWorkflow:
         # Create nested agents
         agent1 = LlmAgent(
             name="agent1",
-            model="gemini-2.0-flash-lite",
+            model=DEFAULT_MODEL_NAME,
             instruction="Say 'Agent 1 complete' and nothing else.",
         )
 
         agent2 = LlmAgent(
             name="agent2",
-            model="gemini-2.0-flash-lite",
+            model=DEFAULT_MODEL_NAME,
             instruction="Say 'Agent 2 complete' and nothing else.",
         )
 
