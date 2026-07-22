@@ -28,7 +28,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Checkout repository (full history)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # Full clone: the scan covers every commit, not just the PR head —
           # a secret added-then-removed inside one PR must still be caught.
