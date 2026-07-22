@@ -1,0 +1,38 @@
+name: pip-audit
+
+# MYS-440 scope 2: CVE gate on the PROD lock (what the image ships) — the
+# same gate storyland-services runs in its test workflow. Accepted or
+# unfixable CVEs are ignored inline WITH justification + a ticket, and the
+# ignore is removed the moment a fixed version exists and the lock moves
+# past it.
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  pip-audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Audit shipped dependencies
+        run: |
+          pip install pip-audit==2.10.1
+          pip-audit --strict --require-hashes -r requirements.lock \
+            --ignore-vuln PYSEC-2026-2447
+            # diskcache 5.6.3 pickle deserialization (CVE-2025-69872 class):
+            # exploitable only with WRITE access to the cache directory on
+            # the box — an attacker with that access has already won. NO
+            # fixed release exists. Accepted risk, tracked on MYS-440/MYS-402
+            # (lockfile PR2); drop this ignore when a fixed version ships.

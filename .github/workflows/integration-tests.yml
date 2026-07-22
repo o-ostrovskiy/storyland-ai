@@ -1,29 +1,29 @@
 name: Integration Tests
 
+# MYS-440 AC-1: the VCR-replay job takes NO secrets. It replays cassettes
+# offline against the dummy key tests/integration/conftest.py already
+# provides, so a live GOOGLE_API_KEY here bought nothing — while a same-repo
+# branch PR could edit the Makefile/conftest to exfiltrate it. Live-key
+# integration lives ONLY in integration-live-tests.yml (manual), and the
+# re-record job below (manual) which genuinely needs the real API.
+# Do NOT convert anything here to pull_request_target — that would hand
+# secrets to fork PRs, which the current triggers correctly do not.
 on:
   push:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
   workflow_dispatch: # Allow manual trigger
-  workflow_call:
-    secrets:
-      GOOGLE_API_KEY:
-        required: true
-      LANGFUSE_SECRET_KEY:
-        required: false
-      LANGFUSE_PUBLIC_KEY:
-        required: false
-      LANGFUSE_HOST:
-        required: false
+  workflow_call: {}
 
 jobs:
   integration-tests:
     runs-on: ubuntu-latest
+    # Least privilege (MYS-440): read-only. The old issues:/pull-requests:
+    # write existed for a boilerplate PR comment, removed with it — a job
+    # that runs PR-authored code should hold no write scopes.
     permissions:
       contents: read
-      pull-requests: write
-      issues: write
 
     steps:
       - name: Checkout repository
@@ -50,13 +50,14 @@ jobs:
           pip install --require-hashes -r requirements-dev.lock
           pip install -e . --no-deps
 
-      - name: Create .env file for tests
+      - name: Create .env file for tests (dummy key — VCR replay is offline)
+        # The explicit dummy matches tests/integration/conftest.py's
+        # setdefault, so the value in play is visible in the job log (AC-1's
+        # "prove it" clause). No LANGFUSE_* lines: absent keys cleanly
+        # disable the tracing plugin (core/types.py Optional fields).
         run: |
-          echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" > .env
+          echo "GOOGLE_API_KEY=test-key-for-vcr-replay" > .env
           echo "USE_DATABASE=false" >> .env
-          echo "LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}" >> .env
-          echo "LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}" >> .env
-          echo "LANGFUSE_HOST=${{ secrets.LANGFUSE_HOST }}" >> .env
 
       - name: Run integration tests (VCR cassettes)
         run: |
@@ -71,22 +72,6 @@ jobs:
             .pytest_cache/
             tests/integration/cassettes/
           retention-days: 7
-
-      - name: Comment test results on PR
-        if: github.event_name == 'pull_request' && always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const testStatus = '${{ job.status }}';
-            const emoji = testStatus === 'success' ? '✅' : '❌';
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `${emoji} **Integration Tests ${testStatus}**\n\nDefault integration run excludes live API tests (\`real_api\` marker).\nUse manual jobs/targets for live network verification.`
-            });
 
   # Optional: Re-record cassettes (manual trigger only, uses API quota)
   re-record-cassettes:

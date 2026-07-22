@@ -24,16 +24,11 @@ jobs:
   integration-tests:
     name: Integration Tests
     if: ${{ !inputs.skip-tests }}
+    # MYS-440 AC-1: the VCR-replay workflow takes no secrets (it replays
+    # offline on the conftest dummy key) and needs only read access.
     permissions:
-      contents: write
-      pull-requests: write
-      issues: write
+      contents: read
     uses: ./.github/workflows/integration-tests.yml
-    secrets:
-      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-      LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
-      LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
-      LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
 
 # NOTE: This pipeline is a compile/test check only — it does NOT deploy. The app
 # runs on a single Lightsail box (self-hosted, see storyland-infrastructure/deploy/);
