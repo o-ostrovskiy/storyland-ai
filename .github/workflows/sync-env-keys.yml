@@ -83,7 +83,7 @@ jobs:
 
       - name: Assume deploy role (OIDC)
         id: aws
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: us-east-1
