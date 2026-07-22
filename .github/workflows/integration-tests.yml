@@ -5,7 +5,8 @@ name: Integration Tests
 # provides, so a live GOOGLE_API_KEY here bought nothing — while a same-repo
 # branch PR could edit the Makefile/conftest to exfiltrate it. Live-key
 # integration lives ONLY in integration-live-tests.yml (manual), and the
-# re-record job below (manual) which genuinely needs the real API.
+# manual re-record workflow (re-record-cassettes.yml) which genuinely
+# needs the real API.
 # Do NOT convert anything here to pull_request_target — that would hand
 # secrets to fork PRs, which the current triggers correctly do not.
 on:
@@ -73,80 +74,8 @@ jobs:
             tests/integration/cassettes/
           retention-days: 7
 
-  # Optional: Re-record cassettes (manual trigger only, uses API quota)
-  re-record-cassettes:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
-    permissions:
-      contents: write
-      pull-requests: write
+# The manual re-record job lives in re-record-cassettes.yml. It cannot live
+# here: workflow_call validates the permissions of EVERY job in the called
+# file — even if-skipped ones — so its write scopes broke ci-cd.yml's
+# read-only call at startup.
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-
-      - name: Create virtual environment
-        run: |
-          python -m venv .venv
-          echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          # Hash-locked install (same tree the unit workflow tests) — a live
-          # resolve here once drifted httpx/vcrpy and broke cassette replay
-          # with behavior the locked env can't reproduce. Editable pkg last,
-          # --no-deps, so the resolver can't re-touch the pinned tree.
-          pip install --require-hashes -r requirements-dev.lock
-          pip install -e . --no-deps
-
-      - name: Create .env file for tests
-        run: |
-          echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" > .env
-          echo "USE_DATABASE=false" >> .env
-          echo "LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}" >> .env
-          echo "LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}" >> .env
-          echo "LANGFUSE_HOST=${{ secrets.LANGFUSE_HOST }}" >> .env
-
-      - name: Delete old cassettes
-        run: |
-          rm -rf tests/integration/cassettes/*
-
-      - name: Re-record VCR cassettes
-        run: |
-          make test-integration-vcr-record
-
-      - name: Upload new cassettes
-        uses: actions/upload-artifact@v7
-        with:
-          name: vcr-cassettes
-          path: tests/integration/cassettes/
-          retention-days: 30
-
-      - name: Create PR with updated cassettes
-        if: success()
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-
-          # Check if there are changes
-          if [[ -n $(git status -s tests/integration/cassettes/) ]]; then
-            git add tests/integration/cassettes/
-            git commit -m "chore: Re-record VCR cassettes for integration tests"
-
-            # Create a new branch
-            BRANCH_NAME="update-vcr-cassettes-$(date +%Y%m%d-%H%M%S)"
-            git checkout -b "$BRANCH_NAME"
-            git push origin "$BRANCH_NAME"
-
-            # Create PR using gh CLI
-            echo "New cassettes recorded. Please create a PR manually or use gh CLI."
-          else
-            echo "No changes to cassettes."
-          fi
