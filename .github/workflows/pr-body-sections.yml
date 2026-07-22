@@ -16,7 +16,14 @@ name: PR body sections
 # the check via job-level `if:`. Rollback = revert here (no feature flags),
 # and GitHub's Revert button generates a body with no headings — a required
 # check that gates the rollback lever is worse than the gap it closes; same
-# shape for Dependabot security updates. Job-level `if:` is the safe form:
+# shape for Dependabot security updates. The Dependabot exemption keys on
+# the PR AUTHOR (`github.event.pull_request.user.login`), not
+# `github.actor`: the actor is whoever caused the triggering event, so a
+# maintainer running `gh pr update-branch` on a Dependabot PR (mandatory —
+# branch protection enforces up-to-date branches) fires `synchronize` with
+# the maintainer as actor, and an actor-keyed exemption would run the check
+# for real against Dependabot's body and red it (bit PRs #253–#256,
+# 2026-07-22). Job-level `if:` is the safe form:
 # the workflow still triggers and reports the job as SKIPPED, which
 # satisfies a required status check — unlike a path-filtered workflow that
 # never reports and wedges the PR at "Expected" (the reason behind the
@@ -50,7 +57,7 @@ jobs:
     name: Require Why/What/Docs/Verification
     # Exemptions — see header. Skipped satisfies a required check.
     if: >-
-      github.actor != 'dependabot[bot]' &&
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
       !startsWith(github.event.pull_request.title, 'Revert ')
     runs-on: ubuntu-latest
     steps:
