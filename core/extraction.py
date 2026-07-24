@@ -21,6 +21,7 @@ from core.guardrails import (
 )
 from models.book import BookRecommendationsResult
 from models.itinerary import TripItinerary, ComposerEnvelope, ExpansionResult
+from models.place_key import resolve_country_name, slug
 
 logger = get_logger("storyland.core.extraction")
 
@@ -154,6 +155,159 @@ def downgrade_ungrounded_match_types(
     return itinerary_dict
 
 
+# MYS-660: an address the composer wrote for a stop is free text ending in
+# "..., <city>, <country>" per the composer prompt's own convention (a
+# country segment is not guaranteed -- some addresses stop at the city, e.g.
+# "221B Baker Street, London"). Extracted here rather than assumed at a fixed
+# comma position, so both shapes parse.
+def _address_locality(address: object) -> Optional[str]:
+    """Best-effort city name from the tail of a free-text stop address.
+
+    Returns None (never a guess) when the address is missing, empty, or a
+    single fragment with no separable locality -- the caller's contract is
+    "skip when unsure", never "fail when unsure".
+    """
+    if not isinstance(address, str):
+        return None
+    parts = [p.strip() for p in address.split(",") if p.strip()]
+    if len(parts) < 2:
+        return None
+    if resolve_country_name(parts[-1]) is not None:
+        # Last segment IS a real country name/code -> locality is the one
+        # before it (the common, fully-qualified shape).
+        return parts[-2] if len(parts) >= 2 else None
+    # No recognisable country trailing the address -> assume the composer
+    # simply stopped at the city (the shorter shape the model docstring
+    # itself gives as an example).
+    return parts[-1]
+
+
+def reconcile_stop_city_grouping(itinerary_dict: Optional[dict]) -> Optional[dict]:
+    """MYS-660: never render a stop under a city its own address contradicts.
+
+    The composer groups stops by city itself, as free-form text, with no
+    coordinates and nothing that cross-checks a stop's ``address`` against
+    the ``CityPlan`` it ends up filed under. Both fields are already on the
+    record we hold (zero new upstream calls, zero spend) -- confirmed live:
+    a real itinerary filed 3 Cartagena-addressed restaurants under
+    Aracataca, ~250km away, while Cartagena was ALSO its own city on the
+    same trip.
+
+    Policy, per AC-2 (a wholesale envelope reject is explicitly the "last
+    resort, not the default" -- not implemented here; see PR notes):
+      * A stop whose address locality slug-matches a DIFFERENT CityPlan
+        already on this same itinerary is RE-FILED there (the Colombia
+        case: the 3 mismatched stops move to the existing Cartagena entry).
+      * A stop whose address locality matches no CityPlan on this itinerary
+        is DROPPED (we have nowhere honest to put it).
+      * A stop with no discernible address locality (``None``, no address,
+        or a single-fragment address) is left where the composer put it --
+        "no signal" is not evidence of a mismatch, matching this file's
+        other guardrails' fail-open convention (see
+        ``downgrade_ungrounded_match_types``).
+      * A CityPlan left with zero stops after this pass is dropped entirely
+        (MYS-268: an empty city section is worse than no section).
+
+    Deterministic post-processing on whatever the composer emitted -- holds
+    regardless of MYS-563's composition non-determinism, which is a
+    *different* defect (a truncated/degenerate envelope) this validation
+    layer does not attempt to fix.
+    """
+    if not itinerary_dict:
+        return itinerary_dict
+
+    cities = itinerary_dict.get("cities")
+    if not isinstance(cities, list) or not cities:
+        return itinerary_dict
+
+    # First CityPlan on the itinerary matching each city-name slug -- a stop
+    # is only ever re-filed to a city ALREADY on this same trip, never a new
+    # one this pass invents.
+    city_index_by_slug: dict = {}
+    for i, city in enumerate(cities):
+        if not isinstance(city, dict):
+            continue
+        name_slug = slug(city.get("name")) if isinstance(city.get("name"), str) else ""
+        if name_slug and name_slug not in city_index_by_slug:
+            city_index_by_slug[name_slug] = i
+
+    # A city that arrived with zero stops was never this pass's business --
+    # only a city THIS PASS emptied (had >=1 stop before, none after) is
+    # "worse than no section" per MYS-268. Recorded before any mutation.
+    city_had_stops: dict = {}
+    for i, city in enumerate(cities):
+        if isinstance(city, dict):
+            existing = city.get("stops")
+            city_had_stops[i] = bool(isinstance(existing, list) and existing)
+
+    refiled_into: dict = {i: [] for i in range(len(cities))}
+    refiled_count = 0
+    dropped_count = 0
+
+    for i, city in enumerate(cities):
+        if not isinstance(city, dict):
+            continue
+        stops = city.get("stops")
+        if not isinstance(stops, list):
+            continue
+        own_slug = slug(city.get("name")) if isinstance(city.get("name"), str) else ""
+        kept = []
+        for stop in stops:
+            if not isinstance(stop, dict):
+                kept.append(stop)
+                continue
+            locality = _address_locality(stop.get("address"))
+            if locality is None:
+                kept.append(stop)
+                continue
+            locality_slug = slug(locality)
+            if not locality_slug or locality_slug == own_slug:
+                kept.append(stop)
+                continue
+            target = city_index_by_slug.get(locality_slug)
+            if target is not None and target != i:
+                refiled_into[target].append(stop)
+                refiled_count += 1
+                logger.warning(
+                    "stop_city_mismatch_refiled",
+                    stop=stop.get("name"),
+                    filed_under=city.get("name"),
+                    address_locality=locality,
+                )
+            else:
+                dropped_count += 1
+                logger.warning(
+                    "stop_city_mismatch_dropped",
+                    stop=stop.get("name"),
+                    filed_under=city.get("name"),
+                    address_locality=locality,
+                )
+        city["stops"] = kept
+
+    for i, extra in refiled_into.items():
+        if extra:
+            cities[i]["stops"] = list(cities[i].get("stops") or []) + extra
+
+    if refiled_count or dropped_count:
+        logger.info(
+            "itinerary_stop_city_reconciled",
+            refiled=refiled_count,
+            dropped=dropped_count,
+        )
+
+    # A city THIS PASS emptied carries nothing honest to show -- drop it
+    # (MYS-268). A city that arrived with zero stops already was never
+    # touched by this guard and is left exactly as the composer emitted it
+    # (e.g. a legitimate zero-stop city elsewhere in the pipeline's own
+    # fixtures) -- this pass only removes what it itself created.
+    itinerary_dict["cities"] = [
+        c
+        for i, c in enumerate(cities)
+        if not isinstance(c, dict) or c.get("stops") or not city_had_stops.get(i, True)
+    ]
+    return itinerary_dict
+
+
 def extract_itinerary_from_response(
     final_response, state_accessor
 ) -> Optional[Tuple[dict, list]]:
@@ -173,6 +327,7 @@ def extract_itinerary_from_response(
 
     def _finalize(itinerary_dict, suggestions):
         itinerary_dict = downgrade_ungrounded_match_types(itinerary_dict, grounding_text)
+        itinerary_dict = reconcile_stop_city_grouping(itinerary_dict)
         itinerary_dict = sanitize_itinerary_explanations(itinerary_dict)
         return itinerary_dict, suggestions
 

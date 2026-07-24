@@ -36,6 +36,8 @@ from core.extraction import (
     extract_expansion_from_state,
     extract_book_recommendations_from_state,
     downgrade_ungrounded_match_types,
+    reconcile_stop_city_grouping,
+    _address_locality,
     grounding_token_set,
     is_title_grounded,
 )
@@ -1020,6 +1022,260 @@ class TestDowngradeUngroundedMatchTypes:
         stop = out["cities"][0]["stops"][0]
         assert stop["match_type"] == "literal"
         assert stop["grounding_source"] == "ch. 2"
+
+
+class TestReconcileStopCityGrouping:
+    """MYS-660: a stop's own address must agree with the CityPlan it's filed
+    under, verified against the live Colombia case (3 Cartagena-addressed
+    restaurants served under Aracataca, ~250km away, while Cartagena was ALSO
+    its own city on the same itinerary) plus the drop/fail-open/fold edges
+    the tech plan calls out.
+    """
+
+    @staticmethod
+    def _stop(name, address=None):
+        return {
+            "name": name,
+            "type": "restaurant",
+            "reason": "x",
+            "address": address,
+            "time_of_day": "evening",
+        }
+
+    @staticmethod
+    def _city(name, stops, country="Colombia"):
+        return {
+            "name": name,
+            "country": country,
+            "days_suggested": 1,
+            "overview": "o",
+            "stops": stops,
+        }
+
+    def test_colombia_case_refiles_under_the_existing_city(self):
+        # The exact live defect: 3 Cartagena-addressed stops filed under
+        # Aracataca, with Cartagena ALSO present as its own city.
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Aracataca",
+                    [
+                        self._stop("Museo Casa", "Cra 5 #4-40, Aracataca, Colombia"),
+                        self._stop(
+                            "La Cocina de Pepina",
+                            "Calle 25 #10B-15, Getsemani, Cartagena, Colombia",
+                        ),
+                        self._stop(
+                            "La Cevicheria",
+                            "Calle Stuart #7-14, Centro Historico, Cartagena, Colombia",
+                        ),
+                        self._stop(
+                            "La Vitrola",
+                            "Calle de los Estribos #33-65, Centro Historico, Cartagena, Colombia",
+                        ),
+                    ],
+                ),
+                self._city(
+                    "Cartagena",
+                    [
+                        self._stop("Walled City", "Centro Historico, Cartagena, Colombia"),
+                        self._stop("Cafe del Mar", "Baluarte de Santo Domingo, Cartagena, Colombia"),
+                    ],
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        by_city = {c["name"]: {s["name"] for s in c["stops"]} for c in out["cities"]}
+        assert by_city["Aracataca"] == {"Museo Casa"}
+        assert by_city["Cartagena"] == {
+            "Walled City",
+            "Cafe del Mar",
+            "La Cocina de Pepina",
+            "La Cevicheria",
+            "La Vitrola",
+        }
+
+    def test_mismatch_with_no_matching_city_is_dropped(self):
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Paris",
+                    [
+                        self._stop("Eiffel Tower", "Champ de Mars, Paris, France"),
+                        self._stop("Ghost Cafe", "Rue de Rivoli, Lyon, France"),
+                    ],
+                    country="France",
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        names = [s["name"] for s in out["cities"][0]["stops"]]
+        assert names == ["Eiffel Tower"]
+
+    def test_fail_open_on_no_address_or_single_fragment(self):
+        # No signal is not evidence of a mismatch -- left exactly where the
+        # composer put it, matching this file's other guardrails.
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Rome",
+                    [
+                        self._stop("Trevi Fountain", None),
+                        self._stop("Mystery Spot", "Somewhere magical"),
+                    ],
+                    country="Italy",
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        names = [s["name"] for s in out["cities"][0]["stops"]]
+        assert names == ["Trevi Fountain", "Mystery Spot"]
+
+    def test_city_left_with_zero_stops_is_dropped(self):
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Lyon",
+                    [self._stop("Ghost Cafe", "Rue de Rivoli, Paris, France")],
+                    country="France",
+                ),
+                self._city(
+                    "Paris",
+                    [self._stop("Louvre", "Rue de Rivoli, Paris, France")],
+                    country="France",
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        assert [c["name"] for c in out["cities"]] == ["Paris"]
+        assert {s["name"] for s in out["cities"][0]["stops"]} == {"Louvre", "Ghost Cafe"}
+
+    def test_accent_and_case_fold_match(self):
+        # Address tail "CIENAGA" (no accent, upper) must fold-match the
+        # CityPlan name "Ciénaga" (accented) -- same helper mint_place_key
+        # uses, so the two paths can never drift on what counts as a match.
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Aracataca",
+                    [self._stop("Wrong filed", "Calle 1, CIENAGA, Colombia")],
+                ),
+                self._city(
+                    "Ciénaga",
+                    [self._stop("Plaza Centenario", "Plaza Centenario, Ciénaga, Colombia")],
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        by_city = {c["name"]: {s["name"] for s in c["stops"]} for c in out["cities"]}
+        assert by_city == {"Ciénaga": {"Plaza Centenario", "Wrong filed"}}
+
+    def test_non_deterministic_recomposition_both_internally_consistent(self):
+        # MYS-563: composition is non-deterministic -- this is deterministic
+        # POST-processing, so it must hold regardless of which of two
+        # differently-shaped compositions of "the same book" comes out of
+        # the model. Two structurally different fixtures, both must end up
+        # with zero remaining address/city mismatches.
+        fixture_a = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Paris",
+                    [
+                        self._stop("Eiffel Tower", "Champ de Mars, Paris, France"),
+                        self._stop("Ghost Cafe", "Rue de Rivoli, Lyon, France"),
+                    ],
+                    country="France",
+                ),
+            ],
+        }
+        fixture_b = {
+            "summary_text": "t",
+            "cities": [
+                self._city("Aracataca", [self._stop("Wrong filed", "Calle 1, Cienaga, Colombia")]),
+                self._city("Ciénaga", [self._stop("Plaza Centenario", "Plaza Centenario, Ciénaga, Colombia")]),
+            ],
+        }
+
+        def is_internally_consistent(result):
+            for city in result["cities"]:
+                for stop in city["stops"]:
+                    locality = _address_locality(stop.get("address"))
+                    if locality is None:
+                        continue
+                    from models.place_key import slug
+
+                    if slug(locality) and slug(locality) != slug(city["name"]):
+                        return False
+            return True
+
+        assert is_internally_consistent(reconcile_stop_city_grouping(fixture_a))
+        assert is_internally_consistent(reconcile_stop_city_grouping(fixture_b))
+
+    def test_none_itinerary_returns_none(self):
+        assert reconcile_stop_city_grouping(None) is None
+
+    def test_city_that_arrives_already_empty_is_left_alone(self):
+        # Regression: a city with 0 stops BEFORE this pass runs (e.g. an
+        # extraction fixture/edge case unrelated to city/address mismatch)
+        # must not be swept up by the "empty city is worse than no section"
+        # rule -- that rule is scoped to cities THIS PASS emptied, never to
+        # a city that arrived already empty. A prior implementation dropped
+        # every zero-stop city unconditionally, which crashed callers
+        # indexing into `cities[0]` on a single-city, zero-stop itinerary.
+        itin = {
+            "summary_text": "t",
+            "cities": [self._city("London", [])],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        assert [c["name"] for c in out["cities"]] == ["London"]
+        assert out["cities"][0]["stops"] == []
+
+    def test_city_emptied_by_this_pass_is_still_dropped(self):
+        # Contrast with the above: a city that HAD stops before this pass,
+        # and ends with none because every stop was re-filed/dropped, is
+        # still removed per MYS-268 -- only the "arrived empty" case is
+        # exempt, not the "this pass emptied it" case.
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Aracataca",
+                    [
+                        self._stop(
+                            "La Cocina de Pepina",
+                            "Calle 25 #10B-15, Getsemani, Cartagena, Colombia",
+                        )
+                    ],
+                ),
+                self._city(
+                    "Cartagena",
+                    [self._stop("Walled City", "Centro Historico, Cartagena, Colombia")],
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        assert [c["name"] for c in out["cities"]] == ["Cartagena"]
+
+    def test_address_locality_country_suffix_stripped(self):
+        assert (
+            _address_locality("Calle 25 #10B-15, Getsemani, Cartagena, Colombia")
+            == "Cartagena"
+        )
+
+    def test_address_locality_no_country_uses_last_segment(self):
+        assert _address_locality("221B Baker Street, London") == "London"
+
+    def test_address_locality_single_fragment_is_none(self):
+        assert _address_locality("Somewhere magical") is None
+
+    def test_address_locality_missing_is_none(self):
+        assert _address_locality(None) is None
 
 
 class TestGroundingTokenMatch:
