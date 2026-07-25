@@ -218,6 +218,20 @@ def _find_reconciliation_target(
     `locality_matches_cities`'s convention) -- but if that tolerance still
     leaves more than one candidate standing, there is no honest way to
     choose, so that segment yields no match either.
+
+    Own-city evidence always wins, across the WHOLE address, not just its
+    own segment (MYS-660 r4 / Codex P1): a real regression had a stop filed
+    under Buffalo with address "..., Buffalo, New York, USA" -- one segment
+    ("Buffalo") positively confirms the stop is already home, but a LATER
+    segment ("New York") also happens to name a different same-trip
+    CityPlan. Scanning segment-by-and-adding-to-`matched_indices`
+    unconditionally let that later segment outvote the earlier "already
+    home" evidence and re-filed a correct stop into the wrong city -- the
+    third consecutive revision to drop/misfile a VALID stop. The fix: any
+    segment that attests the stop is still home (`own_attested`) is
+    recorded across the full scan, and wins over any different-city
+    match found elsewhere in the SAME address, regardless of which segment
+    came first.
     """
     parts = _address_city_candidates(address)
     if parts is None:
@@ -229,6 +243,7 @@ def _find_reconciliation_target(
     candidate_segments = parts[:-1] if address_country_code is not None else parts
 
     matched_indices: set = set()
+    own_attested = False
     for segment in candidate_segments:
         segment_slug = slug(segment)
         if not segment_slug:
@@ -240,7 +255,8 @@ def _find_reconciliation_target(
         if len(all_indices) == 1:
             idx = all_indices[0]
             if idx == own_index:
-                continue  # matches the stop's own city -- not a mismatch
+                own_attested = True  # positive "still home" evidence
+                continue
             matched_indices.add(idx)
             continue
 
@@ -267,7 +283,9 @@ def _find_reconciliation_target(
         if own_index in qualified:
             # The stop's own city hasn't been ruled out as this address's
             # match -- could still plausibly be home, so this segment is
-            # not a mismatch signal, regardless of who else also qualifies.
+            # positive "still home" evidence, regardless of who else also
+            # qualifies.
+            own_attested = True
             continue
 
         distinct_others = set(qualified) - {own_index}
@@ -277,6 +295,12 @@ def _find_reconciliation_target(
         # ruled-out) own city -- still ambiguous, this segment yields no
         # match.
 
+    if own_attested:
+        # Own-city evidence anywhere in the address beats a different-city
+        # match found in another segment of the SAME address (MYS-660 r4) --
+        # never re-file a stop the address also positively confirms is
+        # still home.
+        return None
     if len(matched_indices) == 1:
         return next(iter(matched_indices))
     # Zero, or more than one, distinct different-city match across every

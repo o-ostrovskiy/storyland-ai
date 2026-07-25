@@ -1418,6 +1418,58 @@ class TestReconcileStopCityGrouping:
         )
         assert target is None
 
+    def test_reconciliation_target_own_city_wins_over_a_different_segment_match(self):
+        # MYS-660 r4 / Codex P1, unit-tested directly against the helper:
+        # a stop filed under Buffalo whose address is
+        # "..., Buffalo, New York, USA" names BOTH its own city (Buffalo)
+        # AND a state that happens to share a name with a different
+        # same-trip CityPlan (New York). r3 let the later "New York"
+        # segment outvote the earlier "Buffalo" (own-city) evidence and
+        # re-filed a correct stop into the wrong city. Own-city evidence
+        # anywhere in the address must win, regardless of segment order.
+        cities = [self._city("Buffalo", []), self._city("New York", [])]
+        city_indices_by_slug = {"buffalo": [0], "new-york": [1]}
+        target = _find_reconciliation_target(
+            "1 Symphony Cir, Buffalo, New York, USA",
+            cities,
+            city_indices_by_slug,
+            own_index=0,
+        )
+        assert target is None
+
+    def test_buffalo_stop_stays_put_and_is_not_deleted(self):
+        # Full reconcile_stop_city_grouping-level regression for the same
+        # bug: a same-trip itinerary with both Buffalo and New York as
+        # CityPlans must leave the Buffalo-filed, Buffalo-addressed stop
+        # exactly where it is -- and Buffalo, left with one stop, must
+        # survive (not be swept by the "emptied by this pass" drop rule).
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Buffalo",
+                    [
+                        self._stop(
+                            "Buffalo City Hall",
+                            "65 Niagara Sq, Buffalo, New York, USA",
+                        )
+                    ],
+                    country="USA",
+                ),
+                self._city(
+                    "New York",
+                    [self._stop("Empire State Building", "20 W 34th St, New York, USA")],
+                    country="USA",
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        by_city = {c["name"]: {s["name"] for s in c["stops"]} for c in out["cities"]}
+        assert by_city == {
+            "Buffalo": {"Buffalo City Hall"},
+            "New York": {"Empire State Building"},
+        }
+
 
 class TestGroundingTokenMatch:
     """The shared matching primitive behind all three grounding guards."""
