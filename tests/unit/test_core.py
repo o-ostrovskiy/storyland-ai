@@ -220,12 +220,6 @@ class TestSessionStateAccessor:
         assert accessor.book_title == "1984"
         assert accessor.author == "George Orwell"
 
-    def test_write_book_metadata(self):
-        state = {}
-        accessor = SessionStateAccessor(state)
-        accessor.book_metadata = {"book_title": "1984"}
-        assert state["book_metadata"]["book_title"] == "1984"
-
     def test_read_regions(self):
         state = {
             "region_analysis": {
@@ -237,12 +231,6 @@ class TestSessionStateAccessor:
         assert len(accessor.regions) == 2
         assert accessor.analysis_note == "test note"
 
-    def test_write_selected_regions(self):
-        state = {}
-        accessor = SessionStateAccessor(state)
-        accessor.selected_regions = [{"region_id": 1}]
-        assert state["selected_regions"] == [{"region_id": 1}]
-
     def test_read_final_itinerary(self):
         itinerary = {"cities": [], "summary_text": "test"}
         state = {"final_itinerary": itinerary}
@@ -253,30 +241,34 @@ class TestSessionStateAccessor:
         accessor = SessionStateAccessor({})
         assert accessor.failed is False
 
-    def test_write_failed_flag(self):
-        state = {}
-        accessor = SessionStateAccessor(state)
-        accessor.failed = True
-        assert state["job_failed"] is True
-
-    def test_clear_failed_flag(self):
+    def test_failed_reads_true_when_set_on_the_underlying_dict(self):
         state = {"job_failed": True}
         accessor = SessionStateAccessor(state)
-        accessor.failed = False
-        assert accessor.failed is False
+        assert accessor.failed is True
 
-    def test_clear_final_itinerary(self):
-        state = {"final_itinerary": {"cities": [], "summary_text": "done"}}
-        accessor = SessionStateAccessor(state)
-        accessor.clear_final_itinerary()
-        assert accessor.final_itinerary is None
-        assert "final_itinerary" not in state
+    # MYS-172: the accessor is deliberately read-only -- writing through it
+    # used to be a silent no-op against persisted ADK session state (two
+    # `core/executor.py` call sites did exactly this). These regression
+    # tests pin that the setters/clear method are GONE, not merely unused,
+    # so a future re-add doesn't quietly reintroduce the trap.
+    def test_book_metadata_has_no_setter(self):
+        accessor = SessionStateAccessor({})
+        with pytest.raises(AttributeError):
+            accessor.book_metadata = {"book_title": "1984"}
 
-    def test_clear_final_itinerary_when_absent_is_safe(self):
-        state = {}
-        accessor = SessionStateAccessor(state)
-        accessor.clear_final_itinerary()  # must not raise
-        assert accessor.final_itinerary is None
+    def test_selected_regions_has_no_setter(self):
+        accessor = SessionStateAccessor({})
+        with pytest.raises(AttributeError):
+            accessor.selected_regions = [{"region_id": 1}]
+
+    def test_failed_has_no_setter(self):
+        accessor = SessionStateAccessor({})
+        with pytest.raises(AttributeError):
+            accessor.failed = True
+
+    def test_clear_final_itinerary_method_is_gone(self):
+        accessor = SessionStateAccessor({"final_itinerary": {"cities": []}})
+        assert not hasattr(accessor, "clear_final_itinerary")
 
 
 # =============================================================================
