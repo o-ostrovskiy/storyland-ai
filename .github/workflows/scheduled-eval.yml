@@ -1,4 +1,7 @@
-name: Scheduled Evaluation
+# Manual-only despite the historical name: this workflow has NO `schedule:`/cron
+# trigger and runs solely on workflow_dispatch. Kept manual on purpose — each run
+# spends live API quota. Renamed 2026-07-25 so the name stops implying a cron.
+name: Evaluation (manual dispatch)
 
 on:
   workflow_dispatch: # Allow manual trigger
