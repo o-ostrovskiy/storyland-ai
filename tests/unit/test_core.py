@@ -37,7 +37,7 @@ from core.extraction import (
     extract_book_recommendations_from_state,
     downgrade_ungrounded_match_types,
     reconcile_stop_city_grouping,
-    _address_locality,
+    _find_reconciliation_target,
     grounding_token_set,
     is_title_grounded,
 )
@@ -1096,7 +1096,15 @@ class TestReconcileStopCityGrouping:
             "La Vitrola",
         }
 
-    def test_mismatch_with_no_matching_city_is_dropped(self):
+    def test_mismatch_with_no_matching_city_fails_open(self):
+        # MYS-660 r3: Lyon is a real, resolvable place, but it is not a
+        # CityPlan anywhere on THIS itinerary -- only Paris is. r1 treated
+        # "locality resolved but matches no known city" as grounds to drop
+        # the stop; the Eng Lead's r3 fix-list retired that path precisely
+        # because a fixed-position locality guess can misfire (see the
+        # Salem/Massachusetts test below), so "no known-city match anywhere
+        # in the address" is now fail-open, not a drop -- acting only
+        # happens on a positive, unambiguous DIFFERENT-known-city signal.
         itin = {
             "summary_text": "t",
             "cities": [
@@ -1111,8 +1119,78 @@ class TestReconcileStopCityGrouping:
             ],
         }
         out = reconcile_stop_city_grouping(itin)
-        names = [s["name"] for s in out["cities"][0]["stops"]]
-        assert names == ["Eiffel Tower"]
+        names = {s["name"] for s in out["cities"][0]["stops"]}
+        assert names == {"Eiffel Tower", "Ghost Cafe"}
+
+    def test_state_qualified_address_does_not_misidentify_locality_as_state(self):
+        # The exact live regression (MYS-660 r3 / Codex P1): r1's fixed
+        # "second-to-last segment" heuristic read
+        # "...Salem, Massachusetts, USA" as locality "Massachusetts" (a
+        # state, not a city) -- "massachusetts" matched no CityPlan, so a
+        # perfectly valid Salem stop was dropped. Salem IS a CityPlan on
+        # this itinerary; the fix must re-file to it, not drop.
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Boston",
+                    [
+                        self._stop(
+                            "Salem Witch Museum",
+                            "19 1/2 Washington Square N, Salem, Massachusetts, USA",
+                        ),
+                    ],
+                    country="USA",
+                ),
+                self._city(
+                    "Salem",
+                    [self._stop("Peabody Essex Museum", "East India Sq, Salem, Massachusetts, USA")],
+                    country="USA",
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        by_city = {c["name"]: {s["name"] for s in c["stops"]} for c in out["cities"]}
+        assert by_city == {
+            "Salem": {"Peabody Essex Museum", "Salem Witch Museum"},
+        } or ("Boston" not in by_city)
+        # Boston is left with zero stops after the re-file and is correctly
+        # dropped (MYS-268); Salem carries both.
+        assert by_city["Salem"] == {"Peabody Essex Museum", "Salem Witch Museum"}
+
+    def test_ambiguous_same_named_city_disambiguated_by_country(self):
+        # MYS-660 r3 / Codex P2: two CityPlans named "London" (combined-book
+        # itinerary) -- the address's own trailing country segment picks the
+        # right one, same lesson as MYS-548 (identity match must not be
+        # blind to a same-named disambiguator).
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city("Paris", [self._stop("Misfiled", "221B Baker Street, London, Canada")], country="France"),
+                self._city("London", [self._stop("Tower Bridge", "Tower Bridge Rd, London, UK")], country="United Kingdom"),
+                self._city("London", [self._stop("CN Tower area cafe", "1 Front St, London, Canada")], country="Canada"),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        by_country = {(c["name"], c["country"]): {s["name"] for s in c["stops"]} for c in out["cities"]}
+        assert by_country[("London", "Canada")] == {"CN Tower area cafe", "Misfiled"}
+        assert by_country[("London", "United Kingdom")] == {"Tower Bridge"}
+
+    def test_ambiguous_same_named_city_without_country_signal_fails_open(self):
+        # Same two same-named CityPlans, but the address has no trailing
+        # country segment to disambiguate with -- there is no honest way to
+        # pick one, so no action is taken (fail open, never guess).
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city("Paris", [self._stop("Misfiled", "Some Street, London")], country="France"),
+                self._city("London", [self._stop("Tower Bridge", "Tower Bridge Rd, London, UK")], country="United Kingdom"),
+                self._city("London", [self._stop("Local cafe", "1 Front St, London, Canada")], country="Canada"),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        by_country = {(c["name"], c["country"]): {s["name"] for s in c["stops"]} for c in out["cities"]}
+        assert by_country[("Paris", "France")] == {"Misfiled"}
 
     def test_fail_open_on_no_address_or_single_fragment(self):
         # No signal is not evidence of a mismatch -- left exactly where the
@@ -1202,15 +1280,27 @@ class TestReconcileStopCityGrouping:
             ],
         }
 
-        def is_internally_consistent(result):
-            for city in result["cities"]:
-                for stop in city["stops"]:
-                    locality = _address_locality(stop.get("address"))
-                    if locality is None:
-                        continue
-                    from models.place_key import slug
+        from models.place_key import slug
 
-                    if slug(locality) and slug(locality) != slug(city["name"]):
+        def is_internally_consistent(result):
+            # Post-reconciliation, re-running the same target-finder against
+            # the FINAL city list must find no further action for any stop
+            # -- a fixed point. If it did, this pass left a stop mismatched
+            # against its own address.
+            cities = result["cities"]
+            city_indices_by_slug = {}
+            for idx, city in enumerate(cities):
+                if not isinstance(city, dict):
+                    continue
+                name_slug = slug(city.get("name")) if isinstance(city.get("name"), str) else ""
+                if name_slug:
+                    city_indices_by_slug.setdefault(name_slug, []).append(idx)
+            for idx, city in enumerate(cities):
+                for stop in city["stops"]:
+                    target = _find_reconciliation_target(
+                        stop.get("address"), cities, city_indices_by_slug, own_index=idx
+                    )
+                    if target is not None:
                         return False
             return True
 
@@ -1262,20 +1352,71 @@ class TestReconcileStopCityGrouping:
         out = reconcile_stop_city_grouping(itin)
         assert [c["name"] for c in out["cities"]] == ["Cartagena"]
 
-    def test_address_locality_country_suffix_stripped(self):
-        assert (
-            _address_locality("Calle 25 #10B-15, Getsemani, Cartagena, Colombia")
-            == "Cartagena"
+    def test_reconciliation_target_matches_a_known_different_city(self):
+        cities = [
+            self._city("Aracataca", []),
+            self._city("Cartagena", []),
+        ]
+        city_indices_by_slug = {"aracataca": [0], "cartagena": [1]}
+        target = _find_reconciliation_target(
+            "Calle 25 #10B-15, Getsemani, Cartagena, Colombia",
+            cities,
+            city_indices_by_slug,
+            own_index=0,
         )
+        assert target == 1
 
-    def test_address_locality_no_country_uses_last_segment(self):
-        assert _address_locality("221B Baker Street, London") == "London"
+    def test_reconciliation_target_no_country_still_matches_last_segment(self):
+        cities = [self._city("Aracataca", []), self._city("London", [])]
+        city_indices_by_slug = {"aracataca": [0], "london": [1]}
+        target = _find_reconciliation_target(
+            "221B Baker Street, London", cities, city_indices_by_slug, own_index=0
+        )
+        assert target == 1
 
-    def test_address_locality_single_fragment_is_none(self):
-        assert _address_locality("Somewhere magical") is None
+    def test_reconciliation_target_single_fragment_or_missing_is_none(self):
+        cities = [self._city("Aracataca", [])]
+        city_indices_by_slug = {"aracataca": [0]}
+        assert (
+            _find_reconciliation_target("Somewhere magical", cities, city_indices_by_slug, own_index=0)
+            is None
+        )
+        assert _find_reconciliation_target(None, cities, city_indices_by_slug, own_index=0) is None
 
-    def test_address_locality_missing_is_none(self):
-        assert _address_locality(None) is None
+    def test_reconciliation_target_matches_own_city_is_none(self):
+        # The address names the SAME city the stop is already filed under --
+        # not a mismatch, no action.
+        cities = [self._city("Cartagena", [])]
+        city_indices_by_slug = {"cartagena": [0]}
+        target = _find_reconciliation_target(
+            "Calle 1, Cartagena, Colombia", cities, city_indices_by_slug, own_index=0
+        )
+        assert target is None
+
+    def test_reconciliation_target_state_segment_not_misread_as_city(self):
+        # The MYS-660 r3 regression, unit-tested directly against the
+        # helper: "Massachusetts" must never be treated as a locality
+        # candidate that could match (or fail to match) a CityPlan -- it is
+        # a state, and Salem is the correct, positively-identified target.
+        cities = [self._city("Boston", []), self._city("Salem", [])]
+        city_indices_by_slug = {"boston": [0], "salem": [1]}
+        target = _find_reconciliation_target(
+            "19 1/2 Washington Square N, Salem, Massachusetts, USA",
+            cities,
+            city_indices_by_slug,
+            own_index=0,
+        )
+        assert target == 1
+
+    def test_reconciliation_target_no_known_city_anywhere_is_none(self):
+        # Lyon resolves as a real place but matches no CityPlan on this
+        # itinerary at all -- fail open, not a drop signal.
+        cities = [self._city("Paris", [])]
+        city_indices_by_slug = {"paris": [0]}
+        target = _find_reconciliation_target(
+            "Rue de Rivoli, Lyon, France", cities, city_indices_by_slug, own_index=0
+        )
+        assert target is None
 
 
 class TestGroundingTokenMatch:

@@ -155,31 +155,133 @@ def downgrade_ungrounded_match_types(
     return itinerary_dict
 
 
-# MYS-660: an address the composer wrote for a stop is free text ending in
-# "..., <city>, <country>" per the composer prompt's own convention (a
-# country segment is not guaranteed -- some addresses stop at the city, e.g.
-# "221B Baker Street, London"). Extracted here rather than assumed at a fixed
-# comma position, so both shapes parse.
-def _address_locality(address: object) -> Optional[str]:
-    """Best-effort city name from the tail of a free-text stop address.
+# MYS-660: a stop's own `address` is composer-written free text with no
+# guaranteed shape -- "<place>, <neighbourhood>, <city>, <country>" and
+# "<place>, <neighbourhood>, <city>, <state>, <country>" are BOTH observed,
+# so the city is not reliably at a fixed comma position (r1 guessed
+# "second-to-last when the last segment is a country", which read
+# "...Salem, Massachusetts, USA" as locality "Massachusetts" -- a state, not
+# a city -- and dropped a legitimate Salem stop; MYS-660 r3 / Codex P1).
+#
+# Rather than guess a position, every comma segment of the address is
+# checked against the CityPlans actually on THIS itinerary: an address never
+# invents a new city to file a stop under, so the only signal worth acting
+# on is "one of my segments names a CityPlan already on this trip". No
+# segment matching any known CityPlan is not evidence of a mismatch -- it's
+# simply not a signal (fail open, same convention this file's other
+# guardrails use).
+def _address_city_candidates(address: object) -> Optional[list]:
+    """Comma-separated, stripped segments of a free-text stop address.
 
-    Returns None (never a guess) when the address is missing, empty, or a
-    single fragment with no separable locality -- the caller's contract is
-    "skip when unsure", never "fail when unsure".
+    Returns None (never a guess) for a missing/empty address or one with a
+    single fragment -- there's no separable locality to check at all.
     """
     if not isinstance(address, str):
         return None
     parts = [p.strip() for p in address.split(",") if p.strip()]
     if len(parts) < 2:
         return None
-    if resolve_country_name(parts[-1]) is not None:
-        # Last segment IS a real country name/code -> locality is the one
-        # before it (the common, fully-qualified shape).
-        return parts[-2] if len(parts) >= 2 else None
-    # No recognisable country trailing the address -> assume the composer
-    # simply stopped at the city (the shorter shape the model docstring
-    # itself gives as an example).
-    return parts[-1]
+    return parts
+
+
+def _find_reconciliation_target(
+    address: object,
+    cities: list,
+    city_indices_by_slug: dict,
+    own_index: int,
+) -> Optional[int]:
+    """Does this stop's address positively name a DIFFERENT CityPlan already
+    on this itinerary? Returns that CityPlan's index, or None when no single
+    unambiguous different-city signal exists in the address (fail open --
+    never guess, and never drop on an unresolved tail).
+
+    Scans every comma segment (see `_address_city_candidates`) rather than a
+    fixed position. A segment only counts when it slug-matches a CityPlan
+    name already on this trip -- an off-trip city name (e.g. a real place
+    the address mentions that simply isn't part of this itinerary) yields no
+    match here, same as a segment that doesn't parse as a place at all; both
+    are "no signal", not "signal of a mismatch".
+
+    Country-qualified (MYS-660 r3 / Codex P2, same lesson as MYS-548 --
+    identity matching must not be blind to a same-named disambiguator): when
+    more than one CityPlan on this itinerary shares a segment's matched name
+    slug -- INCLUDING when one of those same-named CityPlans is the stop's
+    own city -- the address's own trailing segment is checked as a country
+    name/code and used to narrow the candidates to the one(s) whose
+    `country` resolves to the same code. If the stop's own city survives
+    that narrowing, the segment is consistent with "already home", not a
+    mismatch signal, even if a same-named different-country city also
+    exists elsewhere on the itinerary. Only when the own city is narrowed
+    OUT and exactly one different candidate remains is that treated as a
+    positive different-city signal. An unresolvable country on either side
+    is tolerated, not treated as a mismatch (matching
+    `locality_matches_cities`'s convention) -- but if that tolerance still
+    leaves more than one candidate standing, there is no honest way to
+    choose, so that segment yields no match either.
+    """
+    parts = _address_city_candidates(address)
+    if parts is None:
+        return None
+
+    address_country_code = resolve_country_name(parts[-1])
+    # A trailing segment that resolved as a country is the country field,
+    # not a locality candidate -- the city can be at any other position.
+    candidate_segments = parts[:-1] if address_country_code is not None else parts
+
+    matched_indices: set = set()
+    for segment in candidate_segments:
+        segment_slug = slug(segment)
+        if not segment_slug:
+            continue
+        all_indices = city_indices_by_slug.get(segment_slug, ())
+        if not all_indices:
+            continue
+
+        if len(all_indices) == 1:
+            idx = all_indices[0]
+            if idx == own_index:
+                continue  # matches the stop's own city -- not a mismatch
+            matched_indices.add(idx)
+            continue
+
+        # The same city name is shared by more than one CityPlan on this
+        # itinerary (own city included, possibly). Narrow by country when
+        # the address gives one; an unresolvable country is tolerated
+        # (kept in), matching this module's "no signal is not evidence of a
+        # mismatch" convention.
+        if address_country_code is not None:
+            qualified = [
+                idx
+                for idx in all_indices
+                if (
+                    resolved := resolve_country_name(
+                        cities[idx].get("country") if isinstance(cities[idx], dict) else None
+                    )
+                )
+                is None
+                or resolved == address_country_code
+            ]
+        else:
+            qualified = list(all_indices)
+
+        if own_index in qualified:
+            # The stop's own city hasn't been ruled out as this address's
+            # match -- could still plausibly be home, so this segment is
+            # not a mismatch signal, regardless of who else also qualifies.
+            continue
+
+        distinct_others = set(qualified) - {own_index}
+        if len(distinct_others) == 1:
+            matched_indices.add(next(iter(distinct_others)))
+        # else: zero or multiple qualified candidates besides the (already
+        # ruled-out) own city -- still ambiguous, this segment yields no
+        # match.
+
+    if len(matched_indices) == 1:
+        return next(iter(matched_indices))
+    # Zero, or more than one, distinct different-city match across every
+    # segment -- no single unambiguous signal. Fail open.
+    return None
 
 
 def reconcile_stop_city_grouping(itinerary_dict: Optional[dict]) -> Optional[dict]:
@@ -195,16 +297,19 @@ def reconcile_stop_city_grouping(itinerary_dict: Optional[dict]) -> Optional[dic
 
     Policy, per AC-2 (a wholesale envelope reject is explicitly the "last
     resort, not the default" -- not implemented here; see PR notes):
-      * A stop whose address locality slug-matches a DIFFERENT CityPlan
-        already on this same itinerary is RE-FILED there (the Colombia
-        case: the 3 mismatched stops move to the existing Cartagena entry).
-      * A stop whose address locality matches no CityPlan on this itinerary
-        is DROPPED (we have nowhere honest to put it).
-      * A stop with no discernible address locality (``None``, no address,
-        or a single-fragment address) is left where the composer put it --
-        "no signal" is not evidence of a mismatch, matching this file's
-        other guardrails' fail-open convention (see
-        ``downgrade_ungrounded_match_types``).
+      * A stop whose address positively, unambiguously names a DIFFERENT
+        CityPlan already on this same itinerary is RE-FILED there (the
+        Colombia case: the 3 mismatched stops move to the existing
+        Cartagena entry).
+      * A stop whose address names no CityPlan on this itinerary at all --
+        whether because it has no discernible locality, or because every
+        comma segment fails to match any CityPlan here, or because a match
+        is ambiguous (same-named cities, unresolvable country) -- is left
+        exactly where the composer put it. "No signal" is not evidence of a
+        mismatch (see ``_find_reconciliation_target``; this also closes the
+        MYS-660 r3 regression where a state/administrative segment like
+        "Massachusetts" used to be misread as the locality and a genuinely
+        correct Salem stop was dropped for not matching anything).
       * A CityPlan left with zero stops after this pass is dropped entirely
         (MYS-268: an empty city section is worse than no section).
 
@@ -220,16 +325,16 @@ def reconcile_stop_city_grouping(itinerary_dict: Optional[dict]) -> Optional[dic
     if not isinstance(cities, list) or not cities:
         return itinerary_dict
 
-    # First CityPlan on the itinerary matching each city-name slug -- a stop
-    # is only ever re-filed to a city ALREADY on this same trip, never a new
-    # one this pass invents.
-    city_index_by_slug: dict = {}
+    # EVERY CityPlan index sharing a given name slug (not just the first) --
+    # needed so a same-named different-country city can be disambiguated
+    # rather than silently shadowed by an earlier entry of the same name.
+    city_indices_by_slug: dict = {}
     for i, city in enumerate(cities):
         if not isinstance(city, dict):
             continue
         name_slug = slug(city.get("name")) if isinstance(city.get("name"), str) else ""
-        if name_slug and name_slug not in city_index_by_slug:
-            city_index_by_slug[name_slug] = i
+        if name_slug:
+            city_indices_by_slug.setdefault(name_slug, []).append(i)
 
     # A city that arrived with zero stops was never this pass's business --
     # only a city THIS PASS emptied (had >=1 stop before, none after) is
@@ -242,7 +347,6 @@ def reconcile_stop_city_grouping(itinerary_dict: Optional[dict]) -> Optional[dic
 
     refiled_into: dict = {i: [] for i in range(len(cities))}
     refiled_count = 0
-    dropped_count = 0
 
     for i, city in enumerate(cities):
         if not isinstance(city, dict):
@@ -250,50 +354,33 @@ def reconcile_stop_city_grouping(itinerary_dict: Optional[dict]) -> Optional[dic
         stops = city.get("stops")
         if not isinstance(stops, list):
             continue
-        own_slug = slug(city.get("name")) if isinstance(city.get("name"), str) else ""
         kept = []
         for stop in stops:
             if not isinstance(stop, dict):
                 kept.append(stop)
                 continue
-            locality = _address_locality(stop.get("address"))
-            if locality is None:
+            target = _find_reconciliation_target(
+                stop.get("address"), cities, city_indices_by_slug, own_index=i
+            )
+            if target is None:
                 kept.append(stop)
                 continue
-            locality_slug = slug(locality)
-            if not locality_slug or locality_slug == own_slug:
-                kept.append(stop)
-                continue
-            target = city_index_by_slug.get(locality_slug)
-            if target is not None and target != i:
-                refiled_into[target].append(stop)
-                refiled_count += 1
-                logger.warning(
-                    "stop_city_mismatch_refiled",
-                    stop=stop.get("name"),
-                    filed_under=city.get("name"),
-                    address_locality=locality,
-                )
-            else:
-                dropped_count += 1
-                logger.warning(
-                    "stop_city_mismatch_dropped",
-                    stop=stop.get("name"),
-                    filed_under=city.get("name"),
-                    address_locality=locality,
-                )
+            refiled_into[target].append(stop)
+            refiled_count += 1
+            logger.warning(
+                "stop_city_mismatch_refiled",
+                stop=stop.get("name"),
+                filed_under=city.get("name"),
+                refiled_to=cities[target].get("name") if isinstance(cities[target], dict) else None,
+            )
         city["stops"] = kept
 
     for i, extra in refiled_into.items():
         if extra:
             cities[i]["stops"] = list(cities[i].get("stops") or []) + extra
 
-    if refiled_count or dropped_count:
-        logger.info(
-            "itinerary_stop_city_reconciled",
-            refiled=refiled_count,
-            dropped=dropped_count,
-        )
+    if refiled_count:
+        logger.info("itinerary_stop_city_reconciled", refiled=refiled_count)
 
     # A city THIS PASS emptied carries nothing honest to show -- drop it
     # (MYS-268). A city that arrived with zero stops already was never
