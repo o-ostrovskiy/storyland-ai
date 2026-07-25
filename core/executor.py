@@ -439,12 +439,20 @@ class WorkflowExecutor:
 
             yield MetadataReady(metadata=book_metadata.model_dump())
 
-            # Store in session state
+            # Persist book metadata via append_event: in-place mutation of
+            # session.state does not survive get_session() (MYS-172) -- the
+            # accessor's setters were silent no-ops here.
             session = await self._session_service.get_session(
                 app_name=APP_NAME, user_id=user_id, session_id=job_id
             )
-            state = SessionStateAccessor(session.state)
-            state.book_metadata = book_metadata.model_dump()
+            metadata_event = Event(
+                invocation_id="system",
+                author="system",
+                actions=EventActions(
+                    state_delta={SessionStateKeys.BOOK_METADATA: book_metadata.model_dump()}
+                ),
+            )
+            await self._session_service.append_event(session, metadata_event)
 
             # Phase 2: Discovery
             yield ProgressEvent(
@@ -843,8 +851,16 @@ class WorkflowExecutor:
             session = await self._session_service.get_session(
                 app_name=APP_NAME, user_id=user_id, session_id=job_id
             )
-            state = SessionStateAccessor(session.state)
-            state.book_metadata = book_metadata.model_dump()
+            # Persist via append_event: in-place mutation of session.state
+            # does not survive get_session() (MYS-172).
+            metadata_event = Event(
+                invocation_id="system",
+                author="system",
+                actions=EventActions(
+                    state_delta={SessionStateKeys.BOOK_METADATA: book_metadata.model_dump()}
+                ),
+            )
+            await self._session_service.append_event(session, metadata_event)
 
             yield ProgressEvent(
                 phase=Phase.COMPOSITION,
