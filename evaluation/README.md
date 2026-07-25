@@ -284,7 +284,7 @@ Evaluations run automatically via GitHub Actions:
 - **Workflow**: `.github/workflows/scheduled-eval.yml`
 - **Results**: Uploaded as workflow artifacts
 
-Manual trigger: Go to Actions tab → Scheduled Evaluation → Run workflow
+Manual trigger: Go to Actions tab → Evaluation (manual dispatch) → Run workflow
 
 ### Prompt Versioning
 
