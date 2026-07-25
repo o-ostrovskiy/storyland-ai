@@ -202,22 +202,24 @@ def _find_reconciliation_target(
     match here, same as a segment that doesn't parse as a place at all; both
     are "no signal", not "signal of a mismatch".
 
-    Country-qualified (MYS-660 r3 / Codex P2, same lesson as MYS-548 --
-    identity matching must not be blind to a same-named disambiguator): when
-    more than one CityPlan on this itinerary shares a segment's matched name
-    slug -- INCLUDING when one of those same-named CityPlans is the stop's
-    own city -- the address's own trailing segment is checked as a country
-    name/code and used to narrow the candidates to the one(s) whose
-    `country` resolves to the same code. If the stop's own city survives
-    that narrowing, the segment is consistent with "already home", not a
-    mismatch signal, even if a same-named different-country city also
-    exists elsewhere on the itinerary. Only when the own city is narrowed
-    OUT and exactly one different candidate remains is that treated as a
-    positive different-city signal. An unresolvable country on either side
-    is tolerated, not treated as a mismatch (matching
-    `locality_matches_cities`'s convention) -- but if that tolerance still
-    leaves more than one candidate standing, there is no honest way to
-    choose, so that segment yields no match either.
+    Country-qualified for EVERY segment, not just ones with a same-named
+    collision (MYS-660 r5 / Codex P2, same lesson as MYS-548 -- identity
+    matching must not be blind to a same-named disambiguator): a real
+    regression had a stop addressed "..., Paris, Texas, USA" get re-filed to
+    a same-trip "Paris, France" CityPlan, because the OLD code only
+    country-checked a segment when more than one CityPlan on the trip shared
+    its slug -- a lone same-named CityPlan skipped the check entirely and
+    matched on name alone, ignoring that the address's own country
+    disagreed. There is only ONE matching path now: every segment's
+    slug-matched candidates (whether there's one or several) are narrowed by
+    the address's trailing country segment when one resolves; a candidate
+    whose own `country` resolves and actively disagrees with the address's
+    country is excluded, an unresolvable country on either side is
+    tolerated (kept in, matching this module's "no signal is not evidence
+    of a mismatch" convention). If narrowing empties the candidate set,
+    the segment yields no match at all -- not a mismatch signal, since a
+    same-named different-country city existing elsewhere doesn't mean this
+    address referred to it.
 
     Own-city evidence always wins, across the WHOLE address, not just its
     own segment (MYS-660 r4 / Codex P1): a real regression had a stop filed
@@ -226,12 +228,16 @@ def _find_reconciliation_target(
     segment ("New York") also happens to name a different same-trip
     CityPlan. Scanning segment-by-and-adding-to-`matched_indices`
     unconditionally let that later segment outvote the earlier "already
-    home" evidence and re-filed a correct stop into the wrong city -- the
-    third consecutive revision to drop/misfile a VALID stop. The fix: any
-    segment that attests the stop is still home (`own_attested`) is
-    recorded across the full scan, and wins over any different-city
+    home" evidence and re-filed a correct stop into the wrong city. The
+    fix: any segment that attests the stop is still home (`own_attested`)
+    is recorded across the full scan, and wins over any different-city
     match found elsewhere in the SAME address, regardless of which segment
     came first.
+
+    A single unified pass keeps both invariants: no segment's match is ever
+    accepted (own-city OR different-city) without surviving the same
+    country-qualification test, and own-city evidence anywhere still beats
+    every different-city match in the same address.
     """
     parts = _address_city_candidates(address)
     if parts is None:
@@ -252,19 +258,10 @@ def _find_reconciliation_target(
         if not all_indices:
             continue
 
-        if len(all_indices) == 1:
-            idx = all_indices[0]
-            if idx == own_index:
-                own_attested = True  # positive "still home" evidence
-                continue
-            matched_indices.add(idx)
-            continue
-
-        # The same city name is shared by more than one CityPlan on this
-        # itinerary (own city included, possibly). Narrow by country when
-        # the address gives one; an unresolvable country is tolerated
-        # (kept in), matching this module's "no signal is not evidence of a
-        # mismatch" convention.
+        # Country-qualify every candidate this segment's slug names -- one
+        # match or several, same rule either way (MYS-660 r5). An
+        # unresolvable country (either side) is tolerated, not treated as a
+        # mismatch, matching `locality_matches_cities`'s convention.
         if address_country_code is not None:
             qualified = [
                 idx
@@ -280,6 +277,12 @@ def _find_reconciliation_target(
         else:
             qualified = list(all_indices)
 
+        if not qualified:
+            # Every same-named candidate's own country actively disagrees
+            # with the address's country -- this segment names a place
+            # that isn't any CityPlan on this trip. No signal either way.
+            continue
+
         if own_index in qualified:
             # The stop's own city hasn't been ruled out as this address's
             # match -- could still plausibly be home, so this segment is
@@ -291,9 +294,10 @@ def _find_reconciliation_target(
         distinct_others = set(qualified) - {own_index}
         if len(distinct_others) == 1:
             matched_indices.add(next(iter(distinct_others)))
-        # else: zero or multiple qualified candidates besides the (already
-        # ruled-out) own city -- still ambiguous, this segment yields no
-        # match.
+        # else: zero (unreachable -- qualified is non-empty and own_index
+        # isn't in it) or multiple qualified candidates besides the
+        # (already ruled-out) own city -- still ambiguous, this segment
+        # yields no match.
 
     if own_attested:
         # Own-city evidence anywhere in the address beats a different-city

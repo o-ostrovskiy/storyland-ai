@@ -1470,6 +1470,73 @@ class TestReconcileStopCityGrouping:
             "New York": {"Empire State Building"},
         }
 
+    def test_reconciliation_target_unique_match_still_country_checked(self):
+        # MYS-660 r5 / Codex P2, unit-tested directly against the helper:
+        # the OLD code only country-qualified a segment when more than one
+        # CityPlan shared its slug -- a LONE same-named CityPlan matched on
+        # name alone, ignoring the address's own country. Here the trip's
+        # only "Paris" CityPlan is in France, but the address says
+        # "Paris, Texas, USA" -- the country disagreement must be honored
+        # even though "paris" resolves to exactly one candidate.
+        cities = [
+            self._city("Dallas", [], country="USA"),
+            self._city("Paris", [], country="France"),
+        ]
+        city_indices_by_slug = {"dallas": [0], "paris": [1]}
+        target = _find_reconciliation_target(
+            "123 Main St, Paris, Texas, USA",
+            cities,
+            city_indices_by_slug,
+            own_index=0,
+        )
+        assert target is None
+
+    def test_paris_texas_stop_is_not_misfiled_to_paris_france(self):
+        # Full reconcile_stop_city_grouping-level regression for the same
+        # bug: a Dallas-filed stop addressed in Paris, TEXAS must not be
+        # re-filed into a same-trip Paris, FRANCE CityPlan just because the
+        # city name matches -- the country must agree too, unique match or
+        # not.
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Dallas",
+                    [self._stop("Reunion Tower", "300 Reunion Blvd, Paris, Texas, USA")],
+                    country="USA",
+                ),
+                self._city(
+                    "Paris",
+                    [self._stop("Eiffel Tower", "Champ de Mars, Paris, France")],
+                    country="France",
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        by_city = {c["name"]: {s["name"] for s in c["stops"]} for c in out["cities"]}
+        assert by_city == {
+            "Dallas": {"Reunion Tower"},
+            "Paris": {"Eiffel Tower"},
+        }
+
+    def test_reconciliation_target_unique_match_with_agreeing_country_still_refiles(self):
+        # Contrast with the two tests above: when the trip's only "Paris"
+        # CityPlan agrees with the address's country, the unique-match path
+        # must still positively re-file -- the r5 fix adds a country check,
+        # it must not turn into "never trust a unique match".
+        cities = [
+            self._city("Dallas", [], country="USA"),
+            self._city("Paris", [], country="USA"),
+        ]
+        city_indices_by_slug = {"dallas": [0], "paris": [1]}
+        target = _find_reconciliation_target(
+            "123 Main St, Paris, Texas, USA",
+            cities,
+            city_indices_by_slug,
+            own_index=0,
+        )
+        assert target == 1
+
 
 class TestGroundingTokenMatch:
     """The shared matching primitive behind all three grounding guards."""
