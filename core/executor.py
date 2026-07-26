@@ -98,6 +98,39 @@ from .types import ExecutorConfig
 
 logger = get_logger("storyland.core.executor")
 
+
+def _map_phase_exception(
+    flow_name: str,
+    phase: Optional[Phase],
+    e: Exception,
+    *,
+    taste_context: Optional[dict] = None,
+) -> WorkflowError:
+    """Classify a phase's terminal exception into a client-safe WorkflowError.
+
+    Shared by every ``GuardSpec.map_exception`` in this module (discover,
+    compose, local_atmosphere, expand, recommend_books) so the async-TaskGroup
+    boundary -- a child-task failure arrives here as an ``ExceptionGroup``
+    whose ``str()`` is the opaque "unhandled errors in a TaskGroup (...)" -- is
+    collapsed into the same typed, client-safe error on all five flows, not
+    just discover(). ``message`` is never a raw exception / ExceptionGroup
+    string; the real exception is logged server-side only (MYS-400).
+    """
+    compose_error = classify_discovery_failure(e, taste_context=taste_context)
+    logger.error(
+        f"{flow_name}_error",
+        error=str(e),
+        error_type=type(e).__name__,
+        compose_error_kind=compose_error.kind,
+    )
+    return WorkflowError(
+        message=compose_error.message,
+        error_type="DiscoveryComposeError",
+        phase=phase,
+        reason=compose_error.kind,
+        offending_title=compose_error.offending_title,
+    )
+
 # Agent name -> human-readable progress descriptions
 DISCOVERY_AGENT_STEPS: dict[str, str] = {
     "book_context_researcher": "Researching book setting and themes",
@@ -558,24 +591,8 @@ class WorkflowExecutor:
             yield WorkflowComplete(job_id=job_id, token_usage=token_usage)
 
         def map_discover_exception(e: Exception) -> WorkflowError:
-            # Collapse the async-TaskGroup boundary: a child-task failure
-            # arrives here as an ExceptionGroup whose str() is the opaque
-            # "unhandled errors in a TaskGroup (...)". Classify it into a
-            # single, client-safe typed error and surface only that — the real
-            # exception is logged server-side, never returned to the client.
-            compose_error = classify_discovery_failure(e, taste_context=taste_context)
-            logger.error(
-                "discover_error",
-                error=str(e),
-                error_type=type(e).__name__,
-                compose_error_kind=compose_error.kind,
-            )
-            return WorkflowError(
-                message=compose_error.message,
-                error_type="DiscoveryComposeError",
-                phase=Phase.DISCOVERY,
-                reason=compose_error.kind,
-                offending_title=compose_error.offending_title,
+            return _map_phase_exception(
+                "discover", Phase.DISCOVERY, e, taste_context=taste_context
             )
 
         spec = GuardSpec(
@@ -775,6 +792,9 @@ class WorkflowExecutor:
             on_timeout=lambda: self._mark_session_failed(job_id, user_id),
             on_cancel=lambda: self._mark_session_failed(job_id, user_id),
             on_error=lambda: self._mark_session_failed(job_id, user_id),
+            map_exception=lambda e: _map_phase_exception(
+                "compose", Phase.COMPOSITION, e
+            ),
         )
         async for ev in run_guarded(body(), spec):
             yield ev
@@ -949,6 +969,9 @@ class WorkflowExecutor:
             on_timeout=lambda: self._mark_session_failed(job_id, user_id),
             on_cancel=lambda: self._mark_session_failed(job_id, user_id),
             on_error=lambda: self._mark_session_failed(job_id, user_id),
+            map_exception=lambda e: _map_phase_exception(
+                "local_atmosphere", Phase.COMPOSITION, e
+            ),
         )
         async for ev in run_guarded(body(), spec):
             yield ev
@@ -1339,6 +1362,9 @@ class WorkflowExecutor:
             on_timeout=timeout_cleanup,
             on_cancel=lambda: self._clear_expansion_lock(job_id, user_id),
             on_error=lambda: self._clear_expansion_lock(job_id, user_id),
+            map_exception=lambda e: _map_phase_exception(
+                "expand", Phase.COMPOSITION, e
+            ),
         )
         async for ev in run_guarded(body(), spec):
             yield ev
@@ -1590,6 +1616,9 @@ class WorkflowExecutor:
             on_timeout=timeout_cleanup,
             on_cancel=lambda: self._clear_book_recs_lock(job_id, user_id),
             on_error=lambda: self._clear_book_recs_lock(job_id, user_id),
+            map_exception=lambda e: _map_phase_exception(
+                "recommend_books", Phase.COMPOSITION, e
+            ),
         )
         async for ev in run_guarded(body(), spec):
             yield ev
