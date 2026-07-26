@@ -32,7 +32,7 @@ import hashlib
 import re
 import uuid
 from collections import defaultdict
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator, List, Optional, Sequence
 
 from google.genai import types
 
@@ -103,20 +103,35 @@ from .types import ExecutorConfig
 logger = get_logger("storyland.core.executor")
 
 
-def _matches_city_as_standalone_word(city_name: str, action_prompt: str) -> bool:
+def _matches_city_as_standalone_word(
+    city_name: str,
+    action_prompt: str,
+    other_city_names: Sequence[str] = (),
+) -> bool:
     """True if ``city_name`` appears in ``action_prompt`` as its own place
     mention, not as the tail of a different, longer proper noun (MYS-401 —
     a plain substring check let a trip city named "York" match an
     action_prompt mentioning "New York", merging into the wrong city).
 
     Heuristic, not a gazetteer: a match is rejected only when the word
-    immediately preceding it is itself capitalized (e.g. "New" before
-    "York"), on the theory that a capitalized modifier immediately before
-    the match usually means the real place name is the two-word phrase, not
-    our shorter city. Case-sensitive by design -- it reads capitalization
-    from ``action_prompt`` as-is, so pass the original-cased trusted prompt,
-    not a lowercased copy.
+    immediately preceding it is capitalized AND the two-word phrase it forms
+    (``"<preceding> <city_name>"``) is itself, case-insensitively, one of
+    ``other_city_names`` -- i.e. this trip has another, longer city name that
+    the same text plausibly refers to instead. Being preceded by a
+    capitalized word is NOT enough on its own to reject a match: real
+    ``action_prompt``s routinely lead with a capitalized verb or adjective
+    right before the target city ("Explore Bath", "Discover Barcelona",
+    "Victorian London bookshops"), and none of those two-word phrases are
+    themselves another trip city, so the shorter city name still wins.
+    Case-sensitive by design -- it reads capitalization from
+    ``action_prompt`` as-is, so pass the original-cased trusted prompt, not
+    a lowercased copy.
     """
+    other_city_names_lower = {
+        name.lower()
+        for name in other_city_names
+        if name.lower() != city_name.lower()
+    }
     pattern = re.compile(
         rf"(?<![\w-]){re.escape(city_name)}(?![\w-])", re.IGNORECASE
     )
@@ -125,7 +140,9 @@ def _matches_city_as_standalone_word(city_name: str, action_prompt: str) -> bool
         if preceding:
             preceding_word = preceding.split()[-1]
             if preceding_word.isalpha() and preceding_word[:1].isupper():
-                continue
+                candidate = f"{preceding_word} {city_name}".lower()
+                if candidate in other_city_names_lower:
+                    continue
         return True
     return False
 
@@ -1204,27 +1221,46 @@ class WorkflowExecutor:
         # section; the re-fetch happens UNDER the lock (not the possibly-
         # stale `session` captured above) so a second caller observes the
         # first caller's already-durable write, not its own earlier read.
-        async with self._get_session_lock(job_id):
-            lock_session = await self._session_service.get_session(
-                app_name=APP_NAME, user_id=user_id, session_id=job_id
-            )
-            lock_state = (
-                SessionStateAccessor(lock_session.state)
-                if lock_session is not None
-                else state
-            )
-            already_in_progress = lock_state.expansion_in_progress
-            if not already_in_progress:
-                lock_event = Event(
-                    invocation_id="system",
-                    author="system",
-                    actions=EventActions(
-                        state_delta={SessionStateKeys.EXPANSION_IN_PROGRESS: True}
-                    ),
+        try:
+            async with self._get_session_lock(job_id):
+                lock_session = await self._session_service.get_session(
+                    app_name=APP_NAME, user_id=user_id, session_id=job_id
                 )
-                await self._session_service.append_event(
-                    lock_session or session, lock_event
+                lock_state = (
+                    SessionStateAccessor(lock_session.state)
+                    if lock_session is not None
+                    else state
                 )
+                already_in_progress = lock_state.expansion_in_progress
+                if not already_in_progress:
+                    lock_event = Event(
+                        invocation_id="system",
+                        author="system",
+                        actions=EventActions(
+                            state_delta={SessionStateKeys.EXPANSION_IN_PROGRESS: True}
+                        ),
+                    )
+                    await self._session_service.append_event(
+                        lock_session or session, lock_event
+                    )
+        except Exception as e:
+            # MYS-401 r2 (Codex P2): this under-lock re-fetch sat outside the
+            # SSE error envelope -- a transient session-backend error here
+            # used to propagate raw and truncate the stream with no terminal
+            # event, the same client-visible-truncation class MYS-400 closed
+            # for the phase executors. Route it through the same client-safe
+            # SessionError pair as the initial lookup above.
+            logger.error(
+                "expand_lock_session_refetch_failed",
+                job_id=job_id,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            for ev in error_events(
+                job_id, "Failed to retrieve session", "SessionError"
+            ):
+                yield ev
+            return
 
         if already_in_progress:
             for ev in error_events(
@@ -1258,10 +1294,11 @@ class WorkflowExecutor:
             # always work. (MYS-167: was the client-echoed action_prompt.)
             cities = itinerary.get("cities", [])
             parent_city = cities[0].get("name", "") if cities else ""
+            trip_city_names = [c.get("name", "") for c in cities if c.get("name")]
             for city in cities:
                 city_name = city.get("name", "")
                 if city_name and _matches_city_as_standalone_word(
-                    city_name, trusted_action_prompt
+                    city_name, trusted_action_prompt, trip_city_names
                 ):
                     parent_city = city_name
                     break
@@ -1546,27 +1583,44 @@ class WorkflowExecutor:
         # EXPANSION_IN_PROGRESS guard above -- serialize via the per-job_id
         # lock and re-fetch UNDER it so a second caller sees the first
         # caller's durable write, not its own stale read.
-        async with self._get_session_lock(job_id):
-            lock_session = await self._session_service.get_session(
-                app_name=APP_NAME, user_id=user_id, session_id=job_id
-            )
-            lock_state = (
-                SessionStateAccessor(lock_session.state)
-                if lock_session is not None
-                else state
-            )
-            already_in_progress = lock_state.book_recs_in_progress
-            if not already_in_progress:
-                lock_event = Event(
-                    invocation_id="system",
-                    author="system",
-                    actions=EventActions(
-                        state_delta={SessionStateKeys.BOOK_RECS_IN_PROGRESS: True}
-                    ),
+        try:
+            async with self._get_session_lock(job_id):
+                lock_session = await self._session_service.get_session(
+                    app_name=APP_NAME, user_id=user_id, session_id=job_id
                 )
-                await self._session_service.append_event(
-                    lock_session or session, lock_event
+                lock_state = (
+                    SessionStateAccessor(lock_session.state)
+                    if lock_session is not None
+                    else state
                 )
+                already_in_progress = lock_state.book_recs_in_progress
+                if not already_in_progress:
+                    lock_event = Event(
+                        invocation_id="system",
+                        author="system",
+                        actions=EventActions(
+                            state_delta={SessionStateKeys.BOOK_RECS_IN_PROGRESS: True}
+                        ),
+                    )
+                    await self._session_service.append_event(
+                        lock_session or session, lock_event
+                    )
+        except Exception as e:
+            # MYS-401 r2 (Codex P2): same fix as expand()'s under-lock
+            # re-fetch above -- route a transient session-backend failure
+            # through the client-safe SessionError pair instead of letting
+            # it propagate raw and truncate the stream.
+            logger.error(
+                "recommend_books_lock_session_refetch_failed",
+                job_id=job_id,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            for ev in error_events(
+                job_id, "Failed to retrieve session", "SessionError"
+            ):
+                yield ev
+            return
 
         if already_in_progress:
             for ev in error_events(

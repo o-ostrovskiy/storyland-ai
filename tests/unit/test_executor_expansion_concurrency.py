@@ -24,7 +24,7 @@ Test (c) covers the third: word-boundary city-name matching must not treat
 
 import asyncio
 
-from core.events import ExpansionReady, WorkflowError
+from core.events import ExpansionReady, WorkflowComplete, WorkflowError
 from core.executor import APP_NAME, _matches_city_as_standalone_word
 from core.session_state import SessionStateKeys
 from core.types import ExecutorConfig
@@ -297,15 +297,97 @@ class TestExpandMergeRevalidation:
         assert final.state[SessionStateKeys.EXPANSION_IN_PROGRESS] is False
 
 
+class TestExpandLockRefetchSessionError:
+    """MYS-401 r2 (Codex P2): the under-lock re-fetch that guards against
+    the TOCTOU race sat outside the SSE error envelope -- a transient
+    session-backend failure on THAT call used to propagate raw and
+    truncate the stream with no terminal event, the same client-visible-
+    truncation class MYS-400 closed for the phase executors. It must now
+    emit the same client-safe SessionError + WorkflowComplete pair as the
+    initial session lookup a few lines above it.
+    """
+
+    async def test_lock_refetch_failure_emits_client_safe_session_error(
+        self, monkeypatch
+    ):
+        real_service = create_session_service(use_database=False)
+        executor, ex = _make_executor(monkeypatch, real_service)
+        monkeypatch.setattr(
+            ex, "Runner", _fake_expansion_runner(_VALID_EXPANSION_DELTA)
+        )
+
+        job_id = "job-lock-refetch-failure-1"
+        await real_service.create_session(
+            app_name=APP_NAME,
+            user_id="default",
+            session_id=job_id,
+            state=dict(_SEED_STATE),
+        )
+
+        class _FailOnSecondGet:
+            """The initial lookup (before the lock) succeeds; the re-fetch
+            UNDER the lock -- the one this fix wraps -- raises."""
+
+            def __init__(self, inner):
+                self._inner = inner
+                self._calls = 0
+
+            async def get_session(self, *args, **kwargs):
+                self._calls += 1
+                if self._calls == 2:
+                    raise RuntimeError("session backend unavailable")
+                return await self._inner.get_session(*args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        executor._session_service = _FailOnSecondGet(real_service)
+
+        events = await _drain(
+            executor.expand(
+                job_id=job_id,
+                action_id="chip-1",
+                action_label="More cafes",
+                action_prompt="Find cafes in Bath",
+            )
+        )
+
+        errors = [e for e in events if isinstance(e, WorkflowError)]
+        assert errors and errors[0].error_type == "SessionError", (
+            f"expected a client-safe SessionError terminal event on a "
+            f"lock-refetch failure, got {events!r}"
+        )
+        assert any(isinstance(e, WorkflowComplete) for e in events), (
+            f"SessionError must still be paired with WorkflowComplete so "
+            f"the stream terminates cleanly, got {events!r}"
+        )
+        assert not any(isinstance(e, ExpansionReady) for e in events)
+
+
 class TestCityWordBoundaryMatch:
     """Direct unit tests of the helper -- no session/Runner machinery
     needed, same style as test_core.py's MYS-167 tests of the sibling
     ``_resolve_trusted_action_prompt`` helper.
+
+    MYS-401 r2 (Codex P1): the original reject rule fired on ANY
+    capitalized preceding word, which misrouted every-day action_prompts
+    with a capitalized leading verb/adjective ("Explore Bath", "Discover
+    Barcelona", "Find Victorian London bookshops") to ``cities[0]`` --
+    reintroducing the exact cities[0]-misroute class MYS-660 spent 8
+    revisions closing. The reject now only fires when the two-word phrase
+    it forms is ITSELF another city in the same trip's itinerary (passed
+    as ``other_city_names``), so plain capitalized language no longer
+    trips it.
     """
 
-    def test_rejects_york_inside_new_york(self):
+    def test_rejects_york_inside_new_york_when_new_york_is_also_a_trip_city(self):
+        # A 2-city itinerary that genuinely contains both "York" and "New
+        # York" -- the only case the reject should fire for, since "New
+        # York" is a real, longer, competing city name from the same trip.
         assert not _matches_city_as_standalone_word(
-            "York", "Find landmarks near New York City Hall"
+            "York",
+            "Find landmarks near New York City Hall",
+            other_city_names=["York", "New York"],
         )
 
     def test_matches_york_as_its_own_mention(self):
@@ -315,10 +397,39 @@ class TestCityWordBoundaryMatch:
 
     def test_rejects_substring_inside_a_longer_word(self):
         # The old bug: `"york" in "yorkshire"` was True under a plain
-        # substring check.
+        # substring check. Word-boundary rejection is unaffected by the
+        # other_city_names change -- Yorkshire never reaches the
+        # preceding-word check at all.
         assert not _matches_city_as_standalone_word(
             "York", "A day trip through Yorkshire"
         )
 
     def test_matches_at_the_very_start_of_the_prompt(self):
         assert _matches_city_as_standalone_word("Bath", "Bath has lovely cafes")
+
+    def test_capitalized_leading_verb_still_matches_the_correct_city(self):
+        # Regression (Codex P1, r2): "Explore" is a capitalized sentence-
+        # initial verb, not part of a competing city name -- on a 2-city
+        # itinerary (Bath, London) this must route to Bath, not fall back
+        # to cities[0].
+        assert _matches_city_as_standalone_word(
+            "Bath",
+            "Explore Bath for hidden cafés",
+            other_city_names=["Bath", "London"],
+        )
+
+    def test_capitalized_leading_adjective_still_matches_the_correct_city(self):
+        # Regression (Codex P1, r2): "Victorian" is a capitalized adjective,
+        # not part of a competing city name -- must still route to London.
+        assert _matches_city_as_standalone_word(
+            "London",
+            "Find Victorian London bookshops",
+            other_city_names=["Bath", "London"],
+        )
+
+    def test_capitalized_leading_verb_matches_with_no_itinerary_context(self):
+        # Same as above but with the helper's default (empty)
+        # other_city_names, matching how a single-city itinerary calls it.
+        assert _matches_city_as_standalone_word(
+            "Barcelona", "Discover Barcelona\'s Gothic Quarter"
+        )
