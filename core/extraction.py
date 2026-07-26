@@ -423,6 +423,62 @@ def reconcile_stop_city_grouping(itinerary_dict: Optional[dict]) -> Optional[dic
     return itinerary_dict
 
 
+def _city_names(itinerary_dict: Optional[dict]) -> set:
+    """The (lowercased) names of every CityPlan currently on this itinerary.
+
+    MYS-660 r6: `_finalize` diffs this before/after `reconcile_stop_city_
+    grouping` to learn which cities the guard just removed, rather than
+    changing that function's return signature -- every existing caller
+    (this module's own tests included) expects a single `dict` back.
+    """
+    if not itinerary_dict:
+        return set()
+    cities = itinerary_dict.get("cities")
+    if not isinstance(cities, list):
+        return set()
+    return {
+        city["name"].lower()
+        for city in cities
+        if isinstance(city, dict)
+        and isinstance(city.get("name"), str)
+        and city["name"].strip()
+    }
+
+
+def _drop_suggestions_naming_removed_cities(suggestions: list, removed_names: set) -> list:
+    """MYS-660 r6: a suggestion chip whose `action_prompt` names a city
+    `reconcile_stop_city_grouping` just removed can no longer resolve to any
+    persisted city. Left alone, `executor.expand()`'s target-city scan
+    (`core/executor.py`, ``city_name.lower() in action_prompt_lower``) finds
+    no match on any CURRENTLY-persisted city and silently falls back to
+    ``cities[0]`` -- the expansion's new places get appended, and PERSISTED,
+    under whatever city happens to be first. That is the exact "stop under
+    the wrong city" defect this ticket exists to kill, newly reachable
+    through this guard's own side effect: before this guard existed no city
+    was ever removed, so a chip's named city always existed; a city this
+    pass drops (r1-r5's fix) can now orphan a suggestion that named it.
+
+    Uses the SAME case-insensitive substring check `expand()` itself makes,
+    so a chip survives this filter if and only if `expand()` would still
+    resolve it to a real, persisted city -- never a stricter or looser test
+    than the one that actually matters.
+    """
+    if not removed_names or not isinstance(suggestions, list):
+        return suggestions
+    kept = []
+    for chip in suggestions:
+        if not isinstance(chip, dict):
+            kept.append(chip)
+            continue
+        prompt = chip.get("action_prompt")
+        prompt_lower = prompt.lower() if isinstance(prompt, str) else ""
+        if prompt_lower and any(name in prompt_lower for name in removed_names):
+            logger.warning("suggestion_dropped_removed_city", action_prompt=prompt)
+            continue
+        kept.append(chip)
+    return kept
+
+
 def extract_itinerary_from_response(
     final_response, state_accessor
 ) -> Optional[Tuple[dict, list]]:
@@ -442,7 +498,14 @@ def extract_itinerary_from_response(
 
     def _finalize(itinerary_dict, suggestions):
         itinerary_dict = downgrade_ungrounded_match_types(itinerary_dict, grounding_text)
+        names_before = _city_names(itinerary_dict)
         itinerary_dict = reconcile_stop_city_grouping(itinerary_dict)
+        # MYS-660 r6: a city the guard above just removed can orphan a
+        # suggestion chip that named it -- see _drop_suggestions_naming_
+        # removed_cities's own doc comment for why that matters.
+        removed_names = names_before - _city_names(itinerary_dict)
+        if removed_names:
+            suggestions = _drop_suggestions_naming_removed_cities(suggestions, removed_names)
         itinerary_dict = sanitize_itinerary_explanations(itinerary_dict)
         return itinerary_dict, suggestions
 

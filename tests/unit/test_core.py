@@ -38,6 +38,8 @@ from core.extraction import (
     downgrade_ungrounded_match_types,
     reconcile_stop_city_grouping,
     _find_reconciliation_target,
+    _city_names,
+    _drop_suggestions_naming_removed_cities,
     grounding_token_set,
     is_title_grounded,
 )
@@ -1351,6 +1353,82 @@ class TestReconcileStopCityGrouping:
         }
         out = reconcile_stop_city_grouping(itin)
         assert [c["name"] for c in out["cities"]] == ["Cartagena"]
+
+    # ── MYS-660 r6 (Eng Lead review of r5 on ai#261): a city THIS PASS drops
+    # can orphan a composer suggestion chip that named it ────────────────────
+    #
+    # Before this guard existed, no city was ever removed post-composition,
+    # so a suggestion chip's action_prompt always named a city that still
+    # existed. This guard's own re-file/drop can now empty and remove a
+    # city a chip named -- executor.expand()'s target-city scan then finds
+    # no match on any persisted city and silently falls back to cities[0],
+    # persisting the expansion under the WRONG city. _city_names +
+    # _drop_suggestions_naming_removed_cities close that gap; these tests
+    # exercise them the same way _finalize composes them (diff before/after,
+    # then filter), since _finalize itself is a private closure inside
+    # extract_itinerary_from_response.
+
+    def test_suggestion_naming_a_city_this_pass_drops_is_removed(self):
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Aracataca",
+                    [
+                        self._stop(
+                            "La Cocina de Pepina",
+                            "Calle 25 #10B-15, Getsemani, Cartagena, Colombia",
+                        )
+                    ],
+                ),
+                self._city(
+                    "Cartagena",
+                    [self._stop("Walled City", "Centro Historico, Cartagena, Colombia")],
+                ),
+            ],
+        }
+        suggestions = [
+            {"id": "1", "label": "More in Aracataca", "action_prompt": "Find more spots in Aracataca"},
+            {"id": "2", "label": "More in Cartagena", "action_prompt": "Find more spots in Cartagena"},
+        ]
+
+        names_before = _city_names(itin)
+        out = reconcile_stop_city_grouping(itin)
+        # Sanity: reproduces the existing r2 fixture -- Aracataca is emptied
+        # by this pass (its only stop re-files to Cartagena) and dropped.
+        assert [c["name"] for c in out["cities"]] == ["Cartagena"]
+
+        removed_names = names_before - _city_names(out)
+        assert removed_names == {"aracataca"}
+
+        kept = _drop_suggestions_naming_removed_cities(suggestions, removed_names)
+        assert [chip["id"] for chip in kept] == ["2"]
+
+    def test_suggestion_naming_a_surviving_city_is_kept_even_when_another_city_is_dropped(self):
+        removed_names = {"aracataca"}
+        suggestions = [
+            {"id": "1", "action_prompt": "Find more spots in Aracataca"},
+            {"id": "2", "action_prompt": "Find more spots in Cartagena"},
+            {"id": "3", "label": "Find books like this", "action_prompt": ""},
+        ]
+        kept = _drop_suggestions_naming_removed_cities(suggestions, removed_names)
+        # The Cartagena chip and the city-agnostic "Find books like this"
+        # chip (empty action_prompt, per _build_book_recommendation_chip)
+        # both survive -- only the chip positively naming a REMOVED city goes.
+        assert [chip["id"] for chip in kept] == ["2", "3"]
+
+    def test_drop_suggestions_is_a_no_op_when_nothing_was_removed(self):
+        suggestions = [{"id": "1", "action_prompt": "Find more spots in Cartagena"}]
+        assert _drop_suggestions_naming_removed_cities(suggestions, set()) == suggestions
+        assert _drop_suggestions_naming_removed_cities([], {"aracataca"}) == []
+        assert _drop_suggestions_naming_removed_cities(None, {"aracataca"}) is None
+
+    def test_city_names_is_case_insensitive_and_tolerates_malformed_input(self):
+        assert _city_names(None) == set()
+        assert _city_names({"cities": "not-a-list"}) == set()
+        assert _city_names({"cities": [{"name": "Cartagena"}, {"no_name": True}, "not-a-dict"]}) == {
+            "cartagena"
+        }
 
     def test_reconciliation_target_matches_a_known_different_city(self):
         cities = [
