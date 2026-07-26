@@ -244,9 +244,23 @@ def _find_reconciliation_target(
         return None
 
     address_country_code = resolve_country_name(parts[-1])
-    # A trailing segment that resolved as a country is the country field,
-    # not a locality candidate -- the city can be at any other position.
-    candidate_segments = parts[:-1] if address_country_code is not None else parts
+    # A trailing segment that resolved as a country is normally the country
+    # field, not a locality candidate -- the city can be at any other
+    # position. r7 (Codex P2, lowest severity, fail-open under-reach not a
+    # regression): a resolved trailing segment can ALSO be the city itself
+    # for a city-state address ("Marina Bay, Singapore", "Central, Hong
+    # Kong"), where the last comma segment names both the city and the
+    # country. Dropping it unconditionally lost the only segment that could
+    # ever have named that CityPlan, so a same-trip misfile there went
+    # unreconciled. Keep it as a candidate too when it ALSO slug-matches a
+    # CityPlan already on this itinerary -- it still resolves the country
+    # either way (`address_country_code` above), this only changes whether
+    # it's ALSO tried as a locality.
+    candidate_segments = (
+        parts
+        if address_country_code is None or slug(parts[-1]) in city_indices_by_slug
+        else parts[:-1]
+    )
 
     matched_indices: set = set()
     own_attested = False
@@ -424,12 +438,24 @@ def reconcile_stop_city_grouping(itinerary_dict: Optional[dict]) -> Optional[dic
 
 
 def _city_names(itinerary_dict: Optional[dict]) -> set:
-    """The (lowercased) names of every CityPlan currently on this itinerary.
+    """The (lowercased name, resolved-country-or-None) identity of every
+    CityPlan currently on this itinerary.
 
     MYS-660 r6: `_finalize` diffs this before/after `reconcile_stop_city_
     grouping` to learn which cities the guard just removed, rather than
     changing that function's return signature -- every existing caller
     (this module's own tests included) expects a single `dict` back.
+
+    MYS-660 r7 (Codex P2): country-qualified, same lesson as MYS-548 and
+    `_find_reconciliation_target`'s own country check -- a bare name-only
+    set can't tell two same-named CityPlans apart. Two same-trip cities
+    both named "London" (UK and Canada) collapsed to one `"london"` entry;
+    if the pass removed one of them, the before/after diff saw `"london"`
+    on both sides (the survivor covering for the one that was actually
+    dropped) and reported no removal at all. An unresolvable country is
+    tolerated as `None`, matching every other guard in this module's
+    fail-open convention -- it still distinguishes from a resolved country
+    that disagrees, it just can't rule anything out on its own.
     """
     if not itinerary_dict:
         return set()
@@ -437,7 +463,7 @@ def _city_names(itinerary_dict: Optional[dict]) -> set:
     if not isinstance(cities, list):
         return set()
     return {
-        city["name"].lower()
+        (city["name"].lower(), resolve_country_name(city.get("country")))
         for city in cities
         if isinstance(city, dict)
         and isinstance(city.get("name"), str)
@@ -445,8 +471,10 @@ def _city_names(itinerary_dict: Optional[dict]) -> set:
     }
 
 
-def _drop_suggestions_naming_removed_cities(suggestions: list, removed_names: set) -> list:
-    """MYS-660 r6: a suggestion chip whose `action_prompt` names a city
+def _drop_suggestions_naming_removed_cities(
+    suggestions: list, removed_identities: set, surviving_identities: set
+) -> list:
+    """MYS-660 r6/r7: a suggestion chip whose `action_prompt` names a city
     `reconcile_stop_city_grouping` just removed can no longer resolve to any
     persisted city. Left alone, `executor.expand()`'s target-city scan
     (`core/executor.py`, ``city_name.lower() in action_prompt_lower``) finds
@@ -458,13 +486,27 @@ def _drop_suggestions_naming_removed_cities(suggestions: list, removed_names: se
     was ever removed, so a chip's named city always existed; a city this
     pass drops (r1-r5's fix) can now orphan a suggestion that named it.
 
-    Uses the SAME case-insensitive substring check `expand()` itself makes,
-    so a chip survives this filter if and only if `expand()` would still
-    resolve it to a real, persisted city -- never a stricter or looser test
-    than the one that actually matters.
+    r7 (Codex P1): r6's filter used ONE substring test -- "does the prompt
+    contain a removed city's name" -- as the whole decision, which over-
+    drops. A removed name is often a substring of unrelated, still-valid
+    prompt text ("York" removed matches surviving "New York"; "Nice"
+    matches "nice restaurants"; "Bath" matches "bathhouse") -- r6's own doc
+    comment claimed this "survives iff `expand()` would still resolve it",
+    which was false: `expand()` never even LOOKS at removed names, it scans
+    the CURRENT cities list for a substring match. Mirroring that directly
+    is both simpler and correct: a chip is dropped only if (a) it names a
+    removed city AND (b) it does NOT ALSO still resolve to a surviving
+    city -- the exact two conditions `expand()`'s own resolution loop
+    implies. Condition (a) alone over-drops (case above); condition (b)
+    alone would never trigger on a plain rename/re-file since some city
+    almost always survives an itinerary. Both together match `expand()`'s
+    real behavior exactly, never a stricter or looser test than the one
+    that actually matters.
     """
-    if not removed_names or not isinstance(suggestions, list):
+    if not removed_identities or not isinstance(suggestions, list):
         return suggestions
+    removed_names = {name for name, _country in removed_identities}
+    surviving_names = {name for name, _country in surviving_identities}
     kept = []
     for chip in suggestions:
         if not isinstance(chip, dict):
@@ -472,10 +514,20 @@ def _drop_suggestions_naming_removed_cities(suggestions: list, removed_names: se
             continue
         prompt = chip.get("action_prompt")
         prompt_lower = prompt.lower() if isinstance(prompt, str) else ""
-        if prompt_lower and any(name in prompt_lower for name in removed_names):
-            logger.warning("suggestion_dropped_removed_city", action_prompt=prompt)
+        if not prompt_lower or not any(name in prompt_lower for name in removed_names):
+            # Either city-agnostic (empty prompt, intentionally resolves via
+            # expand()'s own cities[0] fallback) or doesn't name anything
+            # this pass removed -- not this guard's concern either way.
+            kept.append(chip)
             continue
-        kept.append(chip)
+        if any(name in prompt_lower for name in surviving_names):
+            # Names a removed city by substring, but the prompt ALSO still
+            # matches a surviving city's name -- expand() will resolve it
+            # to that survivor, same as it always has. Not the orphaned-
+            # fallback-to-cities[0] defect this guard exists to prevent.
+            kept.append(chip)
+            continue
+        logger.warning("suggestion_dropped_removed_city", action_prompt=prompt)
     return kept
 
 
@@ -498,14 +550,18 @@ def extract_itinerary_from_response(
 
     def _finalize(itinerary_dict, suggestions):
         itinerary_dict = downgrade_ungrounded_match_types(itinerary_dict, grounding_text)
-        names_before = _city_names(itinerary_dict)
+        identities_before = _city_names(itinerary_dict)
         itinerary_dict = reconcile_stop_city_grouping(itinerary_dict)
-        # MYS-660 r6: a city the guard above just removed can orphan a
+        # MYS-660 r6/r7: a city the guard above just removed can orphan a
         # suggestion chip that named it -- see _drop_suggestions_naming_
-        # removed_cities's own doc comment for why that matters.
-        removed_names = names_before - _city_names(itinerary_dict)
-        if removed_names:
-            suggestions = _drop_suggestions_naming_removed_cities(suggestions, removed_names)
+        # removed_cities's own doc comment for why that matters, and why it
+        # needs BOTH the removed and surviving identity sets (r7).
+        identities_after = _city_names(itinerary_dict)
+        removed_identities = identities_before - identities_after
+        if removed_identities:
+            suggestions = _drop_suggestions_naming_removed_cities(
+                suggestions, removed_identities, identities_after
+            )
         itinerary_dict = sanitize_itinerary_explanations(itinerary_dict)
         return itinerary_dict, suggestions
 
