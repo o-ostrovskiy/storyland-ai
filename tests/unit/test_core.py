@@ -1448,6 +1448,40 @@ class TestReconcileStopCityGrouping:
         kept = _drop_suggestions_naming_removed_cities(suggestions, removed_identities, surviving_identities)
         assert kept == []
 
+    # ── MYS-660 r8 (Codex P2, lower severity): the (a)/(b) test is
+    # name-only, same limit `expand()` itself has -- `action_prompt` is
+    # free text, no country field to qualify against. That's inherent, not
+    # a bug. What r6/r7 got wrong is going silent about it: a removed
+    # identity and a surviving identity can share a bare name but resolve
+    # to DIFFERENT countries (a removed London, GB "surviving" only
+    # because a same-trip London, CA also exists) -- the chip is correctly
+    # KEPT (nothing safer to do with no country signal), but a warning
+    # must fire so the ambiguity is visible, unlike the ordinary
+    # unambiguous "still resolves" case.
+
+    def test_drop_suggestions_keeps_a_cross_country_name_collision_chip(self):
+        # No safe alternative exists (no country in free text) -- the
+        # behavioral contract is "still kept, same as the ordinary case";
+        # the r8 fix additionally logs a warning naming the collision
+        # (`suggestion_kept_despite_removed_city_name_collision`) so it's
+        # visible rather than silently indistinguishable from the
+        # unambiguous survivor case below.
+        removed_identities = {("london", "GB")}
+        surviving_identities = {("london", "CA")}
+        suggestions = [{"id": "1", "action_prompt": "More like London"}]
+        kept = _drop_suggestions_naming_removed_cities(suggestions, removed_identities, surviving_identities)
+        assert kept == suggestions
+
+    def test_drop_suggestions_does_not_flag_the_ordinary_unambiguous_survivor(self):
+        # Contrast case: no country collision at all (both unresolved) --
+        # the ordinary "still resolves" path, no warning expected beyond
+        # what the plain substring test already covers.
+        removed_identities = {("york", None)}
+        surviving_identities = {("new york", None)}
+        suggestions = [{"id": "1", "action_prompt": "Find more spots in New York"}]
+        kept = _drop_suggestions_naming_removed_cities(suggestions, removed_identities, surviving_identities)
+        assert kept == suggestions
+
     def test_drop_suggestions_is_a_no_op_when_nothing_was_removed(self):
         suggestions = [{"id": "1", "action_prompt": "Find more spots in Cartagena"}]
         assert _drop_suggestions_naming_removed_cities(suggestions, set(), {("cartagena", "CO")}) == suggestions
@@ -1583,6 +1617,70 @@ class TestReconcileStopCityGrouping:
             cities,
             city_indices_by_slug,
             own_index=0,
+        )
+        assert target is None
+
+    # ── MYS-660 r8 (Codex P1, blocking): a US state/territory name can
+    # collide with a DIFFERENT same-trip city's name -- "Washington" the
+    # STATE happens to equal "Washington" a same-trip CityPlan (Washington,
+    # D.C.). The all-segment scan (r3-r7) treated any segment matching a
+    # known CityPlan as locality evidence, so a Seattle-addressed stop
+    # (Seattle itself is NOT a CityPlan on this trip) got actively RE-FILED
+    # into Washington on state-name-only evidence -- the exact wrong-city
+    # placement this guard exists to prevent, and could delete Washington
+    # if it was that city's only stop. A state-name segment must never be
+    # the sole different-city signal; own-city attestation is unaffected.
+
+    def test_reconciliation_target_state_name_colliding_with_a_different_city_is_not_a_locality(self):
+        cities = [self._city("Portland", [], country="USA"), self._city("Washington", [], country="USA")]
+        city_indices_by_slug = {"portland": [0], "washington": [1]}
+        target = _find_reconciliation_target(
+            "Pike Place, Seattle, Washington, USA",
+            cities,
+            city_indices_by_slug,
+            own_index=0,
+        )
+        assert target is None
+
+    def test_seattle_stop_addressed_in_washington_state_is_not_misfiled_to_washington_dc(self):
+        # Full reconcile_stop_city_grouping-level regression for the same
+        # bug: a Portland-filed, Seattle-addressed stop must not be
+        # re-filed into a same-trip Washington CityPlan just because the
+        # address's STATE field is the string "Washington".
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Portland",
+                    [self._stop("Voodoo Doughnut", "Pike Place, Seattle, Washington, USA")],
+                    country="USA",
+                ),
+                self._city(
+                    "Washington",
+                    [self._stop("Lincoln Memorial", "2 Lincoln Memorial Cir NW, Washington, USA")],
+                    country="USA",
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        by_city = {c["name"]: {s["name"] for s in c["stops"]} for c in out["cities"]}
+        assert by_city == {
+            "Portland": {"Voodoo Doughnut"},
+            "Washington": {"Lincoln Memorial"},
+        }
+
+    def test_reconciliation_target_state_name_exclusion_does_not_block_own_city_attestation(self):
+        # A real Washington, D.C. stop -- own-city "still home" evidence
+        # must stay unrestricted (only the DIFFERENT-city re-file signal is
+        # restricted): the address's own "Washington" segment matching the
+        # stop's OWN CityPlan still short-circuits to "no action".
+        cities = [self._city("Portland", [], country="USA"), self._city("Washington", [], country="USA")]
+        city_indices_by_slug = {"portland": [0], "washington": [1]}
+        target = _find_reconciliation_target(
+            "2 Lincoln Memorial Cir NW, Washington, USA",
+            cities,
+            city_indices_by_slug,
+            own_index=1,
         )
         assert target is None
 
