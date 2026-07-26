@@ -36,6 +36,10 @@ from core.extraction import (
     extract_expansion_from_state,
     extract_book_recommendations_from_state,
     downgrade_ungrounded_match_types,
+    reconcile_stop_city_grouping,
+    _find_reconciliation_target,
+    _city_names,
+    _drop_suggestions_naming_removed_cities,
     grounding_token_set,
     is_title_grounded,
 )
@@ -1020,6 +1024,823 @@ class TestDowngradeUngroundedMatchTypes:
         stop = out["cities"][0]["stops"][0]
         assert stop["match_type"] == "literal"
         assert stop["grounding_source"] == "ch. 2"
+
+
+class TestReconcileStopCityGrouping:
+    """MYS-660: a stop's own address must agree with the CityPlan it's filed
+    under, verified against the live Colombia case (3 Cartagena-addressed
+    restaurants served under Aracataca, ~250km away, while Cartagena was ALSO
+    its own city on the same itinerary) plus the drop/fail-open/fold edges
+    the tech plan calls out.
+    """
+
+    @staticmethod
+    def _stop(name, address=None):
+        return {
+            "name": name,
+            "type": "restaurant",
+            "reason": "x",
+            "address": address,
+            "time_of_day": "evening",
+        }
+
+    @staticmethod
+    def _city(name, stops, country="Colombia"):
+        return {
+            "name": name,
+            "country": country,
+            "days_suggested": 1,
+            "overview": "o",
+            "stops": stops,
+        }
+
+    def test_colombia_case_refiles_under_the_existing_city(self):
+        # The exact live defect: 3 Cartagena-addressed stops filed under
+        # Aracataca, with Cartagena ALSO present as its own city.
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Aracataca",
+                    [
+                        self._stop("Museo Casa", "Cra 5 #4-40, Aracataca, Colombia"),
+                        self._stop(
+                            "La Cocina de Pepina",
+                            "Calle 25 #10B-15, Getsemani, Cartagena, Colombia",
+                        ),
+                        self._stop(
+                            "La Cevicheria",
+                            "Calle Stuart #7-14, Centro Historico, Cartagena, Colombia",
+                        ),
+                        self._stop(
+                            "La Vitrola",
+                            "Calle de los Estribos #33-65, Centro Historico, Cartagena, Colombia",
+                        ),
+                    ],
+                ),
+                self._city(
+                    "Cartagena",
+                    [
+                        self._stop("Walled City", "Centro Historico, Cartagena, Colombia"),
+                        self._stop("Cafe del Mar", "Baluarte de Santo Domingo, Cartagena, Colombia"),
+                    ],
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        by_city = {c["name"]: {s["name"] for s in c["stops"]} for c in out["cities"]}
+        assert by_city["Aracataca"] == {"Museo Casa"}
+        assert by_city["Cartagena"] == {
+            "Walled City",
+            "Cafe del Mar",
+            "La Cocina de Pepina",
+            "La Cevicheria",
+            "La Vitrola",
+        }
+
+    def test_mismatch_with_no_matching_city_fails_open(self):
+        # MYS-660 r3: Lyon is a real, resolvable place, but it is not a
+        # CityPlan anywhere on THIS itinerary -- only Paris is. r1 treated
+        # "locality resolved but matches no known city" as grounds to drop
+        # the stop; the Eng Lead's r3 fix-list retired that path precisely
+        # because a fixed-position locality guess can misfire (see the
+        # Salem/Massachusetts test below), so "no known-city match anywhere
+        # in the address" is now fail-open, not a drop -- acting only
+        # happens on a positive, unambiguous DIFFERENT-known-city signal.
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Paris",
+                    [
+                        self._stop("Eiffel Tower", "Champ de Mars, Paris, France"),
+                        self._stop("Ghost Cafe", "Rue de Rivoli, Lyon, France"),
+                    ],
+                    country="France",
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        names = {s["name"] for s in out["cities"][0]["stops"]}
+        assert names == {"Eiffel Tower", "Ghost Cafe"}
+
+    def test_state_qualified_address_does_not_misidentify_locality_as_state(self):
+        # The exact live regression (MYS-660 r3 / Codex P1): r1's fixed
+        # "second-to-last segment" heuristic read
+        # "...Salem, Massachusetts, USA" as locality "Massachusetts" (a
+        # state, not a city) -- "massachusetts" matched no CityPlan, so a
+        # perfectly valid Salem stop was dropped. Salem IS a CityPlan on
+        # this itinerary; the fix must re-file to it, not drop.
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Boston",
+                    [
+                        self._stop(
+                            "Salem Witch Museum",
+                            "19 1/2 Washington Square N, Salem, Massachusetts, USA",
+                        ),
+                    ],
+                    country="USA",
+                ),
+                self._city(
+                    "Salem",
+                    [self._stop("Peabody Essex Museum", "East India Sq, Salem, Massachusetts, USA")],
+                    country="USA",
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        by_city = {c["name"]: {s["name"] for s in c["stops"]} for c in out["cities"]}
+        assert by_city == {
+            "Salem": {"Peabody Essex Museum", "Salem Witch Museum"},
+        } or ("Boston" not in by_city)
+        # Boston is left with zero stops after the re-file and is correctly
+        # dropped (MYS-268); Salem carries both.
+        assert by_city["Salem"] == {"Peabody Essex Museum", "Salem Witch Museum"}
+
+    def test_ambiguous_same_named_city_disambiguated_by_country(self):
+        # MYS-660 r3 / Codex P2: two CityPlans named "London" (combined-book
+        # itinerary) -- the address's own trailing country segment picks the
+        # right one, same lesson as MYS-548 (identity match must not be
+        # blind to a same-named disambiguator).
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city("Paris", [self._stop("Misfiled", "221B Baker Street, London, Canada")], country="France"),
+                self._city("London", [self._stop("Tower Bridge", "Tower Bridge Rd, London, UK")], country="United Kingdom"),
+                self._city("London", [self._stop("CN Tower area cafe", "1 Front St, London, Canada")], country="Canada"),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        by_country = {(c["name"], c["country"]): {s["name"] for s in c["stops"]} for c in out["cities"]}
+        assert by_country[("London", "Canada")] == {"CN Tower area cafe", "Misfiled"}
+        assert by_country[("London", "United Kingdom")] == {"Tower Bridge"}
+
+    def test_ambiguous_same_named_city_without_country_signal_fails_open(self):
+        # Same two same-named CityPlans, but the address has no trailing
+        # country segment to disambiguate with -- there is no honest way to
+        # pick one, so no action is taken (fail open, never guess).
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city("Paris", [self._stop("Misfiled", "Some Street, London")], country="France"),
+                self._city("London", [self._stop("Tower Bridge", "Tower Bridge Rd, London, UK")], country="United Kingdom"),
+                self._city("London", [self._stop("Local cafe", "1 Front St, London, Canada")], country="Canada"),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        by_country = {(c["name"], c["country"]): {s["name"] for s in c["stops"]} for c in out["cities"]}
+        assert by_country[("Paris", "France")] == {"Misfiled"}
+
+    def test_fail_open_on_no_address_or_single_fragment(self):
+        # No signal is not evidence of a mismatch -- left exactly where the
+        # composer put it, matching this file's other guardrails.
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Rome",
+                    [
+                        self._stop("Trevi Fountain", None),
+                        self._stop("Mystery Spot", "Somewhere magical"),
+                    ],
+                    country="Italy",
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        names = [s["name"] for s in out["cities"][0]["stops"]]
+        assert names == ["Trevi Fountain", "Mystery Spot"]
+
+    def test_city_left_with_zero_stops_is_dropped(self):
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Lyon",
+                    [self._stop("Ghost Cafe", "Rue de Rivoli, Paris, France")],
+                    country="France",
+                ),
+                self._city(
+                    "Paris",
+                    [self._stop("Louvre", "Rue de Rivoli, Paris, France")],
+                    country="France",
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        assert [c["name"] for c in out["cities"]] == ["Paris"]
+        assert {s["name"] for s in out["cities"][0]["stops"]} == {"Louvre", "Ghost Cafe"}
+
+    def test_accent_and_case_fold_match(self):
+        # Address tail "CIENAGA" (no accent, upper) must fold-match the
+        # CityPlan name "Ciénaga" (accented) -- same helper mint_place_key
+        # uses, so the two paths can never drift on what counts as a match.
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Aracataca",
+                    [self._stop("Wrong filed", "Calle 1, CIENAGA, Colombia")],
+                ),
+                self._city(
+                    "Ciénaga",
+                    [self._stop("Plaza Centenario", "Plaza Centenario, Ciénaga, Colombia")],
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        by_city = {c["name"]: {s["name"] for s in c["stops"]} for c in out["cities"]}
+        assert by_city == {"Ciénaga": {"Plaza Centenario", "Wrong filed"}}
+
+    def test_non_deterministic_recomposition_both_internally_consistent(self):
+        # MYS-563: composition is non-deterministic -- this is deterministic
+        # POST-processing, so it must hold regardless of which of two
+        # differently-shaped compositions of "the same book" comes out of
+        # the model. Two structurally different fixtures, both must end up
+        # with zero remaining address/city mismatches.
+        fixture_a = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Paris",
+                    [
+                        self._stop("Eiffel Tower", "Champ de Mars, Paris, France"),
+                        self._stop("Ghost Cafe", "Rue de Rivoli, Lyon, France"),
+                    ],
+                    country="France",
+                ),
+            ],
+        }
+        fixture_b = {
+            "summary_text": "t",
+            "cities": [
+                self._city("Aracataca", [self._stop("Wrong filed", "Calle 1, Cienaga, Colombia")]),
+                self._city("Ciénaga", [self._stop("Plaza Centenario", "Plaza Centenario, Ciénaga, Colombia")]),
+            ],
+        }
+
+        from models.place_key import slug
+
+        def is_internally_consistent(result):
+            # Post-reconciliation, re-running the same target-finder against
+            # the FINAL city list must find no further action for any stop
+            # -- a fixed point. If it did, this pass left a stop mismatched
+            # against its own address.
+            cities = result["cities"]
+            city_indices_by_slug = {}
+            for idx, city in enumerate(cities):
+                if not isinstance(city, dict):
+                    continue
+                name_slug = slug(city.get("name")) if isinstance(city.get("name"), str) else ""
+                if name_slug:
+                    city_indices_by_slug.setdefault(name_slug, []).append(idx)
+            for idx, city in enumerate(cities):
+                for stop in city["stops"]:
+                    target = _find_reconciliation_target(
+                        stop.get("address"), cities, city_indices_by_slug, own_index=idx
+                    )
+                    if target is not None:
+                        return False
+            return True
+
+        assert is_internally_consistent(reconcile_stop_city_grouping(fixture_a))
+        assert is_internally_consistent(reconcile_stop_city_grouping(fixture_b))
+
+    def test_none_itinerary_returns_none(self):
+        assert reconcile_stop_city_grouping(None) is None
+
+    def test_city_that_arrives_already_empty_is_left_alone(self):
+        # Regression: a city with 0 stops BEFORE this pass runs (e.g. an
+        # extraction fixture/edge case unrelated to city/address mismatch)
+        # must not be swept up by the "empty city is worse than no section"
+        # rule -- that rule is scoped to cities THIS PASS emptied, never to
+        # a city that arrived already empty. A prior implementation dropped
+        # every zero-stop city unconditionally, which crashed callers
+        # indexing into `cities[0]` on a single-city, zero-stop itinerary.
+        itin = {
+            "summary_text": "t",
+            "cities": [self._city("London", [])],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        assert [c["name"] for c in out["cities"]] == ["London"]
+        assert out["cities"][0]["stops"] == []
+
+    def test_city_emptied_by_this_pass_is_still_dropped(self):
+        # Contrast with the above: a city that HAD stops before this pass,
+        # and ends with none because every stop was re-filed/dropped, is
+        # still removed per MYS-268 -- only the "arrived empty" case is
+        # exempt, not the "this pass emptied it" case.
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Aracataca",
+                    [
+                        self._stop(
+                            "La Cocina de Pepina",
+                            "Calle 25 #10B-15, Getsemani, Cartagena, Colombia",
+                        )
+                    ],
+                ),
+                self._city(
+                    "Cartagena",
+                    [self._stop("Walled City", "Centro Historico, Cartagena, Colombia")],
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        assert [c["name"] for c in out["cities"]] == ["Cartagena"]
+
+    # ── MYS-660 r6 (Eng Lead review of r5 on ai#261): a city THIS PASS drops
+    # can orphan a composer suggestion chip that named it ────────────────────
+    #
+    # Before this guard existed, no city was ever removed post-composition,
+    # so a suggestion chip's action_prompt always named a city that still
+    # existed. This guard's own re-file/drop can now empty and remove a
+    # city a chip named -- executor.expand()'s target-city scan then finds
+    # no match on any persisted city and silently falls back to cities[0],
+    # persisting the expansion under the WRONG city. _city_names +
+    # _drop_suggestions_naming_removed_cities close that gap; these tests
+    # exercise them the same way _finalize composes them (diff before/after,
+    # then filter), since _finalize itself is a private closure inside
+    # extract_itinerary_from_response.
+
+    def test_suggestion_naming_a_city_this_pass_drops_is_removed(self):
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Aracataca",
+                    [
+                        self._stop(
+                            "La Cocina de Pepina",
+                            "Calle 25 #10B-15, Getsemani, Cartagena, Colombia",
+                        )
+                    ],
+                ),
+                self._city(
+                    "Cartagena",
+                    [self._stop("Walled City", "Centro Historico, Cartagena, Colombia")],
+                ),
+            ],
+        }
+        suggestions = [
+            {"id": "1", "label": "More in Aracataca", "action_prompt": "Find more spots in Aracataca"},
+            {"id": "2", "label": "More in Cartagena", "action_prompt": "Find more spots in Cartagena"},
+        ]
+
+        identities_before = _city_names(itin)
+        out = reconcile_stop_city_grouping(itin)
+        # Sanity: reproduces the existing r2 fixture -- Aracataca is emptied
+        # by this pass (its only stop re-files to Cartagena) and dropped.
+        assert [c["name"] for c in out["cities"]] == ["Cartagena"]
+
+        identities_after = _city_names(out)
+        removed_identities = identities_before - identities_after
+        assert removed_identities == {("aracataca", "CO")}
+
+        kept = _drop_suggestions_naming_removed_cities(suggestions, removed_identities, identities_after)
+        assert [chip["id"] for chip in kept] == ["2"]
+
+    def test_suggestion_naming_a_surviving_city_is_kept_even_when_another_city_is_dropped(self):
+        removed_identities = {("aracataca", "CO")}
+        surviving_identities = {("cartagena", "CO")}
+        suggestions = [
+            {"id": "1", "action_prompt": "Find more spots in Aracataca"},
+            {"id": "2", "action_prompt": "Find more spots in Cartagena"},
+            {"id": "3", "label": "Find books like this", "action_prompt": ""},
+        ]
+        kept = _drop_suggestions_naming_removed_cities(suggestions, removed_identities, surviving_identities)
+        # The Cartagena chip and the city-agnostic "Find books like this"
+        # chip (empty action_prompt, per _build_book_recommendation_chip)
+        # both survive -- only the chip positively naming a REMOVED city,
+        # with no surviving city to resolve to instead, goes.
+        assert [chip["id"] for chip in kept] == ["2", "3"]
+
+    # ── MYS-660 r7 (Codex P1, valid): the r6 filter's ONE substring test
+    # over-dropped -- a removed name that's merely a SUBSTRING of unrelated
+    # surviving prompt text (a real different city, or ordinary English)
+    # was enough to drop a perfectly resolvable chip. The fix checks BOTH
+    # directions: names a removed city AND does not ALSO still resolve to a
+    # surviving one -- mirroring executor.expand()'s own first-match scan
+    # over the CURRENT cities list, not a guess about what was removed.
+
+    def test_suggestion_surviving_a_substring_collision_with_a_removed_name_is_kept(self):
+        # "York" was removed; "New York" survives. The naive substring test
+        # ("york" in "find more spots in new york") would false-drop this
+        # perfectly valid, still-resolvable chip.
+        removed_identities = {("york", "US")}
+        surviving_identities = {("new york", "US")}
+        suggestions = [{"id": "1", "action_prompt": "Find more spots in New York"}]
+        kept = _drop_suggestions_naming_removed_cities(suggestions, removed_identities, surviving_identities)
+        assert [chip["id"] for chip in kept] == ["1"]
+
+    def test_suggestion_naming_only_a_removed_city_with_no_surviving_match_is_dropped(self):
+        # The genuine orphan case: names a removed city, and nothing
+        # surviving would resolve it either -- this is exactly the chip
+        # that would silently fall back to cities[0] in expand().
+        removed_identities = {("aracataca", "CO")}
+        surviving_identities = {("cartagena", "CO")}
+        suggestions = [{"id": "1", "action_prompt": "Find more spots in Aracataca"}]
+        kept = _drop_suggestions_naming_removed_cities(suggestions, removed_identities, surviving_identities)
+        assert kept == []
+
+    # ── MYS-660 r8 (Codex P2, lower severity): the (a)/(b) test is
+    # name-only, same limit `expand()` itself has -- `action_prompt` is
+    # free text, no country field to qualify against. That's inherent, not
+    # a bug. What r6/r7 got wrong is going silent about it: a removed
+    # identity and a surviving identity can share a bare name but resolve
+    # to DIFFERENT countries (a removed London, GB "surviving" only
+    # because a same-trip London, CA also exists) -- the chip is correctly
+    # KEPT (nothing safer to do with no country signal), but a warning
+    # must fire so the ambiguity is visible, unlike the ordinary
+    # unambiguous "still resolves" case.
+
+    def test_drop_suggestions_keeps_a_cross_country_name_collision_chip(self):
+        # No safe alternative exists (no country in free text) -- the
+        # behavioral contract is "still kept, same as the ordinary case";
+        # the r8 fix additionally logs a warning naming the collision
+        # (`suggestion_kept_despite_removed_city_name_collision`) so it's
+        # visible rather than silently indistinguishable from the
+        # unambiguous survivor case below.
+        removed_identities = {("london", "GB")}
+        surviving_identities = {("london", "CA")}
+        suggestions = [{"id": "1", "action_prompt": "More like London"}]
+        kept = _drop_suggestions_naming_removed_cities(suggestions, removed_identities, surviving_identities)
+        assert kept == suggestions
+
+    def test_drop_suggestions_does_not_flag_the_ordinary_unambiguous_survivor(self):
+        # Contrast case: no country collision at all (both unresolved) --
+        # the ordinary "still resolves" path, no warning expected beyond
+        # what the plain substring test already covers.
+        removed_identities = {("york", None)}
+        surviving_identities = {("new york", None)}
+        suggestions = [{"id": "1", "action_prompt": "Find more spots in New York"}]
+        kept = _drop_suggestions_naming_removed_cities(suggestions, removed_identities, surviving_identities)
+        assert kept == suggestions
+
+    def test_drop_suggestions_is_a_no_op_when_nothing_was_removed(self):
+        suggestions = [{"id": "1", "action_prompt": "Find more spots in Cartagena"}]
+        assert _drop_suggestions_naming_removed_cities(suggestions, set(), {("cartagena", "CO")}) == suggestions
+        assert _drop_suggestions_naming_removed_cities([], {("aracataca", "CO")}, set()) == []
+        assert _drop_suggestions_naming_removed_cities(None, {("aracataca", "CO")}, set()) is None
+
+    def test_city_names_is_case_insensitive_and_tolerates_malformed_input(self):
+        assert _city_names(None) == set()
+        assert _city_names({"cities": "not-a-list"}) == set()
+        assert _city_names(
+            {"cities": [{"name": "Cartagena", "country": "Colombia"}, {"no_name": True}, "not-a-dict"]}
+        ) == {("cartagena", "CO")}
+
+    def test_city_names_tolerates_an_unresolvable_country(self):
+        assert _city_names({"cities": [{"name": "Neverland", "country": "Nowhereland"}]}) == {
+            ("neverland", None)
+        }
+
+    # ── MYS-660 r7 (Codex P2, valid): _city_names must be COUNTRY-qualified,
+    # same lesson as MYS-548 and _find_reconciliation_target's own country
+    # check -- two same-trip cities sharing a bare name collapse to ONE
+    # set entry, so removing one of them while the other survives looked
+    # like "nothing was removed" under a name-only diff.
+
+    def test_city_names_distinguishes_same_named_cities_in_different_countries(self):
+        itin = {
+            "cities": [
+                self._city("London", [], country="United Kingdom"),
+                self._city("London", [], country="Canada"),
+            ]
+        }
+        assert _city_names(itin) == {("london", "GB"), ("london", "CA")}
+
+    def test_removal_of_one_same_named_city_is_detected_even_though_another_survives(self):
+        before = {("london", "GB"), ("london", "CA"), ("cartagena", "CO")}
+        after = {("london", "CA"), ("cartagena", "CO")}
+        # A bare-name diff would see "london" on both sides and report NO
+        # removal at all -- the country-qualified diff correctly isolates
+        # the specific (name, country) identity that's actually gone.
+        assert before - after == {("london", "GB")}
+
+    def test_reconciliation_target_matches_a_known_different_city(self):
+        cities = [
+            self._city("Aracataca", []),
+            self._city("Cartagena", []),
+        ]
+        city_indices_by_slug = {"aracataca": [0], "cartagena": [1]}
+        target = _find_reconciliation_target(
+            "Calle 25 #10B-15, Getsemani, Cartagena, Colombia",
+            cities,
+            city_indices_by_slug,
+            own_index=0,
+        )
+        assert target == 1
+
+    def test_reconciliation_target_no_country_still_matches_last_segment(self):
+        cities = [self._city("Aracataca", []), self._city("London", [])]
+        city_indices_by_slug = {"aracataca": [0], "london": [1]}
+        target = _find_reconciliation_target(
+            "221B Baker Street, London", cities, city_indices_by_slug, own_index=0
+        )
+        assert target == 1
+
+    def test_reconciliation_target_single_fragment_or_missing_is_none(self):
+        cities = [self._city("Aracataca", [])]
+        city_indices_by_slug = {"aracataca": [0]}
+        assert (
+            _find_reconciliation_target("Somewhere magical", cities, city_indices_by_slug, own_index=0)
+            is None
+        )
+        assert _find_reconciliation_target(None, cities, city_indices_by_slug, own_index=0) is None
+
+    def test_reconciliation_target_matches_own_city_is_none(self):
+        # The address names the SAME city the stop is already filed under --
+        # not a mismatch, no action.
+        cities = [self._city("Cartagena", [])]
+        city_indices_by_slug = {"cartagena": [0]}
+        target = _find_reconciliation_target(
+            "Calle 1, Cartagena, Colombia", cities, city_indices_by_slug, own_index=0
+        )
+        assert target is None
+
+    def test_reconciliation_target_state_segment_not_misread_as_city(self):
+        # The MYS-660 r3 regression, unit-tested directly against the
+        # helper: "Massachusetts" must never be treated as a locality
+        # candidate that could match (or fail to match) a CityPlan -- it is
+        # a state, and Salem is the correct, positively-identified target.
+        #
+        # r7: explicit country="USA" on BOTH cities -- this test predates
+        # r5's country-qualification (every segment, including a unique
+        # match, is now qualified against the address's own country) and
+        # was never updated for it. Left at `_city`'s "Colombia" default,
+        # Salem's own CityPlan country (Colombia) disagreed with the
+        # address's resolved country (USA) and the match was silently
+        # excluded -- `target` came back None instead of 1, a latent
+        # fixture bug this run's standalone verification caught (r5/r6
+        # were never actually run against the real suite, only reasoned
+        # about by hand -- see PR notes). The address is USA; the fixture
+        # must be too.
+        cities = [self._city("Boston", [], country="USA"), self._city("Salem", [], country="USA")]
+        city_indices_by_slug = {"boston": [0], "salem": [1]}
+        target = _find_reconciliation_target(
+            "19 1/2 Washington Square N, Salem, Massachusetts, USA",
+            cities,
+            city_indices_by_slug,
+            own_index=0,
+        )
+        assert target == 1
+
+    def test_reconciliation_target_no_known_city_anywhere_is_none(self):
+        # Lyon resolves as a real place but matches no CityPlan on this
+        # itinerary at all -- fail open, not a drop signal.
+        cities = [self._city("Paris", [])]
+        city_indices_by_slug = {"paris": [0]}
+        target = _find_reconciliation_target(
+            "Rue de Rivoli, Lyon, France", cities, city_indices_by_slug, own_index=0
+        )
+        assert target is None
+
+    def test_reconciliation_target_own_city_wins_over_a_different_segment_match(self):
+        # MYS-660 r4 / Codex P1, unit-tested directly against the helper:
+        # a stop filed under Buffalo whose address is
+        # "..., Buffalo, New York, USA" names BOTH its own city (Buffalo)
+        # AND a state that happens to share a name with a different
+        # same-trip CityPlan (New York). r3 let the later "New York"
+        # segment outvote the earlier "Buffalo" (own-city) evidence and
+        # re-filed a correct stop into the wrong city. Own-city evidence
+        # anywhere in the address must win, regardless of segment order.
+        cities = [self._city("Buffalo", []), self._city("New York", [])]
+        city_indices_by_slug = {"buffalo": [0], "new-york": [1]}
+        target = _find_reconciliation_target(
+            "1 Symphony Cir, Buffalo, New York, USA",
+            cities,
+            city_indices_by_slug,
+            own_index=0,
+        )
+        assert target is None
+
+    # ── MYS-660 r8 (Codex P1, blocking): a US state/territory name can
+    # collide with a DIFFERENT same-trip city's name -- "Washington" the
+    # STATE happens to equal "Washington" a same-trip CityPlan (Washington,
+    # D.C.). The all-segment scan (r3-r7) treated any segment matching a
+    # known CityPlan as locality evidence, so a Seattle-addressed stop
+    # (Seattle itself is NOT a CityPlan on this trip) got actively RE-FILED
+    # into Washington on state-name-only evidence -- the exact wrong-city
+    # placement this guard exists to prevent, and could delete Washington
+    # if it was that city's only stop. A state-name segment must never be
+    # the sole different-city signal; own-city attestation is unaffected.
+
+    def test_reconciliation_target_state_name_colliding_with_a_different_city_is_not_a_locality(self):
+        cities = [self._city("Portland", [], country="USA"), self._city("Washington", [], country="USA")]
+        city_indices_by_slug = {"portland": [0], "washington": [1]}
+        target = _find_reconciliation_target(
+            "Pike Place, Seattle, Washington, USA",
+            cities,
+            city_indices_by_slug,
+            own_index=0,
+        )
+        assert target is None
+
+    def test_seattle_stop_addressed_in_washington_state_is_not_misfiled_to_washington_dc(self):
+        # Full reconcile_stop_city_grouping-level regression for the same
+        # bug: a Portland-filed, Seattle-addressed stop must not be
+        # re-filed into a same-trip Washington CityPlan just because the
+        # address's STATE field is the string "Washington".
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Portland",
+                    [self._stop("Voodoo Doughnut", "Pike Place, Seattle, Washington, USA")],
+                    country="USA",
+                ),
+                self._city(
+                    "Washington",
+                    [self._stop("Lincoln Memorial", "2 Lincoln Memorial Cir NW, Washington, USA")],
+                    country="USA",
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        by_city = {c["name"]: {s["name"] for s in c["stops"]} for c in out["cities"]}
+        assert by_city == {
+            "Portland": {"Voodoo Doughnut"},
+            "Washington": {"Lincoln Memorial"},
+        }
+
+    def test_reconciliation_target_state_name_exclusion_does_not_block_own_city_attestation(self):
+        # A real Washington, D.C. stop -- own-city "still home" evidence
+        # must stay unrestricted (only the DIFFERENT-city re-file signal is
+        # restricted): the address's own "Washington" segment matching the
+        # stop's OWN CityPlan still short-circuits to "no action".
+        cities = [self._city("Portland", [], country="USA"), self._city("Washington", [], country="USA")]
+        city_indices_by_slug = {"portland": [0], "washington": [1]}
+        target = _find_reconciliation_target(
+            "2 Lincoln Memorial Cir NW, Washington, USA",
+            cities,
+            city_indices_by_slug,
+            own_index=1,
+        )
+        assert target is None
+
+    def test_buffalo_stop_stays_put_and_is_not_deleted(self):
+        # Full reconcile_stop_city_grouping-level regression for the same
+        # bug: a same-trip itinerary with both Buffalo and New York as
+        # CityPlans must leave the Buffalo-filed, Buffalo-addressed stop
+        # exactly where it is -- and Buffalo, left with one stop, must
+        # survive (not be swept by the "emptied by this pass" drop rule).
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Buffalo",
+                    [
+                        self._stop(
+                            "Buffalo City Hall",
+                            "65 Niagara Sq, Buffalo, New York, USA",
+                        )
+                    ],
+                    country="USA",
+                ),
+                self._city(
+                    "New York",
+                    [self._stop("Empire State Building", "20 W 34th St, New York, USA")],
+                    country="USA",
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        by_city = {c["name"]: {s["name"] for s in c["stops"]} for c in out["cities"]}
+        assert by_city == {
+            "Buffalo": {"Buffalo City Hall"},
+            "New York": {"Empire State Building"},
+        }
+
+    def test_reconciliation_target_unique_match_still_country_checked(self):
+        # MYS-660 r5 / Codex P2, unit-tested directly against the helper:
+        # the OLD code only country-qualified a segment when more than one
+        # CityPlan shared its slug -- a LONE same-named CityPlan matched on
+        # name alone, ignoring the address's own country. Here the trip's
+        # only "Paris" CityPlan is in France, but the address says
+        # "Paris, Texas, USA" -- the country disagreement must be honored
+        # even though "paris" resolves to exactly one candidate.
+        cities = [
+            self._city("Dallas", [], country="USA"),
+            self._city("Paris", [], country="France"),
+        ]
+        city_indices_by_slug = {"dallas": [0], "paris": [1]}
+        target = _find_reconciliation_target(
+            "123 Main St, Paris, Texas, USA",
+            cities,
+            city_indices_by_slug,
+            own_index=0,
+        )
+        assert target is None
+
+    def test_paris_texas_stop_is_not_misfiled_to_paris_france(self):
+        # Full reconcile_stop_city_grouping-level regression for the same
+        # bug: a Dallas-filed stop addressed in Paris, TEXAS must not be
+        # re-filed into a same-trip Paris, FRANCE CityPlan just because the
+        # city name matches -- the country must agree too, unique match or
+        # not.
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Dallas",
+                    [self._stop("Reunion Tower", "300 Reunion Blvd, Paris, Texas, USA")],
+                    country="USA",
+                ),
+                self._city(
+                    "Paris",
+                    [self._stop("Eiffel Tower", "Champ de Mars, Paris, France")],
+                    country="France",
+                ),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        by_city = {c["name"]: {s["name"] for s in c["stops"]} for c in out["cities"]}
+        assert by_city == {
+            "Dallas": {"Reunion Tower"},
+            "Paris": {"Eiffel Tower"},
+        }
+
+    def test_reconciliation_target_unique_match_with_agreeing_country_still_refiles(self):
+        # Contrast with the two tests above: when the trip's only "Paris"
+        # CityPlan agrees with the address's country, the unique-match path
+        # must still positively re-file -- the r5 fix adds a country check,
+        # it must not turn into "never trust a unique match".
+        cities = [
+            self._city("Dallas", [], country="USA"),
+            self._city("Paris", [], country="USA"),
+        ]
+        city_indices_by_slug = {"dallas": [0], "paris": [1]}
+        target = _find_reconciliation_target(
+            "123 Main St, Paris, Texas, USA",
+            cities,
+            city_indices_by_slug,
+            own_index=0,
+        )
+        assert target == 1
+
+    # ── MYS-660 r7 (Codex P2, lowest severity, fail-open under-reach not a
+    # regression): a resolved trailing segment was ALWAYS dropped as a
+    # locality candidate, even when it's also the city itself -- a
+    # city-state address ("Marina Bay, Singapore") lost the only segment
+    # that could ever have named that CityPlan, so a same-trip misfile
+    # there went unreconciled. Keep it as a candidate too when it ALSO
+    # slug-matches a CityPlan already on the trip.
+
+    def test_reconciliation_target_city_state_trailing_segment_still_matches(self):
+        cities = [
+            self._city("Kuala Lumpur", [], country="Malaysia"),
+            self._city("Singapore", [], country="Singapore"),
+        ]
+        city_indices_by_slug = {"kuala-lumpur": [0], "singapore": [1]}
+        target = _find_reconciliation_target(
+            "Marina Bay, Singapore",
+            cities,
+            city_indices_by_slug,
+            own_index=0,
+        )
+        assert target == 1
+
+    def test_reconciliation_target_trailing_segment_still_excluded_when_it_names_no_city(self):
+        # The unchanged case: a trailing segment that resolves as a country
+        # AND names no CityPlan on this trip is still excluded as a
+        # locality candidate -- this fix only ADDS a candidate when one
+        # genuinely exists, it doesn't stop stripping otherwise.
+        cities = [self._city("Kuala Lumpur", [], country="Malaysia")]
+        city_indices_by_slug = {"kuala-lumpur": [0]}
+        target = _find_reconciliation_target(
+            "Somewhere, Malaysia",
+            cities,
+            city_indices_by_slug,
+            own_index=0,
+        )
+        assert target is None
+
+    def test_marina_bay_singapore_stop_is_reconciled_to_the_city_state(self):
+        # Full reconcile_stop_city_grouping-level regression: a stop
+        # addressed in the city-state itself, filed under the wrong city,
+        # must be re-filed -- previously the trailing "Singapore" segment
+        # was stripped outright as "just the country" and this mismatch
+        # went undetected.
+        itin = {
+            "summary_text": "t",
+            "cities": [
+                self._city(
+                    "Kuala Lumpur",
+                    [self._stop("Marina Bay Sands", "Marina Bay, Singapore")],
+                    country="Malaysia",
+                ),
+                self._city("Singapore", [], country="Singapore"),
+            ],
+        }
+        out = reconcile_stop_city_grouping(itin)
+        by_city = {c["name"]: {s["name"] for s in c["stops"]} for c in out["cities"]}
+        assert by_city == {"Singapore": {"Marina Bay Sands"}}
 
 
 class TestGroundingTokenMatch:
