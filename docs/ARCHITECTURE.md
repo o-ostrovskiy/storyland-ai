@@ -1063,6 +1063,31 @@ Kept deliberately: the researcher/formatter split (ADK 2.x would allow tools + o
 
 ---
 
+## 25. Per-Session Lock for `expand()`/`recommend_books()` Concurrency Guards + Merge Re-validation (2026-07-26)
+
+### Context
+
+Tech Radar's AI review (2026-07-09, MYS-401) flagged that `expand()`'s and `recommend_books()`'s "already in progress" guards were check-then-set with an `await` boundary in between: each read `session.state` (a snapshot copy — `InMemorySessionService.get_session` returns `_copy_session(...)`, never a live reference) captured once near the top of the call, then later wrote the flag via a separate `append_event`. Two overlapping requests for the same `job_id` (a double-clicked suggestion chip, or an FE retry) could both read the flag `False` from their own independent snapshot before either's write landed — both proceed, double-billing Gemini, and whichever `append_event` lands last silently overwrites the other's merge (`expansion_count` ends up a lost update instead of the correct total). A second, independent finding on the same ticket: `expand()`'s itinerary merge mutates raw dicts and persists the result to `FINAL_ITINERARY` with no schema check, so a formatter quirk anywhere upstream (a stop missing a required field, an empty `cities` list) would silently persist a structurally-degraded itinerary that `/status` re-serves forever after. A third, low-severity finding: target-city selection for a suggestion chip used a plain substring test, so a trip city literally named "York" would match an `action_prompt` mentioning "New York".
+
+### Decision
+
+- **Atomic guard.** Added a per-`job_id` lock registry (`WorkflowExecutor._session_locks`, a `defaultdict(asyncio.Lock)`) and `_get_session_lock(job_id)`. Both guards now do their read-and-set inside `async with self._get_session_lock(job_id):`, **re-fetching the session under the lock** rather than trusting the snapshot captured before the lock — the second caller's re-fetch happens strictly after the first caller's write is durable, so it correctly observes the flag as set and is rejected before running any agent workflow. In-process only: sufficient because this service runs a single uvicorn worker (`Dockerfile` has no `--workers`); a multi-process deployment would need a durable compare-and-set instead (the same coupling MYS-176/MYS-168/MYS-169 already flagged for this code path).
+- **Merge re-validation.** Before `expand()` persists the merged `FINAL_ITINERARY`, it now runs the merge through `validate_trip_itinerary` (the same `TripItinerary.model_validate` helper `core/extraction.py` already uses elsewhere). On failure, the merge is **not** persisted — `FINAL_ITINERARY` stays whatever it already was, so `/status` keeps re-serving the last-known-good result instead of a newly-degraded one — and the client gets a typed `MergeValidationError` instead of a silently-corrupted success.
+- **Word-boundary city match.** `expand()`'s target-city scan now uses `_matches_city_as_standalone_word(city_name, action_prompt)` — a regex word-boundary match that also rejects a match whose preceding word is capitalized (heuristic: "New" before "York" means the real place name is the two-word phrase, not the shorter city). Not a gazetteer; documented as a heuristic in its own docstring.
+
+### Files Affected
+
+- `core/executor.py` (`_session_locks` + `_get_session_lock` on `WorkflowExecutor`; `expand()` and `recommend_books()` guards; `expand()`'s merge persist path; new module-level `_matches_city_as_standalone_word`)
+- `tests/unit/test_executor_expansion_concurrency.py` (new — forces genuine interleaving via a session-service wrapper that yields on both `get_session` and `append_event`, confirmed red against the pre-fix guard; merge-revalidation and word-boundary-match cases)
+
+### Trade-offs
+
+**Benefits:** no more double-billed Gemini calls or lost-update `expansion_count` on a double-clicked chip; a degraded merge can never reach `/status`; a same-name-substring city mismatch is much rarer.
+
+**Costs:** the lock registry is unbounded for the life of the process (one `asyncio.Lock` per `job_id` ever seen, never evicted) — acceptable at current session volumes, but a candidate for a bounded/TTL'd map if `job_id` cardinality grows; the word-boundary heuristic is capitalization-dependent and can still mismatch on inconsistently-cased `action_prompt` text.
+
+---
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -1089,5 +1114,6 @@ Kept deliberately: the researcher/formatter split (ADK 2.x would allow tools + o
 | **Shared run harness (ADR #22)** | One ADK-facing scaffold for all flows; explicit per-flow error policy | Flow bodies are nested generators; policy lives in `GuardSpec`, not inline |
 | **ADK 2.x, template-first (ADR #23)** | Supported line; CVE ignores retired; public-API plugin; bisectable stages | Deprecation warnings until the graph rewrite; fresh session DB at cutover |
 | **Graph workflows + `book_to_place` naming (ADR #24)** | Explicit edges, no deprecated templates; primary flow named; semantics test-pinned | Factory renames; Langfuse trace names change |
+| **Per-session lock + merge re-validation (ADR #25)** | No double-billed Gemini calls on overlapping requests; a degraded merge never reaches `/status` | Unbounded lock registry (per-process lifetime); word-boundary city match is a capitalization heuristic, not a gazetteer |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.

@@ -27,8 +27,11 @@ keeps only its business logic (guards, caching, merging, grounding filters)
 plus a GuardSpec describing its error-cleanup policy.
 """
 
+import asyncio
 import hashlib
+import re
 import uuid
+from collections import defaultdict
 from typing import AsyncGenerator, List, Optional
 
 from google.genai import types
@@ -72,6 +75,7 @@ from .extraction import (
     extract_expansion_from_state,
     extract_book_recommendations_from_state,
     filter_grounded_recommendations,
+    validate_trip_itinerary,
 )
 from .prompts import (
     build_discovery_prompt,
@@ -97,6 +101,33 @@ from .session_state import SessionStateAccessor, SessionStateKeys
 from .types import ExecutorConfig
 
 logger = get_logger("storyland.core.executor")
+
+
+def _matches_city_as_standalone_word(city_name: str, action_prompt: str) -> bool:
+    """True if ``city_name`` appears in ``action_prompt`` as its own place
+    mention, not as the tail of a different, longer proper noun (MYS-401 —
+    a plain substring check let a trip city named "York" match an
+    action_prompt mentioning "New York", merging into the wrong city).
+
+    Heuristic, not a gazetteer: a match is rejected only when the word
+    immediately preceding it is itself capitalized (e.g. "New" before
+    "York"), on the theory that a capitalized modifier immediately before
+    the match usually means the real place name is the two-word phrase, not
+    our shorter city. Case-sensitive by design -- it reads capitalization
+    from ``action_prompt`` as-is, so pass the original-cased trusted prompt,
+    not a lowercased copy.
+    """
+    pattern = re.compile(
+        rf"(?<![\w-]){re.escape(city_name)}(?![\w-])", re.IGNORECASE
+    )
+    for match in pattern.finditer(action_prompt):
+        preceding = action_prompt[: match.start()].rstrip()
+        if preceding:
+            preceding_word = preceding.split()[-1]
+            if preceding_word.isalpha() and preceding_word[:1].isupper():
+                continue
+        return True
+    return False
 
 
 def _map_phase_exception(
@@ -205,6 +236,18 @@ class WorkflowExecutor:
         # backend persists them across deploys — no stale grounded recs, and no
         # post-deploy warmup needed).
         self._cache_version = compute_cache_version(config.model_name)
+        # Per-session locks serializing the check-then-set concurrency guards
+        # in expand()/recommend_books() (MYS-401): without this, two
+        # overlapping requests for the same job_id can both read their
+        # "in progress" flag as False before either's set is durable, so
+        # both proceed -- double-billing Gemini and racing to persist the
+        # merge. In-process asyncio.Lock is sufficient because this service
+        # runs a single uvicorn worker (Dockerfile has no --workers); a
+        # multi-process deployment would need a durable compare-and-set
+        # instead (see MYS-168/MYS-169 for that coupling).
+        self._session_locks: "defaultdict[str, asyncio.Lock]" = defaultdict(
+            asyncio.Lock
+        )
 
     @property
     def session_service(self):
@@ -1155,8 +1198,35 @@ class WorkflowExecutor:
             last_suggestions, action_id
         )
 
-        # Concurrency guard: block if another expansion is in flight
-        if state.expansion_in_progress:
+        # Concurrency guard (MYS-401): check-then-set on EXPANSION_IN_PROGRESS
+        # must be atomic, or two overlapping requests can both read the flag
+        # False before either's set is durable. The lock serializes this
+        # section; the re-fetch happens UNDER the lock (not the possibly-
+        # stale `session` captured above) so a second caller observes the
+        # first caller's already-durable write, not its own earlier read.
+        async with self._get_session_lock(job_id):
+            lock_session = await self._session_service.get_session(
+                app_name=APP_NAME, user_id=user_id, session_id=job_id
+            )
+            lock_state = (
+                SessionStateAccessor(lock_session.state)
+                if lock_session is not None
+                else state
+            )
+            already_in_progress = lock_state.expansion_in_progress
+            if not already_in_progress:
+                lock_event = Event(
+                    invocation_id="system",
+                    author="system",
+                    actions=EventActions(
+                        state_delta={SessionStateKeys.EXPANSION_IN_PROGRESS: True}
+                    ),
+                )
+                await self._session_service.append_event(
+                    lock_session or session, lock_event
+                )
+
+        if already_in_progress:
             for ev in error_events(
                 job_id,
                 "An expansion is already in progress for this session.",
@@ -1164,16 +1234,6 @@ class WorkflowExecutor:
             ):
                 yield ev
             return
-
-        # Set the lock
-        lock_event = Event(
-            invocation_id="system",
-            author="system",
-            actions=EventActions(
-                state_delta={SessionStateKeys.EXPANSION_IN_PROGRESS: True}
-            ),
-        )
-        await self._session_service.append_event(session, lock_event)
 
         async def body() -> AsyncGenerator[DomainEvent, None]:
             yield ProgressEvent(
@@ -1198,10 +1258,11 @@ class WorkflowExecutor:
             # always work. (MYS-167: was the client-echoed action_prompt.)
             cities = itinerary.get("cities", [])
             parent_city = cities[0].get("name", "") if cities else ""
-            action_prompt_lower = trusted_action_prompt.lower()
             for city in cities:
                 city_name = city.get("name", "")
-                if city_name and city_name.lower() in action_prompt_lower:
+                if city_name and _matches_city_as_standalone_word(
+                    city_name, trusted_action_prompt
+                ):
                     parent_city = city_name
                     break
 
@@ -1296,6 +1357,33 @@ class WorkflowExecutor:
                 matched_city = updated_cities[0].get("name", parent_city)
 
             updated_itinerary["cities"] = updated_cities
+
+            # Re-validate the merged itinerary before persisting (MYS-401):
+            # the merge above mutates raw dicts with no schema check, so a
+            # formatter quirk (a stop missing match_type, a parent_city
+            # mismatch yielding empty cities) could otherwise persist a
+            # structurally-degraded FINAL_ITINERARY that /status re-serves,
+            # bypassing every downstream schema guard. On failure, do NOT
+            # persist the degraded merge -- FINAL_ITINERARY stays whatever
+            # it already was (the pre-merge itinerary), so /status keeps
+            # re-serving a valid result instead of a broken one.
+            validated_itinerary = validate_trip_itinerary(updated_itinerary)
+            if validated_itinerary is None:
+                logger.error(
+                    "expansion_merge_validation_failed",
+                    job_id=job_id[:8],
+                    matched_city=matched_city,
+                )
+                await self._clear_expansion_lock(job_id, user_id)
+                for ev in error_events(
+                    job_id,
+                    "Failed to merge new places into the itinerary.",
+                    "MergeValidationError",
+                    phase=Phase.COMPOSITION,
+                ):
+                    yield ev
+                return
+            updated_itinerary = validated_itinerary
 
             # Stamp new suggestion ids and apply soft cap
             new_suggestions = expansion_data.get("suggestions", [])
@@ -1454,8 +1542,33 @@ class WorkflowExecutor:
                 yield ev
             return
 
-        # Concurrency guard
-        if state.book_recs_in_progress:
+        # Concurrency guard (MYS-401): same check-then-set race as expand()'s
+        # EXPANSION_IN_PROGRESS guard above -- serialize via the per-job_id
+        # lock and re-fetch UNDER it so a second caller sees the first
+        # caller's durable write, not its own stale read.
+        async with self._get_session_lock(job_id):
+            lock_session = await self._session_service.get_session(
+                app_name=APP_NAME, user_id=user_id, session_id=job_id
+            )
+            lock_state = (
+                SessionStateAccessor(lock_session.state)
+                if lock_session is not None
+                else state
+            )
+            already_in_progress = lock_state.book_recs_in_progress
+            if not already_in_progress:
+                lock_event = Event(
+                    invocation_id="system",
+                    author="system",
+                    actions=EventActions(
+                        state_delta={SessionStateKeys.BOOK_RECS_IN_PROGRESS: True}
+                    ),
+                )
+                await self._session_service.append_event(
+                    lock_session or session, lock_event
+                )
+
+        if already_in_progress:
             for ev in error_events(
                 job_id,
                 "A book recommendation request is already in progress for this session.",
@@ -1463,16 +1576,6 @@ class WorkflowExecutor:
             ):
                 yield ev
             return
-
-        # Set lock
-        lock_event = Event(
-            invocation_id="system",
-            author="system",
-            actions=EventActions(
-                state_delta={SessionStateKeys.BOOK_RECS_IN_PROGRESS: True}
-            ),
-        )
-        await self._session_service.append_event(session, lock_event)
 
         async def body() -> AsyncGenerator[DomainEvent, None]:
             yield ProgressEvent(
@@ -1622,6 +1725,13 @@ class WorkflowExecutor:
         )
         async for ev in run_guarded(body(), spec):
             yield ev
+
+    def _get_session_lock(self, job_id: str) -> asyncio.Lock:
+        """Per-job_id lock guarding the concurrency check-then-set in
+        expand()/recommend_books() (MYS-401). See the registry's docstring
+        in __init__ for why an in-process lock is sufficient today.
+        """
+        return self._session_locks[job_id]
 
     async def _clear_expansion_lock(self, job_id: str, user_id: str) -> None:
         """Clear EXPANSION_IN_PROGRESS flag after error or cancellation."""
