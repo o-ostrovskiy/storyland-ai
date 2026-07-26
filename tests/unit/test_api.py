@@ -1412,3 +1412,132 @@ class TestPlaceToBookEndpoint:
     async def test_missing_place_rejected(self, test_client, reset_p2b_singleton):
         response = await test_client.post("/api/v1/place-to-book", json={})
         assert response.status_code == 422
+
+
+# =============================================================================
+# MYS-403 gap 3a: inflight-slot lifetime over a REAL ASGI stream
+# =============================================================================
+#
+# api/dependencies.py::limit_inflight was previously exercised only as a bare
+# async generator (tests/unit/test_ratelimit.py) -- never through a real
+# streaming response, so its own docstring's claim ("holds a slot for the
+# duration of the request ... releases it when the response completes") was
+# unverified. A leak here silently wedges capacity at MAX_INFLIGHT_REQUESTS
+# forever, shedding every subsequent request with 503 until a restart.
+#
+# The completed-stream half lives here (a genuine ASGI round-trip). The
+# mid-stream-disconnect half lives in test_ratelimit.py::
+# TestLimitInflightCancellation -- httpx's ASGITransport in this environment
+# does not propagate an early `async with client.stream(...)` exit as a real
+# server-side cancellation (confirmed empirically: it hangs for the full
+# generator lifetime instead), so that half is tested at the dependency-
+# generator level by cancelling the task holding the slot open, which is
+# exactly the mechanism Starlette uses to unwind a dependency generator on a
+# genuine client disconnect.
+
+
+class TestInflightLimiterOverRealStream:
+    @pytest.mark.asyncio
+    async def test_slot_is_released_after_a_completed_stream(
+        self, mock_app_state, mock_executor
+    ):
+        from api.app import create_app
+        from api.ratelimit import InFlightLimiter
+        from httpx import AsyncClient, ASGITransport
+        import api.dependencies as deps
+
+        mock_app_state.inflight_limiter = InFlightLimiter(max_in_flight=1)
+
+        async def mock_discover(**kwargs):
+            yield ProgressEvent(
+                phase=Phase.BOOK_SEARCH, step="Searching Google Books API"
+            )
+            yield WorkflowComplete(job_id="test-job")
+
+        mock_executor.discover = mock_discover
+
+        app = create_app()
+        app.router.lifespan_context = _null_lifespan
+        deps._app_state = mock_app_state
+
+        client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+        response = await client.post(
+            "/api/v1/itinerary/discover",
+            json={"book_title": "1984", "author": "George Orwell"},
+        )
+        assert response.status_code == 200
+        assert mock_app_state.inflight_limiter.active == 0, (
+            "the slot must be free once the SSE generator has fully drained"
+        )
+        # And the freed slot is genuinely usable, not just zeroed by accident.
+        second = await client.post(
+            "/api/v1/itinerary/discover",
+            json={"book_title": "1984", "author": "George Orwell"},
+        )
+        assert second.status_code == 200
+
+
+# =============================================================================
+# MYS-403 gap 3b: the lazily-created place->book resolver's session store
+# must be included in the session sweeper's provider once it exists, so the
+# sweeper doesn't leak it (api/app.py::lifespan's `_live_session_services`).
+# =============================================================================
+
+
+class TestSessionSweeperIncludesResolverStoreOnceCreated:
+    @pytest.mark.asyncio
+    async def test_resolver_store_joins_the_sweep_once_lazily_created(
+        self, monkeypatch
+    ):
+        from types import SimpleNamespace
+
+        import api.app as app_module
+        import api.dependencies as deps
+
+        fake_executor_session_service = object()
+        fake_state = SimpleNamespace(
+            executor=SimpleNamespace(session_service=fake_executor_session_service),
+            config=SimpleNamespace(
+                session_ttl_seconds=0,  # keeps SessionSweeper.start() a no-op
+                session_max_entries=0,
+                session_sweep_interval_seconds=3600,
+            ),
+        )
+
+        async def fake_initialize():
+            return fake_state
+
+        async def fake_shutdown():
+            return None
+
+        monkeypatch.setattr(app_module, "initialize", fake_initialize)
+        monkeypatch.setattr(app_module, "shutdown", fake_shutdown)
+        # deps._place_to_book_resolver starts unset -- the whole point of
+        # this test is to prove the provider PICKS IT UP once it exists,
+        # exactly as it does lazily on the app's first place-to-book request.
+        monkeypatch.setattr(deps, "_place_to_book_resolver", None)
+
+        app = app_module.FastAPI()
+        async with app_module.lifespan(app):
+            sweeper = app.state.session_sweeper
+
+            before = sweeper._resolve_services()
+            assert fake_executor_session_service in before
+            assert len(before) == 1, (
+                f"resolver has no store yet -- must not appear early: {before!r}"
+            )
+
+            fake_resolver_store = object()
+            monkeypatch.setattr(
+                deps,
+                "_place_to_book_resolver",
+                SimpleNamespace(_session_service=fake_resolver_store),
+            )
+
+            after = sweeper._resolve_services()
+            assert fake_executor_session_service in after
+            assert fake_resolver_store in after, (
+                f"the sweeper must pick up the resolver's store once it's "
+                f"lazily created, so the retention sweep covers it too "
+                f"(otherwise it leaks past the sweeper forever): {after!r}"
+            )

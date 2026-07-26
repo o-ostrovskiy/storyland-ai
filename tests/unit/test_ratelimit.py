@@ -6,6 +6,7 @@ they run fast and deterministically. Time is injected so the sliding window is
 tested without sleeping.
 """
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -182,3 +183,56 @@ class TestLimitInflight:
         assert inflight.active == 0
         with pytest.raises(StopAsyncIteration):
             await gen.__anext__()
+
+
+# ---------------------------------------------------------------------------
+# MYS-403 gap 3 (disconnect half): limit_inflight() releasing its slot when
+# the holder is cancelled mid-stream, not just on normal completion.
+# ---------------------------------------------------------------------------
+#
+# TestLimitInflight above (and test_api.py::TestInflightLimiterOverRealStream,
+# which drives a real ASGI round-trip) both cover the generator finishing on
+# its own. Neither proves the OTHER half of the dependency's own docstring
+# contract: "holds a slot for the duration of the request ... releases it
+# when the response completes" -- a request that never completes because the
+# client walked away must still free the slot. A real client disconnect
+# surfaces to a FastAPI generator dependency as its enclosing task being
+# cancelled while the generator is parked at its `yield`; Starlette then
+# unwinds the dependency via `aclose()`, throwing `GeneratorExit` in at that
+# yield point -- exactly what `hold_the_slot` below does explicitly, so this
+# exercises the real mechanism `limit_inflight`'s `finally: limiter.release()`
+# has to survive, without depending on ASGI-transport-specific disconnect
+# behavior (which proved unreliable to simulate in this sandbox -- see the
+# note in test_api.py).
+class TestLimitInflightCancellation:
+    async def test_release_runs_when_the_holder_is_cancelled_mid_stream(
+        self, fake_state
+    ):
+        inflight = InFlightLimiter(1)
+        fake_state(SlidingWindowRateLimiter(0, 60), inflight)
+
+        started = asyncio.Event()
+
+        async def hold_the_slot():
+            gen = limit_inflight()
+            await gen.__anext__()  # acquire + past the yield
+            started.set()
+            try:
+                await asyncio.sleep(60)  # stands in for "streaming forever"
+            finally:
+                # What Starlette does to unwind a generator dependency when
+                # the request task is cancelled (client disconnect).
+                await gen.aclose()
+
+        task = asyncio.ensure_future(hold_the_slot())
+        await started.wait()
+        assert inflight.active == 1, "the slot must be held while the stream is open"
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert inflight.active == 0, (
+            "a cancelled (disconnected) request must still release its "
+            "inflight slot -- otherwise capacity is wedged until a restart"
+        )
