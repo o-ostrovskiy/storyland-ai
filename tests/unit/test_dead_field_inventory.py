@@ -26,10 +26,16 @@ treats `preferences` as an OPAQUE dict, passed through whole via
 `json.dumps(preferences)` — `core/prompts.py::build_composition_prompt`,
 `agents/prompts.py::preferences_block`. Neither ever reads a field by name.
 An offense is a NEW literal-key read off a variable/parameter named exactly
-`preferences`: `preferences["field"]` or `preferences.get("field", ...)`.
-Reading the whole dict opaquely (`json.dumps(preferences)`,
-`preferences.items()`, `dict(preferences)`) is not an offense — that's the
-safe, already-shipped shape.
+`preferences`: `preferences["field"]` (`ast.Load` context), `preferences["field"]
++= x` (`ast.AugAssign` -- reads the prior value even though its target
+Subscript carries `ast.Store`, same as a plain write), or
+`preferences.get("field", ...)`. A plain write/delete (`preferences["field"]
+= x`, `del preferences["field"]`) is not an offense -- the service writing
+or removing its own key, not reading one the FE sent. Reading the whole
+dict opaquely (`json.dumps(preferences)`, `preferences.items()`,
+`dict(preferences)`) is likewise not an offense. `.pop()`/`.setdefault()`
+also read a field but are deliberately out of scope (disclosed, not a false
+claim -- see SCOPE).
 
 ## SCOPE (deliberately narrow, not exhaustive)
 
@@ -38,8 +44,11 @@ over a fixed set of prompt-assembly files (`agents/` + `core/prompts.py`).
 It does NOT track a differently-named alias (`user_preferences`,
 `prefs = preferences; prefs["budget"]`), attribute-style access on a typed
 object (`preferences.budget`, e.g. if `TravelPreferences` — currently
-unused in production code — were wired back in), or reads outside the
-scanned files. Verified by hand as of this PR that no such alias exists
+unused in production code — were wired back in), reads outside the
+scanned files, or `.pop()`/`.setdefault()` calls (these read too, but sit
+outside this guard's literal-key-subscript/`.get()` offense definition --
+a closed read-set of `Load` ∪ (`Store` under `AugAssign`) that a source-text
+regex could never enumerate but this AST scanner can, per MYS-685). Verified by hand as of this PR that no such alias exists
 today. Mirrors the same "receiver-name-bound, narrow the claim rather than
 over-promise" scope note the fe sibling guard carries
 (`storyland-web/tests/regionCitiesGuard.test.ts`, MYS-681).
@@ -103,6 +112,36 @@ class _PreferencesFieldVisitor(ast.NodeVisitor):
                 self.fields.add(key.value)
         self.generic_visit(node)
 
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        # `preferences["field"] += x` READS the prior value before writing
+        # the new one -- but its target Subscript carries ast.Store, the
+        # same ctx as a plain `preferences["field"] = x` write, so
+        # visit_Subscript's Load gate (correctly) excludes it. That gate
+        # would make this a false-GREEN: a real read shipping uninventoried
+        # (Eng Lead fix-list, MYS-439 r2, Codex-caught).
+        #
+        # This is the ONLY non-Load context that reads. A Subscript carries
+        # exactly three contexts (Load/Store/Del); of every syntactic
+        # position that yields a non-Load one -- Assign, AnnAssign,
+        # AugAssign, For/AsyncFor, With, comprehension, tuple/starred
+        # unpack, Delete -- only AugAssign evaluates the prior value before
+        # writing. So read-set = Load ∪ (Store under AugAssign), and that
+        # set is closed: deliberately NOT widened to `.pop()`/`.setdefault()`
+        # (Eng Lead, MYS-439 r2) -- those also read, but they sit outside
+        # this guard's documented offense definition (a literal-key read via
+        # `preferences["x"]`/`preferences.get("x")`), so they're disclosed
+        # scope rather than a false claim the docstring makes and breaks.
+        target = node.target
+        if (
+            isinstance(target, ast.Subscript)
+            and isinstance(target.value, ast.Name)
+            and target.value.id == "preferences"
+        ):
+            key = target.slice
+            if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                self.fields.add(key.value)
+        self.generic_visit(node)
+
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func
         if (
@@ -148,13 +187,26 @@ def test_detector_self_check_catches_every_offense_shape_and_ignores_safe_shapes
         "    b = preferences.get('preferred_pace')\n"
         "    return a, b\n"
     ) == {"budget", "preferred_pace"}
+    # AugAssign READS the prior value before writing -- its target Subscript
+    # carries ast.Store, same as a plain write, so this is the one
+    # non-Load context that must still count (Eng Lead fix-list, MYS-439 r2).
+    assert find_named_preference_reads(
+        "def f(preferences):\n    preferences['budget'] += 1\n    return preferences\n"
+    ) == {"budget"}
 
     safe_sources = [
-        # a STORE (assignment) or DEL context is the service writing/removing
-        # its own key, not reading a field the FE sent -- must not be
-        # collected as an offense (Eng Lead fix-list, MYS-439, Codex P2)
+        # a plain STORE (assignment) or DEL context is the service writing/
+        # removing its own key, not reading a field the FE sent -- must not
+        # be collected as an offense (Eng Lead fix-list, MYS-439, Codex P2).
+        # AugAssign is the one Store-context exception (it reads first) --
+        # covered as its own offense assertion above, not here.
         "def f(preferences):\n    preferences['derived'] = 1\n    return preferences\n",
         "def f(preferences):\n    del preferences['derived']\n    return preferences\n",
+        # .pop()/.setdefault() also read, but sit outside this guard's
+        # documented offense definition (subscript-Load / .get() only) --
+        # disclosed scope, deliberately not widened (Eng Lead, MYS-439 r2).
+        "def f(preferences):\n    return preferences.pop('budget', None)\n",
+        "def f(preferences):\n    return preferences.setdefault('budget', 'moderate')\n",
         # the exact opaque-passthrough shapes already shipped in this repo
         "import json\ndef f(preferences):\n    return json.dumps(preferences)\n",
         "def f(preferences):\n    return dict(preferences)\n",
