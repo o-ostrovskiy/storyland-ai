@@ -1271,6 +1271,21 @@ class WorkflowExecutor:
                 yield ev
             return
 
+        # MYS-401 r3 (Codex P1): adopt the under-lock re-fetch as this
+        # admitted request's authoritative snapshot. The lock makes the
+        # flag's check-then-set atomic and correctly rejects a genuinely
+        # concurrent second caller -- but by itself it does not make an
+        # ADMITTED caller's outer, pre-lock captures fresh. A caller parked
+        # between its own initial get_session() and lock acquisition (e.g.
+        # a distinct earlier expansion completing in that gap) would
+        # otherwise merge onto its own stale `state`/`itinerary` and
+        # increment a stale `expansion_count`, clobbering the other
+        # expansion's result even though the flag guard behaved correctly.
+        if lock_session is not None:
+            state = lock_state
+            expansion_count = state.expansion_count
+            last_suggestions = state.last_suggestions
+
         async def body() -> AsyncGenerator[DomainEvent, None]:
             yield ProgressEvent(
                 phase=Phase.COMPOSITION,
@@ -1630,6 +1645,15 @@ class WorkflowExecutor:
             ):
                 yield ev
             return
+
+        # MYS-401 r3 (Codex P1): same fix as expand() above -- adopt the
+        # under-lock re-fetch as this admitted request's authoritative
+        # snapshot so it merges onto the freshest persisted state and
+        # increments a fresh `book_recommendation_count`, not a stale
+        # pre-lock capture.
+        if lock_session is not None:
+            state = lock_state
+            book_recommendation_count = state.book_recommendation_count
 
         async def body() -> AsyncGenerator[DomainEvent, None]:
             yield ProgressEvent(

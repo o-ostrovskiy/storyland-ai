@@ -364,6 +364,159 @@ class TestExpandLockRefetchSessionError:
         assert not any(isinstance(e, ExpansionReady) for e in events)
 
 
+class TestExpandAdmittedCallerAdoptsFreshSnapshot:
+    """MYS-401 r3 (Codex P1): the lock makes the in-progress flag's
+    check-then-set atomic, so a genuinely concurrent second caller is
+    correctly rejected (TestExpandConcurrencyGuardIsAtomic above). But an
+    ADMITTED caller -- one whose own initial, pre-lock get_session() read
+    happened to race ahead of a DIFFERENT, already-completed expansion on
+    the same job_id -- was still running body() against that stale outer
+    capture: `state`, `itinerary`, and `expansion_count` were never
+    refreshed from the under-lock re-fetch that had just proven the flag
+    clear. The lock guaranteed nothing else could run WHILE it was held; it
+    never made the admitted caller's own pre-lock reads fresh.
+
+    This drives exactly that interleaving directly (no artificial
+    scheduling needed): caller A runs a real expand() to completion first;
+    caller B's session service is then wired so B's *own* initial lookup
+    returns the snapshot from BEFORE A ran, while every later call (the
+    under-lock re-fetch, the fake runner's write, the post-run re-fetch)
+    goes to the real, current service. B is admitted under the lock (A's
+    flag is durably clear) and must adopt A's already-persisted result as
+    its merge base -- not silently clobber it.
+    """
+
+    async def test_admitted_caller_merges_onto_already_completed_expansion(
+        self, monkeypatch
+    ):
+        real_service = create_session_service(use_database=False)
+        executor, ex = _make_executor(monkeypatch, real_service)
+        monkeypatch.setattr(
+            ex, "Runner", _fake_expansion_runner(_VALID_EXPANSION_DELTA)
+        )
+
+        job_id = "job-admitted-stale-snapshot-1"
+        await real_service.create_session(
+            app_name=APP_NAME,
+            user_id="default",
+            session_id=job_id,
+            state=dict(_SEED_STATE),
+        )
+
+        # The snapshot caller B's own initial get_session() will be made to
+        # return -- captured now, before A runs, so it is genuinely stale
+        # by the time B reaches the lock.
+        stale_session = await real_service.get_session(
+            app_name=APP_NAME, user_id="default", session_id=job_id
+        )
+
+        # Caller A: a real, complete expand() -- persists Jane Austen
+        # Centre, bumps expansion_count to 1, clears the suggestions list
+        # (per _VALID_EXPANSION_DELTA) and the in-progress flag.
+        a_events = await _drain(
+            executor.expand(
+                job_id=job_id,
+                action_id="chip-1",
+                action_label="More cafes",
+                action_prompt="Find cafes in Bath",
+            )
+        )
+        assert any(isinstance(e, ExpansionReady) for e in a_events), (
+            f"caller A must complete for this test to model anything, got {a_events!r}"
+        )
+
+        after_a = await real_service.get_session(
+            app_name=APP_NAME, user_id="default", session_id=job_id
+        )
+        assert after_a.state[SessionStateKeys.EXPANSION_COUNT] == 1
+        assert after_a.state[SessionStateKeys.EXPANSION_IN_PROGRESS] is False
+
+        class _StaleFirstLookup:
+            """B's own initial (pre-lock) get_session() returns the
+            snapshot captured before A ran. Every other get_session call --
+            the under-lock re-fetch, the fake runner's own read, the
+            post-run re-fetch -- goes to the real, current service, so B is
+            admitted (A's flag is already durably clear) with a stale outer
+            capture: exactly the gap this fix closes.
+            """
+
+            def __init__(self, inner, stale):
+                self._inner = inner
+                self._stale = stale
+                self._calls = 0
+
+            async def get_session(self, *args, **kwargs):
+                self._calls += 1
+                if self._calls == 1:
+                    return self._stale
+                return await self._inner.get_session(*args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        executor._session_service = _StaleFirstLookup(real_service, stale_session)
+
+        # B reuses chip-1 -- the only id present in the STALE snapshot's
+        # last_suggestions (action_id validation runs against B's own
+        # pre-lock `state`, so this is the only id that can pass). This is
+        # the realistic shape of the bug: a delayed second click validated
+        # against a chip the first click already consumed.
+        second_delta = {
+            SessionStateKeys.LAST_EXPANSION: {
+                "parent_city": "Bath",
+                "places": [
+                    {
+                        "name": "Royal Crescent",
+                        "type": "landmark",
+                        "reason": "Georgian architecture",
+                        "time_of_day": "morning",
+                    }
+                ],
+                "suggestions": [],
+            }
+        }
+        monkeypatch.setattr(ex, "Runner", _fake_expansion_runner(second_delta))
+
+        b_events = await _drain(
+            executor.expand(
+                job_id=job_id,
+                action_id="chip-1",
+                action_label="More cafes",
+                action_prompt="Find cafes in Bath",
+            )
+        )
+
+        assert any(isinstance(e, ExpansionReady) for e in b_events), (
+            f"the admitted second caller should complete, got {b_events!r}"
+        )
+
+        final = await real_service.get_session(
+            app_name=APP_NAME, user_id="default", session_id=job_id
+        )
+        # count -> 2: without the fix this ends at 1 (B increments its own
+        # stale pre-A count of 0), a lost update identical in shape to the
+        # concurrent-race bug this same ticket already fixed once.
+        assert final.state[SessionStateKeys.EXPANSION_COUNT] == 2
+        bath = next(
+            c
+            for c in final.state[SessionStateKeys.FINAL_ITINERARY]["cities"]
+            if c["name"] == "Bath"
+        )
+        stop_names = {s["name"] for s in bath["stops"]}
+        # Both expansions' places must survive. Without the fix, B merges
+        # its new place onto the STALE pre-A itinerary and persists that as
+        # the whole of FINAL_ITINERARY -- silently dropping A's Jane Austen
+        # Centre even though A's write was already durable.
+        assert "Jane Austen Centre" in stop_names, (
+            f"caller A's already-persisted place must survive caller B's "
+            f"merge, got stops={stop_names!r}"
+        )
+        assert "Royal Crescent" in stop_names
+        # No chip reuse: B's own fresh (empty) suggestion list is what's
+        # left standing, not a residual chip-1 a third caller could replay.
+        assert final.state[SessionStateKeys.LAST_SUGGESTIONS] == []
+
+
 class TestCityWordBoundaryMatch:
     """Direct unit tests of the helper -- no session/Runner machinery
     needed, same style as test_core.py's MYS-167 tests of the sibling
