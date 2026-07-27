@@ -87,7 +87,17 @@ class _PreferencesFieldVisitor(ast.NodeVisitor):
         self.fields: set[str] = set()
 
     def visit_Subscript(self, node: ast.Subscript) -> None:
-        if isinstance(node.value, ast.Name) and node.value.id == "preferences":
+        # Only a READ is an offense candidate. `preferences["derived"] = value`
+        # (ast.Store) or `del preferences["derived"]` (ast.Del) are the service
+        # WRITING/removing its own key, not reading a field the FE must have
+        # collected -- counting those as reads would demand a nonexistent FE
+        # surface for a key that never came from the frontend at all (Eng Lead
+        # fix-list, MYS-439, Codex P2).
+        if (
+            isinstance(node.value, ast.Name)
+            and node.value.id == "preferences"
+            and isinstance(node.ctx, ast.Load)
+        ):
             key = node.slice
             if isinstance(key, ast.Constant) and isinstance(key.value, str):
                 self.fields.add(key.value)
@@ -140,6 +150,11 @@ def test_detector_self_check_catches_every_offense_shape_and_ignores_safe_shapes
     ) == {"budget", "preferred_pace"}
 
     safe_sources = [
+        # a STORE (assignment) or DEL context is the service writing/removing
+        # its own key, not reading a field the FE sent -- must not be
+        # collected as an offense (Eng Lead fix-list, MYS-439, Codex P2)
+        "def f(preferences):\n    preferences['derived'] = 1\n    return preferences\n",
+        "def f(preferences):\n    del preferences['derived']\n    return preferences\n",
         # the exact opaque-passthrough shapes already shipped in this repo
         "import json\ndef f(preferences):\n    return json.dumps(preferences)\n",
         "def f(preferences):\n    return dict(preferences)\n",
@@ -155,7 +170,21 @@ def test_detector_self_check_catches_every_offense_shape_and_ignores_safe_shapes
 
 def test_inventory_file_is_valid_json_with_a_fields_map():
     inventory = _load_inventory()
-    assert isinstance(inventory.get("fields"), dict)
+    fields = inventory.get("fields")
+    assert isinstance(fields, dict)
+    # The _readme's own promise, and the failure message on the drift test
+    # below, both claim every entry NAMES THE FE SURFACE that collects the
+    # field -- {"budget": null} or {"budget": ""} would pass a bare
+    # isinstance(dict) check while telling QA's dead-control sweep nothing.
+    # That's this repo's own "copy claims something the code doesn't do"
+    # class (MYS-492/MYS-584); enforce the contract the doc states (Eng
+    # Lead fix-list, MYS-439, Codex P2).
+    for field, fe_surface in fields.items():
+        assert isinstance(fe_surface, str) and fe_surface.strip(), (
+            f'inventory entry {field!r} must name a non-empty FE surface '
+            f'string (got {fe_surface!r}) -- an empty/null value documents '
+            'nothing for QA\'s dead-control sweep to diff against'
+        )
 
 
 def test_every_named_preference_field_read_in_the_prompt_assembly_surface_is_inventoried():
