@@ -500,3 +500,64 @@ class TestRouteIsolationOverRealGatewayIdentity:
             f"got {events!r}"
         )
         assert "Bath" not in response.text
+
+    async def test_alice_header_reaches_her_own_session_via_expand(
+        self, real_identity_client
+    ):
+        # Codex P2 (MYS-403 review r3): the class above only sent bob's
+        # header to /expand -- a route-specific regression that resolves
+        # EVERY expand request to a fixed non-owner identity would still
+        # produce JobNotFound for bob and pass, since nothing here proves
+        # a REAL owner header is ever admitted on this specific route. The
+        # direct-call owner test elsewhere can't catch this either, since
+        # it supplies user_id explicitly rather than through a header.
+        response = await real_identity_client.post(
+            f"/api/v1/itinerary/{_JOB_ID}/expand",
+            json={
+                "action_id": "chip-1",
+                "action_label": "More cafes",
+                "action_prompt": "Find cafes in Bath",
+            },
+            headers={"X-User-ID": _OWNER_USER_ID},
+        )
+        assert response.status_code == 200
+        events = _parse_sse_text(response.text)
+        errors = [payload for etype, payload in events if etype == "error"]
+        assert not any(e.get("error_type") == "JobNotFound" for e in errors), (
+            f"a real X-User-ID: alice header must resolve to alice and "
+            f"find her own session via expand(), got {events!r}"
+        )
+
+    async def test_alice_header_reaches_her_own_status_via_real_asgi(
+        self, real_identity_client
+    ):
+        # Codex P2 (MYS-403 review r3): TestStatusEndpointIsolation calls
+        # get_status() directly with user_id= as an already-resolved
+        # kwarg, same bypass class as the pre-r3 compose/expand tests --
+        # if the status route alone were repointed to a different/broken
+        # identity resolver, that class would still pass. get_status is a
+        # plain JSON response (no SSE parsing needed).
+        response = await real_identity_client.get(
+            f"/api/v1/itinerary/{_JOB_ID}/status",
+            headers={"X-User-ID": _OWNER_USER_ID},
+        )
+        assert response.status_code == 200, (
+            f"a real X-User-ID: alice header must resolve to alice and "
+            f"find her own status, got {response.status_code} {response.text!r}"
+        )
+        assert response.json().get("book_title") == "Persuasion"
+
+    async def test_bob_header_is_rejected_from_alices_status_via_real_asgi(
+        self, real_identity_client
+    ):
+        response = await real_identity_client.get(
+            f"/api/v1/itinerary/{_JOB_ID}/status",
+            headers={"X-User-ID": _OTHER_USER_ID},
+        )
+        assert response.status_code == 404, (
+            f"a real X-User-ID: bob header must be denied alice's status "
+            f"through the actual gateway-identity dependency, got "
+            f"{response.status_code} {response.text!r}"
+        )
+        assert "Bath" not in response.text
+        assert "Persuasion" not in response.text
