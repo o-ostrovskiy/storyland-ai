@@ -1727,36 +1727,59 @@ class WorkflowExecutor:
         """Per-job_id lock guarding the concurrency check-then-set in
         expand()/recommend_books() (MYS-401). See the registry's docstring
         in __init__ for why an in-process lock is sufficient today.
+
+        Registry invariant (MYS-401 r6 -- re-owned after r4/r5 each closed
+        one hop of the same hole one call site at a time): a lock this
+        method returns to a caller is NEVER a candidate for eviction on
+        THIS call. That used to be true only because a brand-new entry
+        usually sorts after the entries eviction considers first -- true
+        on realistic traffic, but not structurally: if every pre-existing
+        entry happened to be held or waited-on, eviction would walk past
+        all of them and delete the entry this same call had just created,
+        one line above. Evicting strictly BEFORE creating the new entry
+        (this method, below) removes that failure mode by construction:
+        the entry doesn't exist yet when eviction runs, so it cannot be
+        iterated over, let alone deleted, regardless of how many older
+        entries turn out to be evictable.
         """
         lock = self._session_locks.get(job_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._session_locks[job_id] = lock
-            self._evict_stale_session_locks()
-        else:
+        if lock is not None:
             self._session_locks.move_to_end(job_id)
+            return lock
+        self._evict_stale_session_locks()
+        lock = asyncio.Lock()
+        self._session_locks[job_id] = lock
         return lock
 
     def _evict_stale_session_locks(self) -> None:
-        """Bound the per-job_id lock registry (Codex P2, MYS-401 r4).
+        """Make room in the per-job_id lock registry (MYS-401 r4-r6).
 
-        Once the registry exceeds a generous cap, evict the
-        least-recently-used entries -- but ONLY ones that are neither
-        currently held nor have a pending waiter. ``asyncio.Lock`` has no
-        public API for "is anyone waiting on this", hence the ``_waiters``
-        check; skipping both conditions matters because evicting a lock a
-        genuinely-overlapping second caller is about to acquire would hand
-        that caller a DIFFERENT ``Lock`` instance from the one the first
-        caller (or another waiter) holds a reference to -- silently
-        defeating the per-job_id serialization this whole registry exists
-        for. Both conditions together are only relevant once a genuinely
-        pathological number of distinct job_ids have accumulated; ordinary
-        traffic never reaches the cap.
+        Called ONLY from _get_session_lock, and only BEFORE it inserts a
+        new entry -- never after. That ordering is what makes the
+        invariant in _get_session_lock's docstring structural rather than
+        a timing accident: this method only ever sees entries that
+        existed before the current call, so it can never evict the lock
+        _get_session_lock is about to hand back.
+
+        Evicts least-recently-used entries down to (just under) the cap,
+        but ONLY ones that are neither currently held nor have a pending
+        waiter. ``asyncio.Lock`` has no public API for "is anyone waiting
+        on this", hence the ``_waiters`` check; skipping both conditions
+        matters because evicting a lock a genuinely-overlapping second
+        caller is about to acquire would hand that caller a DIFFERENT
+        ``Lock`` instance from the one an earlier caller (or another
+        waiter) holds a reference to -- silently defeating the per-job_id
+        serialization this whole registry exists for. If every existing
+        entry is held or waited-on, this call evicts nothing and the
+        registry is left at (or, after the pending insert, one above) the
+        cap -- the cap is a generous leak bound, not a hard limit, and
+        reaching this branch needs a genuinely pathological number of
+        concurrently in-flight jobs. Ordinary traffic never reaches it.
         """
-        if len(self._session_locks) <= _SESSION_LOCK_REGISTRY_CAP:
+        if len(self._session_locks) < _SESSION_LOCK_REGISTRY_CAP:
             return
         for job_id, lock in list(self._session_locks.items()):
-            if len(self._session_locks) <= _SESSION_LOCK_REGISTRY_CAP:
+            if len(self._session_locks) < _SESSION_LOCK_REGISTRY_CAP:
                 break
             if lock.locked() or getattr(lock, "_waiters", None):
                 continue

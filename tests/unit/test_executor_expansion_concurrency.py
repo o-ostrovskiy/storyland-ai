@@ -611,3 +611,47 @@ class TestSessionLockRegistryIsBounded:
             # The registry is still bounded overall -- the held entry just
             # doesn't count against the evictable pool.
             assert len(executor._session_locks) >= 2
+
+    async def test_newly_created_lock_is_never_evicted_by_its_own_insertion(
+        self, monkeypatch
+    ):
+        """MYS-401 r6 -- Eng Lead bounce, 2026-07-27: r5's eviction ran
+        AFTER inserting the new entry, so if every pre-existing entry
+        happened to be held (or waited-on) once the registry was at cap,
+        the eviction loop walked past all of them and deleted the entry
+        THIS SAME CALL had just created -- the caller walked away holding
+        a ``Lock`` no longer in the registry, and the next caller for that
+        same job_id would be handed a different instance, silently
+        defeating the serialization the whole registry exists for. This
+        is the exact scenario: fill the registry to cap with an entry
+        that's actively held, then request a brand-new job_id at cap.
+        """
+        import core.executor as ex
+
+        monkeypatch.setattr(ex, "_SESSION_LOCK_REGISTRY_CAP", 1)
+        config = ExecutorConfig(model_name="gemini-2.0-flash", google_api_key="test-key")
+        executor = ex.WorkflowExecutor(
+            config=config,
+            session_service=create_session_service(use_database=False),
+            model=object(),
+        )
+
+        held_lock = executor._get_session_lock("job-held")
+        async with held_lock:
+            # Registry is at cap (1) and its only entry is held, so it is
+            # not evictable -- exactly the state that used to make the
+            # buggy eviction-after-insert reach for the entry it had just
+            # created instead.
+            new_lock = executor._get_session_lock("job-new")
+
+            assert executor._session_locks.get("job-new") is new_lock, (
+                "the lock this call returns must be the one registered "
+                "under its job_id -- if it isn't, a second overlapping "
+                "caller for job-new is handed a DIFFERENT Lock instance "
+                "and never actually serializes against the first"
+            )
+
+            # A second caller for the same job_id, still within the same
+            # held-lock window, must observe the identical instance.
+            second_call_lock = executor._get_session_lock("job-new")
+            assert second_call_lock is new_lock
