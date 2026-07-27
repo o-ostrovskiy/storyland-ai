@@ -24,10 +24,15 @@ These tests create a real session as user "alice" via the real
 """
 
 import json
+from contextlib import asynccontextmanager
 
 import pytest
 from fastapi import HTTPException
+from httpx import AsyncClient, ASGITransport
 
+import api.dependencies as deps
+from api.dependencies import AppState, get_gateway_user_id
+from api.ratelimit import InFlightLimiter, SlidingWindowRateLimiter
 from core.events import WorkflowError
 from core.executor import APP_NAME, WorkflowExecutor
 from core.session_state import SessionStateKeys
@@ -55,6 +60,39 @@ async def _drain_sse_route(coro):
     async for sse_dict in response.body_iterator:
         payload = json.loads(sse_dict["data"]) if sse_dict.get("data") else {}
         events.append((sse_dict["event"], payload))
+    return events
+
+
+@asynccontextmanager
+async def _null_lifespan(app):
+    yield
+
+
+def _parse_sse_text(text: str) -> list:
+    """Parse a raw ``text/event-stream`` HTTP response body into
+    ``(event, payload)`` pairs, same shape as ``_drain_sse_route``'s
+    return value, for the real-ASGI-round-trip tests below.
+
+    ``EventSourceResponse`` writes CRLF (``\r\n``) line endings, not bare
+    ``\n`` -- splitting on ``"\n\n"`` directly never matches (the blank
+    line between events is ``\r\n\r\n``), so the whole body parses as one
+    block and only the LAST event/data pair survives. Normalize line
+    endings first.
+    """
+    events = []
+    normalized = text.replace("\r\n", "\n")
+    for block in normalized.strip().split("\n\n"):
+        if not block.strip():
+            continue
+        event_type = None
+        data_line = None
+        for line in block.splitlines():
+            if line.startswith("event:"):
+                event_type = line[len("event:"):].strip()
+            elif line.startswith("data:"):
+                data_line = line[len("data:"):].strip()
+        payload = json.loads(data_line) if data_line else {}
+        events.append((event_type, payload))
     return events
 
 
@@ -358,3 +396,107 @@ class TestExpandRouteIsolation:
             f"real HTTP route, even holding her own chip id; got {events!r}"
         )
         assert not any("Bath" in json.dumps(payload) for _etype, payload in events)
+
+
+class TestRouteIsolationOverRealGatewayIdentity:
+    """Codex P2 (MYS-403 review r2): ``TestComposeRouteIsolation`` and
+    ``TestExpandRouteIsolation`` above call the route functions directly
+    with ``user_id=`` passed in as an already-resolved keyword argument --
+    that exercises route -> stream -> executor propagation, but
+    ``Depends(get_gateway_user_id)`` itself never runs, so a regression
+    that repointed or dropped the identity dependency (e.g. a route
+    signature edit that stopped declaring it, or a swap to a different
+    resolver) would leave the whole file green.
+
+    ``tests/unit/conftest.py`` globally overrides ``get_gateway_user_id``
+    to always return the literal ``"test_user"`` for every unit test (so
+    ordinary endpoint tests don't need gateway headers) -- these tests
+    explicitly remove that override on their own ``app`` instance and
+    drive the real ASGI application with a real ``X-User-ID`` header, so
+    the dependency that resolves identity from the request is what's
+    actually under test, not a stand-in.
+    """
+
+    @pytest.fixture
+    def real_identity_client(self, session_as_alice):
+        """A real ASGI app with the ``get_gateway_user_id`` override
+        removed (so the real dependency reads ``X-User-ID`` off each
+        request) and wired to the same session/executor
+        ``session_as_alice`` sets up. ``verify_gateway_secret`` stays
+        overridden to a no-op -- that boundary already has dedicated
+        negative coverage in ``test_gateway_auth.py`` (MYS-403 gap 1);
+        this fixture isolates identity resolution specifically.
+        """
+        from api.app import create_app
+
+        executor, _service = session_as_alice
+
+        app = create_app()  # patched by tests/unit/conftest.py's autouse fixture
+        app.dependency_overrides.pop(get_gateway_user_id, None)
+        app.router.lifespan_context = _null_lifespan
+
+        deps._app_state = AppState(
+            config=None,
+            executor=executor,
+            rate_limiter=SlidingWindowRateLimiter(max_requests=0, window_seconds=60),
+            inflight_limiter=InFlightLimiter(max_in_flight=0),
+        )
+        try:
+            yield AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+        finally:
+            deps._app_state = None
+
+    async def test_alice_header_reaches_her_own_session_via_compose(
+        self, real_identity_client
+    ):
+        response = await real_identity_client.post(
+            f"/api/v1/itinerary/{_JOB_ID}/compose",
+            json={"region_ids": [1]},
+            headers={"X-User-ID": _OWNER_USER_ID},
+        )
+        assert response.status_code == 200
+        events = _parse_sse_text(response.text)
+        errors = [payload for etype, payload in events if etype == "error"]
+        assert not any(e.get("error_type") == "JobNotFound" for e in errors), (
+            f"a real X-User-ID: alice header must resolve to alice and find "
+            f"her own session, got {events!r}"
+        )
+
+    async def test_bob_header_is_rejected_from_alices_session_via_compose(
+        self, real_identity_client
+    ):
+        response = await real_identity_client.post(
+            f"/api/v1/itinerary/{_JOB_ID}/compose",
+            json={"region_ids": [1]},
+            headers={"X-User-ID": _OTHER_USER_ID},
+        )
+        assert response.status_code == 200
+        events = _parse_sse_text(response.text)
+        errors = [payload for etype, payload in events if etype == "error"]
+        assert errors and errors[0].get("error_type") == "JobNotFound", (
+            f"a real X-User-ID: bob header must be denied alice's session "
+            f"through the actual gateway-identity dependency, got {events!r}"
+        )
+        assert "Bath" not in response.text
+
+    async def test_bob_header_is_rejected_from_alices_session_via_expand(
+        self, real_identity_client
+    ):
+        response = await real_identity_client.post(
+            f"/api/v1/itinerary/{_JOB_ID}/expand",
+            json={
+                "action_id": "chip-1",
+                "action_label": "More cafes",
+                "action_prompt": "Find cafes in Bath",
+            },
+            headers={"X-User-ID": _OTHER_USER_ID},
+        )
+        assert response.status_code == 200
+        events = _parse_sse_text(response.text)
+        errors = [payload for etype, payload in events if etype == "error"]
+        assert errors and errors[0].get("error_type") == "JobNotFound", (
+            f"bob must not reach alice's session via expand() through the "
+            f"real gateway-identity dependency, even holding her chip id, "
+            f"got {events!r}"
+        )
+        assert "Bath" not in response.text
