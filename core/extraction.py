@@ -9,7 +9,7 @@ Extracted from api/streaming.py lines 89-104 and 564-598.
 
 import json
 import re
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 
 from pydantic import ValidationError
 
@@ -533,6 +533,63 @@ def _city_names(itinerary_dict: Optional[dict]) -> set:
     }
 
 
+def _matches_city_as_standalone_word(
+    city_name: str,
+    action_prompt: str,
+    other_city_names: Sequence[str] = (),
+) -> bool:
+    """True if ``city_name`` appears in ``action_prompt`` as its own place
+    mention, not as the tail of a different, longer proper noun (MYS-401 —
+    a plain substring check let a trip city named "York" match an
+    action_prompt mentioning "New York", merging into the wrong city).
+
+    Heuristic, not a gazetteer: a match is rejected only when the word
+    immediately preceding it is capitalized AND the two-word phrase it forms
+    (``"<preceding> <city_name>"``) is itself, case-insensitively, one of
+    ``other_city_names`` -- i.e. this trip has another, longer city name that
+    the same text plausibly refers to instead. Being preceded by a
+    capitalized word is NOT enough on its own to reject a match: real
+    ``action_prompt``s routinely lead with a capitalized verb or adjective
+    right before the target city ("Explore Bath", "Discover Barcelona",
+    "Victorian London bookshops"), and none of those two-word phrases are
+    themselves another trip city, so the shorter city name still wins.
+    Case-sensitive by design -- it reads capitalization from
+    ``action_prompt`` as-is, so pass the original-cased trusted prompt, not
+    a lowercased copy.
+
+    Boundary is plain word-character adjacency (``\w``), NOT ``[\w-]``
+    (MYS-401 r4 -- Codex P2): a hyphen is punctuation, not a word character,
+    so it already ends a word on its own. Excluding it from the boundary
+    class rejected perfectly standalone mentions immediately followed by a
+    hyphenated compound ("Find Bath-based literary experiences"), falling
+    back to cities[0] -- the same misroute class this helper exists to
+    prevent. Known tradeoff: a city name that is itself the tail of a
+    genuinely hyphenated proper noun ("Winston-Salem") can now match a
+    bare search for "Salem", since the preceding-word reject only fires
+    on a clean alphabetic word and "Winston-" isn't one. Out of scope for
+    this fix -- not the failure mode reported, and gazetteer-grade
+    hyphenated-compound detection is a bigger change than this heuristic
+    is trying to be.
+    """
+    other_city_names_lower = {
+        name.lower()
+        for name in other_city_names
+        if name.lower() != city_name.lower()
+    }
+    pattern = re.compile(
+        rf"(?<!\w){re.escape(city_name)}(?!\w)", re.IGNORECASE
+    )
+    for match in pattern.finditer(action_prompt):
+        preceding = action_prompt[: match.start()].rstrip()
+        if preceding:
+            preceding_word = preceding.split()[-1]
+            if preceding_word.isalpha() and preceding_word[:1].isupper():
+                candidate = f"{preceding_word} {city_name}".lower()
+                if candidate in other_city_names_lower:
+                    continue
+        return True
+    return False
+
 def _drop_suggestions_naming_removed_cities(
     suggestions: list, removed_identities: set, surviving_identities: set
 ) -> list:
@@ -578,6 +635,25 @@ def _drop_suggestions_naming_removed_cities(
     happened. Flag that specific shape loudly (still keep the chip; there
     is nothing safer to do with no country in the prompt) rather than let
     it look identical to the ordinary, unambiguous "still resolves" case.
+
+    r9 (MYS-401 r4, Codex P1): condition (b) -- "does the prompt still
+    resolve to a surviving city" -- used the same plain substring test as
+    condition (a). That was consistent with `expand()`'s OWN resolution at
+    the time (also plain substring), but MYS-401 later switched `expand()`
+    to the stricter, word-boundary `_matches_city_as_standalone_word`
+    (now defined above, in this module, for exactly this reason) --
+    without updating this filter to match, the two silently drifted apart.
+    A chip could survive here on a substring match ("York" found inside a
+    prompt mentioning "Yorkshire") and then still get rejected by
+    `expand()`'s stricter scan and fall back to `cities[0]` -- the precise
+    orphaned-fallback defect this whole filter exists to prevent, just
+    reached via a different door. Condition (b) now calls the SAME
+    predicate `expand()` calls, so "this filter says it resolves" and
+    "`expand()` actually resolves it" can no longer disagree. Condition
+    (a) is deliberately left as plain substring -- it only decides whether
+    to evaluate (b) at all, not whether a chip survives, and over-firing
+    there (Nice/nice-restaurants) just means an unnecessary (b) check, not
+    a wrong drop.
     """
     if not removed_identities or not isinstance(suggestions, list):
         return suggestions
@@ -603,12 +679,23 @@ def _drop_suggestions_naming_removed_cities(
             # this pass removed -- not this guard's concern either way.
             kept.append(chip)
             continue
-        matched_surviving = {name for name in surviving_names if name in prompt_lower}
+        # r9: mirror expand()'s ACTUAL resolution -- the same standalone-
+        # word predicate, not a plain substring test -- so this filter's
+        # "still resolves to a survivor" agrees with what expand() will
+        # really do with this exact prompt.
+        matched_surviving = {
+            name
+            for name in surviving_names
+            if _matches_city_as_standalone_word(
+                name, prompt, other_city_names=surviving_names - {name}
+            )
+        } if isinstance(prompt, str) else set()
         if matched_surviving:
             # Names a removed city by substring, but the prompt ALSO still
-            # matches a surviving city's name -- expand() will resolve it
-            # to that survivor, same as it always has. Not the orphaned-
-            # fallback-to-cities[0] defect this guard exists to prevent.
+            # resolves (standalone-word) to a surviving city's name --
+            # expand() will resolve it to that survivor, same as it
+            # always has. Not the orphaned-fallback-to-cities[0] defect
+            # this guard exists to prevent.
             for name in matched_removed & matched_surviving:
                 removed_countries = removed_countries_by_name.get(name, set())
                 surviving_countries = surviving_countries_by_name.get(name, set())

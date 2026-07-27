@@ -31,8 +31,8 @@ import asyncio
 import hashlib
 import re
 import uuid
-from collections import defaultdict
-from typing import AsyncGenerator, List, Optional, Sequence
+from collections import OrderedDict
+from typing import AsyncGenerator, List, Optional
 
 from google.genai import types
 
@@ -76,6 +76,7 @@ from .extraction import (
     extract_book_recommendations_from_state,
     filter_grounded_recommendations,
     validate_trip_itinerary,
+    _matches_city_as_standalone_word,
 )
 from .prompts import (
     build_discovery_prompt,
@@ -101,64 +102,6 @@ from .session_state import SessionStateAccessor, SessionStateKeys
 from .types import ExecutorConfig
 
 logger = get_logger("storyland.core.executor")
-
-
-def _matches_city_as_standalone_word(
-    city_name: str,
-    action_prompt: str,
-    other_city_names: Sequence[str] = (),
-) -> bool:
-    """True if ``city_name`` appears in ``action_prompt`` as its own place
-    mention, not as the tail of a different, longer proper noun (MYS-401 —
-    a plain substring check let a trip city named "York" match an
-    action_prompt mentioning "New York", merging into the wrong city).
-
-    Heuristic, not a gazetteer: a match is rejected only when the word
-    immediately preceding it is capitalized AND the two-word phrase it forms
-    (``"<preceding> <city_name>"``) is itself, case-insensitively, one of
-    ``other_city_names`` -- i.e. this trip has another, longer city name that
-    the same text plausibly refers to instead. Being preceded by a
-    capitalized word is NOT enough on its own to reject a match: real
-    ``action_prompt``s routinely lead with a capitalized verb or adjective
-    right before the target city ("Explore Bath", "Discover Barcelona",
-    "Victorian London bookshops"), and none of those two-word phrases are
-    themselves another trip city, so the shorter city name still wins.
-    Case-sensitive by design -- it reads capitalization from
-    ``action_prompt`` as-is, so pass the original-cased trusted prompt, not
-    a lowercased copy.
-
-    Boundary is plain word-character adjacency (``\w``), NOT ``[\w-]``
-    (MYS-401 r4 -- Codex P2): a hyphen is punctuation, not a word character,
-    so it already ends a word on its own. Excluding it from the boundary
-    class rejected perfectly standalone mentions immediately followed by a
-    hyphenated compound ("Find Bath-based literary experiences"), falling
-    back to cities[0] -- the same misroute class this helper exists to
-    prevent. Known tradeoff: a city name that is itself the tail of a
-    genuinely hyphenated proper noun ("Winston-Salem") can now match a
-    bare search for "Salem", since the preceding-word reject only fires
-    on a clean alphabetic word and "Winston-" isn't one. Out of scope for
-    this fix -- not the failure mode reported, and gazetteer-grade
-    hyphenated-compound detection is a bigger change than this heuristic
-    is trying to be.
-    """
-    other_city_names_lower = {
-        name.lower()
-        for name in other_city_names
-        if name.lower() != city_name.lower()
-    }
-    pattern = re.compile(
-        rf"(?<!\w){re.escape(city_name)}(?!\w)", re.IGNORECASE
-    )
-    for match in pattern.finditer(action_prompt):
-        preceding = action_prompt[: match.start()].rstrip()
-        if preceding:
-            preceding_word = preceding.split()[-1]
-            if preceding_word.isalpha() and preceding_word[:1].isupper():
-                candidate = f"{preceding_word} {city_name}".lower()
-                if candidate in other_city_names_lower:
-                    continue
-        return True
-    return False
 
 
 def _map_phase_exception(
@@ -223,6 +166,12 @@ SOFT_CHIP_CAP = 6
 HARD_EXPANSION_CAP = 20
 BOOK_RECOMMENDATION_HARD_CAP = 5
 
+# Cap on WorkflowExecutor._session_locks (MYS-401 r4, Codex P2): generous
+# relative to realistic concurrent-job volume on a single process -- this
+# only bounds an otherwise-unbounded leak, it is never expected to bind in
+# practice. See _evict_stale_session_locks for the eviction policy.
+_SESSION_LOCK_REGISTRY_CAP = 10_000
+
 BOOK_RECOMMENDATION_AGENT_STEPS: dict[str, str] = {
     "book_recommendation_researcher": "Searching for book recommendations",
     "book_recommendation_formatter": "Curating your book picks",
@@ -276,9 +225,14 @@ class WorkflowExecutor:
         # runs a single uvicorn worker (Dockerfile has no --workers); a
         # multi-process deployment would need a durable compare-and-set
         # instead (see MYS-168/MYS-169 for that coupling).
-        self._session_locks: "defaultdict[str, asyncio.Lock]" = defaultdict(
-            asyncio.Lock
-        )
+        #
+        # An OrderedDict, not a plain defaultdict (Codex P2, MYS-401 r4):
+        # every expand()/recommend_books() call -- even for a job_id that
+        # never resolves to a real session -- used to create an entry that
+        # then lived for the lifetime of this process-wide singleton, an
+        # unbounded leak under normal session churn. _get_session_lock now
+        # bounds this registry; see its docstring for the eviction policy.
+        self._session_locks: "OrderedDict[str, asyncio.Lock]" = OrderedDict()
 
     @property
     def session_service(self):
@@ -1774,7 +1728,39 @@ class WorkflowExecutor:
         expand()/recommend_books() (MYS-401). See the registry's docstring
         in __init__ for why an in-process lock is sufficient today.
         """
-        return self._session_locks[job_id]
+        lock = self._session_locks.get(job_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[job_id] = lock
+            self._evict_stale_session_locks()
+        else:
+            self._session_locks.move_to_end(job_id)
+        return lock
+
+    def _evict_stale_session_locks(self) -> None:
+        """Bound the per-job_id lock registry (Codex P2, MYS-401 r4).
+
+        Once the registry exceeds a generous cap, evict the
+        least-recently-used entries -- but ONLY ones that are neither
+        currently held nor have a pending waiter. ``asyncio.Lock`` has no
+        public API for "is anyone waiting on this", hence the ``_waiters``
+        check; skipping both conditions matters because evicting a lock a
+        genuinely-overlapping second caller is about to acquire would hand
+        that caller a DIFFERENT ``Lock`` instance from the one the first
+        caller (or another waiter) holds a reference to -- silently
+        defeating the per-job_id serialization this whole registry exists
+        for. Both conditions together are only relevant once a genuinely
+        pathological number of distinct job_ids have accumulated; ordinary
+        traffic never reaches the cap.
+        """
+        if len(self._session_locks) <= _SESSION_LOCK_REGISTRY_CAP:
+            return
+        for job_id, lock in list(self._session_locks.items()):
+            if len(self._session_locks) <= _SESSION_LOCK_REGISTRY_CAP:
+                break
+            if lock.locked() or getattr(lock, "_waiters", None):
+                continue
+            del self._session_locks[job_id]
 
     async def _clear_expansion_lock(self, job_id: str, user_id: str) -> None:
         """Clear EXPANSION_IN_PROGRESS flag after error or cancellation."""

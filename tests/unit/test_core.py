@@ -1448,6 +1448,43 @@ class TestReconcileStopCityGrouping:
         kept = _drop_suggestions_naming_removed_cities(suggestions, removed_identities, surviving_identities)
         assert kept == []
 
+    # ── MYS-401 r4 (Codex P1, valid): the r7 fix's condition (b) used the
+    # SAME plain substring test as condition (a) -- consistent with
+    # expand()'s OWN matching at the time, but expand() has since switched
+    # to the stricter, word-boundary `_matches_city_as_standalone_word`.
+    # A chip could survive here on a substring match ("York" found inside
+    # a prompt mentioning "Yorkshire") and then still get rejected by
+    # expand()'s stricter scan and fall back to cities[0] -- reaching the
+    # exact defect this filter exists to prevent through a different door.
+
+    def test_suggestion_surviving_only_via_substring_inside_a_longer_word_is_dropped(self):
+        # "York" removed; "Yorkshire" survives as an unrelated city name.
+        # The OLD substring test ("york" in "...yorkshire...") would
+        # incorrectly count this as "still resolves to a survivor" and
+        # keep the chip -- but expand()'s real standalone-word scan
+        # rejects "York" inside "Yorkshire" (MYS-401's own fix), so the
+        # chip would silently fall back to cities[0] in expand() if kept.
+        # This filter must agree with expand() and drop it too.
+        removed_identities = {("york", "GB")}
+        surviving_identities = {("yorkshire", "GB")}
+        suggestions = [{"id": "1", "action_prompt": "Find more spots near York"}]
+        kept = _drop_suggestions_naming_removed_cities(suggestions, removed_identities, surviving_identities)
+        assert kept == []
+
+    def test_suggestion_surviving_a_genuine_standalone_word_match_is_kept(self):
+        # Contrast: "Bath" removed, "Bath" is ALSO a standalone mention
+        # elsewhere via a different surviving city sharing the exact word
+        # boundary rules expand() uses (e.g. re-filed under a synonymous
+        # surviving identity in the same trip). Uses the same fixture
+        # shape as the New York case above but through the standalone-word
+        # path specifically, confirming r9 didn't just narrow matching --
+        # a real standalone match still survives correctly.
+        removed_identities = {("bath", "GB")}
+        surviving_identities = {("bath", "US")}  # e.g. Bath, Maine
+        suggestions = [{"id": "1", "action_prompt": "Find more spots in Bath"}]
+        kept = _drop_suggestions_naming_removed_cities(suggestions, removed_identities, surviving_identities)
+        assert kept == suggestions
+
     # ── MYS-660 r8 (Codex P2, lower severity): the (a)/(b) test is
     # name-only, same limit `expand()` itself has -- `action_prompt` is
     # free text, no country field to qualify against. That's inherent, not

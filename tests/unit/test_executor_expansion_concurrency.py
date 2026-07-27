@@ -552,3 +552,62 @@ class TestCityWordBoundaryMatch:
         assert _matches_city_as_standalone_word(
             "York", "Find pre-York walking tours"
         )
+
+
+class TestSessionLockRegistryIsBounded:
+    """MYS-401 r4 (Codex P2): every expand()/recommend_books() call created
+    a permanent ``_session_locks`` entry, even for a job_id that never
+    resolves to a real session -- an unbounded leak for the lifetime of
+    this process-wide singleton. ``_get_session_lock`` now evicts
+    least-recently-used, currently-unheld entries once the registry
+    exceeds ``_SESSION_LOCK_REGISTRY_CAP``.
+    """
+
+    def test_registry_stays_at_cap_once_exceeded(self, monkeypatch):
+        import core.executor as ex
+
+        monkeypatch.setattr(ex, "_SESSION_LOCK_REGISTRY_CAP", 5)
+        config = ExecutorConfig(model_name="gemini-2.0-flash", google_api_key="test-key")
+        executor = ex.WorkflowExecutor(
+            config=config,
+            session_service=create_session_service(use_database=False),
+            model=object(),
+        )
+
+        for i in range(8):
+            executor._get_session_lock(f"job-{i}")
+
+        assert len(executor._session_locks) == 5, (
+            f"registry must not grow past the cap, got "
+            f"{len(executor._session_locks)} entries"
+        )
+        # LRU: the last 5 created (job-3..job-7) survive; the oldest 3 were
+        # evicted first since none were ever locked.
+        assert set(executor._session_locks.keys()) == {
+            "job-3", "job-4", "job-5", "job-6", "job-7"
+        }
+
+    async def test_a_held_lock_is_never_evicted_even_at_cap(self, monkeypatch):
+        import core.executor as ex
+
+        monkeypatch.setattr(ex, "_SESSION_LOCK_REGISTRY_CAP", 2)
+        config = ExecutorConfig(model_name="gemini-2.0-flash", google_api_key="test-key")
+        executor = ex.WorkflowExecutor(
+            config=config,
+            session_service=create_session_service(use_database=False),
+            model=object(),
+        )
+
+        held_lock = executor._get_session_lock("job-held")
+        async with held_lock:
+            # Fill past the cap while job-held's lock is actively acquired.
+            for i in range(5):
+                executor._get_session_lock(f"job-extra-{i}")
+            assert "job-held" in executor._session_locks, (
+                "a currently-held lock must never be evicted, even at cap "
+                "-- a second overlapping caller for the same job_id must "
+                "always observe the SAME Lock instance"
+            )
+            # The registry is still bounded overall -- the held entry just
+            # doesn't count against the evictable pool.
+            assert len(executor._session_locks) >= 2
