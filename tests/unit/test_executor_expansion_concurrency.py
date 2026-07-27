@@ -298,16 +298,16 @@ class TestExpandMergeRevalidation:
 
 
 class TestExpandLockRefetchSessionError:
-    """MYS-401 r2 (Codex P2): the under-lock re-fetch that guards against
-    the TOCTOU race sat outside the SSE error envelope -- a transient
-    session-backend failure on THAT call used to propagate raw and
-    truncate the stream with no terminal event, the same client-visible-
-    truncation class MYS-400 closed for the phase executors. It must now
-    emit the same client-safe SessionError + WorkflowComplete pair as the
-    initial session lookup a few lines above it.
+    """MYS-401 r4 (Codex P1 structural fix): there is now exactly ONE
+    session fetch before body() can run -- the single admission snapshot
+    taken UNDER the per-job_id lock (r2's finding was about that fetch
+    sitting outside the SSE error envelope; r4 removed the separate
+    pre-lock read this class used to distinguish it from). A transient
+    session-backend failure on that fetch must emit the same client-safe
+    SessionError + WorkflowComplete pair as before.
     """
 
-    async def test_lock_refetch_failure_emits_client_safe_session_error(
+    async def test_admission_fetch_failure_emits_client_safe_session_error(
         self, monkeypatch
     ):
         real_service = create_session_service(use_database=False)
@@ -324,9 +324,9 @@ class TestExpandLockRefetchSessionError:
             state=dict(_SEED_STATE),
         )
 
-        class _FailOnSecondGet:
-            """The initial lookup (before the lock) succeeds; the re-fetch
-            UNDER the lock -- the one this fix wraps -- raises."""
+        class _FailOnFirstGet:
+            """The sole admission fetch -- now the first and only
+            get_session() call before body() can run -- raises."""
 
             def __init__(self, inner):
                 self._inner = inner
@@ -334,14 +334,14 @@ class TestExpandLockRefetchSessionError:
 
             async def get_session(self, *args, **kwargs):
                 self._calls += 1
-                if self._calls == 2:
+                if self._calls == 1:
                     raise RuntimeError("session backend unavailable")
                 return await self._inner.get_session(*args, **kwargs)
 
             def __getattr__(self, name):
                 return getattr(self._inner, name)
 
-        executor._session_service = _FailOnSecondGet(real_service)
+        executor._session_service = _FailOnFirstGet(real_service)
 
         events = await _drain(
             executor.expand(
@@ -354,8 +354,8 @@ class TestExpandLockRefetchSessionError:
 
         errors = [e for e in events if isinstance(e, WorkflowError)]
         assert errors and errors[0].error_type == "SessionError", (
-            f"expected a client-safe SessionError terminal event on a "
-            f"lock-refetch failure, got {events!r}"
+            f"expected a client-safe SessionError terminal event on an "
+            f"admission-fetch failure, got {events!r}"
         )
         assert any(isinstance(e, WorkflowComplete) for e in events), (
             f"SessionError must still be paired with WorkflowComplete so "
@@ -364,29 +364,25 @@ class TestExpandLockRefetchSessionError:
         assert not any(isinstance(e, ExpansionReady) for e in events)
 
 
-class TestExpandAdmittedCallerAdoptsFreshSnapshot:
-    """MYS-401 r3 (Codex P1): the lock makes the in-progress flag's
-    check-then-set atomic, so a genuinely concurrent second caller is
-    correctly rejected (TestExpandConcurrencyGuardIsAtomic above). But an
-    ADMITTED caller -- one whose own initial, pre-lock get_session() read
-    happened to race ahead of a DIFFERENT, already-completed expansion on
-    the same job_id -- was still running body() against that stale outer
-    capture: `state`, `itinerary`, and `expansion_count` were never
-    refreshed from the under-lock re-fetch that had just proven the flag
-    clear. The lock guaranteed nothing else could run WHILE it was held; it
-    never made the admitted caller's own pre-lock reads fresh.
+class TestExpandStaleChipRejectedAfterConcurrentCompletion:
+    """MYS-401 r4 (Codex P1): r3 adopted the under-lock re-fetch as the
+    MERGE base (state/expansion_count/last_suggestions used inside body()),
+    but the admission checks -- action_id validity chief among them -- still
+    ran against the stale outer, pre-lock capture. So a delayed second
+    click naming a chip a DIFFERENT, already-completed expansion had since
+    consumed was still admitted (last_suggestions on the stale snapshot
+    still listed it as valid) and still billed a second Gemini call. r4
+    collapsed expand() to a single under-lock snapshot for EVERY admission
+    decision, so this scenario is now correctly rejected as InvalidActionId
+    instead of being admitted and double-billed.
 
-    This drives exactly that interleaving directly (no artificial
-    scheduling needed): caller A runs a real expand() to completion first;
-    caller B's session service is then wired so B's *own* initial lookup
-    returns the snapshot from BEFORE A ran, while every later call (the
-    under-lock re-fetch, the fake runner's write, the post-run re-fetch)
-    goes to the real, current service. B is admitted under the lock (A's
-    flag is durably clear) and must adopt A's already-persisted result as
-    its merge base -- not silently clobber it.
+    No special session-service mock is needed for this any more: with only
+    one fetch (taken under the lock, after whatever else already holds and
+    releases it), a caller that runs after another has completed simply
+    sees the current state -- which is the whole point of the fix.
     """
 
-    async def test_admitted_caller_merges_onto_already_completed_expansion(
+    async def test_stale_chip_rejected_not_admitted_after_a_prior_completion(
         self, monkeypatch
     ):
         real_service = create_session_service(use_database=False)
@@ -395,7 +391,7 @@ class TestExpandAdmittedCallerAdoptsFreshSnapshot:
             ex, "Runner", _fake_expansion_runner(_VALID_EXPANSION_DELTA)
         )
 
-        job_id = "job-admitted-stale-snapshot-1"
+        job_id = "job-stale-chip-after-completion-1"
         await real_service.create_session(
             app_name=APP_NAME,
             user_id="default",
@@ -403,16 +399,11 @@ class TestExpandAdmittedCallerAdoptsFreshSnapshot:
             state=dict(_SEED_STATE),
         )
 
-        # The snapshot caller B's own initial get_session() will be made to
-        # return -- captured now, before A runs, so it is genuinely stale
-        # by the time B reaches the lock.
-        stale_session = await real_service.get_session(
-            app_name=APP_NAME, user_id="default", session_id=job_id
-        )
-
         # Caller A: a real, complete expand() -- persists Jane Austen
-        # Centre, bumps expansion_count to 1, clears the suggestions list
-        # (per _VALID_EXPANSION_DELTA) and the in-progress flag.
+        # Centre, bumps expansion_count to 1, and (per
+        # _VALID_EXPANSION_DELTA's empty "suggestions") clears
+        # LAST_SUGGESTIONS to [] -- chip-1 is no longer a valid id on the
+        # current, durable session state.
         a_events = await _drain(
             executor.expand(
                 job_id=job_id,
@@ -429,54 +420,16 @@ class TestExpandAdmittedCallerAdoptsFreshSnapshot:
             app_name=APP_NAME, user_id="default", session_id=job_id
         )
         assert after_a.state[SessionStateKeys.EXPANSION_COUNT] == 1
-        assert after_a.state[SessionStateKeys.EXPANSION_IN_PROGRESS] is False
+        assert after_a.state[SessionStateKeys.LAST_SUGGESTIONS] == []
 
-        class _StaleFirstLookup:
-            """B's own initial (pre-lock) get_session() returns the
-            snapshot captured before A ran. Every other get_session call --
-            the under-lock re-fetch, the fake runner's own read, the
-            post-run re-fetch -- goes to the real, current service, so B is
-            admitted (A's flag is already durably clear) with a stale outer
-            capture: exactly the gap this fix closes.
-            """
-
-            def __init__(self, inner, stale):
-                self._inner = inner
-                self._stale = stale
-                self._calls = 0
-
-            async def get_session(self, *args, **kwargs):
-                self._calls += 1
-                if self._calls == 1:
-                    return self._stale
-                return await self._inner.get_session(*args, **kwargs)
-
-            def __getattr__(self, name):
-                return getattr(self._inner, name)
-
-        executor._session_service = _StaleFirstLookup(real_service, stale_session)
-
-        # B reuses chip-1 -- the only id present in the STALE snapshot's
-        # last_suggestions (action_id validation runs against B's own
-        # pre-lock `state`, so this is the only id that can pass). This is
-        # the realistic shape of the bug: a delayed second click validated
-        # against a chip the first click already consumed.
-        second_delta = {
-            SessionStateKeys.LAST_EXPANSION: {
-                "parent_city": "Bath",
-                "places": [
-                    {
-                        "name": "Royal Crescent",
-                        "type": "landmark",
-                        "reason": "Georgian architecture",
-                        "time_of_day": "morning",
-                    }
-                ],
-                "suggestions": [],
-            }
-        }
-        monkeypatch.setattr(ex, "Runner", _fake_expansion_runner(second_delta))
-
+        # Caller B: a delayed second click replaying the SAME chip-1 id --
+        # the realistic shape of the bug (a stale FE state, or a retry that
+        # fires after the first request's response already landed). Before
+        # r4, action_id validation ran against B's own pre-lock snapshot,
+        # which -- if captured before A's write -- still listed chip-1 as
+        # valid. After r4 there is no such pre-lock snapshot: B's admission
+        # check reads the CURRENT session (A's already durable), where
+        # chip-1 is gone.
         b_events = await _drain(
             executor.expand(
                 job_id=job_id,
@@ -486,36 +439,29 @@ class TestExpandAdmittedCallerAdoptsFreshSnapshot:
             )
         )
 
-        assert any(isinstance(e, ExpansionReady) for e in b_events), (
-            f"the admitted second caller should complete, got {b_events!r}"
+        errors = [e for e in b_events if isinstance(e, WorkflowError)]
+        assert errors and errors[0].error_type == "InvalidActionId", (
+            f"a chip already consumed by a completed expansion must be "
+            f"rejected as InvalidActionId, not admitted, got {b_events!r}"
+        )
+        assert not any(isinstance(e, ExpansionReady) for e in b_events), (
+            f"the stale chip must not be admitted -- admitting it means a "
+            f"second, unbilled-for Gemini call, got {b_events!r}"
         )
 
         final = await real_service.get_session(
             app_name=APP_NAME, user_id="default", session_id=job_id
         )
-        # count -> 2: without the fix this ends at 1 (B increments its own
-        # stale pre-A count of 0), a lost update identical in shape to the
-        # concurrent-race bug this same ticket already fixed once.
-        assert final.state[SessionStateKeys.EXPANSION_COUNT] == 2
+        # No lost update, no double charge: exactly A's one completed
+        # expansion is reflected in the persisted state.
+        assert final.state[SessionStateKeys.EXPANSION_COUNT] == 1
         bath = next(
             c
             for c in final.state[SessionStateKeys.FINAL_ITINERARY]["cities"]
             if c["name"] == "Bath"
         )
         stop_names = {s["name"] for s in bath["stops"]}
-        # Both expansions' places must survive. Without the fix, B merges
-        # its new place onto the STALE pre-A itinerary and persists that as
-        # the whole of FINAL_ITINERARY -- silently dropping A's Jane Austen
-        # Centre even though A's write was already durable.
-        assert "Jane Austen Centre" in stop_names, (
-            f"caller A's already-persisted place must survive caller B's "
-            f"merge, got stops={stop_names!r}"
-        )
-        assert "Royal Crescent" in stop_names
-        # No chip reuse: B's own fresh (empty) suggestion list is what's
-        # left standing, not a residual chip-1 a third caller could replay.
-        assert final.state[SessionStateKeys.LAST_SUGGESTIONS] == []
-
+        assert stop_names == {"The Pump Room", "Jane Austen Centre"}
 
 class TestCityWordBoundaryMatch:
     """Direct unit tests of the helper -- no session/Runner machinery
@@ -585,4 +531,24 @@ class TestCityWordBoundaryMatch:
         # other_city_names, matching how a single-city itinerary calls it.
         assert _matches_city_as_standalone_word(
             "Barcelona", "Discover Barcelona\'s Gothic Quarter"
+        )
+
+    def test_matches_city_immediately_followed_by_a_hyphenated_compound(self):
+        # Regression (Codex P2, r4): the boundary class used to be
+        # `[\w-]`, which treats a hyphen as PART of a word rather than a
+        # separator -- so "Bath" immediately followed by "-based" was
+        # rejected as not-standalone and fell back to cities[0]. A hyphen
+        # is punctuation, not a word character; it already ends a word on
+        # its own, same as a space would.
+        assert _matches_city_as_standalone_word(
+            "Bath",
+            "Find Bath-based literary experiences",
+            other_city_names=["Bath", "London"],
+        )
+
+    def test_matches_city_immediately_preceded_by_a_hyphenated_compound(self):
+        # Same boundary bug, other side: a hyphen immediately before the
+        # city name must also count as a separator.
+        assert _matches_city_as_standalone_word(
+            "York", "Find pre-York walking tours"
         )
