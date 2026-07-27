@@ -1044,6 +1044,41 @@ class WorkflowExecutor:
             "action_prompt": "",
         }
 
+    # MYS-494 item 1: mirrors ExpandRequest.action_prompt's bound
+    # (api/models.py:249-253, min_length=1, max_length=500).
+    _MAX_ACTION_PROMPT_CHARS = 500
+
+    @classmethod
+    def _clamp_action_prompt(cls, chip: dict) -> dict:
+        """Truncate an overlong composer-generated action_prompt at persist
+        time (MYS-494 item 1).
+
+        SuggestionChip.action_prompt (models/itinerary.py:94-96) is a
+        field the LLM must fill under a structured-output response
+        schema (expansion_formatter's output_schema=ExpansionResult,
+        same for the trip composer) -- adding max_length there would
+        turn an overlong composer output into a live compose failure
+        rather than a cosmetic truncation. The bound lives here instead,
+        where it is guaranteed to actually run: ADK writes the raw dict
+        into session state, so a Pydantic field_validator/computed_field
+        on the response schema would never execute on this path (a
+        validator that silently never runs is worse than no validator).
+
+        Clamp, don't reject: an overlong prompt is our own composer's
+        tidiness bug, not the reader's fault -- dropping the whole chip
+        would degrade their UI to fix our output.
+        """
+        prompt = chip.get("action_prompt", "")
+        if isinstance(prompt, str) and len(prompt) > cls._MAX_ACTION_PROMPT_CHARS:
+            logger.warning(
+                "suggestion_chip_action_prompt_overlong",
+                original_length=len(prompt),
+                clamped_to=cls._MAX_ACTION_PROMPT_CHARS,
+            )
+            chip = dict(chip)
+            chip["action_prompt"] = prompt[: cls._MAX_ACTION_PROMPT_CHARS]
+        return chip
+
     async def _persist_suggestions(
         self,
         job_id: str,
@@ -1058,6 +1093,9 @@ class WorkflowExecutor:
                 app_name=APP_NAME, user_id=user_id, session_id=job_id
             )
             if session is not None:
+                suggestions = [
+                    self._clamp_action_prompt(chip) for chip in suggestions
+                ]
                 delta: dict = {SessionStateKeys.LAST_SUGGESTIONS: suggestions}
                 if itinerary_data is not None:
                     delta[SessionStateKeys.FINAL_ITINERARY] = itinerary_data

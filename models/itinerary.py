@@ -92,6 +92,17 @@ class SuggestionChip(BaseModel):
     label: str = Field(
         description="Short chip label shown in the UI (2-4 words, e.g. 'Add restaurants nearby')"
     )
+    # MYS-494: deliberately left unbounded (no min_length/max_length).
+    # This model is a structured-output response schema for the composer
+    # and expansion-formatter agents (see core/executor.py's
+    # _clamp_action_prompt docstring) -- a max_length here would fail
+    # generation validation on an overlong LLM output rather than
+    # truncating it. The 500-char bound lives at persist time instead
+    # (core/executor.py::WorkflowExecutor._clamp_action_prompt, applied
+    # in _persist_suggestions), which is guaranteed to run: ADK writes
+    # this model's raw dict into session state, so a field_validator/
+    # computed_field added here would not. Don't "fix" this field
+    # directly -- read the ticket first.
     action_prompt: str = Field(
         description="Instruction passed to the expansion agent when this chip is clicked (10-30 words)"
     )

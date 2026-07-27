@@ -628,6 +628,38 @@ class TestResolveTrustedActionPrompt:
         assert resolved == "First prompt."
 
 
+class TestClampActionPrompt:
+    """MYS-494 item 1. SuggestionChip.action_prompt is deliberately
+    unbounded at the schema (Eng Lead's ruling -- it's a structured-output
+    field the LLM must fill; a schema max_length would fail generation
+    rather than truncate). `_clamp_action_prompt` is the persist-time
+    bound instead, called from `_persist_suggestions`.
+    """
+
+    def test_short_prompt_passes_through_unchanged(self):
+        chip = {"id": "chip-1", "label": "Add cafes", "action_prompt": "Find cafes."}
+        clamped = WorkflowExecutor._clamp_action_prompt(chip)
+        assert clamped is chip, "must not copy/mutate a chip already in bounds"
+
+    def test_overlong_prompt_is_truncated_not_dropped(self):
+        overlong = "x" * (WorkflowExecutor._MAX_ACTION_PROMPT_CHARS + 50)
+        chip = {"id": "chip-1", "label": "Add cafes", "action_prompt": overlong}
+        clamped = WorkflowExecutor._clamp_action_prompt(chip)
+        assert clamped["action_prompt"] == overlong[: WorkflowExecutor._MAX_ACTION_PROMPT_CHARS]
+        # Clamp, don't reject: every other field survives untouched.
+        assert clamped["id"] == "chip-1" and clamped["label"] == "Add cafes"
+        # Must not mutate the caller's dict in place (a truncated-in-place
+        # chip would silently change under anything upstream still
+        # holding the original reference).
+        assert clamped is not chip
+        assert chip["action_prompt"] == overlong
+
+    def test_missing_or_non_string_action_prompt_does_not_raise(self):
+        assert WorkflowExecutor._clamp_action_prompt({"id": "c"}) == {"id": "c"}
+        no_prompt = {"id": "c", "action_prompt": None}
+        assert WorkflowExecutor._clamp_action_prompt(no_prompt) == no_prompt
+
+
 class TestExpansionReadyEvent:
     def test_construction(self):
         event = ExpansionReady(
