@@ -27,8 +27,11 @@ keeps only its business logic (guards, caching, merging, grounding filters)
 plus a GuardSpec describing its error-cleanup policy.
 """
 
+import asyncio
 import hashlib
+import re
 import uuid
+from collections import OrderedDict
 from typing import AsyncGenerator, List, Optional
 
 from google.genai import types
@@ -72,6 +75,8 @@ from .extraction import (
     extract_expansion_from_state,
     extract_book_recommendations_from_state,
     filter_grounded_recommendations,
+    validate_trip_itinerary,
+    _matches_city_as_standalone_word,
 )
 from .prompts import (
     build_discovery_prompt,
@@ -161,6 +166,12 @@ SOFT_CHIP_CAP = 6
 HARD_EXPANSION_CAP = 20
 BOOK_RECOMMENDATION_HARD_CAP = 5
 
+# Cap on WorkflowExecutor._session_locks (MYS-401 r4, Codex P2): generous
+# relative to realistic concurrent-job volume on a single process -- this
+# only bounds an otherwise-unbounded leak, it is never expected to bind in
+# practice. See _evict_stale_session_locks for the eviction policy.
+_SESSION_LOCK_REGISTRY_CAP = 10_000
+
 BOOK_RECOMMENDATION_AGENT_STEPS: dict[str, str] = {
     "book_recommendation_researcher": "Searching for book recommendations",
     "book_recommendation_formatter": "Curating your book picks",
@@ -205,6 +216,23 @@ class WorkflowExecutor:
         # backend persists them across deploys — no stale grounded recs, and no
         # post-deploy warmup needed).
         self._cache_version = compute_cache_version(config.model_name)
+        # Per-session locks serializing the check-then-set concurrency guards
+        # in expand()/recommend_books() (MYS-401): without this, two
+        # overlapping requests for the same job_id can both read their
+        # "in progress" flag as False before either's set is durable, so
+        # both proceed -- double-billing Gemini and racing to persist the
+        # merge. In-process asyncio.Lock is sufficient because this service
+        # runs a single uvicorn worker (Dockerfile has no --workers); a
+        # multi-process deployment would need a durable compare-and-set
+        # instead (see MYS-168/MYS-169 for that coupling).
+        #
+        # An OrderedDict, not a plain defaultdict (Codex P2, MYS-401 r4):
+        # every expand()/recommend_books() call -- even for a job_id that
+        # never resolves to a real session -- used to create an entry that
+        # then lived for the lifetime of this process-wide singleton, an
+        # unbounded leak under normal session churn. _get_session_lock now
+        # bounds this registry; see its docstring for the eviction policy.
+        self._session_locks: "OrderedDict[str, asyncio.Lock]" = OrderedDict()
 
     @property
     def session_service(self):
@@ -1074,106 +1102,135 @@ class WorkflowExecutor:
                 field for FE wire compatibility.
             user_id: User identifier (must match the original session).
         """
+        # Concurrency guard (MYS-401 r4 -- Codex P1): EVERY admission
+        # decision -- job lookup, failed/not-ready state, HARD_EXPANSION_CAP,
+        # action_id validity, and the in-progress flag itself -- is made
+        # from ONE session snapshot fetched UNDER the per-job_id lock. There
+        # is no separate pre-lock read at all: the lock only needs job_id to
+        # compute its key, so it is acquired first, and the single fetch
+        # taken while holding it is what every check below runs against.
+        #
+        # r3 only adopted the under-lock snapshot as the MERGE base (state/
+        # expansion_count/last_suggestions used inside body()) -- the
+        # admission checks above it still ran against the stale pre-lock
+        # capture, so a delayed second click naming a chip an intervening,
+        # already-completed expansion had consumed was still admitted (and
+        # still billed a second Gemini call): finding #1 of this ticket's
+        # own "Why", still open one hop later. Collapsing to a single
+        # fetch removes the second, stale snapshot the bug needs to exist.
+        error_message: Optional[str] = None
+        error_kind: Optional[str] = None
+        state: Optional[SessionStateAccessor] = None
+        expansion_count = 0
+        last_suggestions: list = []
+        trusted_action_prompt = ""
+        lock_session = None
+
         try:
-            session = await self._session_service.get_session(
-                app_name=APP_NAME, user_id=user_id, session_id=job_id
-            )
+            async with self._get_session_lock(job_id):
+                lock_session = await self._session_service.get_session(
+                    app_name=APP_NAME, user_id=user_id, session_id=job_id
+                )
+                if lock_session is None:
+                    error_message = f"Job {job_id} not found."
+                    error_kind = "JobNotFound"
+                else:
+                    state = SessionStateAccessor(lock_session.state)
+                    if state.failed:
+                        error_message = "Job is in a failed state."
+                        error_kind = "JobFailed"
+                    elif state.final_itinerary is None:
+                        error_message = (
+                            "Itinerary not yet composed. Run compose or "
+                            "local-atmosphere first."
+                        )
+                        error_kind = "ItineraryNotReady"
+                    else:
+                        # Hard cap: refuse if already at max expansions
+                        expansion_count = state.expansion_count
+                        if expansion_count >= HARD_EXPANSION_CAP:
+                            error_message = (
+                                f"Expansion limit reached "
+                                f"({HARD_EXPANSION_CAP} expansions per "
+                                f"session)."
+                            )
+                            error_kind = "ExpansionLimitReached"
+                        else:
+                            # Always validate action_id against stored
+                            # suggestions. Empty last_suggestions (capped,
+                            # missing, or legacy session) is also a
+                            # rejection -- the caller must present a
+                            # server-issued chip id from THIS fresh
+                            # snapshot, not one an earlier response handed
+                            # out that a concurrent/prior call has since
+                            # consumed.
+                            last_suggestions = state.last_suggestions
+                            valid_ids = {
+                                chip.get("id")
+                                for chip in last_suggestions
+                                if chip.get("id")
+                            }
+                            if action_id not in valid_ids:
+                                error_message = (
+                                    "Invalid action_id. It must match a "
+                                    "suggestion chip from the last "
+                                    "response."
+                                )
+                                error_kind = "InvalidActionId"
+                            elif state.expansion_in_progress:
+                                error_message = (
+                                    "An expansion is already in progress "
+                                    "for this session."
+                                )
+                                error_kind = "ExpansionInProgress"
+                            else:
+                                # MYS-167: resolve the chip's OWN
+                                # server-stored action_prompt rather than
+                                # trusting the client-echoed
+                                # `action_prompt` argument. `action_id` is
+                                # already confirmed to be in `valid_ids`
+                                # above, so the lookup here always
+                                # resolves. From here down `action_prompt`
+                                # (the parameter) is display-only, same as
+                                # `action_label` -- it must never reach an
+                                # agent instruction.
+                                trusted_action_prompt = (
+                                    self._resolve_trusted_action_prompt(
+                                        last_suggestions, action_id
+                                    )
+                                )
+                                lock_event = Event(
+                                    invocation_id="system",
+                                    author="system",
+                                    actions=EventActions(
+                                        state_delta={
+                                            SessionStateKeys.EXPANSION_IN_PROGRESS: True
+                                        }
+                                    ),
+                                )
+                                await self._session_service.append_event(
+                                    lock_session, lock_event
+                                )
         except Exception as e:
+            # A transient session-backend error anywhere in the block above
+            # (the fetch or the lock-flag persist) must still emit the same
+            # client-safe SessionError + WorkflowComplete pair the initial
+            # lookup always has, not propagate raw and truncate the stream
+            # (the same client-visible-truncation class MYS-400 closed for
+            # the phase executors).
             logger.error(
                 "expand_session_lookup_failed",
                 job_id=job_id,
                 error=str(e),
                 error_type=type(e).__name__,
             )
-            for ev in error_events(
-                job_id, "Failed to retrieve session", "SessionError"
-            ):
+            error_message = "Failed to retrieve session"
+            error_kind = "SessionError"
+
+        if error_kind is not None:
+            for ev in error_events(job_id, error_message, error_kind):
                 yield ev
             return
-
-        if session is None:
-            for ev in error_events(
-                job_id, f"Job {job_id} not found.", "JobNotFound"
-            ):
-                yield ev
-            return
-
-        state = SessionStateAccessor(session.state)
-
-        if state.failed:
-            for ev in error_events(
-                job_id, "Job is in a failed state.", "JobFailed"
-            ):
-                yield ev
-            return
-
-        if state.final_itinerary is None:
-            for ev in error_events(
-                job_id,
-                "Itinerary not yet composed. Run compose or local-atmosphere first.",
-                "ItineraryNotReady",
-            ):
-                yield ev
-            return
-
-        # Hard cap: refuse if already at max expansions
-        expansion_count = state.expansion_count
-        if expansion_count >= HARD_EXPANSION_CAP:
-            for ev in error_events(
-                job_id,
-                f"Expansion limit reached ({HARD_EXPANSION_CAP} expansions per session).",
-                "ExpansionLimitReached",
-            ):
-                yield ev
-            return
-
-        # Always validate action_id against stored suggestions.
-        # Empty last_suggestions (capped, missing, or legacy session) is also a rejection —
-        # the caller must present a server-issued chip id.
-        last_suggestions = state.last_suggestions
-        valid_ids = {chip.get("id") for chip in last_suggestions if chip.get("id")}
-        if action_id not in valid_ids:
-            for ev in error_events(
-                job_id,
-                "Invalid action_id. It must match a suggestion chip from the last response.",
-                "InvalidActionId",
-            ):
-                yield ev
-            return
-
-        # MYS-167: resolve the chip's OWN server-stored action_prompt rather than
-        # trusting the client-echoed `action_prompt` argument. Only `action_id`
-        # was ever validated against `state.last_suggestions` above -- the free-
-        # text prompt string itself was passed straight through into the
-        # researcher/formatter's system instruction, so a caller holding one
-        # valid chip id could steer 20 expansions of arbitrary system-prompt
-        # content. From here down `action_prompt` (the parameter) is treated as
-        # display-only, same as `action_label` -- it must never reach an agent
-        # instruction again. `action_id` is already confirmed to be in
-        # `valid_ids`, so the lookup below always resolves.
-        trusted_action_prompt = self._resolve_trusted_action_prompt(
-            last_suggestions, action_id
-        )
-
-        # Concurrency guard: block if another expansion is in flight
-        if state.expansion_in_progress:
-            for ev in error_events(
-                job_id,
-                "An expansion is already in progress for this session.",
-                "ExpansionInProgress",
-            ):
-                yield ev
-            return
-
-        # Set the lock
-        lock_event = Event(
-            invocation_id="system",
-            author="system",
-            actions=EventActions(
-                state_delta={SessionStateKeys.EXPANSION_IN_PROGRESS: True}
-            ),
-        )
-        await self._session_service.append_event(session, lock_event)
 
         async def body() -> AsyncGenerator[DomainEvent, None]:
             yield ProgressEvent(
@@ -1198,10 +1255,12 @@ class WorkflowExecutor:
             # always work. (MYS-167: was the client-echoed action_prompt.)
             cities = itinerary.get("cities", [])
             parent_city = cities[0].get("name", "") if cities else ""
-            action_prompt_lower = trusted_action_prompt.lower()
+            trip_city_names = [c.get("name", "") for c in cities if c.get("name")]
             for city in cities:
                 city_name = city.get("name", "")
-                if city_name and city_name.lower() in action_prompt_lower:
+                if city_name and _matches_city_as_standalone_word(
+                    city_name, trusted_action_prompt, trip_city_names
+                ):
                     parent_city = city_name
                     break
 
@@ -1242,7 +1301,7 @@ class WorkflowExecutor:
             refreshed = await self._session_service.get_session(
                 app_name=APP_NAME, user_id=user_id, session_id=job_id
             )
-            active_session = refreshed if refreshed is not None else session
+            active_session = refreshed if refreshed is not None else lock_session
 
             run_state = SessionStateAccessor(active_session.state)
             expansion_data = extract_expansion_from_state(run_state)
@@ -1296,6 +1355,33 @@ class WorkflowExecutor:
                 matched_city = updated_cities[0].get("name", parent_city)
 
             updated_itinerary["cities"] = updated_cities
+
+            # Re-validate the merged itinerary before persisting (MYS-401):
+            # the merge above mutates raw dicts with no schema check, so a
+            # formatter quirk (a stop missing match_type, a parent_city
+            # mismatch yielding empty cities) could otherwise persist a
+            # structurally-degraded FINAL_ITINERARY that /status re-serves,
+            # bypassing every downstream schema guard. On failure, do NOT
+            # persist the degraded merge -- FINAL_ITINERARY stays whatever
+            # it already was (the pre-merge itinerary), so /status keeps
+            # re-serving a valid result instead of a broken one.
+            validated_itinerary = validate_trip_itinerary(updated_itinerary)
+            if validated_itinerary is None:
+                logger.error(
+                    "expansion_merge_validation_failed",
+                    job_id=job_id[:8],
+                    matched_city=matched_city,
+                )
+                await self._clear_expansion_lock(job_id, user_id)
+                for ev in error_events(
+                    job_id,
+                    "Failed to merge new places into the itinerary.",
+                    "MergeValidationError",
+                    phase=Phase.COMPOSITION,
+                ):
+                    yield ev
+                return
+            updated_itinerary = validated_itinerary
 
             # Stamp new suggestion ids and apply soft cap
             new_suggestions = expansion_data.get("suggestions", [])
@@ -1390,89 +1476,103 @@ class WorkflowExecutor:
             action_prompt: Unused for book recs; kept for interface symmetry with expand.
             user_id: User identifier (must match the original session).
         """
+        # Concurrency guard (MYS-401 r4 -- Codex P1): same structural fix as
+        # expand() above -- every admission decision (job lookup, failed/
+        # not-ready state, BOOK_RECOMMENDATION_HARD_CAP, action_id validity,
+        # the in-progress flag) is made from ONE session snapshot fetched
+        # UNDER the per-job_id lock, with no separate pre-lock read to go
+        # stale. r3 only adopted the under-lock snapshot for the merge base
+        # (state/book_recommendation_count used inside body()); the
+        # admission checks above it still ran against the stale pre-lock
+        # capture, so a delayed second click naming a chip an intervening,
+        # already-completed call had consumed was still admitted and still
+        # billed a second Gemini call.
+        error_message: Optional[str] = None
+        error_kind: Optional[str] = None
+        state: Optional[SessionStateAccessor] = None
+        book_recommendation_count = 0
+        lock_session = None
+
         try:
-            session = await self._session_service.get_session(
-                app_name=APP_NAME, user_id=user_id, session_id=job_id
-            )
+            async with self._get_session_lock(job_id):
+                lock_session = await self._session_service.get_session(
+                    app_name=APP_NAME, user_id=user_id, session_id=job_id
+                )
+                if lock_session is None:
+                    error_message = f"Job {job_id} not found."
+                    error_kind = "JobNotFound"
+                else:
+                    state = SessionStateAccessor(lock_session.state)
+                    if state.failed:
+                        error_message = "Job is in a failed state."
+                        error_kind = "JobFailed"
+                    elif state.final_itinerary is None:
+                        error_message = (
+                            "Itinerary not yet composed. Run compose or "
+                            "local-atmosphere first."
+                        )
+                        error_kind = "ItineraryNotReady"
+                    else:
+                        # Hard cap
+                        book_recommendation_count = state.book_recommendation_count
+                        if book_recommendation_count >= BOOK_RECOMMENDATION_HARD_CAP:
+                            error_message = (
+                                f"Book recommendation limit reached "
+                                f"({BOOK_RECOMMENDATION_HARD_CAP} per "
+                                f"session)."
+                            )
+                            error_kind = "BookRecommendationLimitReached"
+                        else:
+                            # Validate action_id against stored books chip
+                            # id from THIS fresh snapshot, not one an
+                            # earlier response handed out that a
+                            # concurrent/prior call has since consumed.
+                            stored_chip_id = state.book_recommendation_chip_id
+                            if not stored_chip_id or action_id != stored_chip_id:
+                                error_message = (
+                                    "Invalid action_id. Use the 'Find "
+                                    "books like this' chip id from the "
+                                    "itinerary response."
+                                )
+                                error_kind = "InvalidActionId"
+                            elif state.book_recs_in_progress:
+                                error_message = (
+                                    "A book recommendation request is "
+                                    "already in progress for this "
+                                    "session."
+                                )
+                                error_kind = "BookRecsInProgress"
+                            else:
+                                lock_event = Event(
+                                    invocation_id="system",
+                                    author="system",
+                                    actions=EventActions(
+                                        state_delta={
+                                            SessionStateKeys.BOOK_RECS_IN_PROGRESS: True
+                                        }
+                                    ),
+                                )
+                                await self._session_service.append_event(
+                                    lock_session, lock_event
+                                )
         except Exception as e:
+            # A transient session-backend error anywhere in the block above
+            # must still emit the same client-safe SessionError +
+            # WorkflowComplete pair the initial lookup always has, not
+            # propagate raw and truncate the stream.
             logger.error(
                 "recommend_books_session_lookup_failed",
                 job_id=job_id,
                 error=str(e),
                 error_type=type(e).__name__,
             )
-            for ev in error_events(
-                job_id, "Failed to retrieve session", "SessionError"
-            ):
+            error_message = "Failed to retrieve session"
+            error_kind = "SessionError"
+
+        if error_kind is not None:
+            for ev in error_events(job_id, error_message, error_kind):
                 yield ev
             return
-
-        if session is None:
-            for ev in error_events(
-                job_id, f"Job {job_id} not found.", "JobNotFound"
-            ):
-                yield ev
-            return
-
-        state = SessionStateAccessor(session.state)
-
-        if state.failed:
-            for ev in error_events(
-                job_id, "Job is in a failed state.", "JobFailed"
-            ):
-                yield ev
-            return
-
-        if state.final_itinerary is None:
-            for ev in error_events(
-                job_id,
-                "Itinerary not yet composed. Run compose or local-atmosphere first.",
-                "ItineraryNotReady",
-            ):
-                yield ev
-            return
-
-        # Hard cap
-        book_recommendation_count = state.book_recommendation_count
-        if book_recommendation_count >= BOOK_RECOMMENDATION_HARD_CAP:
-            for ev in error_events(
-                job_id,
-                f"Book recommendation limit reached ({BOOK_RECOMMENDATION_HARD_CAP} per session).",
-                "BookRecommendationLimitReached",
-            ):
-                yield ev
-            return
-
-        # Validate action_id against stored books chip id
-        stored_chip_id = state.book_recommendation_chip_id
-        if not stored_chip_id or action_id != stored_chip_id:
-            for ev in error_events(
-                job_id,
-                "Invalid action_id. Use the 'Find books like this' chip id from the itinerary response.",
-                "InvalidActionId",
-            ):
-                yield ev
-            return
-
-        # Concurrency guard
-        if state.book_recs_in_progress:
-            for ev in error_events(
-                job_id,
-                "A book recommendation request is already in progress for this session.",
-                "BookRecsInProgress",
-            ):
-                yield ev
-            return
-
-        # Set lock
-        lock_event = Event(
-            invocation_id="system",
-            author="system",
-            actions=EventActions(
-                state_delta={SessionStateKeys.BOOK_RECS_IN_PROGRESS: True}
-            ),
-        )
-        await self._session_service.append_event(session, lock_event)
 
         async def body() -> AsyncGenerator[DomainEvent, None]:
             yield ProgressEvent(
@@ -1533,7 +1633,7 @@ class WorkflowExecutor:
             refreshed = await self._session_service.get_session(
                 app_name=APP_NAME, user_id=user_id, session_id=job_id
             )
-            active_session = refreshed if refreshed is not None else session
+            active_session = refreshed if refreshed is not None else lock_session
 
             run_state = SessionStateAccessor(active_session.state)
             rec_data = extract_book_recommendations_from_state(run_state)
@@ -1622,6 +1722,68 @@ class WorkflowExecutor:
         )
         async for ev in run_guarded(body(), spec):
             yield ev
+
+    def _get_session_lock(self, job_id: str) -> asyncio.Lock:
+        """Per-job_id lock guarding the concurrency check-then-set in
+        expand()/recommend_books() (MYS-401). See the registry's docstring
+        in __init__ for why an in-process lock is sufficient today.
+
+        Registry invariant (MYS-401 r6 -- re-owned after r4/r5 each closed
+        one hop of the same hole one call site at a time): a lock this
+        method returns to a caller is NEVER a candidate for eviction on
+        THIS call. That used to be true only because a brand-new entry
+        usually sorts after the entries eviction considers first -- true
+        on realistic traffic, but not structurally: if every pre-existing
+        entry happened to be held or waited-on, eviction would walk past
+        all of them and delete the entry this same call had just created,
+        one line above. Evicting strictly BEFORE creating the new entry
+        (this method, below) removes that failure mode by construction:
+        the entry doesn't exist yet when eviction runs, so it cannot be
+        iterated over, let alone deleted, regardless of how many older
+        entries turn out to be evictable.
+        """
+        lock = self._session_locks.get(job_id)
+        if lock is not None:
+            self._session_locks.move_to_end(job_id)
+            return lock
+        self._evict_stale_session_locks()
+        lock = asyncio.Lock()
+        self._session_locks[job_id] = lock
+        return lock
+
+    def _evict_stale_session_locks(self) -> None:
+        """Make room in the per-job_id lock registry (MYS-401 r4-r6).
+
+        Called ONLY from _get_session_lock, and only BEFORE it inserts a
+        new entry -- never after. That ordering is what makes the
+        invariant in _get_session_lock's docstring structural rather than
+        a timing accident: this method only ever sees entries that
+        existed before the current call, so it can never evict the lock
+        _get_session_lock is about to hand back.
+
+        Evicts least-recently-used entries down to (just under) the cap,
+        but ONLY ones that are neither currently held nor have a pending
+        waiter. ``asyncio.Lock`` has no public API for "is anyone waiting
+        on this", hence the ``_waiters`` check; skipping both conditions
+        matters because evicting a lock a genuinely-overlapping second
+        caller is about to acquire would hand that caller a DIFFERENT
+        ``Lock`` instance from the one an earlier caller (or another
+        waiter) holds a reference to -- silently defeating the per-job_id
+        serialization this whole registry exists for. If every existing
+        entry is held or waited-on, this call evicts nothing and the
+        registry is left at (or, after the pending insert, one above) the
+        cap -- the cap is a generous leak bound, not a hard limit, and
+        reaching this branch needs a genuinely pathological number of
+        concurrently in-flight jobs. Ordinary traffic never reaches it.
+        """
+        if len(self._session_locks) < _SESSION_LOCK_REGISTRY_CAP:
+            return
+        for job_id, lock in list(self._session_locks.items()):
+            if len(self._session_locks) < _SESSION_LOCK_REGISTRY_CAP:
+                break
+            if lock.locked() or getattr(lock, "_waiters", None):
+                continue
+            del self._session_locks[job_id]
 
     async def _clear_expansion_lock(self, job_id: str, user_id: str) -> None:
         """Clear EXPANSION_IN_PROGRESS flag after error or cancellation."""

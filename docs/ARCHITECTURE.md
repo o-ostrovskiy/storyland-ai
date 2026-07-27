@@ -1063,6 +1063,34 @@ Kept deliberately: the researcher/formatter split (ADK 2.x would allow tools + o
 
 ---
 
+## 25. Per-Session Lock for `expand()`/`recommend_books()` Concurrency Guards + Merge Re-validation (2026-07-26)
+
+### Context
+
+Tech Radar's AI review (2026-07-09, MYS-401) flagged that `expand()`'s and `recommend_books()`'s "already in progress" guards were check-then-set with an `await` boundary in between: each read `session.state` (a snapshot copy — `InMemorySessionService.get_session` returns `_copy_session(...)`, never a live reference) captured once near the top of the call, then later wrote the flag via a separate `append_event`. Two overlapping requests for the same `job_id` (a double-clicked suggestion chip, or an FE retry) could both read the flag `False` from their own independent snapshot before either's write landed — both proceed, double-billing Gemini, and whichever `append_event` lands last silently overwrites the other's merge (`expansion_count` ends up a lost update instead of the correct total). A second, independent finding on the same ticket: `expand()`'s itinerary merge mutates raw dicts and persists the result to `FINAL_ITINERARY` with no schema check, so a formatter quirk anywhere upstream (a stop missing a required field, an empty `cities` list) would silently persist a structurally-degraded itinerary that `/status` re-serves forever after. A third, low-severity finding: target-city selection for a suggestion chip used a plain substring test, so a trip city literally named "York" would match an `action_prompt` mentioning "New York".
+
+### Decision
+
+- **Atomic guard, single-snapshot admission (r4).** A per-`job_id` lock registry (`WorkflowExecutor._session_locks`) and `_get_session_lock(job_id)` serialize both guards. Every admission decision — job lookup, failed/not-ready state, the hard cap, `action_id` validity, and the in-progress flag itself — is made from **one** session snapshot fetched **while holding the lock**; there is no separate pre-lock read left to go stale. (r1–r3 iterated toward this: r1 added the lock but only re-fetched to check the flag; r2 wrapped that re-fetch in the SSE error envelope; r3 adopted the re-fetch for the merge base but still ran admission checks against the stale outer capture, which Codex correctly flagged as reopening the double-charge finding one line later.) In-process only: sufficient because this service runs a single uvicorn worker (`Dockerfile` has no `--workers`); a multi-process deployment would need a durable compare-and-set instead (the same coupling MYS-176/MYS-168/MYS-169 already flagged for this code path).
+- **Bounded lock registry, eviction strictly before insertion (r4, re-owned r6).** `_session_locks` is an `OrderedDict`, not an unbounded `defaultdict`. `_get_session_lock` moves an entry to MRU on access and evicts least-recently-used, currently-unheld entries once the registry reaches `_SESSION_LOCK_REGISTRY_CAP` — never evicting a lock that's held or has a pending waiter, so a genuinely-overlapping second caller for the same `job_id` can never be handed a different `Lock` instance. r4's version ran eviction *after* inserting the new entry: usually harmless (a brand-new entry sorts last), but not structural — if every pre-existing entry happened to be held or waited-on at cap, the eviction loop would walk past all of them and delete the entry the same call had just created, handing the caller a `Lock` no longer in the registry. r6 reorders this: eviction now runs *before* the new entry is created, so it is never a candidate — the entry simply doesn't exist yet when eviction runs, independent of how many older entries are evictable. This is the fix Eng Lead review asked for after r5, framed as re-owning the guard rather than a sixth incremental patch (see PR discussion); no further hardening was layered onto this diff beyond it.
+- **Merge re-validation.** Before `expand()` persists the merged `FINAL_ITINERARY`, it now runs the merge through `validate_trip_itinerary` (the same `TripItinerary.model_validate` helper `core/extraction.py` already uses elsewhere). On failure, the merge is **not** persisted — `FINAL_ITINERARY` stays whatever it already was, so `/status` keeps re-serving the last-known-good result instead of a newly-degraded one — and the client gets a typed `MergeValidationError` instead of a silently-corrupted success.
+- **Word-boundary city match, hyphen-aware (r4).** `expand()`'s target-city scan uses `_matches_city_as_standalone_word(city_name, action_prompt, other_city_names)` — a regex word-boundary match that rejects a match only when the preceding word forms another trip city (not any capitalized word — r2). The boundary itself is plain `\w` adjacency, not `[\w-]` (r4): a hyphen already ends a word on its own, so a city immediately followed by a hyphenated compound ("Bath-based") is no longer misrouted to `cities[0]`. Moved to `core/extraction.py` (r4) so `_drop_suggestions_naming_removed_cities` (MYS-660) can call the exact same predicate `expand()` uses, instead of the plain substring test that used to let the two silently drift apart. Not a gazetteer; documented as a heuristic, tradeoffs included, in its own docstring.
+
+### Files Affected
+
+- `core/extraction.py` (`_matches_city_as_standalone_word` — moved here from `core/executor.py`, r4; `_drop_suggestions_naming_removed_cities` now calls it instead of a plain substring test)
+- `core/executor.py` (`_session_locks` — now a bounded `OrderedDict` — + `_get_session_lock`/`_evict_stale_session_locks` on `WorkflowExecutor`; `expand()` and `recommend_books()` guards restructured to single-snapshot admission; `expand()`'s merge persist path)
+- `tests/unit/test_executor_expansion_concurrency.py` (interleaving/merge-revalidation/word-boundary/hyphen/registry-bound cases)
+- `tests/unit/test_core.py` (`_drop_suggestions_naming_removed_cities` cases proving it now agrees with `expand()`'s real resolution)
+
+### Trade-offs
+
+**Benefits:** no more double-billed Gemini calls or lost-update `expansion_count` on a double-clicked chip, including the delayed-replay-of-a-consumed-chip case; a degraded merge can never reach `/status`; a same-name-substring city mismatch is much rarer, including hyphenated-compound prompts; the lock registry no longer grows unbounded; the removed-city suggestion filter can no longer disagree with `expand()`'s own resolution.
+
+**Costs:** the word-boundary heuristic is capitalization-dependent and can still mismatch on inconsistently-cased `action_prompt` text; a city that's the tail of a genuinely hyphenated proper noun ("Winston-Salem") can now match a bare search for the tail word alone (r4, documented in the helper's own docstring); the lock registry's eviction is best-effort LRU, not a hard guarantee, and relies on `asyncio.Lock`'s private `_waiters` attribute; if every existing entry is held/waited at cap, a newly-inserted entry can leave the registry one above `_SESSION_LOCK_REGISTRY_CAP` until a later call finds room to evict (r6) — an accepted, bounded, and rare relaxation, never a correctness issue.
+
+---
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -1089,5 +1117,6 @@ Kept deliberately: the researcher/formatter split (ADK 2.x would allow tools + o
 | **Shared run harness (ADR #22)** | One ADK-facing scaffold for all flows; explicit per-flow error policy | Flow bodies are nested generators; policy lives in `GuardSpec`, not inline |
 | **ADK 2.x, template-first (ADR #23)** | Supported line; CVE ignores retired; public-API plugin; bisectable stages | Deprecation warnings until the graph rewrite; fresh session DB at cutover |
 | **Graph workflows + `book_to_place` naming (ADR #24)** | Explicit edges, no deprecated templates; primary flow named; semantics test-pinned | Factory renames; Langfuse trace names change |
+| **Per-session lock + merge re-validation (ADR #25)** | No double-billed Gemini calls on overlapping requests, incl. delayed chip replay; a degraded merge never reaches `/status`; lock registry now bounded | Word-boundary city match is a capitalization heuristic, not a gazetteer |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.
