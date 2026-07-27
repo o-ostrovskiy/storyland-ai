@@ -23,6 +23,8 @@ These tests create a real session as user "alice" via the real
   exactly that, not user A's data.
 """
 
+import json
+
 import pytest
 from fastapi import HTTPException
 
@@ -35,6 +37,25 @@ from services.session_service import create_session_service
 
 async def _drain(agen):
     return [e async for e in agen]
+
+
+async def _drain_sse_route(coro):
+    """Call a route function that returns an ``EventSourceResponse`` and
+    drain its underlying SSE-dict generator (event/data pairs), decoding
+    each ``data`` payload's JSON. This exercises the actual HTTP route
+    function -- request -> ``compose_stream``/``expand_stream`` ->
+    ``executor`` -- not just the executor directly, so a regression that
+    stopped forwarding the authenticated ``user_id`` anywhere on that path
+    (a route or streaming adapter falling back to a shared default) would
+    show up here even though it would leave an executor-level-only test
+    green.
+    """
+    response = await coro
+    events = []
+    async for sse_dict in response.body_iterator:
+        payload = json.loads(sse_dict["data"]) if sse_dict.get("data") else {}
+        events.append((sse_dict["event"], payload))
+    return events
 
 
 _SEED_STATE = {
@@ -162,6 +183,77 @@ class TestComposeIsolation:
         assert not any("Bath" in str(e) for e in events)
 
 
+class TestComposeRouteIsolation:
+    """Codex P2 (MYS-403 review): the tests above call executor.compose()
+    directly, which only proves the EXECUTOR's session lookup is
+    user-scoped. This PR's stated purpose is protecting the auth boundary
+    -- the HTTP surface -- and that's exactly where a regression would
+    hide: a route or streaming adapter that stopped forwarding the
+    authenticated user_id and fell back to a shared default would leave
+    the tests above green while HTTP callers crossed the boundary. These
+    call the real ``api.routes.compose`` route function (request ->
+    ``compose_stream`` -> executor), the same pattern
+    ``TestStatusEndpointIsolation`` above already uses for ``get_status``.
+    """
+
+    async def test_owner_route_call_succeeds_not_job_not_found(
+        self, session_as_alice
+    ):
+        from api.models import ComposeRequest
+        from api.routes import compose
+        import api.dependencies as deps
+
+        executor, _service = session_as_alice
+        deps._app_state = deps.AppState(
+            config=None, executor=executor, rate_limiter=None, inflight_limiter=None
+        )
+        try:
+            events = await _drain_sse_route(
+                compose(
+                    job_id=_JOB_ID,
+                    request=ComposeRequest(region_ids=[1]),
+                    user_id=_OWNER_USER_ID,
+                )
+            )
+        finally:
+            deps._app_state = None
+        errors = [payload for etype, payload in events if etype == "error"]
+        assert not any(e.get("error_type") == "JobNotFound" for e in errors), (
+            f"alice's own session must be found via the real compose route; "
+            f"got {events!r}"
+        )
+
+    async def test_bob_route_call_gets_job_not_found_not_alices_data(
+        self, session_as_alice
+    ):
+        from api.models import ComposeRequest
+        from api.routes import compose
+        import api.dependencies as deps
+
+        executor, _service = session_as_alice
+        deps._app_state = deps.AppState(
+            config=None, executor=executor, rate_limiter=None, inflight_limiter=None
+        )
+        try:
+            events = await _drain_sse_route(
+                compose(
+                    job_id=_JOB_ID,
+                    request=ComposeRequest(region_ids=[1]),
+                    user_id=_OTHER_USER_ID,
+                )
+            )
+        finally:
+            deps._app_state = None
+        errors = [payload for etype, payload in events if etype == "error"]
+        assert errors and errors[0].get("error_type") == "JobNotFound", (
+            f"bob must not be able to compose alice's session through the "
+            f"real HTTP route; got {events!r}"
+        )
+        # Route→stream→executor propagation must not leak alice's data
+        # anywhere in the wire-shaped output, not just the domain events.
+        assert not any("Bath" in json.dumps(payload) for _etype, payload in events)
+
+
 class TestExpandIsolation:
     async def test_owner_lookup_succeeds_not_job_not_found(self, session_as_alice):
         executor, _service = session_as_alice
@@ -198,3 +290,71 @@ class TestExpandIsolation:
             f"and her chip id; got {events!r}"
         )
         assert not any("Bath" in str(e) for e in events)
+
+
+class TestExpandRouteIsolation:
+    """Codex P2 (MYS-403 review) -- see TestComposeRouteIsolation's
+    docstring: the same route→stream→executor gap applies to expand()."""
+
+    async def test_owner_route_call_succeeds_not_job_not_found(
+        self, session_as_alice
+    ):
+        from api.models import ExpandRequest
+        from api.routes import expand
+        import api.dependencies as deps
+
+        executor, _service = session_as_alice
+        deps._app_state = deps.AppState(
+            config=None, executor=executor, rate_limiter=None, inflight_limiter=None
+        )
+        try:
+            events = await _drain_sse_route(
+                expand(
+                    job_id=_JOB_ID,
+                    request=ExpandRequest(
+                        action_id="chip-1",
+                        action_label="More cafes",
+                        action_prompt="Find cafes in Bath",
+                    ),
+                    user_id=_OWNER_USER_ID,
+                )
+            )
+        finally:
+            deps._app_state = None
+        errors = [payload for etype, payload in events if etype == "error"]
+        assert not any(e.get("error_type") == "JobNotFound" for e in errors), (
+            f"alice's own session must be found via the real expand route; "
+            f"got {events!r}"
+        )
+
+    async def test_bob_route_call_gets_job_not_found_not_alices_data(
+        self, session_as_alice
+    ):
+        from api.models import ExpandRequest
+        from api.routes import expand
+        import api.dependencies as deps
+
+        executor, _service = session_as_alice
+        deps._app_state = deps.AppState(
+            config=None, executor=executor, rate_limiter=None, inflight_limiter=None
+        )
+        try:
+            events = await _drain_sse_route(
+                expand(
+                    job_id=_JOB_ID,
+                    request=ExpandRequest(
+                        action_id="chip-1",
+                        action_label="More cafes",
+                        action_prompt="Find cafes in Bath",
+                    ),
+                    user_id=_OTHER_USER_ID,
+                )
+            )
+        finally:
+            deps._app_state = None
+        errors = [payload for etype, payload in events if etype == "error"]
+        assert errors and errors[0].get("error_type") == "JobNotFound", (
+            f"bob must not be able to expand alice's session through the "
+            f"real HTTP route, even holding her own chip id; got {events!r}"
+        )
+        assert not any("Bath" in json.dumps(payload) for _etype, payload in events)

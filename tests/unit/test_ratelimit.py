@@ -195,15 +195,26 @@ class TestLimitInflight:
 # its own. Neither proves the OTHER half of the dependency's own docstring
 # contract: "holds a slot for the duration of the request ... releases it
 # when the response completes" -- a request that never completes because the
-# client walked away must still free the slot. A real client disconnect
-# surfaces to a FastAPI generator dependency as its enclosing task being
-# cancelled while the generator is parked at its `yield`; Starlette then
-# unwinds the dependency via `aclose()`, throwing `GeneratorExit` in at that
-# yield point -- exactly what `hold_the_slot` below does explicitly, so this
-# exercises the real mechanism `limit_inflight`'s `finally: limiter.release()`
-# has to survive, without depending on ASGI-transport-specific disconnect
-# behavior (which proved unreliable to simulate in this sandbox -- see the
-# note in test_api.py).
+# client walked away must still free the slot.
+#
+# Two tests below, at two different levels:
+#
+# 1. test_release_runs_when_the_holder_is_cancelled_mid_stream drives the
+#    dependency generator directly (fast, isolated, no app/ASGI machinery) --
+#    it proves OUR cleanup code (`finally: limiter.release()`) survives being
+#    unwound via `aclose()`, i.e. that our code is not the failure mode.
+#
+# 2. test_release_runs_on_a_real_http_disconnect_over_raw_asgi (Codex P2,
+#    MYS-403 review) proves Starlette's OWN machinery actually reaches that
+#    unwind on a genuine disconnect -- test 1 alone would stay green even if
+#    a real disconnect never called `aclose()` at all. httpx's ASGITransport
+#    could not be used for this (confirmed empirically: an early
+#    `client.stream()` context exit does not surface to the app as an ASGI
+#    `http.disconnect` in this sandbox -- see the note in
+#    test_api.py::TestInflightLimiterOverRealStream) -- but a *raw* ASGI
+#    harness (a hand-built scope/receive/send trio calling the real FastAPI
+#    app directly, bypassing httpx entirely) can and does simulate a genuine
+#    `http.disconnect`, and that's what test 2 drives.
 class TestLimitInflightCancellation:
     async def test_release_runs_when_the_holder_is_cancelled_mid_stream(
         self, fake_state
@@ -235,4 +246,94 @@ class TestLimitInflightCancellation:
         assert inflight.active == 0, (
             "a cancelled (disconnected) request must still release its "
             "inflight slot -- otherwise capacity is wedged until a restart"
+        )
+
+    async def test_release_runs_on_a_real_http_disconnect_over_raw_asgi(self):
+        """Drives the real FastAPI app via a hand-built ASGI scope/receive/
+        send trio -- no httpx, no TestClient -- so the disconnect goes
+        through sse_starlette's actual ``_listen_for_disconnect`` ->
+        task-group-cancellation path, not a simulated ``aclose()`` call.
+        This is the integration behavior the test above only assumes.
+        """
+        from unittest.mock import MagicMock
+
+        from api.app import create_app
+        from api.dependencies import AppState, get_gateway_user_id, verify_gateway_secret
+        from core.events import Phase, ProgressEvent
+
+        inflight = InFlightLimiter(1)
+        app_state = AppState(
+            config=MagicMock(),
+            executor=MagicMock(),
+            rate_limiter=SlidingWindowRateLimiter(0, 60),
+            inflight_limiter=inflight,
+        )
+
+        started = asyncio.Event()
+
+        async def mock_discover(**kwargs):
+            yield ProgressEvent(phase=Phase.BOOK_SEARCH, step="Searching")
+            started.set()
+            await asyncio.sleep(60)  # stands in for "streaming forever"
+            # pragma: no cover -- unreachable once disconnect cancels this
+
+        app_state.executor.discover = mock_discover
+
+        app = create_app()
+        app.dependency_overrides[verify_gateway_secret] = lambda: None
+        app.dependency_overrides[get_gateway_user_id] = lambda: "test_user"
+        deps._app_state = app_state
+
+        body = b'{"book_title": "1984", "author": "George Orwell"}'
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/api/v1/itinerary/discover",
+            "raw_path": b"/api/v1/itinerary/discover",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+            ],
+            "client": ("testclient", 123),
+            "server": ("testserver", 80),
+        }
+
+        request_delivered = False
+        disconnect_requested = asyncio.Event()
+
+        async def receive():
+            nonlocal request_delivered
+            if not request_delivered:
+                request_delivered = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            # Blocks until the test asks for the disconnect -- mirrors a
+            # real transport's receive() parking between client messages.
+            await disconnect_requested.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            pass
+
+        app_task = asyncio.ensure_future(app(scope, receive, send))
+
+        await asyncio.wait_for(started.wait(), timeout=5)
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert inflight.active == 1, (
+            "the slot must be held while genuinely streaming over raw ASGI"
+        )
+
+        disconnect_requested.set()
+        await asyncio.wait_for(app_task, timeout=5)
+
+        assert inflight.active == 0, (
+            "a genuine ASGI http.disconnect must reach limit_inflight's own "
+            "cleanup via Starlette's dependency-generator unwind -- not just "
+            "a hand-simulated aclose() -- otherwise capacity is wedged until "
+            "a restart"
         )

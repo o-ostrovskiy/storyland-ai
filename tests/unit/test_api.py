@@ -4,6 +4,7 @@ Unit tests for FastAPI SSE API layer.
 Tests API models, endpoint responses, and SSE streaming with mocked executor.
 """
 
+import asyncio
 import json
 
 import pytest
@@ -1438,9 +1439,19 @@ class TestPlaceToBookEndpoint:
 
 class TestInflightLimiterOverRealStream:
     @pytest.mark.asyncio
-    async def test_slot_is_released_after_a_completed_stream(
+    async def test_slot_is_held_during_the_stream_and_released_after(
         self, mock_app_state, mock_executor
     ):
+        """MYS-403 (Codex P2): the original version of this test fully
+        buffered the request (a plain ``client.post``) before inspecting
+        ``active`` -- so a regression that freed the slot as soon as the
+        endpoint FUNCTION returned, rather than when the SSE generator
+        actually finishes draining, would still have passed (it ends at 0
+        either way). This drives a genuine partial ASGI read: the mock
+        generator parks mid-stream (after its first event, before its
+        last) until the test explicitly releases it, so ``active`` is
+        inspected while the response is demonstrably still open.
+        """
         from api.app import create_app
         from api.ratelimit import InFlightLimiter
         from httpx import AsyncClient, ASGITransport
@@ -1448,10 +1459,16 @@ class TestInflightLimiterOverRealStream:
 
         mock_app_state.inflight_limiter = InFlightLimiter(max_in_flight=1)
 
+        hold = asyncio.Event()
+        first_event_sent = asyncio.Event()
+
         async def mock_discover(**kwargs):
             yield ProgressEvent(
                 phase=Phase.BOOK_SEARCH, step="Searching Google Books API"
             )
+            first_event_sent.set()
+            # Parked mid-stream until the test releases it below.
+            await hold.wait()
             yield WorkflowComplete(job_id="test-job")
 
         mock_executor.discover = mock_discover
@@ -1461,20 +1478,50 @@ class TestInflightLimiterOverRealStream:
         deps._app_state = mock_app_state
 
         client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
-        response = await client.post(
+
+        async def _drive_stream():
+            async with client.stream(
+                "POST",
+                "/api/v1/itinerary/discover",
+                json={"book_title": "1984", "author": "George Orwell"},
+            ) as response:
+                assert response.status_code == 200
+                async for _ in response.aiter_lines():
+                    if first_event_sent.is_set():
+                        break
+
+        stream_task = asyncio.create_task(_drive_stream())
+        await asyncio.wait_for(first_event_sent.wait(), timeout=5)
+        # Give the event loop a few ticks so the generator has genuinely
+        # parked on `hold.wait()` (not just scheduled to) before checking.
+        for _ in range(5):
+            await asyncio.sleep(0)
+
+        assert mock_app_state.inflight_limiter.active == 1, (
+            "the slot must still be held WHILE the SSE generator is "
+            "mid-stream, not only before the endpoint function returns"
+        )
+        # At capacity 1, a concurrent request must be shed while the first
+        # is still open -- proves the slot is genuinely occupied, not just
+        # a counter that happens to read 1.
+        concurrent = await client.post(
             "/api/v1/itinerary/discover",
             json={"book_title": "1984", "author": "George Orwell"},
         )
-        assert response.status_code == 200
+        assert concurrent.status_code == 503
+
+        hold.set()
+        await asyncio.wait_for(stream_task, timeout=5)
+
         assert mock_app_state.inflight_limiter.active == 0, (
             "the slot must be free once the SSE generator has fully drained"
         )
         # And the freed slot is genuinely usable, not just zeroed by accident.
-        second = await client.post(
+        after = await client.post(
             "/api/v1/itinerary/discover",
             json={"book_title": "1984", "author": "George Orwell"},
         )
-        assert second.status_code == 200
+        assert after.status_code == 200
 
 
 # =============================================================================
