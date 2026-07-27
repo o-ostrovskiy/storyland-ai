@@ -4,6 +4,7 @@ Unit tests for FastAPI SSE API layer.
 Tests API models, endpoint responses, and SSE streaming with mocked executor.
 """
 
+import asyncio
 import json
 
 import pytest
@@ -1412,3 +1413,178 @@ class TestPlaceToBookEndpoint:
     async def test_missing_place_rejected(self, test_client, reset_p2b_singleton):
         response = await test_client.post("/api/v1/place-to-book", json={})
         assert response.status_code == 422
+
+
+# =============================================================================
+# MYS-403 gap 3a: inflight-slot lifetime over a REAL ASGI stream
+# =============================================================================
+#
+# api/dependencies.py::limit_inflight was previously exercised only as a bare
+# async generator (tests/unit/test_ratelimit.py) -- never through a real
+# streaming response, so its own docstring's claim ("holds a slot for the
+# duration of the request ... releases it when the response completes") was
+# unverified. A leak here silently wedges capacity at MAX_INFLIGHT_REQUESTS
+# forever, shedding every subsequent request with 503 until a restart.
+#
+# The completed-stream half lives here (a genuine ASGI round-trip). The
+# mid-stream-disconnect half lives in test_ratelimit.py::
+# TestLimitInflightCancellation -- httpx's ASGITransport in this environment
+# does not propagate an early `async with client.stream(...)` exit as a real
+# server-side cancellation (confirmed empirically: it hangs for the full
+# generator lifetime instead), so that half is tested at the dependency-
+# generator level by cancelling the task holding the slot open, which is
+# exactly the mechanism Starlette uses to unwind a dependency generator on a
+# genuine client disconnect.
+
+
+class TestInflightLimiterOverRealStream:
+    @pytest.mark.asyncio
+    async def test_slot_is_held_during_the_stream_and_released_after(
+        self, mock_app_state, mock_executor
+    ):
+        """MYS-403 (Codex P2): the original version of this test fully
+        buffered the request (a plain ``client.post``) before inspecting
+        ``active`` -- so a regression that freed the slot as soon as the
+        endpoint FUNCTION returned, rather than when the SSE generator
+        actually finishes draining, would still have passed (it ends at 0
+        either way). This drives a genuine partial ASGI read: the mock
+        generator parks mid-stream (after its first event, before its
+        last) until the test explicitly releases it, so ``active`` is
+        inspected while the response is demonstrably still open.
+        """
+        from api.app import create_app
+        from api.ratelimit import InFlightLimiter
+        from httpx import AsyncClient, ASGITransport
+        import api.dependencies as deps
+
+        mock_app_state.inflight_limiter = InFlightLimiter(max_in_flight=1)
+
+        hold = asyncio.Event()
+        first_event_sent = asyncio.Event()
+
+        async def mock_discover(**kwargs):
+            yield ProgressEvent(
+                phase=Phase.BOOK_SEARCH, step="Searching Google Books API"
+            )
+            first_event_sent.set()
+            # Parked mid-stream until the test releases it below.
+            await hold.wait()
+            yield WorkflowComplete(job_id="test-job")
+
+        mock_executor.discover = mock_discover
+
+        app = create_app()
+        app.router.lifespan_context = _null_lifespan
+        deps._app_state = mock_app_state
+
+        client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+        async def _drive_stream():
+            async with client.stream(
+                "POST",
+                "/api/v1/itinerary/discover",
+                json={"book_title": "1984", "author": "George Orwell"},
+            ) as response:
+                assert response.status_code == 200
+                async for _ in response.aiter_lines():
+                    if first_event_sent.is_set():
+                        break
+
+        stream_task = asyncio.create_task(_drive_stream())
+        await asyncio.wait_for(first_event_sent.wait(), timeout=5)
+        # Give the event loop a few ticks so the generator has genuinely
+        # parked on `hold.wait()` (not just scheduled to) before checking.
+        for _ in range(5):
+            await asyncio.sleep(0)
+
+        assert mock_app_state.inflight_limiter.active == 1, (
+            "the slot must still be held WHILE the SSE generator is "
+            "mid-stream, not only before the endpoint function returns"
+        )
+        # At capacity 1, a concurrent request must be shed while the first
+        # is still open -- proves the slot is genuinely occupied, not just
+        # a counter that happens to read 1.
+        concurrent = await client.post(
+            "/api/v1/itinerary/discover",
+            json={"book_title": "1984", "author": "George Orwell"},
+        )
+        assert concurrent.status_code == 503
+
+        hold.set()
+        await asyncio.wait_for(stream_task, timeout=5)
+
+        assert mock_app_state.inflight_limiter.active == 0, (
+            "the slot must be free once the SSE generator has fully drained"
+        )
+        # And the freed slot is genuinely usable, not just zeroed by accident.
+        after = await client.post(
+            "/api/v1/itinerary/discover",
+            json={"book_title": "1984", "author": "George Orwell"},
+        )
+        assert after.status_code == 200
+
+
+# =============================================================================
+# MYS-403 gap 3b: the lazily-created place->book resolver's session store
+# must be included in the session sweeper's provider once it exists, so the
+# sweeper doesn't leak it (api/app.py::lifespan's `_live_session_services`).
+# =============================================================================
+
+
+class TestSessionSweeperIncludesResolverStoreOnceCreated:
+    @pytest.mark.asyncio
+    async def test_resolver_store_joins_the_sweep_once_lazily_created(
+        self, monkeypatch
+    ):
+        from types import SimpleNamespace
+
+        import api.app as app_module
+        import api.dependencies as deps
+
+        fake_executor_session_service = object()
+        fake_state = SimpleNamespace(
+            executor=SimpleNamespace(session_service=fake_executor_session_service),
+            config=SimpleNamespace(
+                session_ttl_seconds=0,  # keeps SessionSweeper.start() a no-op
+                session_max_entries=0,
+                session_sweep_interval_seconds=3600,
+            ),
+        )
+
+        async def fake_initialize():
+            return fake_state
+
+        async def fake_shutdown():
+            return None
+
+        monkeypatch.setattr(app_module, "initialize", fake_initialize)
+        monkeypatch.setattr(app_module, "shutdown", fake_shutdown)
+        # deps._place_to_book_resolver starts unset -- the whole point of
+        # this test is to prove the provider PICKS IT UP once it exists,
+        # exactly as it does lazily on the app's first place-to-book request.
+        monkeypatch.setattr(deps, "_place_to_book_resolver", None)
+
+        app = app_module.FastAPI()
+        async with app_module.lifespan(app):
+            sweeper = app.state.session_sweeper
+
+            before = sweeper._resolve_services()
+            assert fake_executor_session_service in before
+            assert len(before) == 1, (
+                f"resolver has no store yet -- must not appear early: {before!r}"
+            )
+
+            fake_resolver_store = object()
+            monkeypatch.setattr(
+                deps,
+                "_place_to_book_resolver",
+                SimpleNamespace(_session_service=fake_resolver_store),
+            )
+
+            after = sweeper._resolve_services()
+            assert fake_executor_session_service in after
+            assert fake_resolver_store in after, (
+                f"the sweeper must pick up the resolver's store once it's "
+                f"lazily created, so the retention sweep covers it too "
+                f"(otherwise it leaks past the sweeper forever): {after!r}"
+            )
