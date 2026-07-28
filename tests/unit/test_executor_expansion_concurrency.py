@@ -831,3 +831,80 @@ class TestPersistSuggestionsClampsOverlongActionPrompt:
         assert persisted[0]["action_prompt"] == overlong[: ex.WorkflowExecutor._MAX_ACTION_PROMPT_CHARS]
         # The already-in-bounds chip is untouched.
         assert persisted[1]["action_prompt"] == "Find museums."
+
+
+class TestExpandClampsOverlongActionPrompt:
+    """MYS-494 r1 (Eng Lead fix-list). `TestPersistSuggestionsClampsOverlongActionPrompt`
+    above proves `_persist_suggestions` clamps -- but `expand()` never calls
+    that helper. It writes LAST_SUGGESTIONS directly via its own
+    `persist_event`, so an expansion's chips shipped completely unclamped
+    regardless of that fix. Worse, a clamp applied ONLY at the write site
+    (as the r0 patch did inside `_persist_suggestions`) doesn't help here
+    either, because it would clamp a copy while `ExpansionReady` emitted
+    the original -- so the value the reader is shown and can click would
+    still exceed `ExpandRequest.action_prompt`'s max_length=500, and that
+    later request is rejected before `action_id` resolution ever runs
+    (MYS-492 class: a control that is visibly offered and cannot fire).
+    This test asserts persisted, emitted, and the 500-char bound are all
+    the SAME number -- not just that persisted is bounded.
+    """
+
+    async def test_persisted_and_emitted_chip_share_the_same_clamped_prompt(
+        self, monkeypatch
+    ):
+        real_service = create_session_service(use_database=False)
+        executor, ex = _make_executor(monkeypatch, real_service)
+
+        overlong = "x" * (ex.WorkflowExecutor._MAX_ACTION_PROMPT_CHARS + 40)
+        delta = {
+            SessionStateKeys.LAST_EXPANSION: {
+                "parent_city": "Bath",
+                "places": [],
+                "suggestions": [
+                    {
+                        "id": "pre-restamp-id",
+                        "label": "More cafes",
+                        "action_prompt": overlong,
+                    }
+                ],
+            }
+        }
+        monkeypatch.setattr(ex, "Runner", _fake_expansion_runner(delta))
+
+        job_id = "job-clamp-expand-1"
+        await real_service.create_session(
+            app_name=APP_NAME,
+            user_id="default",
+            session_id=job_id,
+            state=dict(_SEED_STATE),
+        )
+
+        results = await _drain(
+            executor.expand(
+                job_id=job_id,
+                action_id="chip-1",
+                action_label="More cafes",
+                action_prompt="Find cafes in Bath",
+            )
+        )
+
+        ready = next(e for e in results if isinstance(e, ExpansionReady))
+        assert ready.suggestions, "expansion should have produced a chip"
+        emitted_prompt = ready.suggestions[0]["action_prompt"]
+
+        session = await real_service.get_session(
+            app_name=APP_NAME, user_id="default", session_id=job_id
+        )
+        persisted_prompt = (
+            session.state[SessionStateKeys.LAST_SUGGESTIONS][0]["action_prompt"]
+        )
+
+        assert len(emitted_prompt) == ex.WorkflowExecutor._MAX_ACTION_PROMPT_CHARS
+        assert emitted_prompt == persisted_prompt, (
+            "the reader clicks the chip ExpansionReady showed them, sending "
+            "back its action_id -- if the emitted prompt diverges from the "
+            "persisted one, either the display lied about what's stored, or "
+            "(the r0 bug) the emitted value exceeds ExpandRequest's own "
+            "max_length=500 and a later click on THIS chip is rejected "
+            "before action_id resolution ever runs"
+        )

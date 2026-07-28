@@ -796,7 +796,11 @@ class WorkflowExecutor:
             itinerary_data, suggestions = result
             suggestions = self._stamp_suggestion_ids(suggestions)
             book_recommendation_chip = self._build_book_recommendation_chip()
-            await self._persist_suggestions(
+            # MYS-494 r1: use the RETURNED (clamped) list for the emitted
+            # event too, so what the reader is shown matches what a later
+            # expand() call resolves against -- not the pre-clamp local
+            # variable, which is what this used to emit.
+            suggestions = await self._persist_suggestions(
                 job_id, user_id, suggestions, itinerary_data,
                 book_recommendation_chip=book_recommendation_chip,
             )
@@ -972,7 +976,11 @@ class WorkflowExecutor:
             itinerary_data, suggestions = result
             suggestions = self._stamp_suggestion_ids(suggestions)
             book_recommendation_chip = self._build_book_recommendation_chip()
-            await self._persist_suggestions(
+            # MYS-494 r1: use the RETURNED (clamped) list for the emitted
+            # event too, so what the reader is shown matches what a later
+            # expand() call resolves against -- not the pre-clamp local
+            # variable, which is what this used to emit.
+            suggestions = await self._persist_suggestions(
                 job_id, user_id, suggestions, itinerary_data,
                 book_recommendation_chip=book_recommendation_chip,
             )
@@ -1086,17 +1094,30 @@ class WorkflowExecutor:
         suggestions: list,
         itinerary_data: dict | None = None,
         book_recommendation_chip: dict | None = None,
-    ) -> None:
-        """Persist suggestion chips (and optionally the resolved itinerary) to session state."""
+    ) -> list:
+        """Persist suggestion chips (and optionally the resolved itinerary) to session state.
+
+        Returns the clamped suggestions list actually written to session
+        state (MYS-494 r1). Callers MUST emit this returned list, not the
+        one they passed in -- clamping only the copy written here while
+        the caller separately emits its own unclamped local variable is
+        exactly the divergence this fix closes: the reader is shown (and
+        can click) a chip whose action_prompt is longer than what's
+        stored, and whose stored copy is what a later expand() actually
+        resolves against. On the no-op path (session missing, or an
+        exception during the write) the original suggestions are
+        returned unclamped, matching prior no-op behaviour.
+        """
+        clamped = suggestions
         try:
             session = await self._session_service.get_session(
                 app_name=APP_NAME, user_id=user_id, session_id=job_id
             )
             if session is not None:
-                suggestions = [
+                clamped = [
                     self._clamp_action_prompt(chip) for chip in suggestions
                 ]
-                delta: dict = {SessionStateKeys.LAST_SUGGESTIONS: suggestions}
+                delta: dict = {SessionStateKeys.LAST_SUGGESTIONS: clamped}
                 if itinerary_data is not None:
                     delta[SessionStateKeys.FINAL_ITINERARY] = itinerary_data
                 if book_recommendation_chip is not None:
@@ -1110,6 +1131,7 @@ class WorkflowExecutor:
                 await self._session_service.append_event(session, event)
         except Exception:
             logger.warning("persist_suggestions_error", job_id=job_id)
+        return clamped
 
     async def expand(
         self,
@@ -1428,6 +1450,16 @@ class WorkflowExecutor:
                 new_suggestions = []
             else:
                 new_suggestions = self._stamp_suggestion_ids(new_suggestions)
+                # MYS-494 r1: expand() writes LAST_SUGGESTIONS directly via
+                # persist_event below rather than calling
+                # _persist_suggestions, so that helper's clamp never ran on
+                # this path -- every chip an expansion produces shipped
+                # unclamped. Clamp here, at the point these chips are
+                # produced, so the SAME list is both what gets persisted
+                # and what ExpansionReady emits below.
+                new_suggestions = [
+                    self._clamp_action_prompt(chip) for chip in new_suggestions
+                ]
 
             # Accumulate this expansion in session state
             prior_expansions = run_state.expansions
