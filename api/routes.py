@@ -5,6 +5,8 @@ Maps HTTP endpoints to streaming generators and status queries.
 All business logic lives in core.executor — routes are thin wiring.
 """
 
+import os
+
 from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
@@ -79,6 +81,14 @@ async def health_check() -> HealthResponse:
         )
     except RuntimeError:
         return HealthResponse(status="unhealthy", version="0.1.0")
+
+
+@system_router.get("/version")
+async def version() -> dict:
+    """Deployed commit SHA — reuses SENTRY_RELEASE (already stamped by
+    deploy.sh at deploy time; same value the Sentry SDK tags releases with),
+    so "what's live" is one request instead of an SSH session."""
+    return {"service": "storyland-ai", "git_sha": os.environ.get("SENTRY_RELEASE") or "unknown"}
 
 
 @router.post(
