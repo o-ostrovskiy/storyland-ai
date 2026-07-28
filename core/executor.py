@@ -796,7 +796,11 @@ class WorkflowExecutor:
             itinerary_data, suggestions = result
             suggestions = self._stamp_suggestion_ids(suggestions)
             book_recommendation_chip = self._build_book_recommendation_chip()
-            await self._persist_suggestions(
+            # MYS-494 r1: use the RETURNED (clamped) list for the emitted
+            # event too, so what the reader is shown matches what a later
+            # expand() call resolves against -- not the pre-clamp local
+            # variable, which is what this used to emit.
+            suggestions = await self._persist_suggestions(
                 job_id, user_id, suggestions, itinerary_data,
                 book_recommendation_chip=book_recommendation_chip,
             )
@@ -972,7 +976,11 @@ class WorkflowExecutor:
             itinerary_data, suggestions = result
             suggestions = self._stamp_suggestion_ids(suggestions)
             book_recommendation_chip = self._build_book_recommendation_chip()
-            await self._persist_suggestions(
+            # MYS-494 r1: use the RETURNED (clamped) list for the emitted
+            # event too, so what the reader is shown matches what a later
+            # expand() call resolves against -- not the pre-clamp local
+            # variable, which is what this used to emit.
+            suggestions = await self._persist_suggestions(
                 job_id, user_id, suggestions, itinerary_data,
                 book_recommendation_chip=book_recommendation_chip,
             )
@@ -1044,6 +1052,41 @@ class WorkflowExecutor:
             "action_prompt": "",
         }
 
+    # MYS-494 item 1: mirrors ExpandRequest.action_prompt's bound
+    # (api/models.py:249-253, min_length=1, max_length=500).
+    _MAX_ACTION_PROMPT_CHARS = 500
+
+    @classmethod
+    def _clamp_action_prompt(cls, chip: dict) -> dict:
+        """Truncate an overlong composer-generated action_prompt at persist
+        time (MYS-494 item 1).
+
+        SuggestionChip.action_prompt (models/itinerary.py:94-96) is a
+        field the LLM must fill under a structured-output response
+        schema (expansion_formatter's output_schema=ExpansionResult,
+        same for the trip composer) -- adding max_length there would
+        turn an overlong composer output into a live compose failure
+        rather than a cosmetic truncation. The bound lives here instead,
+        where it is guaranteed to actually run: ADK writes the raw dict
+        into session state, so a Pydantic field_validator/computed_field
+        on the response schema would never execute on this path (a
+        validator that silently never runs is worse than no validator).
+
+        Clamp, don't reject: an overlong prompt is our own composer's
+        tidiness bug, not the reader's fault -- dropping the whole chip
+        would degrade their UI to fix our output.
+        """
+        prompt = chip.get("action_prompt", "")
+        if isinstance(prompt, str) and len(prompt) > cls._MAX_ACTION_PROMPT_CHARS:
+            logger.warning(
+                "suggestion_chip_action_prompt_overlong",
+                original_length=len(prompt),
+                clamped_to=cls._MAX_ACTION_PROMPT_CHARS,
+            )
+            chip = dict(chip)
+            chip["action_prompt"] = prompt[: cls._MAX_ACTION_PROMPT_CHARS]
+        return chip
+
     async def _persist_suggestions(
         self,
         job_id: str,
@@ -1051,14 +1094,30 @@ class WorkflowExecutor:
         suggestions: list,
         itinerary_data: dict | None = None,
         book_recommendation_chip: dict | None = None,
-    ) -> None:
-        """Persist suggestion chips (and optionally the resolved itinerary) to session state."""
+    ) -> list:
+        """Persist suggestion chips (and optionally the resolved itinerary) to session state.
+
+        Returns the clamped suggestions list actually written to session
+        state (MYS-494 r1). Callers MUST emit this returned list, not the
+        one they passed in -- clamping only the copy written here while
+        the caller separately emits its own unclamped local variable is
+        exactly the divergence this fix closes: the reader is shown (and
+        can click) a chip whose action_prompt is longer than what's
+        stored, and whose stored copy is what a later expand() actually
+        resolves against. On the no-op path (session missing, or an
+        exception during the write) the original suggestions are
+        returned unclamped, matching prior no-op behaviour.
+        """
+        clamped = suggestions
         try:
             session = await self._session_service.get_session(
                 app_name=APP_NAME, user_id=user_id, session_id=job_id
             )
             if session is not None:
-                delta: dict = {SessionStateKeys.LAST_SUGGESTIONS: suggestions}
+                clamped = [
+                    self._clamp_action_prompt(chip) for chip in suggestions
+                ]
+                delta: dict = {SessionStateKeys.LAST_SUGGESTIONS: clamped}
                 if itinerary_data is not None:
                     delta[SessionStateKeys.FINAL_ITINERARY] = itinerary_data
                 if book_recommendation_chip is not None:
@@ -1072,6 +1131,7 @@ class WorkflowExecutor:
                 await self._session_service.append_event(session, event)
         except Exception:
             logger.warning("persist_suggestions_error", job_id=job_id)
+        return clamped
 
     async def expand(
         self,
@@ -1390,6 +1450,16 @@ class WorkflowExecutor:
                 new_suggestions = []
             else:
                 new_suggestions = self._stamp_suggestion_ids(new_suggestions)
+                # MYS-494 r1: expand() writes LAST_SUGGESTIONS directly via
+                # persist_event below rather than calling
+                # _persist_suggestions, so that helper's clamp never ran on
+                # this path -- every chip an expansion produces shipped
+                # unclamped. Clamp here, at the point these chips are
+                # produced, so the SAME list is both what gets persisted
+                # and what ExpansionReady emits below.
+                new_suggestions = [
+                    self._clamp_action_prompt(chip) for chip in new_suggestions
+                ]
 
             # Accumulate this expansion in session state
             prior_expansions = run_state.expansions
