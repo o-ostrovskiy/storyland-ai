@@ -1,0 +1,21 @@
+{
+  "_readme": [
+    "MYS-439 class-level guard inventory (paired with tests/unit/test_dead_field_inventory.py).",
+    "Every preference FIELD NAME literally read off a variable/parameter named `preferences` inside",
+    "the prompt-assembly surface (agents/*.py, core/prompts.py) via preferences[\"field\"] or",
+    "preferences.get(\"field\") must have an entry in `fields` below, naming the FE surface that",
+    "actually collects it -- so QA's weekly dead-control sweep can diff against the same list. The",
+    "test fails CI if a scanned field is missing here, or if an entry here names a field the scan no",
+    "longer finds (stale documentation of a read that was removed).",
+    "",
+    "Empty today (2026-07-27): MYS-436 deleted reader_profile_agent, the only prompt that ever read",
+    "a NAMED preference field. Every remaining prompt builder treats `preferences` as an opaque dict",
+    "passed through whole via json.dumps(preferences) -- core/prompts.py::build_composition_prompt,",
+    "agents/prompts.py::preferences_block. The FE does not collect or send any named preference",
+    "field on the live discover/compose paths either (storyland-web's `preferences` payload is",
+    "optional and unused since MYS-392 retired the mood-chip channel). Add an entry here in the SAME",
+    "PR that adds a named preferences.get(\"field\")/preferences[\"field\"] read to the prompt-assembly",
+    "surface."
+  ],
+  "fields": {}
+}
