@@ -653,6 +653,22 @@ class TestHealthEndpoint:
         assert data["model_name"] == "gemini-2.0-flash-lite"
 
 
+class TestVersionEndpoint:
+    @pytest.mark.asyncio
+    async def test_version_reports_sentry_release_env_var(self, test_client, monkeypatch):
+        monkeypatch.setenv("SENTRY_RELEASE", "abc1234")
+        response = await test_client.get("/api/v1/version")
+        assert response.status_code == 200
+        assert response.json() == {"service": "storyland-ai", "git_sha": "abc1234"}
+
+    @pytest.mark.asyncio
+    async def test_version_falls_back_to_unknown_when_unset(self, test_client, monkeypatch):
+        monkeypatch.delenv("SENTRY_RELEASE", raising=False)
+        response = await test_client.get("/api/v1/version")
+        assert response.status_code == 200
+        assert response.json() == {"service": "storyland-ai", "git_sha": "unknown"}
+
+
 class TestStatusEndpoint:
     """Tests for GET /api/v1/itinerary/{job_id}/status (derived status)."""
 
