@@ -4,7 +4,7 @@ import os
 import httpx
 import pytest
 
-from generate_books_set_in_corpus import (
+from tools.generate_books_set_in_corpus import (
     GeneratorError,
     build_page,
     fetch_place_to_book,
@@ -152,7 +152,7 @@ def test_fetch_place_to_book_calls_the_expected_path_and_query():
 # -- CLI: --batch must refuse without ever touching the network --
 
 def test_main_batch_flag_refuses_without_network_call(monkeypatch, capsys):
-    from generate_books_set_in_corpus import main
+    from tools.generate_books_set_in_corpus import main
 
     def fail_if_called(*args, **kwargs):
         raise AssertionError("network must not be touched when --batch is passed")
@@ -165,7 +165,7 @@ def test_main_batch_flag_refuses_without_network_call(monkeypatch, capsys):
 
 
 def test_main_requires_city_or_batch():
-    from generate_books_set_in_corpus import main
+    from tools.generate_books_set_in_corpus import main
 
     with pytest.raises(SystemExit):
         main([])
