@@ -169,3 +169,113 @@ def test_main_requires_city_or_batch():
 
     with pytest.raises(SystemExit):
         main([])
+
+
+# ---------------------------------------------------------------------------
+# r2 (fix-list round 1, Engineering Lead)
+# ---------------------------------------------------------------------------
+
+
+def _mixed_response(literal: int, vibe: int) -> dict:
+    """A minimal PlaceToBook-shaped body with a chosen literal/vibe split.
+
+    Built from the real fixture's row shape rather than invented, so a change to
+    the BE contract breaks these tests too instead of letting them drift.
+    """
+    template = load_fixture()["books"][0]
+    books = []
+    for i in range(literal):
+        row = dict(template, title=f"Literal {i}", match_type="literal", maps_to=f"Anchor {i}")
+        books.append(row)
+    for i in range(vibe):
+        row = dict(template, title=f"Kindred {i}", match_type="vibe")
+        row["maps_to"] = None  # exactly what the BE sends for a kindred row
+        books.append(row)
+    return {"place": "Testville", "query": "Testville", "found": True, "message": None, "books": books}
+
+
+# -- item 1: the intro must not claim an anchor the kindred rows do not have --
+
+
+def test_mixed_page_scopes_the_stand_claim_to_the_literal_entries():
+    # The reported defect: 3 of Barcelona's 8 verified rows are vibe with
+    # maps_to=None, and the intro told every reader "each one points to
+    # somewhere you can actually stand".
+    report = build_page("Barcelona", load_fixture())
+    intro = report.page["intro"]
+
+    assert "the literal entries point to somewhere you can actually stand." in intro
+    assert "each one points to" not in intro, (
+        "an unscoped claim is false for every kindred row on a mixed page: "
+        f"{intro}"
+    )
+
+
+def test_all_literal_page_keeps_the_unscoped_claim_because_it_is_true_there():
+    report = build_page("Testville", _mixed_response(literal=4, vibe=0))
+    intro = report.page["intro"]
+
+    assert "so each one points to somewhere you can actually stand." in intro
+    assert "the literal entries" not in intro
+
+
+def test_the_scoped_claim_never_overstates_a_row_that_carries_no_map_anchor():
+    # Ties the sentence to the DATA rather than to a string: every row the
+    # intro claims is standable must actually carry a mapsTo.
+    report = build_page("Testville", _mixed_response(literal=2, vibe=3))
+    books = report.page["books"]
+    anchored = [b for b in books if b.get("mapsTo")]
+    unanchored = [b for b in books if not b.get("mapsTo")]
+
+    assert len(unanchored) == 3, "fixture guard: this page must contain unanchored rows"
+    assert all(b["matchType"] == "literal" for b in anchored)
+    assert all(b["matchType"] == "vibe" for b in unanchored)
+    # ...and because unanchored rows exist, the claim is scoped.
+    assert "the literal entries point to" in report.page["intro"]
+
+
+# -- item 2: the tool's success bar must equal the corpus's publish bar --
+
+
+def test_all_vibe_city_is_refused_because_the_fe_could_never_publish_it():
+    # Previously: printed "6 verified book(s) kept", exited 0, produced a page
+    # storyland-web's isPublishableBooksSetInPlace (MYS-455) will never publish.
+    with pytest.raises(GeneratorError) as exc:
+        build_page("Testville", _mixed_response(literal=0, vibe=6))
+
+    message = str(exc.value)
+    assert "0 are matchType 'literal'" in message
+    assert "isPublishableBooksSetInPlace" in message
+
+
+def test_a_single_literal_row_is_enough_mirroring_the_fe_gate_exactly():
+    # The FE gate is `some(matchType === 'literal')` -- not a ratio. Mirror it,
+    # so this tool never refuses a page the corpus would happily publish.
+    report = build_page("Testville", _mixed_response(literal=1, vibe=5))
+    assert report.verified_book_count == 6
+
+
+# -- item 3: a trailing slash on the documented override must not 404 --
+
+
+def test_backend_url_trailing_slash_is_stripped_before_the_request(monkeypatch, tmp_path):
+    from tools.generate_books_set_in_corpus import main
+
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # httpx preserves the doubled slash, so this asserts the real URL path.
+        seen["path"] = request.url.path
+        return httpx.Response(200, json=load_fixture())
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.Client  # captured BEFORE patching, or the lambda recurses into itself
+    monkeypatch.setattr(httpx, "Client", lambda *a, **k: real_client(transport=transport))
+
+    out = tmp_path / "out.json"
+    exit_code = main(["--city", "Barcelona", "--out", str(out), "--backend-url", "http://localhost:8090/"])
+
+    assert exit_code == 0
+    assert seen["path"] == "/api/v1/place-to-book", (
+        f"a trailing slash produced {seen['path']!r} -- a directly-hosted ASGI app 404s on the doubled slash"
+    )

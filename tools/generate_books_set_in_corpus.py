@@ -25,7 +25,10 @@ show fewer titles than invent one." Only rows with `grounding.verified is
 True` are kept -- an ungrounded/unverified candidate is dropped, never padded
 in. A city that ends up with zero verified rows is refused outright (an
 empty `books[]` is build-fatal on the FE loader anyway; better to fail loudly
-here than ship a thin or empty page).
+here than ship a thin or empty page). A city whose verified rows are ALL
+kindred (`vibe`) is refused too: storyland-web's `isPublishableBooksSetInPlace`
+(MYS-455) requires at least one `literal` row before a page may be published,
+so "verified" alone is this tool's bar, not the corpus's.
 
 Usage:
     python generate_books_set_in_corpus.py --city Barcelona --out out.json
@@ -80,8 +83,10 @@ def place_slug(name: str) -> str:
     `src/data/booksSetInPlace.ts::placeSlug()` -- the FE loader rejects any
     record whose `slug` isn't exactly `placeSlug(place)` (MYS-204's build-time
     gate for generated rows). Re-implemented here rather than shared because
-    this is a different repo/language; a test pins both against the same
-    fixture set to keep them from drifting apart.
+    this is a different repo/language. There is deliberately no cross-repo pin
+    here -- CI cannot run both sides -- so the real guard is that the FE's
+    `validatePlace` is build-fatal on a slug mismatch. (Corrected in r2: this
+    docstring used to claim a shared-fixture test that does not exist.)
     """
     if not name:
         return ""
@@ -217,20 +222,45 @@ def build_page(city: str, backend_response: dict[str, Any]) -> GenerationReport:
         books.append(book)
 
     literal_titles = [b["title"] for b in books if b["matchType"] == "literal"]
+    vibe_count = len(books) - len(literal_titles)
+
+    # MYS-431 r1 (Eng Lead), item 2: mirror storyland-web's SECOND, stricter
+    # gate. The verified bar above is this tool's bar; `isPublishableBooksSetInPlace`
+    # (booksSetInPlace.ts, MYS-455) is the CORPUS's bar -- a page needs at least
+    # one LITERAL row, because the h1, <title> and ItemList JSON-LD all assert a
+    # "set in <place>" relationship an all-kindred page does not contain. Without
+    # this, a city returning 6 verified-but-all-vibe rows printed "6 verified
+    # book(s) kept", exited 0, and produced a page the FE will never publish --
+    # invisible at --city scale, silent at 90 cities.
+    if not literal_titles:
+        raise GeneratorError(
+            f'"{city}": {len(books)} verified row(s) kept but 0 are matchType '
+            "'literal' -- storyland-web's isPublishableBooksSetInPlace (MYS-455) "
+            "refuses an all-kindred page, so this city is unpublishable: its h1 and "
+            "ItemList would assert a set-in relationship the corpus does not contain"
+        )
+
     # Deterministic, no-extra-LLM-call intro: a template, not a second Gemini
-    # pass. Matches the fixed closing sentence every hand-authored seed page
-    # already uses (src/data/booksSetInPlace.json) so a generated page reads
-    # as one voice with the existing 11. A Content role can hand-polish the
-    # opening clause before publish; the schema/grounding contract below is
-    # the build-fatal part, not the prose.
-    if literal_titles:
-        opening = f"{literal_titles[0]} is among the books genuinely set in {place}."
+    # pass.
+    #
+    # MYS-431 r1 (Eng Lead), item 1: the closing clause must not claim a
+    # property the rows do not have. A `vibe` row legitimately carries no
+    # `mapsTo` at all, so on a mixed page the unscoped "each one points to
+    # somewhere you can actually stand" is FALSE for every kindred row -- the
+    # render-"we-don't-know"-as-a-positive-claim class (MYS-584/MYS-492), and
+    # worse here because these are indexable pages whose whole proposition is
+    # that we checked. `greece` is the one seed page that solved it, by scoping
+    # the clause to "the literal entries"; that form is copied here for any page
+    # carrying kindred rows. An all-literal page keeps the unscoped form, which
+    # is honest for it. (The zero-literal case can no longer reach this code.)
+    opening = f"{literal_titles[0]} is among the books genuinely set in {place}."
+    if vibe_count:
+        claim = "so the literal entries point to somewhere you can actually stand."
     else:
-        opening = f"{place} has inspired more books than most guides let on."
+        claim = "so each one points to somewhere you can actually stand."
     intro = (
         f"{opening} The books below are drawn from Storyland's book↔place "
-        "engine and checked against real locations, so each one points to "
-        "somewhere you can actually stand."
+        f"engine and checked against real locations, {claim}"
     )
 
     page = {
@@ -272,6 +302,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", default="books_set_in_generated.json", help="Output JSON path")
     parser.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
     args = parser.parse_args(argv)
+    # MYS-431 r1 (Eng Lead), item 3 (from Codex): `--backend-url http://host:8090/`
+    # would request `//api/v1/place-to-book`, which a directly-hosted ASGI app
+    # treats as a distinct path and 404s. The default carries no trailing slash,
+    # so this never fired in the Barcelona run -- it only breaks the documented
+    # override, for the person most likely to use it (a local backend).
+    args.backend_url = args.backend_url.rstrip("/")
 
     if args.batch:
         # Deliberately not implemented in this PR. MYS-431's own scope note:
