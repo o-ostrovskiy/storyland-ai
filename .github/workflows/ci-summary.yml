@@ -1,0 +1,147 @@
+name: CI summary comment
+
+# WHY THIS EXISTS (MYS-672)
+#
+# The agent fleet cannot read CI. Two independent walls:
+#   1. The Checks API 403s for the GitHub MCP connector app AND for our own
+#      fine-grained PAT — /commits/<sha>/check-runs is simply out of reach.
+#   2. The Actions API would answer, but the agent sandbox's outbound proxy
+#      refuses api.github.com ("403 from proxy after CONNECT"); --noproxy
+#      does not help. Verified by the Engineering Lead 2026-07-28.
+#
+# So we stop making agents PULL and let CI PUSH. This job runs inside Actions
+# — full API access, no proxy — and writes the result into a PR comment, a
+# channel the fleet already reads through the MCP (pull_request_read
+# get_comments is NOT blocked). Fresh by construction: it updates whenever a
+# run finishes, so there is no staleness window and no snapshot to reconcile.
+#
+# INFORMATIONAL ONLY. Never add this to the required-checks list: it reports
+# CI, it does not gate it. Branch protection already blocks a red merge.
+
+on:
+  workflow_run:
+    # Every workflow that reports on a PR here. Add new ones to this list —
+    # a missing name means its result silently never reaches the summary.
+    workflows:
+      - "Unit Tests"
+      - "Integration Tests"
+      - "Gitleaks"
+      - "pip-audit"
+      - "PR body sections"
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to summarise (manual verification)"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  pull-requests: write
+
+jobs:
+  summarise:
+    name: Post CI summary to the PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const MARKER = '<!-- ci-summary:do-not-remove -->';
+            const GREEN = new Set(['success', 'skipped']);
+
+            // --- Resolve (pr, head_sha) from either trigger -------------------
+            let prNumber, headSha;
+            if (context.eventName === 'workflow_dispatch') {
+              prNumber = Number(context.payload.inputs.pr);
+              const { data: pr } = await github.rest.pulls.get({
+                ...context.repo, pull_number: prNumber,
+              });
+              headSha = pr.head.sha;
+            } else {
+              const run = context.payload.workflow_run;
+              headSha = run.head_sha;
+              // workflow_run.pull_requests is populated for same-repo PRs, but
+              // is empty for forks and occasionally lags. Fall back to a search
+              // by head SHA rather than silently skipping the comment.
+              prNumber = run.pull_requests?.[0]?.number;
+              if (!prNumber) {
+                const { data: prs } = await github.rest.pulls.list({
+                  ...context.repo, state: 'open', per_page: 100,
+                });
+                prNumber = prs.find((p) => p.head.sha === headSha)?.number;
+              }
+              if (!prNumber) {
+                core.info(`No open PR for ${headSha} — nothing to comment on.`);
+                return;
+              }
+            }
+
+            // --- Newest run per workflow NAME --------------------------------
+            // Load-bearing, not tidiness: a re-run — or an edited PR body
+            // re-firing the body-sections guard — leaves the OLD failure and
+            // the NEW success both attached to the same SHA. Reporting the
+            // first match shows a red that no longer exists, and one phantom
+            // red is all it takes for a reader to stop trusting this comment.
+            const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+              ...context.repo, head_sha: headSha, per_page: 100,
+            });
+            const latest = new Map();
+            for (const r of [...runs.workflow_runs].sort(
+              (a, b) => new Date(a.created_at) - new Date(b.created_at)
+            )) {
+              if (r.name === context.workflow) continue; // never report on ourselves
+              latest.set(r.name, r);
+            }
+
+            // --- Build the comment -------------------------------------------
+            const rows = [...latest.entries()].sort(([a], [b]) => a.localeCompare(b));
+            const bad = rows.filter(([, r]) => !GREEN.has(r.conclusion));
+            const pending = rows.filter(([, r]) => r.conclusion === null);
+
+            let verdict;
+            if (rows.length === 0) verdict = '**NO RUNS** — CI has not reported for this commit. This is NOT green.';
+            else if (pending.length) verdict = `⏳ **${pending.length} still running** — not green yet.`;
+            else if (bad.length) verdict = `🔴 **RED** — ${bad.length} of ${rows.length} failing.`;
+            else verdict = `🟢 **GREEN** — ${rows.length}/${rows.length} passing.`;
+
+            const table = rows.length
+              ? ['| result | workflow | run |', '| -- | -- | -- |',
+                 ...rows.map(([name, r]) => {
+                   const c = r.conclusion ?? 'running';
+                   const icon = GREEN.has(c) ? '✅' : c === 'running' ? '⏳' : '❌';
+                   return `| ${icon} ${c} | ${name} | [log](${r.html_url}) |`;
+                 })].join('\n')
+              : '_No workflow runs recorded for this commit._';
+
+            const body = [
+              MARKER,
+              `### CI on \`${headSha.slice(0, 8)}\``,
+              '',
+              verdict,
+              '',
+              table,
+              '',
+              `<sub>Posted by CI because the fleet cannot read check status directly ` +
+              `([MYS-672](https://linear.app/mystoryland/issue/MYS-672)). **This comment is only true for ` +
+              `\`${headSha.slice(0, 8)}\`** — if that is not the PR's current head, a newer commit has ` +
+              `landed and this is stale. Informational; branch protection is what actually gates the merge.</sub>`,
+            ].join('\n');
+
+            // --- Upsert one sticky comment, never a thread of them ------------
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo, issue_number: prNumber, per_page: 100,
+            });
+            const existing = comments.find((c) => c.body?.includes(MARKER));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo, comment_id: existing.id, body,
+              });
+              core.info(`Updated CI summary on #${prNumber} (${headSha.slice(0, 8)}).`);
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: prNumber, body,
+              });
+              core.info(`Created CI summary on #${prNumber} (${headSha.slice(0, 8)}).`);
+            }

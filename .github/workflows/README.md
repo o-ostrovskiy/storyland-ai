@@ -25,6 +25,7 @@ workflow files** plus GitHub-managed **Dependabot Updates**.
 | **Re-record VCR Cassettes** | `re-record-cassettes.yml` | dispatch | Manual utility to regenerate VCR cassettes (MYS-440 re-record split). No automatic trigger; run when live responses change. | **Keep** (manual tool) |
 | **Sync rotated env keys to box** | `sync-env-keys.yml` | dispatch | Manual utility to push rotated env keys to the prod box (MYS-440 key rotation). | **Keep** (manual tool) |
 | **Dependabot Updates** | *(GitHub-managed, `.github/dependabot.yml`)* | Dependabot schedule | Automated dependency-update PRs. Not a YAML in `.github/workflows/`. | **Keep** |
+| **CI summary comment** | `ci-summary.yml` | `workflow_run` completed on this repo's PR-reporting workflows + dispatch | Upserts ONE sticky comment per PR summarising every workflow's conclusion for the PR's current head SHA. Exists because agents cannot read CI at all — the Checks API 403s (no `checks` scope on the connector app, and our own PAT 403s too) and the Actions API is refused by the agent sandbox's outbound proxy (MYS-672). Runs inside Actions, so it has the access agents lack, and writes into a channel they can read. **Informational — never add to the required-checks list; it reports CI, it does not gate it.** Takes the newest run per workflow name (a re-run leaves stale failures on the same SHA) and reports "no runs" as explicitly NOT green. | **Keep** |
 
 ## Health notes (2026-07-25)
 - `main` **green**; security lane (Gitleaks, pip-audit, Dependabot) all passing.
