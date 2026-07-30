@@ -1,0 +1,144 @@
+{
+  "place": "Barcelona",
+  "query": "barcelona",
+  "found": true,
+  "message": null,
+  "books": [
+    {
+      "title": "The Shadow of the Wind",
+      "author": "Carlos Ruiz Zafon",
+      "description": "Barcelona, 1945: a city slowly heals in the aftermath of the Spanish Civil War, and Daniel finds solace in a mysterious book by Julian Carax.",
+      "image_url": "https://books.google.com/books/content?id=aLNPEAAAQBAJ&printsec=frontcover&img=1&zoom=1&source=gbs_api",
+      "published_date": "2004-04-12",
+      "why_it_fits": "It is arguably the definitive Barcelona novel, capturing the city’s gothic, rainy, and mysterious soul.",
+      "match_type": "literal",
+      "maps_to": "The Gothic Quarter",
+      "grounding": {
+        "google_books_id": "aLNPEAAAQBAJ",
+        "source": "google_books",
+        "verified": true,
+        "catalog_id": "aLNPEAAAQBAJ",
+        "catalog_source": "google_books"
+      }
+    },
+    {
+      "title": "Cathedral of the Sea",
+      "author": "Ildefonso Falcones",
+      "description": "A young serf's rise amid the building of a cathedral in 14th-century Barcelona.",
+      "image_url": "https://books.google.com/books/content?id=60LxPgAACAAJ&printsec=frontcover&img=1&zoom=1&source=gbs_api",
+      "published_date": "2009",
+      "why_it_fits": "Walking into the actual Santa Maria del Mar basilica after reading this provides a profound, tangible link to the city's medieval origins.",
+      "match_type": "literal",
+      "maps_to": "La Ribera neighborhood",
+      "grounding": {
+        "google_books_id": "60LxPgAACAAJ",
+        "source": "google_books",
+        "verified": true,
+        "catalog_id": "60LxPgAACAAJ",
+        "catalog_source": "google_books"
+      }
+    },
+    {
+      "title": "In Diamond Square",
+      "author": "Merce Rodoreda",
+      "description": "A shop-girl's life in Gracia through the Spanish Civil War.",
+      "image_url": "https://books.google.com/books/content?id=46tFLwEACAAJ&printsec=frontcover&img=1&zoom=1&source=gbs_api",
+      "published_date": "2013",
+      "why_it_fits": "It provides a deeply moving and authentic look at how the city’s turbulent 20th-century history affected ordinary citizens.",
+      "match_type": "literal",
+      "maps_to": "Gràcia neighborhood",
+      "grounding": {
+        "google_books_id": "46tFLwEACAAJ",
+        "source": "google_books",
+        "verified": true,
+        "catalog_id": "46tFLwEACAAJ",
+        "catalog_source": "google_books"
+      }
+    },
+    {
+      "title": "Homage to Catalonia",
+      "author": "George Orwell",
+      "description": "Orwell's personal account of fighting for the Republican army during the Spanish Civil War.",
+      "image_url": "https://books.google.com/books/content?id=KgKVzQEACAAJ&printsec=frontcover&img=1&zoom=1&source=gbs_api",
+      "published_date": "2020-06-06",
+      "why_it_fits": "It offers an essential, raw historical perspective on the political passions that have shaped modern Barcelona.",
+      "match_type": "literal",
+      "maps_to": "Barcelona",
+      "grounding": {
+        "google_books_id": "KgKVzQEACAAJ",
+        "source": "google_books",
+        "verified": true,
+        "catalog_id": "KgKVzQEACAAJ",
+        "catalog_source": "google_books"
+      }
+    },
+    {
+      "title": "The Angst-ridden Executive",
+      "author": "Manuel Vazquez Montalban",
+      "description": "Private investigator Pepe Carvalho investigates a murder in post-Franco Barcelona.",
+      "image_url": "https://books.google.com/books/content?id=fcNvDwAAQBAJ&printsec=frontcover&img=1&zoom=1&source=gbs_api",
+      "published_date": "2012",
+      "why_it_fits": "It serves as a gritty, \"insider\" tour of the city’s neighborhoods and culinary culture during the post-Franco era.",
+      "match_type": "literal",
+      "maps_to": "Plaça Reial",
+      "grounding": {
+        "google_books_id": "fcNvDwAAQBAJ",
+        "source": "google_books",
+        "verified": true,
+        "catalog_id": "fcNvDwAAQBAJ",
+        "catalog_source": "google_books"
+      }
+    },
+    {
+      "title": "Iberia",
+      "author": "James A. Michener",
+      "description": "Michener's nonfiction tribute to Spain.",
+      "image_url": "https://books.google.com/books/content?id=pzKJDAAAQBAJ&printsec=frontcover&img=1&zoom=1&source=gbs_api",
+      "published_date": "2015-03-10",
+      "why_it_fits": "It prepares you for the broader cultural and historical context of Spain, helping you appreciate Barcelona’s unique position within the nation.",
+      "match_type": "vibe",
+      "maps_to": null,
+      "grounding": {
+        "google_books_id": "pzKJDAAAQBAJ",
+        "source": "google_books",
+        "verified": true,
+        "catalog_id": "pzKJDAAAQBAJ",
+        "catalog_source": "google_books"
+      }
+    },
+    {
+      "title": "The Battle for Spain",
+      "author": "Antony Beevor",
+      "description": "A comprehensive account of the Spanish Civil War.",
+      "image_url": "https://books.google.com/books/content?id=Q-mayoYS6eIC&printsec=frontcover&img=1&zoom=1&source=gbs_api",
+      "published_date": "2006-06-01",
+      "why_it_fits": "Understanding the gravity of this period will give you a much richer and more respectful appreciation for the city's monuments and memorials.",
+      "match_type": "vibe",
+      "maps_to": null,
+      "grounding": {
+        "google_books_id": "Q-mayoYS6eIC",
+        "source": "google_books",
+        "verified": true,
+        "catalog_id": "Q-mayoYS6eIC",
+        "catalog_source": "google_books"
+      }
+    },
+    {
+      "title": "Barcelona",
+      "author": "Robert Hughes",
+      "description": "A history, art, and architecture tour of Barcelona.",
+      "image_url": "https://books.google.com/books/content?id=6chpUGofrdcC&printsec=frontcover&img=1&zoom=1&source=gbs_api",
+      "published_date": "2011-06-15",
+      "why_it_fits": "It is arguably the most \"flavorful\" introduction to the soul of the city, perfectly blending historical depth with a keen eye for its architectural peculiarities.",
+      "match_type": "vibe",
+      "maps_to": null,
+      "grounding": {
+        "google_books_id": "6chpUGofrdcC",
+        "source": "google_books",
+        "verified": true,
+        "catalog_id": "6chpUGofrdcC",
+        "catalog_source": "google_books"
+      }
+    }
+  ]
+}
