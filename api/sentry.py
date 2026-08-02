@@ -82,6 +82,27 @@ logger = get_logger(__name__)
 # in access lines and any other URL-bearing stdlib log reaching Sentry Logs.
 _URL_QUERY_RE = re.compile(r"\?[^\s\"]*")
 
+# Span/trace attribute keys whose VALUE is a bare query string with no
+# leading '?' (MYS-551, ai twin of the gateway defect): sentry-sdk's HTTPX
+# integration stores span.data['http.query'] = 'q=<user search>'. The
+# '?'-heuristic below can never fire on those values, so the KEY is dropped
+# outright. Matches http.query / url.query / query_string style names.
+_QUERY_KEY_RE = re.compile(r"(^|[._])query($|[._])", re.IGNORECASE)
+
+
+def _scrub_data_record(data):
+    """
+    Scrub one span/trace attribute dict in place (MYS-551): query-named keys
+    are DELETED (their whole value is the query — nothing to strip back to),
+    every other string value loses any '?' tail. Same two rules as the
+    gateway (storyland-services#127) and the frontend (storyland-web#310).
+    """
+    for key, value in list(data.items()):
+        if _QUERY_KEY_RE.search(key):
+            del data[key]
+        elif isinstance(value, str) and "?" in value:
+            data[key] = _URL_QUERY_RE.sub("", value)
+
 
 def _drop_health_probe_logs(log, hint):
     """
@@ -154,9 +175,17 @@ def _scrub_event(event, hint):
                 span["description"] = _URL_QUERY_RE.sub("", description)
             data = span.get("data")
             if isinstance(data, dict):
-                for key, value in list(data.items()):
-                    if isinstance(value, str) and "?" in value:
-                        data[key] = _URL_QUERY_RE.sub("", value)
+                _scrub_data_record(data)
+    # The ROOT span's attributes are serialized separately, as
+    # contexts.trace.data — same record shape, same rules (parity with the
+    # gateway's MYS-551 fix and storyland-web#310 round 2).
+    contexts = event.get("contexts")
+    if isinstance(contexts, dict):
+        trace = contexts.get("trace")
+        if isinstance(trace, dict):
+            trace_data = trace.get("data")
+            if isinstance(trace_data, dict):
+                _scrub_data_record(trace_data)
     return event
 
 
