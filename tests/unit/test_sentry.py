@@ -236,6 +236,52 @@ class TestHealthProbeLogFilter:
         assert out3["spans"][0]["description"] == "GET http://u/v"
         assert out3["spans"][0]["data"]["url"] == "http://u/v"
 
+    def test_span_bare_query_keys_dropped(self):
+        """MYS-551 (ai twin of the gateway defect): the HTTPX integration
+        stores the query WITHOUT a leading '?' in span.data['http.query'] —
+        the '?' heuristic never fires, so the key must be dropped. Reds
+        against pre-fix main."""
+        event = {
+            "spans": [
+                {
+                    "description": "GET http://u/v",
+                    "data": {
+                        "http.query": "book_title=secret+title",
+                        "url.query": "place=Paris",
+                        "http.request.method": "GET",
+                        "status": 200,
+                    },
+                }
+            ]
+        }
+        out = _scrub_event(event, {})
+        data = out["spans"][0]["data"]
+        assert "http.query" not in data
+        assert "url.query" not in data
+        assert data["http.request.method"] == "GET"
+        assert data["status"] == 200
+
+    def test_root_trace_context_data_scrubbed(self):
+        """MYS-551 companion: the ROOT span's attributes land in
+        contexts.trace.data, not event['spans'] (storyland-web#310 r2
+        parity)."""
+        event = {
+            "contexts": {
+                "trace": {
+                    "data": {
+                        "url.full": "http://u/api/v1/discover?book_title=secret",
+                        "http.query": "book_title=secret",
+                        "keep": "plain",
+                    }
+                }
+            }
+        }
+        out = _scrub_event(event, {})
+        trace_data = out["contexts"]["trace"]["data"]
+        assert trace_data["url.full"] == "http://u/api/v1/discover"
+        assert "http.query" not in trace_data
+        assert trace_data["keep"] == "plain"
+
     def test_round5_parity(self, monkeypatch):
         """storyland-services#92 round 5: dict params + extras scrubbed,
         health crumbs dropped, tracing None when off / kept when opted in."""
