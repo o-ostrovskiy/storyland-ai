@@ -13,7 +13,7 @@ from typing import Optional, List, Literal
 from pydantic import BaseModel, Field, field_validator
 
 
-# --- Request Models ---
+# Request Models
 
 # Input-size bounds: reject oversized payloads with a 422 BEFORE any prompt is
 # built or Gemini is called (cost + prompt-injection-surface guard). 200 matches
@@ -395,7 +395,7 @@ class LocalAtmosphereRequest(BaseModel):
         return _bound_preferences(value)
 
 
-# --- SSE Event Models ---
+# SSE Event Models
 
 
 class SSEProgressEvent(BaseModel):
@@ -514,7 +514,7 @@ class SSEDoneEvent(BaseModel):
     )
 
 
-# --- REST Response Models ---
+# REST Response Models
 
 
 class JobStatus(str, Enum):

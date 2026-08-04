@@ -15,10 +15,7 @@ from evaluation.tools.llm_scorer import (
 
 
 class TestItineraryScoresModel:
-    """Test the ItineraryScores Pydantic model."""
-
     def test_valid_scores(self):
-        """Test creating model with valid scores."""
         scores = ItineraryScores(
             book_relevance=5,
             preference_adherence=4,
@@ -36,7 +33,6 @@ class TestItineraryScoresModel:
         assert scores.engagement == 4
 
     def test_average_score_calculation(self):
-        """Test average score calculation."""
         scores = ItineraryScores(
             book_relevance=5,
             preference_adherence=4,
@@ -50,7 +46,6 @@ class TestItineraryScoresModel:
         assert scores.average_score() == 4.0
 
     def test_average_score_with_decimals(self):
-        """Test average score with decimal result."""
         scores = ItineraryScores(
             book_relevance=5,
             preference_adherence=5,
@@ -64,7 +59,6 @@ class TestItineraryScoresModel:
         assert abs(scores.average_score() - 4.333) < 0.01
 
     def test_score_too_low_raises_validation_error(self):
-        """Test that scores below 1 raise validation error."""
         with pytest.raises(ValidationError) as exc_info:
             ItineraryScores(
                 book_relevance=0,  # Invalid: too low
@@ -79,7 +73,6 @@ class TestItineraryScoresModel:
         assert "greater than or equal to 1" in str(exc_info.value)
 
     def test_score_too_high_raises_validation_error(self):
-        """Test that scores above 5 raise validation error."""
         with pytest.raises(ValidationError) as exc_info:
             ItineraryScores(
                 book_relevance=5,
@@ -94,7 +87,6 @@ class TestItineraryScoresModel:
         assert "less than or equal to 5" in str(exc_info.value)
 
     def test_missing_field_raises_validation_error(self):
-        """Test that missing required fields raise validation error."""
         with pytest.raises(ValidationError):
             # Missing engagement field
             ItineraryScores(
@@ -106,7 +98,6 @@ class TestItineraryScoresModel:
             )
 
     def test_model_json_serialization(self):
-        """Test that model can be serialized to JSON."""
         scores = ItineraryScores(
             book_relevance=5,
             preference_adherence=4,
@@ -121,7 +112,6 @@ class TestItineraryScoresModel:
         assert "5" in json_str
 
     def test_model_json_deserialization(self):
-        """Test that model can be deserialized from JSON."""
         json_str = """{
             "book_relevance": 5,
             "preference_adherence": 4,
@@ -137,10 +127,7 @@ class TestItineraryScoresModel:
 
 
 class TestScoringCriteria:
-    """Test scoring criteria definitions."""
-
     def test_all_criteria_defined(self):
-        """Test that all 6 scoring criteria are defined."""
         expected_criteria = [
             "book_relevance",
             "preference_adherence",
@@ -155,7 +142,6 @@ class TestScoringCriteria:
             assert len(SCORING_CRITERIA[criterion]) > 0
 
     def test_criteria_contain_score_ranges(self):
-        """Test that all criteria define 1-5 score ranges."""
         for criterion_name, criterion_text in SCORING_CRITERIA.items():
             # Each criterion should mention the 1-5 scale
             assert "1-5" in criterion_text or "Score 1-5" in criterion_text, \
@@ -168,10 +154,7 @@ class TestScoringCriteria:
 
 
 class TestBuildScoringPrompt:
-    """Test the prompt building function."""
-
     def test_prompt_includes_book_info(self):
-        """Test that prompt includes book title and author."""
         prompt = _build_scoring_prompt(
             book_title="The Great Gatsby",
             author="F. Scott Fitzgerald",
@@ -184,7 +167,6 @@ class TestBuildScoringPrompt:
         assert "F. Scott Fitzgerald" in prompt
 
     def test_prompt_includes_input_text(self):
-        """Test that prompt includes the original input."""
         input_text = "Plan a literary trip to Paris with museums"
         prompt = _build_scoring_prompt(
             book_title="A Moveable Feast",
@@ -197,7 +179,6 @@ class TestBuildScoringPrompt:
         assert input_text in prompt
 
     def test_prompt_includes_itinerary(self):
-        """Test that prompt includes the itinerary data."""
         itinerary = {
             "cities": ["Paris", "Lyon"],
             "summary": "A literary journey through France",
@@ -217,7 +198,6 @@ class TestBuildScoringPrompt:
         assert "literary journey" in prompt
 
     def test_prompt_includes_preferences_when_provided(self):
-        """Test that prompt includes user preferences."""
         preferences = {
             "budget": "moderate",
             "pace": "relaxed",
@@ -237,7 +217,6 @@ class TestBuildScoringPrompt:
         assert "wheelchair" in prompt
 
     def test_prompt_handles_no_preferences(self):
-        """Test that prompt handles missing preferences gracefully."""
         prompt = _build_scoring_prompt(
             book_title="A Moveable Feast",
             author="Ernest Hemingway",
@@ -249,7 +228,6 @@ class TestBuildScoringPrompt:
         assert "No preferences specified" in prompt
 
     def test_prompt_includes_all_scoring_criteria(self):
-        """Test that prompt includes all 6 scoring criteria."""
         prompt = _build_scoring_prompt(
             book_title="Test Book",
             author="Test Author",
@@ -273,7 +251,6 @@ class TestBuildScoringPrompt:
             assert "1-5" in prompt  # All should mention scale
 
     def test_prompt_format_is_valid(self):
-        """Test that prompt is properly formatted (no syntax errors)."""
         prompt = _build_scoring_prompt(
             book_title="Test Book",
             author="Test Author",
@@ -290,7 +267,6 @@ class TestBuildScoringPrompt:
         assert "Evaluate this travel itinerary" in prompt
 
     def test_prompt_json_formatting(self):
-        """Test that JSON data in prompt is properly formatted."""
         itinerary = {
             "cities": ["Paris"],
             "nested": {"key": "value"},
@@ -313,8 +289,6 @@ class TestBuildScoringPrompt:
 
 
 class TestBuildScoringPromptWithQualityCriteria:
-    """Test quality_criteria injection in the scoring prompt."""
-
     def test_quality_criteria_injected_into_prompt(self):
         """Book-specific requirement lines appear for each provided key."""
         quality_criteria = {
@@ -333,7 +307,6 @@ class TestBuildScoringPromptWithQualityCriteria:
         assert "real NZ/UK locations" in prompt
 
     def test_quality_criteria_only_injects_provided_keys(self):
-        """Only the dimension keys present in quality_criteria get injected."""
         quality_criteria = {"book_relevance": "Must reference the One Ring."}
         prompt = _build_scoring_prompt(
             book_title="The Lord of the Rings",
@@ -345,7 +318,6 @@ class TestBuildScoringPromptWithQualityCriteria:
         assert prompt.count("Book-specific requirement:") == 1
 
     def test_no_quality_criteria_no_injection(self):
-        """No injection when quality_criteria is None."""
         prompt = _build_scoring_prompt(
             book_title="The Lord of the Rings",
             author="J.R.R. Tolkien",
@@ -357,10 +329,7 @@ class TestBuildScoringPromptWithQualityCriteria:
 
 
 class TestBuildScoringPromptWithExpectedOutput:
-    """Test expected_output reference section injection in the scoring prompt."""
-
     def test_expected_output_section_appears_when_provided(self):
-        """REFERENCE OUTPUT section appears in prompt when expected_output is given."""
         expected_output = {
             "locations": [{"city": "Matamata", "country": "New Zealand"}],
             "themes": ["Epic quest"],
@@ -382,7 +351,6 @@ class TestBuildScoringPromptWithExpectedOutput:
         assert "10-14 days" in prompt
 
     def test_no_expected_output_no_reference_section(self):
-        """No reference section when expected_output is None."""
         prompt = _build_scoring_prompt(
             book_title="The Lord of the Rings",
             author="J.R.R. Tolkien",

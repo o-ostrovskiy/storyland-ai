@@ -53,9 +53,7 @@ DEFAULT_DATASETS = ["storyland_eval", "books_v1"]
 DEFAULT_RUN_PREFIX = "eval_run_202607"
 
 
-# ---------------------------------------------------------------------------
 # Pure selection / analysis logic (unit-tested without a Langfuse client)
-# ---------------------------------------------------------------------------
 
 def interleave_by_run(
     per_dataset_runs: Dict[str, List[List[Dict[str, Any]]]],
@@ -157,9 +155,7 @@ def compute_agreement(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
 # Langfuse plumbing
-# ---------------------------------------------------------------------------
 
 def make_langfuse_client():
     """Build a Langfuse client from env creds, or exit with instructions."""
@@ -402,9 +398,7 @@ def merge_manifest_items(
     return list(merged.values())
 
 
-# ---------------------------------------------------------------------------
 # Subcommands
-# ---------------------------------------------------------------------------
 
 def cmd_build_queue(args: argparse.Namespace) -> int:
     langfuse, host = make_langfuse_client()

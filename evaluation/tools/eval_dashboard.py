@@ -203,7 +203,6 @@ class EvalDashboard:
             except Exception as e:
                 logger.warning("failed_to_load_result", filepath=filepath, error=str(e))
 
-        # Sort by timestamp
         results.sort(key=lambda x: x.get('timestamp', ''))
 
         logger.info("loaded_results", count=len(results), days=days)
@@ -244,7 +243,6 @@ class EvalDashboard:
                 "```",
             ])
         else:
-            # Calculate summary stats
             total_cases = sum(
                 sum(r.get('evaluated_cases', 0) for r in result.get('results', []))
                 for result in results
@@ -260,7 +258,6 @@ class EvalDashboard:
                 "|------|---------|-------|--------|",
             ])
 
-            # Show last 10 evaluation runs
             for result in results[-10:]:
                 timestamp = result.get('timestamp', 'N/A')
                 date = timestamp.split('T')[0] if 'T' in timestamp else timestamp
@@ -296,7 +293,6 @@ class EvalDashboard:
                 "- Monitor trends for quality regression",
             ])
 
-        # Save report
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, 'w') as f:
             f.write('\n'.join(report_lines))
@@ -340,7 +336,6 @@ class EvalDashboard:
 
             metrics["runs"].append(run_data)
 
-        # Save metrics
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, 'w') as f:
             json.dump(metrics, f, indent=2)
@@ -381,7 +376,6 @@ class EvalDashboard:
 
 
 def main():
-    """Main entry point for dashboard CLI."""
     import argparse
 
     parser = argparse.ArgumentParser(description='Evaluation Dashboard')

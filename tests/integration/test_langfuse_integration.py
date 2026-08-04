@@ -22,8 +22,6 @@ from services.session_service import create_session_service
 
 
 class TestLangfusePluginIntegration:
-    """Test Langfuse plugin with real agent workflows."""
-
     @pytest.fixture
     def langfuse_credentials(self):
         """
@@ -45,12 +43,10 @@ class TestLangfusePluginIntegration:
 
     @pytest.fixture
     def session_service(self):
-        """Create an in-memory session service for testing."""
         return create_session_service(use_database=False)
 
     @pytest.fixture
     def simple_agent(self):
-        """Create a simple LLM agent for testing."""
         return LlmAgent(
             name="test_agent",
             model=DEFAULT_MODEL_NAME,
@@ -104,7 +100,6 @@ class TestLangfusePluginIntegration:
             host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
         )
 
-        # Create runner with plugin
         runner = Runner(
             agent=simple_agent,
             app_name="test_app",
@@ -113,14 +108,12 @@ class TestLangfusePluginIntegration:
         )
 
         try:
-            # Create session first
             await session_service.create_session(
                 app_name="test_app",
                 user_id="test_user",
                 session_id="test_session",
             )
 
-            # Run a simple query using correct ADK API
             user_message = types.Content(role="user", parts=[types.Part(text="What is 2+2? Answer in one word.")])
 
             event_count = 0
@@ -155,14 +148,12 @@ class TestLangfusePluginIntegration:
     @pytest.mark.real_api
     async def test_plugin_graceful_degradation(self, simple_agent, session_service):
         """Test that invalid credentials don't break workflows."""
-        # Create plugin with invalid credentials
         plugin = LangfusePlugin(
             secret_key="invalid-key",
             public_key="invalid-key",
             host="https://invalid-host.example.com",
         )
 
-        # Create runner
         runner = Runner(
             agent=simple_agent,
             app_name="test_app",
@@ -170,7 +161,6 @@ class TestLangfusePluginIntegration:
             plugins=[plugin],
         )
 
-        # Create session
         await session_service.create_session(
             app_name="test_app",
             user_id="test_user",
@@ -193,14 +183,11 @@ class TestLangfusePluginIntegration:
 
 
 class TestLangfuseWithRealWorkflow:
-    """Test Langfuse with actual StoryLand workflows."""
-
     @pytest.mark.integration
     @pytest.mark.vcr()
     @pytest.mark.asyncio
     async def test_book_metadata_workflow_with_langfuse(self):
-        """Test a simple agent workflow with Langfuse tracking."""
-        # Create plugin (will auto-disable if credentials missing or package unavailable)
+        # Plugin auto-disables if credentials missing or package unavailable
         plugin = LangfusePlugin(
             secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
             public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
@@ -215,10 +202,8 @@ class TestLangfuseWithRealWorkflow:
             instruction="You are a helpful assistant. Respond briefly.",
         )
 
-        # Create session service
         session_service = create_session_service(use_database=False)
 
-        # Create runner
         runner = Runner(
             agent=pipeline,
             app_name="test_app",
@@ -227,14 +212,12 @@ class TestLangfuseWithRealWorkflow:
         )
 
         try:
-            # Create session
             await session_service.create_session(
                 app_name="test_app",
                 user_id="test_user",
                 session_id="test_session",
             )
 
-            # Run workflow
             user_message = types.Content(
                 role="user",
                 parts=[types.Part(text="Find book metadata for '1984' by George Orwell")]
@@ -269,15 +252,12 @@ class TestLangfuseWithRealWorkflow:
     @pytest.mark.asyncio
     @pytest.mark.real_api
     async def test_multiple_agents_with_langfuse(self):
-        """Test that Langfuse correctly tracks multiple nested agents."""
-        # Create plugin (will auto-disable if credentials missing or package unavailable)
         plugin = LangfusePlugin(
             secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
             public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
             host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
         )
 
-        # Create nested agents
         agent1 = LlmAgent(
             name="agent1",
             model=DEFAULT_MODEL_NAME,
@@ -295,7 +275,6 @@ class TestLangfuseWithRealWorkflow:
             sub_agents=[agent1, agent2],
         )
 
-        # Create session service
         session_service = create_session_service(use_database=False)
 
         runner = Runner(
@@ -306,14 +285,12 @@ class TestLangfuseWithRealWorkflow:
         )
 
         try:
-            # Create session
             await session_service.create_session(
                 app_name="test_app",
                 user_id="test_user",
                 session_id="test_session",
             )
 
-            # Run workflow
             user_message = types.Content(
                 role="user",
                 parts=[types.Part(text="Execute both agents")]

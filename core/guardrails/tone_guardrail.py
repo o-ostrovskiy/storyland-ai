@@ -38,12 +38,10 @@ from common.logging import get_logger
 logger = get_logger("storyland.core.guardrails.tone")
 
 
-# --------------------------------------------------------------------------- #
 # System-instruction clause (primary control). Appended to every
 # explanation-producing agent prompt so the model never writes reader-directed
 # judgement in the first place. Same module feeds the deterministic checker
 # below, so the prompt and the check stay in lock-step.
-# --------------------------------------------------------------------------- #
 READER_TONE_GUARDRAIL = (
     "\n\n## READER-SAFETY GUARDRAIL (explanation tone)\n"
     "Every explanation you write — the \"why it fits\" / reason / overview / "
@@ -65,7 +63,6 @@ READER_TONE_GUARDRAIL = (
 )
 
 
-# --------------------------------------------------------------------------- #
 # Deterministic checker (secondary, zero-spend safety net).
 #
 # Each pattern targets a reader-DIRECTED judgement (a verdict/label/inference
@@ -73,7 +70,6 @@ READER_TONE_GUARDRAIL = (
 # and high-precision to avoid stripping legitimate fit explanations that happen
 # to use second person to invite the reader into the *place* ("you'll wander the
 # foggy quays", "you can stand where the duel was fought").
-# --------------------------------------------------------------------------- #
 _READER_NOUNS = r"(?:taste|tastes|personality|character|soul|mind|intellect|reading habits?|reading|choices?|preferences?|picks?|selections?)"
 
 _PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (

@@ -13,7 +13,6 @@ from evaluation.tools.llm_scorer import score_itinerary, ItineraryScores
 @pytest.mark.vcr()
 async def test_score_itinerary_success():
     """Test scoring an itinerary with LLM-as-judge (real API call recorded)."""
-    # Sample itinerary data
     itinerary = {
         "summary": "A literary journey through Paris following Hemingway's footsteps",
         "cities": [
@@ -45,7 +44,6 @@ async def test_score_itinerary_success():
         "museums": True,
     }
 
-    # Score the itinerary
     api_key = os.getenv("GOOGLE_API_KEY", "test-api-key-for-vcr")
 
     scores = await score_itinerary(
@@ -58,10 +56,9 @@ async def test_score_itinerary_success():
         model_name="gemini-2.0-flash-lite",
     )
 
-    # Verify response structure
     assert isinstance(scores, ItineraryScores)
 
-    # Verify all scores are in valid range (1-5)
+    # All scores in valid range (1-5)
     assert 1 <= scores.book_relevance <= 5
     assert 1 <= scores.preference_adherence <= 5
     assert 1 <= scores.completeness <= 5
@@ -69,7 +66,6 @@ async def test_score_itinerary_success():
     assert 1 <= scores.geographical_accuracy <= 5
     assert 1 <= scores.engagement <= 5
 
-    # Verify average calculation
     avg = scores.average_score()
     assert 1.0 <= avg <= 5.0
 
@@ -82,7 +78,6 @@ async def test_score_itinerary_success():
 @pytest.mark.integration
 @pytest.mark.vcr()
 async def test_score_itinerary_without_preferences():
-    """Test scoring works when preferences are not provided."""
     itinerary = {
         "summary": "Visit locations from Pride and Prejudice",
         "cities": [
@@ -104,7 +99,6 @@ async def test_score_itinerary_without_preferences():
 
     api_key = os.getenv("GOOGLE_API_KEY", "test-api-key-for-vcr")
 
-    # Score without preferences
     scores = await score_itinerary(
         api_key=api_key,
         book_title="Pride and Prejudice",

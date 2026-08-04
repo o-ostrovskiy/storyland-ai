@@ -52,7 +52,7 @@ def _chips():
     return [{"id": "abc", "label": "Add jazz bars", "action_prompt": "Find jazz bars nearby"}]
 
 
-# --- haversine -------------------------------------------------------------
+# haversine
 
 def test_haversine_zero_for_identical_points():
     assert haversine_km(40.7128, -74.006, 40.7128, -74.006) == 0.0
@@ -63,7 +63,7 @@ def test_haversine_nyc_to_newark_about_14km():
     assert 12 < d < 18
 
 
-# --- scan_geo_points -------------------------------------------------------
+# scan_geo_points
 
 def test_scan_geo_points_empty_for_plain_itinerary():
     assert scan_geo_points(_valid_itinerary()) == []
@@ -85,7 +85,7 @@ def test_scan_geo_points_ignores_half_pairs_and_non_numeric():
     assert scan_geo_points({"lat": True, "lng": 2.0}) == []
 
 
-# --- check_radius ----------------------------------------------------------
+# check_radius
 
 def test_check_radius_no_geo_fields():
     result = check_radius(_valid_itinerary(), 40.7128, -74.006, 15)
@@ -108,7 +108,7 @@ def test_check_radius_fail_beyond_slack():
     assert result["outside_radius"] == 1
 
 
-# --- validate_envelope -----------------------------------------------------
+# validate_envelope
 
 def test_validate_envelope_accepts_valid_payload():
     ok, err = validate_envelope(_valid_itinerary(), _chips())
@@ -131,7 +131,7 @@ def test_validate_envelope_rejects_bad_match_type():
     assert ok is False
 
 
-# --- check_local_atmosphere_case ------------------------------------------
+# check_local_atmosphere_case
 
 def test_case_passes_with_valid_envelope_and_no_geo_fields():
     checks = check_local_atmosphere_case(
@@ -160,7 +160,7 @@ def test_case_fails_on_radius_violation():
     assert checks["deterministic_pass"] is False
 
 
-# --- aggregate_by_preference_shape ----------------------------------------
+# aggregate_by_preference_shape
 
 def _scored_case(has_prefs, base=4):
     scores = {
@@ -204,7 +204,7 @@ def test_mechanism_section_present_and_structured():
     assert "pass_rule" in mechanism
 
 
-# --- evalset lint (eval protocol) -----------------------------------------
+# evalset lint (eval protocol)
 
 @pytest.fixture(scope="module")
 def evalset():

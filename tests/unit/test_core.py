@@ -49,9 +49,7 @@ from core.regions import get_valid_region_ids, validate_region_selection
 from evaluation.tools.run_scheduled_eval import select_first_region, select_all_regions
 
 
-# =============================================================================
 # Domain Events
-# =============================================================================
 
 
 class TestPhase:
@@ -162,9 +160,7 @@ class TestPatternMatching:
                 pytest.fail("Should match WorkflowError")
 
 
-# =============================================================================
 # ExecutorConfig
-# =============================================================================
 
 
 class TestExecutorConfig:
@@ -193,9 +189,7 @@ class TestExecutorConfig:
         assert executor_config.use_database is True
 
 
-# =============================================================================
 # Session State
-# =============================================================================
 
 
 class TestSessionStateKeys:
@@ -275,9 +269,7 @@ class TestSessionStateAccessor:
         assert not hasattr(accessor, "clear_final_itinerary")
 
 
-# =============================================================================
 # Prompts
-# =============================================================================
 
 
 class TestPrompts:
@@ -365,9 +357,7 @@ class TestPrompts:
         assert "atmospheric" in prompt.lower()
 
 
-# =============================================================================
 # Extraction
-# =============================================================================
 
 
 class TestValidateTripItinerary:
@@ -681,9 +671,7 @@ class TestExpansionReadyEvent:
             event.parent_city = "Milan"
 
 
-# =============================================================================
 # Regions
-# =============================================================================
 
 
 class TestGetValidRegionIds:
@@ -746,9 +734,7 @@ class TestValidateRegionSelection:
         assert invalid == [99]
 
 
-# =============================================================================
 # Eval Runner Region Selection
-# =============================================================================
 
 
 class TestSelectFirstRegion:
@@ -793,9 +779,7 @@ class TestSelectAllRegions:
         assert select_all_regions({}) == []
 
 
-# =============================================================================
 # BookRecommendationsReady Event Tests
-# =============================================================================
 
 
 class TestBookRecommendationsReady:
@@ -817,9 +801,7 @@ class TestBookRecommendationsReady:
         assert event.recommendations == []
 
 
-# =============================================================================
 # Session State - Book Recommendations Keys
-# =============================================================================
 
 
 class TestBookRecommendationSessionState:
@@ -860,9 +842,7 @@ class TestBookRecommendationSessionState:
         assert accessor.last_book_recommendations == {"recommendations": []}
 
 
-# =============================================================================
 # Extraction - Book Recommendations
-# =============================================================================
 
 
 class TestValidateBookRecommendationsResult:
@@ -941,9 +921,7 @@ class TestExtractBookRecommendationsFromState:
         assert extract_book_recommendations_from_state(accessor) is None
 
 
-# =============================================================================
 # Hallucination guardrail — match_type grounding assertion (PR 2 of 4)
-# =============================================================================
 
 
 def _itinerary_with_stops(stops):
@@ -1386,8 +1364,8 @@ class TestReconcileStopCityGrouping:
         out = reconcile_stop_city_grouping(itin)
         assert [c["name"] for c in out["cities"]] == ["Cartagena"]
 
-    # ── MYS-660 r6 (Eng Lead review of r5 on ai#261): a city THIS PASS drops
-    # can orphan a composer suggestion chip that named it ────────────────────
+    # MYS-660 r6 (Eng Lead review of r5 on ai#261): a city THIS PASS drops
+    # can orphan a composer suggestion chip that named it.
     #
     # Before this guard existed, no city was ever removed post-composition,
     # so a suggestion chip's action_prompt always named a city that still
@@ -1452,7 +1430,7 @@ class TestReconcileStopCityGrouping:
         # with no surviving city to resolve to instead, goes.
         assert [chip["id"] for chip in kept] == ["2", "3"]
 
-    # ── MYS-660 r7 (Codex P1, valid): the r6 filter's ONE substring test
+    # MYS-660 r7 (Codex P1, valid): the r6 filter's ONE substring test
     # over-dropped -- a removed name that's merely a SUBSTRING of unrelated
     # surviving prompt text (a real different city, or ordinary English)
     # was enough to drop a perfectly resolvable chip. The fix checks BOTH
@@ -1480,7 +1458,7 @@ class TestReconcileStopCityGrouping:
         kept = _drop_suggestions_naming_removed_cities(suggestions, removed_identities, surviving_identities)
         assert kept == []
 
-    # ── MYS-401 r4 (Codex P1, valid): the r7 fix's condition (b) used the
+    # MYS-401 r4 (Codex P1, valid): the r7 fix's condition (b) used the
     # SAME plain substring test as condition (a) -- consistent with
     # expand()'s OWN matching at the time, but expand() has since switched
     # to the stricter, word-boundary `_matches_city_as_standalone_word`.
@@ -1517,7 +1495,7 @@ class TestReconcileStopCityGrouping:
         kept = _drop_suggestions_naming_removed_cities(suggestions, removed_identities, surviving_identities)
         assert kept == suggestions
 
-    # ── MYS-660 r8 (Codex P2, lower severity): the (a)/(b) test is
+    # MYS-660 r8 (Codex P2, lower severity): the (a)/(b) test is
     # name-only, same limit `expand()` itself has -- `action_prompt` is
     # free text, no country field to qualify against. That's inherent, not
     # a bug. What r6/r7 got wrong is going silent about it: a removed
@@ -1569,7 +1547,7 @@ class TestReconcileStopCityGrouping:
             ("neverland", None)
         }
 
-    # ── MYS-660 r7 (Codex P2, valid): _city_names must be COUNTRY-qualified,
+    # MYS-660 r7 (Codex P2, valid): _city_names must be COUNTRY-qualified,
     # same lesson as MYS-548 and _find_reconciliation_target's own country
     # check -- two same-trip cities sharing a bare name collapse to ONE
     # set entry, so removing one of them while the other survives looked
@@ -1689,7 +1667,7 @@ class TestReconcileStopCityGrouping:
         )
         assert target is None
 
-    # ── MYS-660 r8 (Codex P1, blocking): a US state/territory name can
+    # MYS-660 r8 (Codex P1, blocking): a US state/territory name can
     # collide with a DIFFERENT same-trip city's name -- "Washington" the
     # STATE happens to equal "Washington" a same-trip CityPlan (Washington,
     # D.C.). The all-segment scan (r3-r7) treated any segment matching a
@@ -1853,7 +1831,7 @@ class TestReconcileStopCityGrouping:
         )
         assert target == 1
 
-    # ── MYS-660 r7 (Codex P2, lowest severity, fail-open under-reach not a
+    # MYS-660 r7 (Codex P2, lowest severity, fail-open under-reach not a
     # regression): a resolved trailing segment was ALWAYS dropped as a
     # locality candidate, even when it's also the city itself -- a
     # city-state address ("Marina Bay, Singapore") lost the only segment

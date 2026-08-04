@@ -433,7 +433,6 @@ class WorkflowExecutor:
         """
         job_id = str(uuid.uuid4())
 
-        # Build initial state
         initial_state = {
             SessionStateKeys.BOOK_TITLE: book_title,
             SessionStateKeys.AUTHOR: author,
@@ -441,7 +440,6 @@ class WorkflowExecutor:
         if preferences:
             initial_state[SessionStateKeys.USER_PREFERENCES] = preferences
 
-        # Create session
         try:
             await self._session_service.create_session(
                 app_name=APP_NAME,
@@ -515,7 +513,6 @@ class WorkflowExecutor:
             )
             await self._session_service.append_event(session, metadata_event)
 
-            # Phase 2: Discovery
             yield ProgressEvent(
                 phase=Phase.DISCOVERY, step="Starting location discovery"
             )
@@ -550,7 +547,6 @@ class WorkflowExecutor:
             ):
                 yield ev
 
-            # Extract regions from session state
             session = await self._session_service.get_session(
                 app_name=APP_NAME, user_id=user_id, session_id=job_id
             )
@@ -654,7 +650,6 @@ class WorkflowExecutor:
             region_ids: Region IDs selected by the user
             user_id: User identifier (must match the discover request)
         """
-        # Session lookup
         try:
             session = await self._session_service.get_session(
                 app_name=APP_NAME, user_id=user_id, session_id=job_id
@@ -695,7 +690,6 @@ class WorkflowExecutor:
                 yield ev
             return
 
-        # Validate regions
         selected_regions, invalid_ids = validate_region_selection(
             region_ids, all_regions
         )
@@ -1653,14 +1647,12 @@ class WorkflowExecutor:
             book_title = state.book_title
             author = state.author
 
-            # Extract destinations from itinerary cities
             itinerary = state.final_itinerary or {}
             destinations = ", ".join(
                 city.get("name", "") for city in itinerary.get("cities", [])
                 if city.get("name")
             ) or "unknown"
 
-            # Extract themes from book context
             book_context = state.book_context or {}
             themes_list = book_context.get("themes", [])
             themes = ", ".join(themes_list) if themes_list else "literary fiction"

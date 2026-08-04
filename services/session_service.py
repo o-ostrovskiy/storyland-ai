@@ -49,7 +49,6 @@ def create_session_service(
         ... )
     """
     if use_database:
-        # Production: Database-backed session service
         if not connection_string:
             # Default to SQLite with async driver in the current directory.
             # "_v2" suffix: ADK 2.x writes a session schema incompatible with
@@ -62,7 +61,6 @@ def create_session_service(
         logger.info("session_service_created", type="database", connection_string=connection_string)
         return DatabaseSessionService(db_url=connection_string)
     else:
-        # Development: In-memory session service
         logger.info("session_service_created", type="in_memory", persistent=False)
         return InMemorySessionService()
 

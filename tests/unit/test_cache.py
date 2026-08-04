@@ -273,13 +273,11 @@ class TestExecutorCacheHit:
         assert isinstance(executor._discovery_cache, TTLCache)
 
 
-# =============================================================================
 # Cache master-switch config (MYS-153 / MYS-9 PR1)
 #
 # The Discovery result cache must NEVER be silently disabled by a dropped env
 # var: an absent CACHE_ENABLED falls back to on. These tests pin that contract
 # and the flag's propagation Config -> ExecutorConfig -> WorkflowExecutor.
-# =============================================================================
 
 import os
 from unittest.mock import MagicMock

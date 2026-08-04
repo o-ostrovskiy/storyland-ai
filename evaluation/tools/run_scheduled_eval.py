@@ -15,7 +15,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-# Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from common.logging import get_logger, configure_logging
@@ -294,7 +293,6 @@ async def run_evaluation_on_dataset(
         logger.error("langfuse_not_available")
         return {"error": "Langfuse not installed"}
 
-    # Initialize Langfuse client
     langfuse = Langfuse(
         secret_key=config.langfuse_secret_key,
         public_key=config.langfuse_public_key,
@@ -302,7 +300,6 @@ async def run_evaluation_on_dataset(
     )
 
     try:
-        # Get dataset items
         dataset = langfuse.get_dataset(dataset_name)
     except Exception as e:
         logger.error(
@@ -318,7 +315,6 @@ async def run_evaluation_on_dataset(
             "evaluated_cases": 0,
         }
 
-    # Fetch dataset items
     try:
         items = list(dataset.items)
     except Exception as e:
@@ -335,7 +331,6 @@ async def run_evaluation_on_dataset(
             "evaluated_cases": 0,
         }
 
-    # Filter to specific item IDs if provided, then limit to max_cases
     if item_ids:
         items = [item for item in items if item.id in item_ids]
     items_to_evaluate = items[:max_cases]
@@ -354,10 +349,8 @@ async def run_evaluation_on_dataset(
         max_cases=max_cases,
     )
 
-    # Load prompt set for this run
     prompts = load_prompts(prompt_version)
 
-    # Create run name for this evaluation batch
     run_name = f"eval_run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{prompt_version}"
     run_metadata = {
         "dataset_name": dataset_name,
@@ -366,9 +359,7 @@ async def run_evaluation_on_dataset(
         "prompt_version": prompt_version,
     }
 
-    # Evaluate each dataset item
     for item in items_to_evaluate:
-        # Check remaining budget before starting each case
         if start_time is not None and timeout_seconds is not None:
             elapsed = time.monotonic() - start_time
             remaining = timeout_seconds - elapsed
@@ -384,7 +375,6 @@ async def run_evaluation_on_dataset(
                 break
 
         try:
-            # Extract input from dataset item
             input_data = item.input
             expected_output = item.expected_output
             item_metadata = item.metadata or {}
@@ -413,12 +403,9 @@ async def run_evaluation_on_dataset(
                         prompts=prompts,
                     )
 
-                    # Log execution type for observability
-                    # LLM-as-judge quality scores are added in Phase 4 (lines 765-794)
                     case_status = result.get("status", "unknown")
 
                     if case_status == "placeholder":
-                        # Placeholder execution - log for tracking
                         logger.info(
                             "placeholder_execution",
                             item_id=item.id,
@@ -434,20 +421,17 @@ async def run_evaluation_on_dataset(
                         observation_id=root_span.id,
                     )
 
-            # Track full result including scores
             case_result = {
                 "item_id": item.id,
                 "run_name": run_name,
                 # Langfuse trace link — lets the human spot-check and the
                 # calibration tooling find this exact generation later.
                 "trace_id": root_span.trace_id,
-                **result,  # Include all result fields (status, scores, token_usage, etc.)
+                **result,
             }
             case_results.append(case_result)
 
-            # Count by status type
             if case_status == "evaluated":
-                # Real workflow evaluation
                 evaluated_cases += 1
                 logger.info(
                     "case_evaluated",
@@ -456,7 +440,6 @@ async def run_evaluation_on_dataset(
                     run_name=run_name,
                 )
             elif case_status == "placeholder":
-                # Placeholder execution (not a real eval)
                 placeholder_cases += 1
                 logger.info(
                     "placeholder_counted",
@@ -486,17 +469,16 @@ async def run_evaluation_on_dataset(
                 "error": str(e),
             })
 
-    # Flush Langfuse client to ensure all traces are sent
     langfuse.flush()
 
     results = {
         "dataset_name": dataset_name,
         "timestamp": datetime.now().isoformat(),
         "total_cases": total_cases,
-        "evaluated_cases": evaluated_cases,  # Real evaluations only
-        "placeholder_cases": placeholder_cases,  # Placeholders (not real)
+        "evaluated_cases": evaluated_cases,
+        "placeholder_cases": placeholder_cases,
         "failed_cases": failed_cases,
-        "skipped_cases": skipped_cases,  # Cases that couldn't be parsed
+        "skipped_cases": skipped_cases,
         "case_results": case_results,
         # Per-shape aggregation (PR-4 step zero): preference-carrying cases
         # exercise the API-contract path; preference-free cases are the shape
@@ -548,7 +530,6 @@ async def _run_evaluation_case(
         Evaluation result with status "evaluated" on success
     """
     try:
-        # Extract book_title and author directly from input data
         book_title = input_data.get('book_title', '').strip()
         author = input_data.get('author', '').strip()
 
@@ -562,7 +543,7 @@ async def _run_evaluation_case(
             author=author or "unknown",
         )
 
-        # Initialize model with retry config (same as main.py)
+        # Same retry config as main.py
         retry_config = build_retry_options(
             attempts=config.retry_attempts,
             exp_base=config.retry_exp_base,
@@ -577,21 +558,17 @@ async def _run_evaluation_case(
             retry_options=retry_config
         )
 
-        # Create session service (in-memory for evaluations)
         session_service = create_session_service(
             connection_string=None,
             use_database=False  # Use in-memory for eval
         )
 
-        # Initialize Langfuse plugin for token tracking
         langfuse_plugin = LangfusePlugin(
             secret_key=config.langfuse_secret_key,
             public_key=config.langfuse_public_key,
             host=config.langfuse_host,
         )
 
-        # Create session with initial state
-        # Extract session_input and quality_criteria from metadata
         session_input = item_metadata.get("session_input", {})
         quality_criteria = item_metadata.get("quality_criteria")
         user_id = session_input.get("user_id", "eval_user")
@@ -602,14 +579,12 @@ async def _run_evaluation_case(
             "author": author or "",
         }
 
-        # Initialize preferences from metadata if available
-        # Session input can have state with user:preferences (proper structure)
-        # or a top-level preferences key (legacy/alternate format)
+        # Preferences arrive either under state["user:preferences"] (proper
+        # structure) or a top-level "preferences" key (legacy format).
         session_state = session_input.get("state", {})
         if "user:preferences" in session_state:
             initial_state["user:preferences"] = session_state["user:preferences"]
         elif "preferences" in session_input:
-            # Fallback: legacy format with top-level preferences
             initial_state["user:preferences"] = session_input["preferences"]
 
         await session_service.create_session(
@@ -621,14 +596,12 @@ async def _run_evaluation_case(
 
         logger.info("eval_session_created", session_id=session_id[:8])
 
-        # Phase 1: Confirm book metadata from provided title/author (no API lookup needed)
         logger.info("eval_phase_1_start", phase="metadata_confirmation")
         root_span.update(metadata={"current_phase": "metadata_confirmation"})
 
         exact_title = book_title
         exact_author = author or ""
 
-        # Store metadata in session state for downstream agents
         session = await session_service.get_session(
             app_name="storyland", user_id=user_id, session_id=session_id
         )
@@ -655,10 +628,7 @@ async def _run_evaluation_case(
             }
         )
 
-        # Phase 2: Discovery - find locations and analyze regions
         logger.info("eval_phase_2_start", phase="location_discovery")
-
-        # Update root_span for phase 2
         root_span.update(metadata={"current_phase": "discovery"})
 
         try:
@@ -686,7 +656,6 @@ Find cities, landmarks, and author-related sites, then group them into practical
                 ):
                     pass
 
-            # Get region analysis from session state
             session = await session_service.get_session(
                 app_name="storyland", user_id=user_id, session_id=session_id
             )
@@ -697,7 +666,6 @@ Find cities, landmarks, and author-related sites, then group them into practical
                 num_regions=len(region_analysis.get("regions", []))
             )
 
-            # Update root_span with discovery results
             root_span.update(
                 metadata={
                     "phase_2_complete": True,
@@ -735,7 +703,6 @@ Find cities, landmarks, and author-related sites, then group them into practical
                 "author": exact_author,
             }
 
-        # Store selected regions in session state
         session = await session_service.get_session(
             app_name="storyland", user_id=user_id, session_id=session_id
         )
@@ -746,7 +713,6 @@ Find cities, landmarks, and author-related sites, then group them into practical
         # Phase 3 (Composition) - numbering kept in spans for Langfuse compat
         logger.info("eval_phase_3_start", phase="itinerary_composition")
 
-        # Update root_span for phase 3
         root_span.update(
             metadata={
                 "current_phase": "composition",
@@ -798,7 +764,6 @@ Find cities, landmarks, and author-related sites, then group them into practical
                     if event.is_final_response():
                         final_response = event
 
-            # Extract itinerary from response
             itinerary_data = None
             if final_response and final_response.content and final_response.content.parts:
                 for part in final_response.content.parts:
@@ -819,7 +784,6 @@ Find cities, landmarks, and author-related sites, then group them into practical
                 num_cities=len(itinerary_data.get("cities", [])) if itinerary_data else 0,
             )
 
-            # Update root_span with composition results
             root_span.update(
                 output=itinerary_data,
                 metadata={
@@ -842,7 +806,6 @@ Find cities, landmarks, and author-related sites, then group them into practical
             )
             raise
 
-        # Get token usage stats
         token_stats = langfuse_plugin.get_session_stats()
         logger.info(
             "eval_workflow_complete",
@@ -853,7 +816,6 @@ Find cities, landmarks, and author-related sites, then group them into practical
             cost_usd=token_stats.get('cost_usd', 0),
         )
 
-        # Flush Langfuse events
         await langfuse_plugin.flush()
 
         # Phase 4: LLM-as-judge scoring (Issue #96)
@@ -862,7 +824,6 @@ Find cities, landmarks, and author-related sites, then group them into practical
             logger.info("eval_phase_4_start", phase="llm_scoring")
 
             try:
-                # Get user preferences from session state
                 preferences = session.state.get("user:preferences", {})
 
                 # quality_criteria deliberately NOT passed to the quality
@@ -880,7 +841,6 @@ Find cities, landmarks, and author-related sites, then group them into practical
                     model_name="gemini-2.5-flash-lite",
                 )
 
-                # Store scores in Langfuse
                 root_span.score_trace(
                     name="book_relevance",
                     value=scores.book_relevance,
@@ -913,7 +873,6 @@ Find cities, landmarks, and author-related sites, then group them into practical
                     comment="LLM-as-judge: Engaging descriptions that evoke book's spirit (1-5)",
                 )
 
-                # Prepare scores for local result storage
                 scores_data = {
                     "book_relevance": scores.book_relevance,
                     "completeness": scores.completeness,
@@ -976,8 +935,6 @@ Find cities, landmarks, and author-related sites, then group them into practical
                 )
                 # Don't fail evaluation if scoring fails - scoring is optional
 
-        # Return evaluation result
-        # Status is "evaluated" (real workflow execution, not placeholder)
         result = {
             "status": "evaluated",
             "book_title": exact_title,
@@ -999,7 +956,6 @@ Find cities, landmarks, and author-related sites, then group them into practical
             "itinerary": itinerary_data,
         }
 
-        # Add scores if scoring succeeded
         if scores_data:
             result["scores"] = scores_data
 
@@ -1034,7 +990,6 @@ async def run_all_evaluations(
     """
     config = load_config()
 
-    # Check if Langfuse is configured
     if not all([config.langfuse_secret_key, config.langfuse_public_key]):
         logger.error(
             "langfuse_not_configured",
@@ -1049,9 +1004,7 @@ async def run_all_evaluations(
             "evaluated_cases": 0,
         }]
 
-    # Determine which datasets to evaluate
     if dataset_names:
-        # Use explicitly provided dataset names
         datasets = dataset_names
         logger.info("using_provided_datasets", datasets=datasets)
     else:
@@ -1090,10 +1043,8 @@ async def run_all_evaluations(
                     file=str(datasets_file),
                     error=str(e),
                 )
-                # Fall back to defaults
                 datasets = ["storyland_eval", "books_v1"]
         else:
-            # Default datasets if no config file exists
             datasets = ["storyland_eval", "books_v1"]
             logger.info("using_default_datasets", datasets=datasets)
 
@@ -1108,7 +1059,6 @@ async def run_all_evaluations(
 
     results = []
     for dataset_name in datasets:
-        # Check remaining budget before starting each dataset
         if timeout_seconds is not None:
             elapsed = time.monotonic() - start_time
             remaining = timeout_seconds - elapsed
@@ -1188,7 +1138,6 @@ async def run_all_evaluations(
         enqueued=human_spot_check["enqueued"],
     )
 
-    # Save results
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(
         output_dir,
@@ -1207,7 +1156,6 @@ async def run_all_evaluations(
 
 
 def main():
-    """Main entry point for scheduled evaluations."""
     import argparse
 
     parser = argparse.ArgumentParser(description='Run scheduled evaluations')
@@ -1255,7 +1203,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Run evaluations
     results = asyncio.run(
         run_all_evaluations(
             output_dir=args.output_dir,
@@ -1268,7 +1215,6 @@ def main():
         )
     )
 
-    # Print summary
     print("\n" + "=" * 60)
     print("Evaluation Summary")
     print("=" * 60)
@@ -1289,7 +1235,6 @@ def main():
         failed_cases = result.get('failed_cases', 0)
         skipped_cases = result.get('skipped_cases', 0)
 
-        # Show breakdown of evaluation types
         if evaluated > 0:
             print(f"Real evaluations: {evaluated} cases")
         if placeholders > 0:
@@ -1302,10 +1247,8 @@ def main():
         total_evaluated += evaluated
         total_placeholders += placeholders
 
-        # Check if this dataset failed
-        # Failure = explicit error OR any failed cases OR any skipped cases
-        # Empty dataset (total_cases == 0) is NOT a failure
-        # Any failure/skip means the dataset failed (matches "any dataset failure should fail CI")
+        # Failure = explicit error OR failed cases OR skipped cases (any dataset
+        # failure should fail CI). Empty dataset (total_cases == 0) is NOT a failure.
         has_error = 'error' in result
         has_failures = failed_cases > 0
         has_skipped = skipped_cases > 0
@@ -1319,7 +1262,6 @@ def main():
             elif has_skipped:
                 print(f"ERROR: {skipped_cases} case(s) skipped due to parsing failures")
         elif total_cases == 0:
-            # Empty dataset - informational, not an error
             total_skipped += 1
             print("INFO: Dataset is empty (no test cases)")
 
@@ -1330,29 +1272,22 @@ def main():
     print(f"Failed datasets: {total_failed_datasets}")
     print("=" * 60)
 
-    # Exit with error code if all evaluations failed
-    # This ensures GitHub Actions workflow correctly reports failure
-    # Note: Empty datasets don't count as failures
+    # Nonzero exit on any dataset failure so GitHub Actions reports it;
+    # empty datasets don't count as failures.
     actual_datasets = total_datasets - total_skipped
 
     if actual_datasets == 0 and total_failed_datasets > 0:
-        # No actual datasets to evaluate, but config/setup errors exist
         print("\n❌ ERROR: Configuration or setup error - cannot run evaluations")
         sys.exit(1)
     elif actual_datasets > 0 and total_failed_datasets == actual_datasets:
-        # All non-empty datasets failed
         print("\n❌ ERROR: All dataset evaluations failed")
         sys.exit(1)
     elif total_failed_datasets > 0:
         print(f"\n❌ ERROR: {total_failed_datasets}/{actual_datasets} dataset(s) failed")
-        # Exit with error - any dataset failure should fail CI
         sys.exit(1)
     elif actual_datasets == 0:
-        # Only empty datasets
         print("\n⚠️  WARNING: No datasets to evaluate (all empty)")
-        # Exit 0 - not an error, just nothing to do
     else:
-        # Success - but distinguish real evals from placeholders
         if total_evaluated > 0:
             print("\n✅ All evaluations completed successfully")
         elif total_placeholders > 0:

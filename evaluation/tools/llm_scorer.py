@@ -22,7 +22,7 @@ from common.logging import get_logger
 logger = get_logger("storyland.llm_scorer")
 
 
-# Scoring criteria extracted from evaluation/tools/langfuse_eval.py (lines 172-262)
+# Scoring criteria mirror the scoring-function prompts in langfuse_eval.py
 SCORING_CRITERIA = {
     "book_relevance": (
         "Evaluate if the travel itinerary locations are directly connected to the book's "
@@ -152,16 +152,13 @@ def _build_scoring_prompt(
     Returns:
         Formatted prompt string with all scoring criteria
     """
-    # Format preferences for display
     if preferences:
         preferences_json = json.dumps(preferences, indent=2)
     else:
         preferences_json = "No preferences specified"
 
-    # Format itinerary for display
     itinerary_json = json.dumps(itinerary, indent=2)
 
-    # Format expected output section (only when provided)
     if expected_output:
         # Calibration finding (MYS-586): "use as benchmark" turned the judge
         # into a reference-similarity metric on books_v1 (divergence ~1.2 vs
@@ -243,7 +240,6 @@ async def score_itinerary(
         model=model_name,
     )
 
-    # Build scoring prompt
     prompt = _build_scoring_prompt(
         book_title=book_title,
         author=author,
@@ -283,12 +279,10 @@ async def score_itinerary(
     )
 
     try:
-        # Create GenAI client
         client = genai.Client(api_key=api_key)
 
-        # Call model requesting JSON output in prompt
-        # Note: Using simple prompt-based JSON request instead of response_schema
-        # for broader model compatibility
+        # Prompt-based JSON request instead of response_schema, for broader
+        # model compatibility.
         score_preferences = bool(preferences)
         if score_preferences:
             json_instruction = """
@@ -325,15 +319,14 @@ Respond with ONLY a valid JSON object (no markdown, no explanation) with these e
             ),
         )
 
-        # Parse and validate response
-        # Extract JSON from response (handle potential markdown code blocks)
+        # Strip potential markdown code fences before parsing
         response_text = response.text.strip()
         if response_text.startswith("```json"):
-            response_text = response_text[7:]  # Remove ```json
+            response_text = response_text[7:]
         if response_text.startswith("```"):
-            response_text = response_text[3:]  # Remove ```
+            response_text = response_text[3:]
         if response_text.endswith("```"):
-            response_text = response_text[:-3]  # Remove trailing ```
+            response_text = response_text[:-3]
         response_text = response_text.strip()
 
         scores = ItineraryScores.model_validate_json(response_text)

@@ -47,14 +47,10 @@ from core.events import (
 )
 
 
-# =============================================================================
 # Model Validation Tests
-# =============================================================================
 
 
 class TestDiscoverRequest:
-    """Tests for DiscoverRequest model."""
-
     def test_minimal_request(self):
         req = DiscoverRequest(book_title="1984", author="George Orwell")
         assert req.book_title == "1984"
@@ -103,8 +99,6 @@ class TestDiscoverRequest:
 
 
 class TestComposeRequest:
-    """Tests for ComposeRequest model."""
-
     def test_valid_request(self):
         req = ComposeRequest(region_ids=[1, 2])
         assert req.region_ids == [1, 2]
@@ -123,8 +117,6 @@ class TestComposeRequest:
 
 
 class TestUserLocation:
-    """Tests for UserLocation model."""
-
     def test_valid_location(self):
         loc = UserLocation(lat=40.7128, lng=-74.0060, label="New York, NY")
         assert loc.lat == 40.7128
@@ -148,8 +140,6 @@ class TestUserLocation:
 
 
 class TestLocalAtmosphereRequest:
-    """Tests for LocalAtmosphereRequest model."""
-
     def _location(self) -> UserLocation:
         return UserLocation(lat=40.7128, lng=-74.0060, label="New York, NY")
 
@@ -215,9 +205,7 @@ class TestLocalAtmosphereRequest:
         assert restored.user_location.lat == 40.7128
 
 
-# =============================================================================
 # SSE Event Model Tests
-# =============================================================================
 
 
 class TestSSEProgressEvent:
@@ -460,9 +448,7 @@ class TestSSEDoneEvent:
         assert data["token_usage"]["total_tokens"] == 150
 
 
-# =============================================================================
 # REST Response Model Tests
-# =============================================================================
 
 
 class TestHealthResponse:
@@ -500,9 +486,7 @@ class TestJobStatusResponse:
         assert resp.has_itinerary is True
 
 
-# =============================================================================
 # SSE Helper & Adapter Tests
-# =============================================================================
 
 
 class TestSSEHelper:
@@ -519,8 +503,6 @@ class TestSSEHelper:
 
 
 class TestDomainEventToSSE:
-    """Tests for domain_event_to_sse adapter function."""
-
     def test_progress_event(self):
         event = ProgressEvent(phase=Phase.DISCOVERY, step="Finding cities")
         result = domain_event_to_sse(event)
@@ -579,14 +561,11 @@ class TestDomainEventToSSE:
         assert data["job_id"] == "abc"
 
 
-# =============================================================================
 # Endpoint Tests (with mocked executor)
-# =============================================================================
 
 
 @pytest.fixture
 def mock_executor():
-    """Create a mock WorkflowExecutor."""
     from core.executor import WorkflowExecutor
 
     executor = MagicMock(spec=WorkflowExecutor)
@@ -599,7 +578,6 @@ def mock_executor():
 
 @pytest.fixture
 def mock_app_state(mock_executor):
-    """Create a mock AppState for testing."""
     from api.dependencies import AppState
     from api.ratelimit import InFlightLimiter, SlidingWindowRateLimiter
 
@@ -1039,9 +1017,7 @@ class TestComposeEndpoint:
         assert "error" in event_types
 
 
-# =============================================================================
 # CORS Configuration Tests
-# =============================================================================
 
 
 class TestCORSConfiguration:
@@ -1079,9 +1055,7 @@ class TestCORSConfiguration:
             assert cors_middleware.kwargs["allow_credentials"] is True
 
 
-# =============================================================================
 # Regression Tests
-# =============================================================================
 
 
 class TestBookContextTimePeriod:
@@ -1135,9 +1109,7 @@ class TestDiscoveryProgressMapping:
         assert "reader_profile" not in DISCOVERY_AGENT_STEPS
 
 
-# =============================================================================
 # Test Helpers
-# =============================================================================
 
 
 def _parse_sse_response(text: str) -> list[dict]:
@@ -1175,9 +1147,7 @@ def _parse_sse_response(text: str) -> list[dict]:
     return events
 
 
-# =============================================================================
 # RecommendBooksRequest Tests
-# =============================================================================
 
 
 class TestRecommendBooksRequest:
@@ -1210,9 +1180,7 @@ class TestRecommendBooksRequest:
             RecommendBooksRequest(action_id="x", action_label="a" * 101)
 
 
-# =============================================================================
 # SSEBookRecommendationsEvent Tests
-# =============================================================================
 
 
 class TestSSEBookRecommendationsEvent:
@@ -1244,9 +1212,7 @@ class TestSSEBookRecommendationsEvent:
         assert data["recommendations"] == []
 
 
-# =============================================================================
 # domain_event_to_sse - BookRecommendationsReady
-# =============================================================================
 
 
 class TestDomainEventToSSEBookRecommendations:
@@ -1282,9 +1248,7 @@ class TestDomainEventToSSEBookRecommendations:
         assert data["book_recommendation_count"] == 2
 
 
-# =============================================================================
 # Place→Book reverse-discovery endpoint (internal: gateway → AI)
-# =============================================================================
 
 from api.models import PlaceToBookRequest
 from models.place_to_book import PlaceBookCandidate, PlaceToBookResult
@@ -1431,9 +1395,7 @@ class TestPlaceToBookEndpoint:
         assert response.status_code == 422
 
 
-# =============================================================================
 # MYS-403 gap 3a: inflight-slot lifetime over a REAL ASGI stream
-# =============================================================================
 #
 # api/dependencies.py::limit_inflight was previously exercised only as a bare
 # async generator (tests/unit/test_ratelimit.py) -- never through a real
@@ -1540,11 +1502,9 @@ class TestInflightLimiterOverRealStream:
         assert after.status_code == 200
 
 
-# =============================================================================
 # MYS-403 gap 3b: the lazily-created place->book resolver's session store
 # must be included in the session sweeper's provider once it exists, so the
 # sweeper doesn't leak it (api/app.py::lifespan's `_live_session_services`).
-# =============================================================================
 
 
 class TestSessionSweeperIncludesResolverStoreOnceCreated:

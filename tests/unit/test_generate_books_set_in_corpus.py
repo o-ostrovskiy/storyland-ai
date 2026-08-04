@@ -21,7 +21,7 @@ def load_fixture():
         return json.load(f)
 
 
-# -- place_slug: must stay in lockstep with the FE's placeSlug() --
+# place_slug: must stay in lockstep with the FE's placeSlug()
 
 def test_place_slug_basic():
     assert place_slug("Edinburgh") == "edinburgh"
@@ -35,7 +35,7 @@ def test_place_slug_strips_accents_and_punctuation():
     assert place_slug("") == ""
 
 
-# -- validate_book / validate_place: mirrors booksSetInPlace.ts, must be build-fatal --
+# validate_book / validate_place: mirrors booksSetInPlace.ts, must be build-fatal
 
 def test_validate_book_rejects_missing_required_fields():
     with pytest.raises(GeneratorError, match="title"):
@@ -75,7 +75,7 @@ def test_validate_place_rejects_empty_books():
         validate_place({"slug": "paris", "place": "Paris", "intro": "intro", "books": []})
 
 
-# -- build_page: the real mapping/filtering logic, against real captured data --
+# build_page: the real mapping/filtering logic, against real captured data
 
 def test_build_page_on_real_barcelona_fixture_keeps_all_eight_verified_rows():
     resp = load_fixture()
@@ -149,7 +149,7 @@ def test_fetch_place_to_book_calls_the_expected_path_and_query():
     assert body["found"] is True
 
 
-# -- CLI: --batch must refuse without ever touching the network --
+# CLI: --batch must refuse without ever touching the network
 
 def test_main_batch_flag_refuses_without_network_call(monkeypatch, capsys):
     from tools.generate_books_set_in_corpus import main
@@ -171,9 +171,7 @@ def test_main_requires_city_or_batch():
         main([])
 
 
-# ---------------------------------------------------------------------------
 # r2 (fix-list round 1, Engineering Lead)
-# ---------------------------------------------------------------------------
 
 
 def _mixed_response(literal: int, vibe: int) -> dict:
@@ -194,7 +192,7 @@ def _mixed_response(literal: int, vibe: int) -> dict:
     return {"place": "Testville", "query": "Testville", "found": True, "message": None, "books": books}
 
 
-# -- item 1: the intro must not claim an anchor the kindred rows do not have --
+# item 1: the intro must not claim an anchor the kindred rows do not have
 
 
 def test_mixed_page_scopes_the_stand_claim_to_the_literal_entries():
@@ -234,7 +232,7 @@ def test_the_scoped_claim_never_overstates_a_row_that_carries_no_map_anchor():
     assert "the literal entries point to" in report.page["intro"]
 
 
-# -- item 2: the tool's success bar must equal the corpus's publish bar --
+# item 2: the tool's success bar must equal the corpus's publish bar
 
 
 def test_all_vibe_city_is_refused_because_the_fe_could_never_publish_it():
@@ -255,7 +253,7 @@ def test_a_single_literal_row_is_enough_mirroring_the_fe_gate_exactly():
     assert report.verified_book_count == 6
 
 
-# -- item 3: a trailing slash on the documented override must not 404 --
+# item 3: a trailing slash on the documented override must not 404
 
 
 def test_backend_url_trailing_slash_is_stripped_before_the_request(monkeypatch, tmp_path):
