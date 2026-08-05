@@ -45,7 +45,7 @@ jobs:
     name: Post CI summary to the PR
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@v9
         with:
           script: |
             const MARKER = '<!-- ci-summary:do-not-remove -->';
