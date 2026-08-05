@@ -32,21 +32,16 @@ from agents.prompts import load_prompts, AgentPrompts
 START_NAME = "__START__"
 
 
-# =============================================================================
 # Fixtures / helpers
-# =============================================================================
 
 @pytest.fixture
 def model_name():
-    """Return a valid model name string for agent creation."""
     return "gemini-2.0-flash"
 
 
 @pytest.fixture
 def mock_google_search_tool():
-    """Create a mock Google Search FunctionTool."""
     def mock_search(query: str) -> str:
-        """Mock search function."""
         return "Search results for: " + query
 
     return FunctionTool(mock_search)
@@ -69,13 +64,9 @@ def predecessors(workflow: Workflow, name: str) -> set[str]:
     return {f for f, t in edge_pairs(workflow) if t == name}
 
 
-# =============================================================================
 # Agent-pair factory tests
-# =============================================================================
 
 class TestBookContextAgents:
-    """Tests for create_book_context_agents."""
-
     def test_returns_researcher_formatter_pair(self, model_name, mock_google_search_tool):
         researcher, formatter = create_book_context_agents(
             model_name, mock_google_search_tool,
@@ -194,8 +185,6 @@ class TestLocalAtmosphereAgents:
 
 
 class TestLocalAtmosphereWorkflow:
-    """Tests for create_local_atmosphere_workflow."""
-
     def test_creates_workflow_graph(self, model_name):
         workflow = create_local_atmosphere_workflow(
             model_name,
@@ -226,13 +215,9 @@ class TestLocalAtmosphereWorkflow:
         }
 
 
-# =============================================================================
 # Trip Composer Agent Tests
-# =============================================================================
 
 class TestTripComposerAgent:
-    """Tests for create_trip_composer_agent."""
-
     def test_creates_llm_agent(self, model_name):
         agent = create_trip_composer_agent(model_name)
         assert isinstance(agent, LlmAgent)
@@ -246,9 +231,7 @@ class TestTripComposerAgent:
         assert hasattr(agent, 'output_schema') or hasattr(agent, 'output_key')
 
 
-# =============================================================================
 # MYS-436: reader_profile_agent removed -- class-level guard, not a spot check
-# =============================================================================
 
 class TestNoReaderProfileAgent:
     """Pins the deletion: reader_profile_agent must not exist anywhere in the
@@ -283,13 +266,9 @@ class TestNoReaderProfileAgent:
         assert "reader_profile_agent" not in node_names(workflow)
 
 
-# =============================================================================
 # Region Analyzer Agent Tests
-# =============================================================================
 
 class TestRegionAnalyzerAgent:
-    """Tests for create_region_analyzer_agent."""
-
     def test_creates_llm_agent(self, model_name):
         agent = create_region_analyzer_agent(model_name)
         assert isinstance(agent, LlmAgent)
@@ -307,9 +286,7 @@ class TestRegionAnalyzerAgent:
         assert agent.output_key == "region_analysis"
 
 
-# =============================================================================
 # Book→Place Discovery Workflow (phase 1 of the primary flow)
-# =============================================================================
 
 class TestBookToPlaceDiscoveryWorkflow:
     """Tests for create_book_to_place_discovery_workflow's graph shape."""
@@ -363,13 +340,9 @@ class TestBookToPlaceDiscoveryWorkflow:
         assert successors(workflow, "region_analyzer") == set()
 
 
-# =============================================================================
 # Book→Place Composition Workflow (phase 2 of the primary flow)
-# =============================================================================
 
 class TestBookToPlaceCompositionWorkflow:
-    """Tests for create_book_to_place_composition_workflow."""
-
     def test_creates_workflow_graph(self, model_name):
         workflow = create_book_to_place_composition_workflow(model_name)
         assert isinstance(workflow, Workflow)
@@ -380,9 +353,7 @@ class TestBookToPlaceCompositionWorkflow:
         assert edge_pairs(workflow) == {(START_NAME, "trip_composer")}
 
 
-# =============================================================================
 # BookContext Dynamic Instruction Tests
-# =============================================================================
 
 class TestBookContextDynamicInstruction:
     """Verify book_context agents handle both known and unknown title/author."""
@@ -414,9 +385,7 @@ class TestBookContextDynamicInstruction:
         assert '"[Pygmalion]" by George Bernard Shaw' in researcher.instruction
 
 
-# =============================================================================
 # Prompt Loader Tests
-# =============================================================================
 
 class TestLoadPrompts:
     """Tests for the versioned prompt loader."""
@@ -443,14 +412,10 @@ class TestLoadPrompts:
             assert "{themes}" in template
 
 
-# =============================================================================
 # Book Recommendation agents + workflow
-# =============================================================================
 
 
 class TestBookRecommendationAgents:
-    """Tests for create_book_recommendation_agents."""
-
     def _pair(self, model_name, tool, **overrides):
         kwargs = dict(
             book_title="1984",
@@ -500,8 +465,6 @@ class TestBookRecommendationAgents:
 
 
 class TestBookRecommendationWorkflow:
-    """Tests for create_book_recommendation_workflow."""
-
     def _workflow(self, model_name, tool):
         return create_book_recommendation_workflow(
             model_name,

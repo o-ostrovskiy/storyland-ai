@@ -43,7 +43,6 @@ async def initialize() -> AppState:
     )
     logger = get_logger("storyland.api")
 
-    # Create executor with config
     executor_config = ExecutorConfig.from_config(config)
     executor = WorkflowExecutor(executor_config)
 

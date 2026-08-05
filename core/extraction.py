@@ -780,12 +780,10 @@ def extract_itinerary_from_response(
             if hasattr(part, "text") and part.text:
                 candidate = extract_json_from_text(part.text)
                 if candidate is not None:
-                    # Try envelope first
                     env_result = validate_composer_envelope(candidate)
                     if env_result is not None:
                         logger.info("itinerary_from_text_envelope_fallback")
                         return _finalize(*env_result)
-                    # Then bare itinerary
                     itinerary_result = validate_trip_itinerary(candidate)
                     if itinerary_result is not None:
                         logger.info("itinerary_from_text_fallback")

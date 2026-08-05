@@ -146,7 +146,6 @@ class LangfusePlugin(BasePlugin):
             logger.info("langfuse_unavailable", reason="package_not_installed")
             return
 
-        # Only initialize if all credentials provided
         if secret_key and public_key:
             try:
                 self.client = Langfuse(
@@ -234,7 +233,6 @@ class LangfusePlugin(BasePlugin):
             user_id = invocation_context.user_id
             session_id = invocation_context.session.id if invocation_context.session else None
 
-            # Propagate trace-level attributes to root span and all children
             self._propagation_cm = propagate_attributes(
                 user_id=user_id,
                 session_id=session_id,
@@ -268,7 +266,6 @@ class LangfusePlugin(BasePlugin):
         try:
             agent_name = getattr(agent, 'name', 'unknown_agent')
 
-            # Create child span for agent under the current trace span
             span = self._current_trace.start_observation(
                 as_type="span",
                 name=agent_name,
@@ -318,8 +315,6 @@ class LangfusePlugin(BasePlugin):
             key = self._branch_key(callback_context)
             self._models[key] = model_name
 
-            # Create generation tracking under the current agent span (this
-            # branch's own stack top) or the shared trace span.
             stack = self._agent_stacks.get(key) or []
             parent = stack[-1][1] if stack else self._current_trace
             self._generations[key] = parent.start_observation(
@@ -351,7 +346,6 @@ class LangfusePlugin(BasePlugin):
             return None
 
         try:
-            # Extract token usage from response
             usage = self._extract_token_usage(llm_response)
             model_name = self._models.get(key, "")
 
@@ -449,7 +443,6 @@ class LangfusePlugin(BasePlugin):
                     output_tokens=getattr(metadata, 'candidates_token_count', 0) or 0,
                     total_tokens=getattr(metadata, 'total_token_count', 0) or 0,
                 )
-            # Alternative: dict-like access
             elif isinstance(response, dict) and response.get('usage_metadata'):
                 md = response['usage_metadata']
                 usage = TokenUsage(

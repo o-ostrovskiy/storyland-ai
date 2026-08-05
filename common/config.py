@@ -17,7 +17,6 @@ DEFAULT_MODEL_NAME = "gemini-3.1-flash-lite"
 from dataclasses import dataclass
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
 

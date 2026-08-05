@@ -135,7 +135,6 @@ def configure_logging(level: str = "INFO", enable_adk_debug: bool = False) -> No
     """
     log_level = getattr(logging, level.upper(), logging.INFO)
 
-    # Configure root logger
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -144,12 +143,10 @@ def configure_logging(level: str = "INFO", enable_adk_debug: bool = False) -> No
         force=True,
     )
 
-    # Configure ADK loggers
     adk_level = logging.DEBUG if enable_adk_debug else log_level
     for logger_name in ADK_LOGGERS:
         logging.getLogger(logger_name).setLevel(adk_level)
 
-    # Configure structlog with colored console output
     structlog.configure(
         processors=[
             structlog.processors.add_log_level,

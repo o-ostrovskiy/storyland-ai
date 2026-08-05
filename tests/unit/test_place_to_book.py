@@ -35,9 +35,7 @@ from core.place_to_book import (
 from core.session_state import SessionStateAccessor, SessionStateKeys
 
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def mock_google_search_tool():
@@ -59,9 +57,7 @@ def _candidate(title, author="A", match_type="literal", maps_to="Somewhere",
     }
 
 
-# ---------------------------------------------------------------------------
 # Models
-# ---------------------------------------------------------------------------
 
 class TestModels:
     def test_candidates_allow_empty(self):
@@ -86,9 +82,7 @@ class TestModels:
         assert r.candidates == []
 
 
-# ---------------------------------------------------------------------------
 # Normalization
-# ---------------------------------------------------------------------------
 
 class TestNormalize:
     def test_lower_and_strip(self):
@@ -113,9 +107,7 @@ class TestNormalize:
         assert cache_key("NYC") == "place2book:v1:nyc"
 
 
-# ---------------------------------------------------------------------------
 # Extraction / validation
-# ---------------------------------------------------------------------------
 
 class TestExtraction:
     def test_validate_good_payload(self):
@@ -145,9 +137,7 @@ class TestExtraction:
         assert extract_place_to_book_from_state(SessionStateAccessor({})) is None
 
 
-# ---------------------------------------------------------------------------
 # Grounding filter
-# ---------------------------------------------------------------------------
 
 class TestGroundingFilter:
     def test_drops_ungrounded_title(self):
@@ -188,9 +178,7 @@ class TestGroundingFilter:
         assert [c["title"] for c in out] == ["Real Title"]
 
 
-# ---------------------------------------------------------------------------
 # Label invariants
-# ---------------------------------------------------------------------------
 
 class TestLabelInvariants:
     def test_vibe_maps_to_forced_none(self):
@@ -212,9 +200,7 @@ class TestLabelInvariants:
         assert enforce_label_invariants(cands) == []
 
 
-# ---------------------------------------------------------------------------
 # Agent / workflow factories
-# ---------------------------------------------------------------------------
 
 class TestFactories:
     def test_agent_pair(self, mock_google_search_tool):
@@ -247,9 +233,7 @@ class TestFactories:
         ]
 
 
-# ---------------------------------------------------------------------------
 # Resolver (Gemini chain stubbed — no network)
-# ---------------------------------------------------------------------------
 
 def _make_resolver(monkeypatch, researcher_text, formatter_candidates, run_counter=None):
     """Build a PlaceToBookResolver whose pipeline run is stubbed.
@@ -374,9 +358,7 @@ class TestResolver:
         assert runs == []  # never ran the pipeline
 
 
-# ---------------------------------------------------------------------------
 # Resolver capture under the REAL graph runtime (Codex P2, 2026-07-19 20:48)
-# ---------------------------------------------------------------------------
 
 class TestResolverCaptureUnderRealGraph:
     """Drive the REAL PlaceToBookResolver._run_pipeline — real workflow, real

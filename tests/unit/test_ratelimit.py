@@ -17,9 +17,7 @@ from api.dependencies import AppState, enforce_rate_limit, limit_inflight
 from api.ratelimit import InFlightLimiter, SlidingWindowRateLimiter
 
 
-# ---------------------------------------------------------------------------
 # InFlightLimiter
-# ---------------------------------------------------------------------------
 class TestInFlightLimiter:
     def test_disabled_always_acquires(self):
         lim = InFlightLimiter(0)
@@ -55,9 +53,7 @@ class TestInFlightLimiter:
         assert lim.active == 0
 
 
-# ---------------------------------------------------------------------------
 # SlidingWindowRateLimiter
-# ---------------------------------------------------------------------------
 class TestSlidingWindowRateLimiter:
     def test_disabled_always_allows(self):
         lim = SlidingWindowRateLimiter(max_requests=0, window_seconds=60)
@@ -110,9 +106,7 @@ class TestSlidingWindowRateLimiter:
         assert lim.tracked_keys == 1
 
 
-# ---------------------------------------------------------------------------
 # FastAPI dependency wiring
-# ---------------------------------------------------------------------------
 @pytest.fixture
 def fake_state(monkeypatch):
     """Install a minimal AppState carrying real limiter instances."""
@@ -185,10 +179,8 @@ class TestLimitInflight:
             await gen.__anext__()
 
 
-# ---------------------------------------------------------------------------
 # MYS-403 gap 3 (disconnect half): limit_inflight() releasing its slot when
 # the holder is cancelled mid-stream, not just on normal completion.
-# ---------------------------------------------------------------------------
 #
 # TestLimitInflight above (and test_api.py::TestInflightLimiterOverRealStream,
 # which drives a real ASGI round-trip) both cover the generator finishing on

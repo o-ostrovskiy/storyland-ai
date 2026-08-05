@@ -407,7 +407,6 @@ async def _run_case(
     """Drive discover → compose → expand for one case; return a result dict."""
     RegionsReady, ItineraryReady, ExpansionReady, WorkflowError = events
 
-    # Step 1: discovery
     regions_ev = error_ev = None
     async for ev in executor.discover(
         book_title=book_title, author=author, user_id="eval_user",
@@ -426,7 +425,6 @@ async def _run_case(
     else:
         region_ids = [regions_ev.regions[0].get("region_id")]
 
-    # Step 2: composition (base itinerary + server-stamped chips)
     itinerary_ev = error_ev = None
     async for ev in executor.compose(
         job_id=job_id, region_ids=region_ids, user_id="eval_user",
@@ -446,7 +444,6 @@ async def _run_case(
 
     chip = pick_chip(chips, chip_keyword)
 
-    # Step 3: expansion via the clicked chip
     expansion_ev = error_ev = None
     async for ev in executor.expand(
         job_id=job_id,

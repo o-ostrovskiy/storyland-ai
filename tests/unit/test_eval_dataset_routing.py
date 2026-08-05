@@ -78,7 +78,7 @@ def test_all_committed_evalsets_declare_expected_flows():
             assert evalset.get("flow", "itinerary") == "itinerary", path.name
 
 
-# --- input extraction shapes (dataset sync) --------------------------------
+# input extraction shapes (dataset sync)
 
 def test_extract_input_place_shape():
     case = {"place": "Lisbon", "eval_id": "x"}

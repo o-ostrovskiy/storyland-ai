@@ -46,5 +46,4 @@ def get_user_preferences(tool_context: ToolContext) -> str:
         })
 
 
-# Create FunctionTool
 get_preferences_tool = FunctionTool(get_user_preferences)

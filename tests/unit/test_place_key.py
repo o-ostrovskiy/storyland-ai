@@ -50,7 +50,7 @@ def _region(**overrides) -> dict:
     return base
 
 
-# ── 1. The key: canonical, grounded, and refusing to guess ───────────────────
+# 1. The key: canonical, grounded, and refusing to guess
 
 class TestMintPlaceKey:
     def test_canonical_form(self):
@@ -510,7 +510,7 @@ class TestKeyIsNotDerivedFromTheWrongThing:
         assert book_a["regions"][0]["place_key"] == book_c["regions"][0]["place_key"] == "fr:paris"
 
 
-# ── 2. Enrichment: on the wire, on both paths, mutating nothing ──────────────
+# 2. Enrichment: on the wire, on both paths, mutating nothing
 
 class TestEnrichRegionAnalysis:
     def test_adds_place_key_to_every_region_and_preserves_the_payload(self):
@@ -637,7 +637,7 @@ class TestSseWireContract:
         assert payload["regions"][0]["admin_area"] == "Maine"
 
 
-# ── 3. THE AC: a discovery cache HIT can never return a keyless region ───────
+# 3. THE AC: a discovery cache HIT can never return a keyless region
 
 class TestCacheNamespaceFlush:
     def test_the_discovery_schema_is_an_input_to_the_cache_version(self):

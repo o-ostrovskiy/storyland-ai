@@ -113,7 +113,6 @@ def real_api_key():
 
 @pytest.fixture
 def sample_integration_queries():
-    """Common queries for integration testing."""
     return [
         {"title": "Pride and Prejudice", "author": "Jane Austen"},
         {"title": "1984", "author": "George Orwell"},

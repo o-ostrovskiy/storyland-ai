@@ -13,7 +13,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from evaluation.tools.llm_scorer import SCORING_CRITERIA
 
-# Load environment variables from .env file
 load_dotenv()
 
 try:
@@ -73,7 +72,6 @@ class LangfuseEvalPipeline:
             host=self.host,
         )
 
-        # Verify authentication
         if not self.client.auth_check():
             raise RuntimeError("Langfuse authentication failed. Check credentials.")
 
@@ -96,7 +94,6 @@ class LangfuseEvalPipeline:
         Returns:
             Dataset name in Langfuse
         """
-        # Load evalset
         with open(evalset_path, 'r') as f:
             evalset = json.load(f)
 
@@ -114,17 +111,11 @@ class LangfuseEvalPipeline:
             description=description,
         )
 
-        # Add eval cases as dataset items
         for case in evalset.get('eval_cases', []):
             eval_id = case.get('eval_id', 'unknown')
-
-            # Extract input from conversation
             input_data = self._extract_input_from_case(case)
-
-            # Extract expected output (if available)
             expected_output = case.get('expected_output', None)
 
-            # Validate quality_criteria keys if present
             quality_criteria = case.get('quality_criteria')
             if quality_criteria:
                 valid_keys = set(SCORING_CRITERIA.keys())
@@ -153,7 +144,6 @@ class LangfuseEvalPipeline:
                         ),
                     )
 
-            # Add metadata
             metadata = {
                 'eval_id': eval_id,
                 'session_input': case.get('session_input', {}),
@@ -319,9 +309,6 @@ class LangfuseEvalPipeline:
         ]
 
         logger.info("creating_scoring_functions", count=len(scoring_functions))
-
-        # Note: Langfuse scoring functions are typically created via UI
-        # For programmatic creation, we'll store them as metadata
         return [sf['name'] for sf in scoring_functions]
 
     def export_evaluation_results(
@@ -337,10 +324,6 @@ class LangfuseEvalPipeline:
             dataset_name: Filter by dataset name (optional)
         """
         logger.info("exporting_evaluation_results", output_path=output_path)
-
-        # Fetch dataset runs from Langfuse
-        # Note: This would use Langfuse API to fetch evaluation results
-        # Implementation depends on Langfuse SDK capabilities
 
         results = {
             'export_date': datetime.now().isoformat(),
@@ -366,8 +349,6 @@ class LangfuseEvalPipeline:
         Returns:
             Dictionary with dataset statistics
         """
-        # This would query Langfuse API for dataset stats
-        # Implementation depends on SDK capabilities
         return {
             'dataset_name': dataset_name,
             'message': f'View dataset at {self.host}',
@@ -412,7 +393,6 @@ def create_dataset_from_evalsets(
             'created_at': datetime.now().isoformat(),
         })
 
-    # Save summary
     os.makedirs(os.path.dirname(output_summary), exist_ok=True)
     with open(output_summary, 'w') as f:
         json.dump({

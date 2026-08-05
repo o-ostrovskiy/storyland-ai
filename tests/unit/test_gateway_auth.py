@@ -83,9 +83,7 @@ def test_unverified_jwt_helper_is_removed():
     assert not hasattr(deps, "_user_from_jwt")
 
 
-# --------------------------------------------------------------------------
 # verify_gateway_secret — the service-to-service check
-# --------------------------------------------------------------------------
 
 
 def _request(secret_header: str | None = None) -> SimpleNamespace:
@@ -189,9 +187,7 @@ def test_empty_config_accepts_every_caller_and_that_is_a_misconfiguration(instal
     assert deps.verify_gateway_secret(_request("anything-at-all")) is None
 
 
-# --------------------------------------------------------------------------
 # initialize() — boot-time visibility and the fail-closed switch
-# --------------------------------------------------------------------------
 
 
 class _FakeLogger:
@@ -287,9 +283,7 @@ async def test_require_gateway_secret_boots_normally_when_secret_present(boot):
     assert "gateway_auth_disabled" not in logger.events("warning")
 
 
-# --------------------------------------------------------------------------
 # load_config() — REQUIRE_GATEWAY_SECRET defaults CLOSED (the 2026-07 flip)
-# --------------------------------------------------------------------------
 
 
 _REQUIRED_ENV = {

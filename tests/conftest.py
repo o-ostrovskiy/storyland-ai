@@ -19,9 +19,7 @@ from models.itinerary import TripItinerary, CityPlan, CityStop
 from models.preferences import TravelPreferences
 
 
-# =============================================================================
 # Sample Book Data Fixtures
-# =============================================================================
 
 @pytest.fixture
 def sample_book_metadata() -> BookMetadata:
@@ -61,7 +59,6 @@ def sample_book_info() -> BookInfo:
 
 @pytest.fixture
 def sample_book_info_list(sample_book_info) -> list:
-    """List of sample BookInfo objects."""
     return [
         sample_book_info,
         BookInfo(
@@ -75,13 +72,10 @@ def sample_book_info_list(sample_book_info) -> list:
     ]
 
 
-# =============================================================================
 # Discovery Fixtures
-# =============================================================================
 
 @pytest.fixture
 def sample_city_discovery() -> CityDiscovery:
-    """Sample CityDiscovery results."""
     return CityDiscovery(
         cities=[
             CityInfo(
@@ -100,7 +94,6 @@ def sample_city_discovery() -> CityDiscovery:
 
 @pytest.fixture
 def sample_landmark_discovery() -> LandmarkDiscovery:
-    """Sample LandmarkDiscovery results."""
     return LandmarkDiscovery(
         landmarks=[
             LandmarkInfo(
@@ -119,7 +112,6 @@ def sample_landmark_discovery() -> LandmarkDiscovery:
 
 @pytest.fixture
 def sample_author_sites() -> AuthorSites:
-    """Sample AuthorSites results."""
     return AuthorSites(
         author_sites=[
             AuthorSiteInfo(
@@ -136,13 +128,10 @@ def sample_author_sites() -> AuthorSites:
     )
 
 
-# =============================================================================
 # Itinerary Fixtures
-# =============================================================================
 
 @pytest.fixture
 def sample_city_stop() -> CityStop:
-    """Sample CityStop."""
     return CityStop(
         name="Chatsworth House",
         type="landmark",
@@ -154,7 +143,6 @@ def sample_city_stop() -> CityStop:
 
 @pytest.fixture
 def sample_city_plan(sample_city_stop) -> CityPlan:
-    """Sample CityPlan."""
     return CityPlan(
         name="Bakewell",
         country="England",
@@ -166,20 +154,16 @@ def sample_city_plan(sample_city_stop) -> CityPlan:
 
 @pytest.fixture
 def sample_trip_itinerary(sample_city_plan) -> TripItinerary:
-    """Sample TripItinerary."""
     return TripItinerary(
         cities=[sample_city_plan],
         summary_text="Follow in the footsteps of Elizabeth Bennet through the English countryside."
     )
 
 
-# =============================================================================
 # Preferences Fixtures
-# =============================================================================
 
 @pytest.fixture
 def sample_preferences() -> TravelPreferences:
-    """Sample TravelPreferences."""
     return TravelPreferences(
         prefers_museums=True,
         travels_with_kids=False,
@@ -209,7 +193,6 @@ def sample_preferences_dict() -> Dict[str, Any]:
 
 @pytest.fixture
 def luxury_preferences_dict() -> Dict[str, Any]:
-    """Luxury traveler preferences."""
     return {
         "prefers_museums": True,
         "travels_with_kids": False,
@@ -224,7 +207,6 @@ def luxury_preferences_dict() -> Dict[str, Any]:
 
 @pytest.fixture
 def family_preferences_dict() -> Dict[str, Any]:
-    """Family traveler preferences."""
     return {
         "prefers_museums": True,
         "travels_with_kids": True,
@@ -237,13 +219,10 @@ def family_preferences_dict() -> Dict[str, Any]:
     }
 
 
-# =============================================================================
 # Mock Responses
-# =============================================================================
 
 @pytest.fixture
 def mock_tool_context(sample_preferences_dict):
-    """Mock ToolContext for testing tools."""
     context = MagicMock()
     context.state = {"user:preferences": sample_preferences_dict}
     return context
@@ -251,15 +230,12 @@ def mock_tool_context(sample_preferences_dict):
 
 @pytest.fixture
 def mock_tool_context_no_preferences():
-    """Mock ToolContext with no preferences."""
     context = MagicMock()
     context.state = {}
     return context
 
 
-# =============================================================================
 # Session State Fixtures
-# =============================================================================
 
 @pytest.fixture
 def sample_session_state(
@@ -284,9 +260,7 @@ def sample_session_state(
     }
 
 
-# =============================================================================
 # Async Test Helpers
-# =============================================================================
 
 @pytest.fixture
 def event_loop_policy():
