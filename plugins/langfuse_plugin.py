@@ -141,6 +141,14 @@ class LangfusePlugin(BasePlugin):
         self._agent_stacks: dict[str, list] = {}  # branch key -> that branch's own LIFO agent stack
         self._spans: dict[str, Any] = {}  # branch key -> open tool span
         self._propagation_cm = None
+        # Last final-response event text, used as the trace's output. A plain
+        # scalar is correct here even under ParallelAgent: unlike the
+        # before_model/after_model pairs above, events are consumed one at a
+        # time off the Runner's single event stream, so there is no
+        # interleaving to scope per branch. "Last event whose
+        # is_final_response() is true" is the same rule core/run_harness.py
+        # already uses to pick a run's answer.
+        self._final_response_text: Optional[str] = None
 
         if not LANGFUSE_AVAILABLE:
             logger.info("langfuse_unavailable", reason="package_not_installed")
@@ -250,6 +258,15 @@ class LangfusePlugin(BasePlugin):
                 },
                 input=str(user_message),
             )
+            # Mirror the root span's input onto the TRACE. Langfuse's session
+            # view and trace list render trace-level I/O, not the root span's,
+            # so without this every production trace displays as "This trace
+            # has no input or output" even though the span tree is complete.
+            # v4's observations-first model deprecates trace I/O in favour of
+            # propagate_attributes(), but propagate_attributes carries only
+            # correlating attributes (user/session/tags) -- set_trace_io is
+            # still the only way to populate the fields those views read.
+            self._current_trace.set_trace_io(input=str(user_message))
             logger.debug("langfuse_trace_created", trace_id=self._current_trace.trace_id, user_id=user_id)
         except Exception as e:
             logger.warning("langfuse_trace_error", error=str(e), error_type=type(e).__name__)
@@ -518,6 +535,26 @@ class LangfusePlugin(BasePlugin):
 
         return None
 
+    async def on_event_callback(
+        self, *, invocation_context: InvocationContext, event: Any
+    ) -> None:
+        """Remember the run's answer so after_run can set it as trace output."""
+        if not self.enabled or not self.client or not self._current_trace:
+            return None
+
+        try:
+            if not event.is_final_response():
+                return None
+            content = getattr(event, "content", None)
+            parts = getattr(content, "parts", None) or []
+            texts = [t for t in (getattr(p, "text", None) for p in parts) if t]
+            if texts:
+                self._final_response_text = "".join(texts)
+        except Exception as e:
+            logger.warning("langfuse_event_error", error=str(e), error_type=type(e).__name__)
+
+        return None
+
     async def after_run_callback(
         self, *, invocation_context: InvocationContext
     ) -> None:
@@ -534,6 +571,15 @@ class LangfusePlugin(BasePlugin):
                     "total_cost_usd": self._total_cost_usd,
                 },
             )
+            # Trace-level output, for the same reason as the input above. Falls
+            # back to the status blob only when the run produced no final-
+            # response text (error paths), so the trace never renders blank.
+            # set_trace_io drops None fields, so this cannot clear the input.
+            self._current_trace.set_trace_io(
+                output=self._final_response_text
+                if self._final_response_text is not None
+                else {"status": "completed"}
+            )
             self._current_trace.end()
             logger.info(
                 "langfuse_invocation_complete",
@@ -545,6 +591,7 @@ class LangfusePlugin(BasePlugin):
         except Exception as e:
             logger.warning("langfuse_finalize_error", error=str(e), error_type=type(e).__name__)
         finally:
+            self._final_response_text = None
             if self._propagation_cm:
                 self._propagation_cm.__exit__(None, None, None)
                 self._propagation_cm = None
@@ -567,6 +614,7 @@ class LangfusePlugin(BasePlugin):
         """Reset token usage statistics."""
         self._token_usage = TokenUsage()
         self._total_cost_usd = 0.0
+        self._final_response_text = None
 
     async def flush(self) -> None:
         """Flush pending Langfuse events."""
