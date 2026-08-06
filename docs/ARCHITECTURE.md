@@ -953,12 +953,13 @@ Add an isolated, gateway-internal capability that routes a **place back to books
 
 ## 21. API Abuse + Operational Hardening (grouped; 2026-06-23 → 07-17)
 
-Four smaller decisions, recorded together:
+Five smaller decisions, recorded together:
 
 - **Rate limiting + concurrency cap** (2026-06-23): per-identity request rate limit and in-flight concurrency cap on discovery endpoints (`api/ratelimit.py`); input-size bounds return 422 **before** any Gemini tokens are spent.
 - **Bounded session retention** (2026-06-24): a periodic retention sweep (`services/session_retention.py`) bounds the in-memory/SQLite session store — extends ADR #6, which predates it.
 - **Recommendation-tone guardrail** (2026-06-28): rec explanations are fit-only and never grade the reader (`core/guardrails/tone_guardrail.py`).
 - **Langfuse per-branch scoping** (2026-07-17, MYS-398): generation/agent-stack/span state is scoped **per ParallelAgent branch** (`_branch_key()` in `plugins/langfuse_plugin.py`) — per-request plugin instances (ADR #8) were not enough under the ADR #3 parallel fan-out.
+- **Langfuse trace-level I/O written explicitly** (2026-08-05, MYS-788): the plugin sets input/output on the trace as well as on its root span (`set_trace_io()` in `plugins/langfuse_plugin.py`), because Langfuse's session view and trace list render **trace**-level I/O — setting only the root span's made every production trace display as "This trace has no input or output" despite a complete span tree. Python SDK v4 dropped `update_current_trace()` and deprecates trace I/O in favour of the observations-first model, but `propagate_attributes()` carries correlating attributes only (user/session/tags/metadata), so `set_trace_io()` is the sole remaining writer for those two fields; revisit when those views read observations instead. Trace output is the run's final-response text, picked with the same rule as `core/run_harness.py` (last event where `is_final_response()` is true).
 
 ---
 
