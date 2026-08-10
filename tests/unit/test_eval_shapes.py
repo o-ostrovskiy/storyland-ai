@@ -163,6 +163,99 @@ class TestJudgeModel:
             default = inspect.signature(fn).parameters["model_name"].default
             assert default == _DEFAULT_JUDGE_MODEL, fn.__name__
 
+    def test_no_runner_hardcodes_a_judge_model(self):
+        """The defaults above are not enough on their own.
+
+        The first fix re-pinned the constant while both call sites still passed
+        `model_name="gemini-2.5-flash-lite"` explicitly — the default-checking
+        test above passed, and the next live run failed on the dead model
+        exactly as before. Pin the call sites at source level too.
+        """
+        from pathlib import Path
+
+        for name in (
+            "run_scheduled_eval.py",
+            "run_local_atmosphere_eval.py",
+            "llm_scorer.py",
+        ):
+            source = (Path("evaluation") / "tools" / name).read_text()
+            for line in source.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("#") or "_DEFAULT_JUDGE_MODEL" in line:
+                    continue
+                assert "gemini-2.5" not in line, f"{name}: {stripped}"
+
+
+class TestDatasetFailureReason:
+    """A run that measured nothing must not report success (MYS-825).
+
+    The 2026-08-09 failure: judge 404s, every case catches its own error and
+    records scores=None, and the summary prints "All evaluations completed
+    successfully" with exit 0. "No result" is the one outcome that looks
+    identical to a pass, so it needs an explicit check.
+    """
+
+    def _result(self, cases, **overrides):
+        base = {
+            "dataset_name": "storyland_eval",
+            "total_cases": len(cases),
+            "evaluated_cases": len(cases),
+            "failed_cases": 0,
+            "skipped_cases": 0,
+            "case_results": cases,
+        }
+        base.update(overrides)
+        return base
+
+    def _scored(self):
+        return {"status": "evaluated", "scores": {"average": 4.0}}
+
+    def _unscored(self):
+        return {"status": "evaluated", "scores": None}
+
+    def test_all_unscored_is_a_failure(self):
+        from evaluation.tools.run_scheduled_eval import dataset_failure_reason
+
+        reason = dataset_failure_reason(self._result([self._unscored()] * 3))
+        assert reason is not None
+        assert "scored 0 of 3" in reason
+        assert "llm_scorer.py" in reason  # points at the fix
+
+    def test_all_scored_passes(self):
+        from evaluation.tools.run_scheduled_eval import dataset_failure_reason
+
+        assert dataset_failure_reason(self._result([self._scored()] * 3)) is None
+
+    def test_partial_scoring_is_not_a_failure(self):
+        """One judge hiccup is noise; it surfaces as a WARNING, not a red run."""
+        from evaluation.tools.run_scheduled_eval import dataset_failure_reason
+
+        result = self._result([self._scored(), self._unscored()])
+        assert dataset_failure_reason(result) is None
+
+    def test_empty_dataset_is_not_a_failure(self):
+        from evaluation.tools.run_scheduled_eval import dataset_failure_reason
+
+        assert dataset_failure_reason(self._result([], total_cases=0)) is None
+
+    def test_explicit_error_still_reported_first(self):
+        from evaluation.tools.run_scheduled_eval import dataset_failure_reason
+
+        result = self._result([self._unscored()], error="Failed to fetch dataset")
+        assert "Failed to fetch dataset" in dataset_failure_reason(result)
+
+    def test_failed_cases_still_reported(self):
+        from evaluation.tools.run_scheduled_eval import dataset_failure_reason
+
+        result = self._result([self._scored()], failed_cases=2)
+        assert "2 case(s) failed" in dataset_failure_reason(result)
+
+    def test_count_scored_cases_tolerates_missing_key(self):
+        from evaluation.tools.run_scheduled_eval import count_scored_cases
+
+        assert count_scored_cases({}) == 0
+        assert count_scored_cases({"case_results": None}) == 0
+
 
 class TestCountItineraryCities:
     """The composer returns an envelope; the count must reach into it.

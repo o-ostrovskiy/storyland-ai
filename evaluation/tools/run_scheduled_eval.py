@@ -81,6 +81,51 @@ def count_itinerary_cities(itinerary_data: Optional[Dict[str, Any]]) -> int:
     return len(itinerary_data.get("cities") or [])
 
 
+def count_scored_cases(result: Dict[str, Any]) -> int:
+    """Cases in a dataset result that actually carry judge scores."""
+    return sum(1 for c in (result.get("case_results") or []) if c.get("scores"))
+
+
+def dataset_failure_reason(result: Dict[str, Any]) -> Optional[str]:
+    """Why this dataset result should fail CI, or None if it passes.
+
+    "The judge scored nothing" is a failure in its own right (MYS-825). On
+    2026-08-09 the judge model began answering 404; because each case caught
+    its own scoring error, all 18 cases recorded ``scores: None`` and the run
+    still exited 0 under "✅ All evaluations completed successfully". A quality
+    gate that measured nothing must not report success — "no result" is the one
+    outcome that looks identical to a passing one, so it has to be called out
+    explicitly rather than inferred from the numbers nobody reads.
+
+    An empty dataset (no cases at all) is NOT a failure; the caller reports
+    that separately as a configuration state.
+    """
+    if "error" in result:
+        return f"ERROR: {result['error']}"
+
+    failed = result.get("failed_cases", 0)
+    if failed:
+        return (
+            f"ERROR: {failed} case(s) failed evaluation "
+            f"(out of {result.get('total_cases', 0)})"
+        )
+
+    skipped = result.get("skipped_cases", 0)
+    if skipped:
+        return f"ERROR: {skipped} case(s) skipped due to parsing failures"
+
+    evaluated = result.get("evaluated_cases", 0)
+    if evaluated > 0 and count_scored_cases(result) == 0:
+        return (
+            f"ERROR: the judge scored 0 of {evaluated} evaluated case(s) — "
+            "this run measured nothing. Check the judge model in "
+            "evaluation/tools/llm_scorer.py (_DEFAULT_JUDGE_MODEL); model "
+            "retirements surface here as a per-case 404."
+        )
+
+    return None
+
+
 def select_itinerary_datasets(
     datasets_info: Dict[str, Any],
 ) -> tuple[List[str], List[Dict[str, str]]]:
@@ -864,7 +909,6 @@ Find cities, landmarks, and author-related sites, then group them into practical
                     itinerary=itinerary_data,
                     preferences=preferences,
                     expected_output=expected_output,
-                    model_name="gemini-2.5-flash-lite",
                 )
 
                 root_span.score_trace(
@@ -925,8 +969,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
                             author=exact_author,
                             quality_criteria=quality_criteria,
                             itinerary=itinerary_data,
-                            model_name="gemini-2.5-flash-lite",
-                        )
+                                )
                         scores_data["criteria_coverage"] = coverage
                         root_span.score_trace(
                             name="criteria_coverage",
@@ -1273,23 +1316,21 @@ def main():
         total_evaluated += evaluated
         total_placeholders += placeholders
 
-        # Failure = explicit error OR failed cases OR skipped cases (any dataset
-        # failure should fail CI). Empty dataset (total_cases == 0) is NOT a failure.
-        has_error = 'error' in result
-        has_failures = failed_cases > 0
-        has_skipped = skipped_cases > 0
+        # Failure = explicit error, failed cases, skipped cases, OR a judge that
+        # scored nothing (MYS-825). Empty dataset (total_cases == 0) is NOT a
+        # failure. See dataset_failure_reason for why "measured nothing" counts.
+        failure = dataset_failure_reason(result)
 
-        if has_error or has_failures or has_skipped:
+        if failure:
             total_failed_datasets += 1
-            if has_error:
-                print(f"ERROR: {result['error']}")
-            elif has_failures:
-                print(f"ERROR: {failed_cases} case(s) failed evaluation (out of {total_cases})")
-            elif has_skipped:
-                print(f"ERROR: {skipped_cases} case(s) skipped due to parsing failures")
+            print(failure)
         elif total_cases == 0:
             total_skipped += 1
             print("INFO: Dataset is empty (no test cases)")
+        else:
+            unscored = evaluated - count_scored_cases(result)
+            if unscored > 0:
+                print(f"WARNING: {unscored} of {evaluated} case(s) evaluated but unscored")
 
     print("\n" + "=" * 60)
     print(f"Total: {total_evaluated} real evaluation(s), {total_placeholders} placeholder(s)")
