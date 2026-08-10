@@ -39,7 +39,13 @@ make eval-setup
 ```
 
 This creates the Langfuse datasets:
-- `storyland_eval` — 8 diverse scenarios for comprehensive testing
+- `storyland_eval` — 10 diverse scenarios for comprehensive testing. Two of
+  them (*Piranesi*, *Project Hail Mary*) are **fictional/non-Earth-setting**
+  books, a shape the set carried none of until 2026-08-09. That gap is likely
+  why MYS-816 went unnoticed: those are exactly the books where discovery
+  researchers were observed skipping `google_search` entirely. Note the judge
+  scores itinerary *quality* and does not itself assert that a search
+  happened — see MYS-817 for making the runner check that.
 - `books_v1` — 10 cases with expected outputs and book-specific scoring criteria
 - `place_to_book_v1` — 11 cases for the **place→book reverse-routing** grounding gate (literal/vibe labelling + not-found state). Register with `make eval-setup-one EVALSET_FILE=evaluation/place_to_book_v1.evalset.json`.
 - `local_atmosphere_v1` — 8 cases for the **local-atmosphere** ("book near me") flow: mixed preference shapes (4 with / 4 without `user:preferences`), LLM judge + deterministic envelope/radius gate.
@@ -428,7 +434,7 @@ evaluation/
 │   ├── llm_scorer.py              # LLM-as-judge quality scoring
 │   ├── judge_calibration.py       # Human-label queue + judge-vs-human agreement
 │   └── setup_langfuse_eval.sh     # Setup script
-├── storyland_eval.evalset.json    # Dataset (8 diverse books)
+├── storyland_eval.evalset.json    # Dataset (10 diverse books, incl. 2 fictional-world)
 ├── books_v1.evalset.json          # Dataset (10 books with expected output + criteria)
 ├── place_to_book_v1.evalset.json  # Dataset (11 place→book reverse-routing grounding cases)
 ├── local_atmosphere_v1.evalset.json  # Dataset (8 local-atmosphere cases, mixed preference shapes)
