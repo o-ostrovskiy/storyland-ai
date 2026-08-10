@@ -873,6 +873,64 @@ def is_title_grounded(title: object, haystack_tokens: frozenset) -> bool:
     return missing <= allowed_missing
 
 
+# Discovery payload key -> the list field holding its entries. All three entry
+# shapes identify themselves with ``name`` (models/discovery.py), so one check
+# covers cities, landmarks, and author sites.
+_DISCOVERY_PAYLOAD_LISTS: dict[str, str] = {
+    "cities": "cities",
+    "landmarks": "landmarks",
+    "author_sites": "author_sites",
+}
+
+
+def audit_discovery_grounding(
+    payloads: dict[str, Optional[object]], researcher_text: str
+) -> Optional[dict[str, tuple]]:
+    """Measure how much of the discovery output traces back to the research.
+
+    OBSERVATION ONLY — returns counts and mutates nothing. It exists to answer
+    a question we currently cannot: the discovery *formatters* turn researcher
+    prose into the structured payloads that every downstream stage then treats
+    as ground truth, and nothing checks that a formatted place was actually
+    found by the researcher. A fabrication entering there is laundered into
+    fact by the time the composer sees it.
+
+    Note the deliberate asymmetry with the composer-stage guard
+    (``downgrade_ungrounded_match_types``), which DOES act on its finding.
+    That guard is safe to enforce because the composer's haystack is exactly
+    its own input, so a miss is unambiguously an invention. Here the haystack
+    is free-form researcher prose, so a miss may equally be the token rule
+    being strict about a paraphrase. We measure first and decide enforcement
+    from the numbers.
+
+    Returns ``{payload_key: (grounded, total)}``, or None when there is no
+    usable evidence — no researcher text (fail-open, same rule as every other
+    grounding guard here) or no entries at all. A None means "cannot say",
+    never "nothing was grounded"; the caller logs the two cases apart.
+    """
+    haystack = grounding_token_set(researcher_text)
+    if not haystack:
+        return None
+
+    counts: dict[str, tuple] = {}
+    for key, list_field in _DISCOVERY_PAYLOAD_LISTS.items():
+        payload = payloads.get(key)
+        if not isinstance(payload, dict):
+            continue
+        entries = payload.get(list_field) or []
+        if not entries:
+            continue
+        grounded = sum(
+            1
+            for entry in entries
+            if isinstance(entry, dict)
+            and is_title_grounded(entry.get("name"), haystack)
+        )
+        counts[key] = (grounded, len(entries))
+
+    return counts or None
+
+
 def filter_grounded_recommendations(
     rec_data: Optional[dict], researcher_text: str
 ) -> Optional[dict]:

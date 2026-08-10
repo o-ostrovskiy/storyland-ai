@@ -71,6 +71,7 @@ from .events import (
     WorkflowComplete,
 )
 from .extraction import (
+    audit_discovery_grounding,
     extract_itinerary_from_response,
     extract_expansion_from_state,
     extract_book_recommendations_from_state,
@@ -137,6 +138,16 @@ def _map_phase_exception(
     )
 
 # Agent name -> human-readable progress descriptions
+# The search-backed half of the discovery chain. Their text is captured on
+# every fresh run and audited against the formatters' payloads — see
+# WorkflowExecutor._audit_discovery_grounding.
+DISCOVERY_RESEARCHER_AUTHORS: tuple[str, ...] = (
+    "book_context_researcher",
+    "city_researcher",
+    "landmark_researcher",
+    "author_researcher",
+)
+
 DISCOVERY_AGENT_STEPS: dict[str, str] = {
     "book_context_researcher": "Researching book setting and themes",
     "book_context_formatter": "Formatting book context",
@@ -264,6 +275,52 @@ class WorkflowExecutor:
             client_kwargs={"api_key": self._config.google_api_key},
             retry_options=retry_config,
         )
+
+    def _audit_discovery_grounding(
+        self, job_id: str, capture: RunCapture, run_state: SessionStateAccessor
+    ) -> None:
+        """Log how much of the discovery payload traces to the researchers.
+
+        Observation only — logs and returns, never touching the payloads. See
+        ``audit_discovery_grounding`` for why this stage measures rather than
+        enforces.
+
+        Fresh runs ONLY. The cached-discovery replay path deliberately does
+        not call this: a cache hit has no researcher text by construction, so
+        auditing there would emit a permanent no-evidence warning on exactly
+        the popular, repeated titles the cache serves most.
+        """
+        researcher_text = "\n".join(
+            capture.text_for(author) for author in DISCOVERY_RESEARCHER_AUTHORS
+        )
+        counts = audit_discovery_grounding(
+            {
+                "cities": run_state.city_discovery,
+                "landmarks": run_state.landmark_discovery,
+                "author_sites": run_state.author_sites,
+            },
+            researcher_text,
+        )
+        if counts is None:
+            # Either no researcher text reached us or discovery produced no
+            # entries. Both are worth a line: the first would mean the
+            # researchers never spoke (or the capture seam broke), which is
+            # the same class of silence the search_grounding_absent log
+            # exists to surface.
+            logger.info(
+                "discovery_grounding_no_capture",
+                job_id=job_id[:8],
+                captured_chars=len(researcher_text),
+            )
+            return
+        for kind, (grounded, total) in counts.items():
+            logger.info(
+                "discovery_grounding_audit",
+                job_id=job_id[:8],
+                kind=kind,
+                grounded=grounded,
+                total=total,
+            )
 
     def _create_langfuse_plugin(self) -> LangfusePlugin:
         """Fresh plugin per workflow run to isolate token tracking."""
@@ -537,6 +594,10 @@ class WorkflowExecutor:
                 role="user", parts=[types.Part(text=prompt)]
             )
 
+            # Capture the researchers' text purely to audit the formatters
+            # against it below. Same capture seam recommend_books() and the
+            # place→book resolver already use; costs no extra model call.
+            capture = RunCapture()
             async for ev in pump_events(
                 runner,
                 user_id=user_id,
@@ -544,6 +605,8 @@ class WorkflowExecutor:
                 message=message,
                 phase=Phase.DISCOVERY,
                 agent_steps=DISCOVERY_AGENT_STEPS,
+                capture=capture,
+                capture_authors=DISCOVERY_RESEARCHER_AUTHORS,
             ):
                 yield ev
 
@@ -557,6 +620,8 @@ class WorkflowExecutor:
                 job_id=job_id[:8],
                 num_regions=len(run_state.regions),
             )
+
+            self._audit_discovery_grounding(job_id, capture, run_state)
 
             # Empty-discovery guard: when discovery yields zero regions
             # (obscure book, failed/empty google_search, extraction miss),

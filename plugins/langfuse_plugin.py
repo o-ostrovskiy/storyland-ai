@@ -18,6 +18,7 @@ from google.adk.tools.tool_context import ToolContext
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from common.logging import get_logger
+from common.search_grounding import SearchMetadata, extract_search_metadata
 
 logger = get_logger(__name__)
 
@@ -353,18 +354,44 @@ class LangfusePlugin(BasePlugin):
         self, *, callback_context: CallbackContext, llm_response: LlmResponse
     ) -> Optional[LlmResponse]:
         """
-        Track model response and extract token usage.
+        Track model response, search grounding, and extract token usage.
 
         This is where we capture actual token counts from Gemini API.
         """
         key = self._branch_key(callback_context)
         generation = self._generations.get(key)
+
+        # Search receipts are logged BEFORE the Langfuse gate below, and
+        # deliberately so: "did this researcher actually search?" is a
+        # correctness question about the product, not a tracing nicety, and
+        # it must stay answerable on a deploy with no Langfuse credentials
+        # (the plugin disables itself there but ADK still calls this hook).
+        search = self._log_search_grounding(callback_context, llm_response)
+
         if not self.enabled or not self.client or not generation:
             return None
 
         try:
             usage = self._extract_token_usage(llm_response)
             model_name = self._models.get(key, "")
+
+            # Search receipts ride on the generation's metadata in BOTH
+            # branches below. They are independent of token usage, and a
+            # response missing usage_metadata is exactly when we most want to
+            # know whether it was a grounded call — so this must not live
+            # inside the usage branch.
+            search_metadata = (
+                {
+                    "search": {
+                        "queries": list(search.queries),
+                        "sources": [
+                            {"title": s.title, "uri": s.uri} for s in search.sources
+                        ],
+                    }
+                }
+                if search is not None
+                else {"search": None}
+            )
 
             # Explicit None check: _extract_token_usage never returns an
             # all-zero TokenUsage, and a dataclass instance is always truthy,
@@ -397,6 +424,7 @@ class LangfusePlugin(BasePlugin):
                             "input_per_1m": input_rate,
                             "output_per_1m": output_rate,
                         },
+                        **search_metadata,
                     },
                 )
                 logger.debug(
@@ -417,6 +445,9 @@ class LangfusePlugin(BasePlugin):
                     branch=key,
                     response_type=type(llm_response).__name__,
                 )
+                # Still record the search receipts: a usage-less response is
+                # the case where the trace is otherwise emptiest.
+                generation.update(metadata=search_metadata)
 
             generation.end()
             self._generations.pop(key, None)
@@ -425,6 +456,43 @@ class LangfusePlugin(BasePlugin):
             logger.warning("langfuse_model_response_error", error=str(e), error_type=type(e).__name__)
 
         return None
+
+    def _log_search_grounding(
+        self, callback_context: CallbackContext, llm_response: LlmResponse
+    ) -> Optional[SearchMetadata]:
+        """Log whether this response was actually search-grounded.
+
+        Emits exactly one of two events per model response:
+          * ``search_grounding_captured`` — the model ran ``google_search``;
+            carries query/source counts and the distinct source hosts.
+          * ``search_grounding_absent`` — no grounding metadata came back.
+
+        The absent case is the point of this method. Researcher prompts
+        instruct the model to search ("You MUST call google_search at least
+        once"), but an instruction is not a guarantee, and a researcher that
+        answers from memory is otherwise indistinguishable from one that
+        searched. It is logged at INFO, not WARNING: every formatter agent is
+        tool-less by design (ADK forbids tools + output_schema on one agent),
+        so absence is expected for roughly half of all calls and a warning
+        would be noise. Filter by agent name to read it.
+
+        Counts and hosts only — never the query strings. Queries embed the
+        user-supplied book title, and ``common/logging.py`` forwards INFO logs
+        to Sentry against an allowlist that deliberately excludes user content.
+        """
+        agent_name = getattr(callback_context, "agent_name", None) or "unknown"
+        search = extract_search_metadata(llm_response)
+        if search is None:
+            logger.info("search_grounding_absent", agent=agent_name)
+            return None
+        logger.info(
+            "search_grounding_captured",
+            agent=agent_name,
+            query_count=len(search.queries),
+            source_count=len(search.sources),
+            source_hosts=",".join(search.hosts()),
+        )
+        return search
 
     def _extract_token_usage(self, response: LlmResponse) -> Optional[TokenUsage]:
         """

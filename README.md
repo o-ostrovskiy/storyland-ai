@@ -225,6 +225,32 @@ Failed jobs can be retried by calling `/compose` again with the same `job_id`; t
 
 StoryLand AI uses Google Gemini models (default: `gemini-3.1-flash-lite`) for all agents, chosen for native ADK integration, fast parallel execution (sub-2s response times), and excellent structured output adherence across 16 Pydantic data models. The complete workflow takes 60-100 seconds end-to-end with parallel discovery providing 3x speedup over sequential execution.
 
+### Search-grounding observability
+
+Researcher agents ground their answers with Gemini's built-in `google_search`.
+Whether a given call *actually* searched is not something the prompt can
+guarantee, so it is logged. Four events, all INFO:
+
+| Event | Where | Meaning |
+|-------|-------|---------|
+| `search_grounding_captured` | every model response | The call ran `google_search`. Carries `query_count`, `source_count`, `source_hosts`. |
+| `search_grounding_absent` | every model response | No grounding metadata came back. **Expected for every formatter** (they are tool-less by design — ADK forbids `tools` + `output_schema` on one agent); notable for anything named `*_researcher`. |
+| `discovery_grounding_audit` | end of a fresh `discover()` | How many entries in each discovery payload trace back to the researchers' text: `kind`, `grounded`, `total`. |
+| `discovery_grounding_no_capture` | end of a fresh `discover()` | No researcher text or no entries — "cannot say", never "nothing was grounded". |
+
+Read them together: `search_grounding_absent agent=city_researcher` means that
+researcher answered from model memory. Observed most often on books with
+fictional or non-Earth settings — exactly the case `city_researcher`'s prompt
+has a mandatory-redirect clause for. The audit is **observation only**: it
+drops nothing, because a miss can equally mean the token rule was strict
+about a paraphrase.
+
+Query strings are deliberately never logged — they embed the user's book
+title, and `common/logging.py` forwards INFO logs to Sentry against an
+allowlist that excludes user content. Full source URIs go to Langfuse
+generation metadata instead. Note those URIs are `vertexaisearch.cloud.google.com`
+redirects, not publisher domains.
+
 ## Configuration
 
 All configuration is via environment variables in `.env`. Copy `.env.example` to get started.
@@ -306,7 +332,8 @@ storyland-ai/
 │
 ├── common/              # Shared utilities
 │   ├── config.py        # Configuration management
-│   └── logging.py       # Structured logging (structlog)
+│   ├── logging.py       # Structured logging (structlog)
+│   └── search_grounding.py  # Search receipts (queries/sources) off a model response
 │
 ├── plugins/             # ADK runner plugins
 │   └── langfuse_plugin.py  # Langfuse observability & token tracking
@@ -398,7 +425,7 @@ The unit suite (`tests/unit/`) by area — per-module counts rot with every PR, 
 | Place features | `test_place_key.py`, `test_place_to_book.py`, `test_place_to_book_eval.py` |
 | Quality & guardrails | `test_llm_scorer.py`, `test_tone_guardrail.py`, `test_recommendation_floor.py`, `test_judge_calibration.py`, `test_spot_check.py` |
 | Eval harnesses | `test_local_atmosphere_eval.py`, `test_expansion_eval.py`, `test_eval_dataset_routing.py` |
-| Observability | `test_sentry.py`, `test_langfuse_plugin_concurrency.py`, `test_langfuse_pricing.py` |
+| Observability | `test_sentry.py`, `test_langfuse_plugin_concurrency.py`, `test_langfuse_pricing.py`, `test_search_grounding.py`, `test_langfuse_search_grounding.py`, `test_discovery_grounding_audit.py` |
 | Sessions & ops | `test_services.py`, `test_session_retention.py` |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).

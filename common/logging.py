@@ -47,6 +47,19 @@ _SENTRY_SAFE_LOG_ATTR_KEYS = frozenset(
         "traces_sample_rate",
         "logs_enabled",
         "metrics_enabled",
+        # Search-grounding observability. All derived, never user content:
+        # agent/model names come from a fixed in-code vocabulary, the rest are
+        # counts and result hostnames. The search QUERIES are deliberately
+        # absent — they embed the user-supplied book title.
+        "agent",
+        "model",
+        "query_count",
+        "source_count",
+        "source_hosts",
+        "grounded",
+        "total",
+        "kind",
+        "captured_chars",
     }
 )
 
