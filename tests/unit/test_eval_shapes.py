@@ -130,6 +130,84 @@ class TestModelDefault:
         assert load_config().model_name == "gemini-3.5-flash"
 
 
+class TestJudgeModel:
+    """The judge is an instrument; it must not drift or grade its own work."""
+
+    def test_judge_is_not_the_model_under_test(self):
+        """Same model both sides = the family grading itself (MYS-825)."""
+        from common.config import DEFAULT_MODEL_NAME
+        from evaluation.tools.llm_scorer import _DEFAULT_JUDGE_MODEL
+
+        assert _DEFAULT_JUDGE_MODEL != DEFAULT_MODEL_NAME
+
+    def test_judge_is_pinned_not_an_alias(self):
+        """A `-latest` alias would re-point the instrument under the numbers
+        with nothing in the diff — the same silent change as the 404 that
+        zeroed every score on 2026-08-09."""
+        from evaluation.tools.llm_scorer import _DEFAULT_JUDGE_MODEL
+
+        assert not _DEFAULT_JUDGE_MODEL.endswith("-latest")
+
+    def test_scoring_functions_use_the_constant(self):
+        """Both entry points default to the one constant, so re-pinning after
+        a retirement is a single edit."""
+        import inspect
+
+        from evaluation.tools.llm_scorer import (
+            _DEFAULT_JUDGE_MODEL,
+            score_criteria_coverage,
+            score_itinerary,
+        )
+
+        for fn in (score_itinerary, score_criteria_coverage):
+            default = inspect.signature(fn).parameters["model_name"].default
+            assert default == _DEFAULT_JUDGE_MODEL, fn.__name__
+
+
+class TestCountItineraryCities:
+    """The composer returns an envelope; the count must reach into it.
+
+    Reading top-level ["cities"] reported 0 for every successful run — beside
+    itineraries carrying up to 11 cities in the same result file (MYS-825).
+    """
+
+    def _envelope(self, cities):
+        return {
+            "itinerary": {
+                "cities": [
+                    {"name": n, "country": "X", "days_suggested": 1,
+                     "overview": "o", "stops": []}
+                    for n in cities
+                ],
+                "summary_text": "s",
+            },
+            "suggestions": [],
+        }
+
+    def test_counts_cities_inside_the_envelope(self):
+        from evaluation.tools.run_scheduled_eval import count_itinerary_cities
+
+        assert count_itinerary_cities(self._envelope(["Bath", "Winchester"])) == 2
+
+    def test_top_level_shape_still_counts(self):
+        from evaluation.tools.run_scheduled_eval import count_itinerary_cities
+
+        assert count_itinerary_cities({"cities": [{"name": "Bath"}]}) == 1
+
+    def test_schema_invalid_payload_falls_back_rather_than_zeroing(self):
+        """A payload the validator rejects must not silently read as 0 —
+        that is the failure being fixed, not a behaviour to preserve."""
+        from evaluation.tools.run_scheduled_eval import count_itinerary_cities
+
+        assert count_itinerary_cities({"itinerary": {"cities": [{"nope": 1}]}}) == 1
+
+    def test_empty_and_missing_are_zero(self):
+        from evaluation.tools.run_scheduled_eval import count_itinerary_cities
+
+        for payload in (None, {}, {"itinerary": {}}, {"itinerary": {"cities": []}}):
+            assert count_itinerary_cities(payload) == 0
+
+
 class TestJudgeDimensionContract:
     """Codex P2 on PR #228: preference_adherence is Optional for the
     no-preference shape, so a judge omitting it on a preference-CARRYING case

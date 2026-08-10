@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from common.logging import get_logger, configure_logging
 from common.config import load_config
+from core.extraction import validate_composer_envelope
 from core.prompts import build_composition_prompt
 from core.retry import build_retry_options
 from core.session_state import SessionStateAccessor
@@ -53,6 +54,31 @@ DEDICATED_RUNNERS = {
     "local_atmosphere": "evaluation/tools/run_local_atmosphere_eval.py",
     "expansion": "evaluation/tools/run_expansion_eval.py",
 }
+
+
+def count_itinerary_cities(itinerary_data: Optional[Dict[str, Any]]) -> int:
+    """Cities in a composer payload, whichever shape it arrives in.
+
+    The composer emits a ComposerEnvelope — ``{"itinerary": {"cities": [...]},
+    "suggestions": [...]}`` — so the top-level ``["cities"]`` read this replaced
+    returned 0 for every successful run, including the 11-city itineraries sat
+    right beside it in the same result file. The count is reported to Langfuse
+    and to the summary, so "0 cities" read as a broken composition when nothing
+    was wrong.
+
+    Prefers ``validate_composer_envelope`` (the same validator the executor
+    uses) and falls back to a plain nested read so a payload that fails schema
+    validation still counts rather than silently reporting zero.
+    """
+    if not itinerary_data:
+        return 0
+    envelope = validate_composer_envelope(itinerary_data)
+    if envelope is not None:
+        return len(envelope[0].get("cities") or [])
+    inner = itinerary_data.get("itinerary")
+    if isinstance(inner, dict):
+        return len(inner.get("cities") or [])
+    return len(itinerary_data.get("cities") or [])
 
 
 def select_itinerary_datasets(
@@ -781,7 +807,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
             logger.info(
                 "eval_composition_complete",
                 itinerary_created=itinerary_data is not None,
-                num_cities=len(itinerary_data.get("cities", [])) if itinerary_data else 0,
+                num_cities=count_itinerary_cities(itinerary_data),
             )
 
             root_span.update(
@@ -789,7 +815,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
                 metadata={
                     "phase_3_complete": True,
                     "itinerary_created": itinerary_data is not None,
-                    "num_cities": len(itinerary_data.get("cities", [])) if itinerary_data else 0,
+                    "num_cities": count_itinerary_cities(itinerary_data),
                 }
             )
         except Exception as e:
@@ -880,7 +906,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
                     "geographical_accuracy": scores.geographical_accuracy,
                     "engagement": scores.engagement,
                     "average": round(scores.average_score(), 2),
-                    "scoring_method": "llm_judge_gemini_flash_lite",
+                    "scoring_method": "llm_judge",
                     "scored_at": datetime.now().isoformat(),
                 }
                 # Present only when scored (no-preference cases average 5 dims).
@@ -946,7 +972,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
             # initial_state (always bound), not the scoring-block local.
             "has_preferences": bool(initial_state.get("user:preferences")),
             "itinerary_created": itinerary_data is not None,
-            "num_cities": len(itinerary_data.get("cities", [])) if itinerary_data else 0,
+            "num_cities": count_itinerary_cities(itinerary_data),
             "num_regions": len(selected_regions),
             "token_usage": token_stats,
             # Full payload + the preferences the judge saw, so results JSONs
