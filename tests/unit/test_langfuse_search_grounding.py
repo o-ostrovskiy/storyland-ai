@@ -60,6 +60,32 @@ def _grounded_response(usage=None):
     )
 
 
+def _server_side_response(usage=None):
+    """What an agent with include_server_side_tool_invocations returns.
+
+    grounding_metadata is None by design here — that flag moves the receipts
+    onto tool_call parts instead. The trailing function_call part is the
+    set_model_response call ADK injects for tools+output_schema agents.
+    """
+    return SimpleNamespace(
+        usage_metadata=usage,
+        grounding_metadata=None,
+        content=SimpleNamespace(
+            parts=[
+                SimpleNamespace(
+                    tool_call=SimpleNamespace(
+                        tool_type="ToolType.GOOGLE_SEARCH_WEB",
+                        args={"queries": ["piranesi real locations"]},
+                    )
+                ),
+                SimpleNamespace(
+                    function_call=SimpleNamespace(name="set_model_response")
+                ),
+            ]
+        ),
+    )
+
+
 def _usage(prompt=10, candidates=5, total=15):
     return SimpleNamespace(
         prompt_token_count=prompt,
@@ -113,6 +139,52 @@ class TestLogsWithoutLangfuse:
         out = capsys.readouterr().out
         assert "persuasion real locations" not in out
         assert "example.com" in out  # host is fine
+
+
+class TestServerSideToolCallChannel:
+    """An agent with tools+output_schema reports search via parts, not metadata.
+
+    Pinned at the plugin layer, not just the extractor: the whole value of the
+    fix is that the LOG comes out right, and the object the plugin receives is
+    ADK's LlmResponse — which flattens the candidate, so the parts hang off
+    ``.content`` and there is no ``.candidates`` list to walk.
+    """
+
+    async def test_captured_not_absent(self, capsys):
+        plugin = LangfusePlugin(secret_key=None, public_key=None, host=None)
+
+        await plugin.after_model_callback(
+            callback_context=_ctx(agent_name="city_pipeline"),
+            llm_response=_server_side_response(),
+        )
+
+        out = capsys.readouterr().out
+        assert "search_grounding_captured" in out
+        assert "search_grounding_absent" not in out
+        assert "city_pipeline" in out
+
+    async def test_query_strings_still_never_logged(self, capsys):
+        plugin = LangfusePlugin(secret_key=None, public_key=None, host=None)
+
+        await plugin.after_model_callback(
+            callback_context=_ctx(agent_name="city_pipeline"),
+            llm_response=_server_side_response(),
+        )
+
+        assert "piranesi real locations" not in capsys.readouterr().out
+
+    async def test_recorded_on_the_generation(self):
+        plugin = _enabled_plugin()
+        generation = FakeObservation()
+        plugin._generations[plugin._branch_key(_ctx())] = generation
+
+        await plugin.after_model_callback(
+            callback_context=_ctx(), llm_response=_server_side_response(usage=_usage())
+        )
+
+        metadata = next(u["metadata"] for u in generation.updates if "metadata" in u)
+        assert metadata["search"]["queries"] == ["piranesi real locations"]
+        assert metadata["search"]["sources"] == []
 
 
 class TestGenerationMetadata:

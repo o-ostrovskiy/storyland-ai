@@ -1,16 +1,35 @@
 """Search-grounding receipts from a grounded model response.
 
-Every response produced with the built-in ``google_search`` tool carries a
-``grounding_metadata`` block: the queries the model actually ran
-(``web_search_queries``) and the pages it drew on (``grounding_chunks[].web``).
-Nothing read that block before this module existed, which left one question
-unanswerable: the researcher prompts *instruct* the model to search, but
-nothing verified it ever did. A researcher that answered from memory produced
-output indistinguishable from a searched one.
+Nothing read the model's search receipts before this module existed, which left
+one question unanswerable: the researcher prompts *instruct* the model to
+search, but nothing verified it ever did. A response answered from memory is
+otherwise indistinguishable from a searched one.
 
-An absent block is therefore the load-bearing signal, not an edge case:
+An absent receipt is therefore the load-bearing signal, not an edge case:
 ``extract_search_metadata`` returns None precisely when a response involved no
 search, and the caller logs that.
+
+**Gemini reports the same fact on two mutually exclusive channels**, and which
+one you get depends on the request config — so reading only one makes a
+searching agent look like it skipped:
+
+* **Default** (built-in ``google_search``, no function declarations) ->
+  ``grounding_metadata``: the queries run (``web_search_queries``) and the
+  pages drawn on (``grounding_chunks[].web``).
+* **With** ``tool_config.include_server_side_tool_invocations`` -> explicit
+  ``tool_call`` / ``tool_response`` parts on the response content, and
+  ``grounding_metadata`` comes back **None**.
+
+That flag is not optional anywhere it appears: the Gemini API rejects a
+built-in tool alongside any function declaration without it (400
+INVALID_ARGUMENT), and ADK injects a ``set_model_response`` declaration into
+every agent that carries both ``tools`` and ``output_schema``. So any agent
+built that way reports exclusively on the second channel.
+
+The tool-call channel yields queries but no sources: ``tool_response`` carries
+only Google's ``search_suggestions`` chip markup, not the underlying pages, so
+there is nothing citable to attribute. A queries-only ``SearchMetadata`` is
+therefore a normal, fully-grounded result — not a degraded one.
 
 Deliberately duck-typed (no ``google.genai`` / ADK import): the shapes here are
 plain attribute reads, so this is unit-testable against SimpleNamespace fakes
@@ -128,25 +147,59 @@ def _clean_sources(raw: object) -> Tuple[SearchSource, ...]:
     return tuple(out)
 
 
-def extract_search_metadata(response: object) -> Optional[SearchMetadata]:
-    """Pull search receipts off a model response.
+def _clean_tool_call_queries(content: object) -> Tuple[str, ...]:
+    """Search queries from server-side tool-call parts, order preserved.
 
-    Returns None when the response carries no usable grounding — no metadata
-    block, or one with neither queries nor web sources. That None is the
-    "this response did not search" signal; callers log it rather than
-    treating it as a routine empty value.
+    The second reporting channel (see the module docstring): when
+    ``include_server_side_tool_invocations`` is on, the search surfaces as a
+    ``tool_call`` part rather than in ``grounding_metadata``.
+
+    Matched on the tool type rather than the part's position: a response may
+    interleave search calls with ordinary function calls (``set_model_response``
+    is itself one), and only ``GOOGLE_SEARCH*`` types are a web search. The
+    check is a substring on ``str(...)`` because the value arrives as an enum
+    whose exact member name is Google's to change.
+    """
+    parts = _get(content, "parts")
+    if not isinstance(parts, (list, tuple)):
+        return ()
+    out: list[str] = []
+    for part in parts:
+        tool_call = _get(part, "tool_call")
+        if tool_call is None:
+            continue
+        if "GOOGLE_SEARCH" not in str(_get(tool_call, "tool_type") or "").upper():
+            continue
+        args = _get(tool_call, "args")
+        for query in _clean_queries(_get(args, "queries")):
+            if query not in out:
+                out.append(query)
+    return tuple(out)
+
+
+def extract_search_metadata(response: object) -> Optional[SearchMetadata]:
+    """Pull search receipts off a model response, from either channel.
+
+    Returns None when the response carries no usable grounding on *either*
+    channel — no queries and no web sources. That None is the "this response
+    did not search" signal; callers log it rather than treating it as a
+    routine empty value. Checking only ``grounding_metadata`` would report
+    every server-side-invocation agent as unsearched, which is the exact
+    defect this function exists to detect.
 
     Never raises: this runs on every model response, and losing observability
     is strictly better than failing a user's request over a shape change.
     """
     try:
         metadata = _get(response, "grounding_metadata")
-        if metadata is None:
-            return None
+        # ``_get`` tolerates a None metadata block, so no early return here:
+        # a response with no metadata may still carry tool-call receipts.
         queries = _clean_queries(_get(metadata, "web_search_queries"))
         sources = _clean_sources(_get(metadata, "grounding_chunks"))
-        if not queries and not sources:
+        tool_queries = _clean_tool_call_queries(_get(response, "content"))
+        merged = queries + tuple(q for q in tool_queries if q not in queries)
+        if not merged and not sources:
             return None
-        return SearchMetadata(queries=queries, sources=sources)
+        return SearchMetadata(queries=merged, sources=sources)
     except Exception:  # pragma: no cover - defensive, shape changes only
         return None

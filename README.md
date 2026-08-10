@@ -251,6 +251,20 @@ allowlist that excludes user content. Full source URIs go to Langfuse
 generation metadata instead. Note those URIs are `vertexaisearch.cloud.google.com`
 redirects, not publisher domains.
 
+**Gemini reports a search on one of two channels**, and `extract_search_metadata`
+reads both — checking only the first reports a searching agent as unsearched:
+
+| Request shape | Channel | Sources? |
+|---------------|---------|----------|
+| built-in `google_search` alone | `grounding_metadata.web_search_queries` | yes, `grounding_chunks[].web` |
+| plus `tool_config.include_server_side_tool_invocations` | `tool_call` parts on the response content; `grounding_metadata` is `None` | no — `tool_response` carries only Google's suggestion-chip markup |
+
+The second shape is not optional where it applies: the API rejects a built-in
+tool alongside any function declaration without that flag (400
+`INVALID_ARGUMENT`), and ADK injects a `set_model_response` declaration into
+every agent carrying both `tools` and `output_schema`. A queries-only receipt
+from that channel is fully grounded, not degraded.
+
 ## Configuration
 
 All configuration is via environment variables in `.env`. Copy `.env.example` to get started.

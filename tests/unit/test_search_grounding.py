@@ -32,6 +32,32 @@ def _response(queries=None, chunks=None):
     )
 
 
+def _part(tool_type=None, queries=None):
+    """One response part. Omitting tool_type gives a part with no tool_call."""
+    if tool_type is None:
+        return SimpleNamespace(function_call=SimpleNamespace(name="set_model_response"))
+    return SimpleNamespace(
+        tool_call=SimpleNamespace(tool_type=tool_type, args={"queries": queries})
+    )
+
+
+def _server_side_response(parts, metadata_queries=None):
+    """A response from an agent with server-side tool invocations enabled.
+
+    ``grounding_metadata`` is None unless explicitly given: that is the whole
+    trap — the API reports the search through parts INSTEAD of metadata, so a
+    detector reading only metadata sees a searching agent as unsearched.
+    """
+    return SimpleNamespace(
+        grounding_metadata=(
+            SimpleNamespace(web_search_queries=metadata_queries, grounding_chunks=None)
+            if metadata_queries is not None
+            else None
+        ),
+        content=SimpleNamespace(parts=parts),
+    )
+
+
 class TestNoGrounding:
     """Every shape that means "this response did not search"."""
 
@@ -56,6 +82,88 @@ class TestNoGrounding:
     def test_web_block_without_uri_is_dropped(self):
         """A title with no URI cannot be linked or verified."""
         assert extract_search_metadata(_response(chunks=[_web(title="Bath")])) is None
+
+
+class TestServerSideToolCallChannel:
+    """The second reporting channel (MYS-818).
+
+    An agent carrying both ``tools`` and ``output_schema`` needs
+    ``include_server_side_tool_invocations``, and with it Gemini reports the
+    search as ``tool_call`` parts while ``grounding_metadata`` comes back None.
+    Reading metadata alone reports every such agent as never having searched —
+    the precise defect this module exists to detect, aimed at itself.
+    """
+
+    def test_tool_call_alone_counts_as_grounded(self):
+        result = extract_search_metadata(
+            _server_side_response(
+                [_part("ToolType.GOOGLE_SEARCH_WEB", ["piranesi real locations"])]
+            )
+        )
+        assert result is not None
+        assert result.queries == ("piranesi real locations",)
+
+    def test_no_sources_on_this_channel_is_not_degraded(self):
+        """tool_response carries chip markup, not pages — nothing to cite."""
+        result = extract_search_metadata(
+            _server_side_response([_part("ToolType.GOOGLE_SEARCH_WEB", ["a"])])
+        )
+        assert result.sources == ()
+        assert result.hosts() == ()
+
+    def test_parts_without_a_tool_call_are_skipped(self):
+        """set_model_response is a function_call, not a search."""
+        result = extract_search_metadata(
+            _server_side_response(
+                [_part(), _part("ToolType.GOOGLE_SEARCH_WEB", ["a"]), _part()]
+            )
+        )
+        assert result.queries == ("a",)
+
+    def test_non_search_tool_type_is_not_a_search(self):
+        assert (
+            extract_search_metadata(
+                _server_side_response([_part("ToolType.CODE_EXECUTION", ["a"])])
+            )
+            is None
+        )
+
+    def test_both_channels_merge_and_dedupe(self):
+        result = extract_search_metadata(
+            _server_side_response(
+                [_part("ToolType.GOOGLE_SEARCH_WEB", ["shared", "from_parts"])],
+                metadata_queries=["from_metadata", "shared"],
+            )
+        )
+        assert result.queries == ("from_metadata", "shared", "from_parts")
+
+    def test_repeated_tool_calls_dedupe(self):
+        result = extract_search_metadata(
+            _server_side_response(
+                [
+                    _part("ToolType.GOOGLE_SEARCH_WEB", ["a", "b"]),
+                    _part("ToolType.GOOGLE_SEARCH_WEB", ["b", "c"]),
+                ]
+            )
+        )
+        assert result.queries == ("a", "b", "c")
+
+    def test_content_shapes_that_carry_nothing(self):
+        for content in (None, SimpleNamespace(parts=None), SimpleNamespace(parts=[])):
+            assert (
+                extract_search_metadata(
+                    SimpleNamespace(grounding_metadata=None, content=content)
+                )
+                is None
+            )
+
+    def test_tool_call_with_no_queries_is_not_grounded(self):
+        assert (
+            extract_search_metadata(
+                _server_side_response([_part("ToolType.GOOGLE_SEARCH_WEB", None)])
+            )
+            is None
+        )
 
 
 class TestExtraction:
