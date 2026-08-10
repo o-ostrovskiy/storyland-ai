@@ -351,3 +351,97 @@ class TestJudgeDimensionContract:
                 itinerary={"cities": []},
                 preferences={"pace": "fast"},
             )
+
+
+class TestSearchGroundingReporting:
+    """MYS-817: the eval reports whether researchers actually searched.
+
+    Deterministic and reported BESIDE the judge scores, never folded into
+    them. The judge grades itinerary quality and cannot tell a searched answer
+    from a remembered one, which is exactly how MYS-816 went unnoticed — a
+    researcher that skips google_search still returns a plausible itinerary
+    that scores fine.
+
+    Report-only by decision: skips are currently near-universal, so a hard
+    gate would be red on every run and would get switched off.
+    """
+
+    def test_summarize_counts_unsearched_researchers(self):
+        from types import SimpleNamespace
+
+        from evaluation.tools.run_scheduled_eval import summarize_search_grounding
+
+        plugin = SimpleNamespace(
+            unsearched_agents=lambda candidates: frozenset({"author_researcher"})
+        )
+        assert summarize_search_grounding(plugin) == {
+            "researchers_total": 4,
+            "researchers_grounded": 3,
+            "unsearched": ["author_researcher"],
+        }
+
+    def test_summarize_all_grounded(self):
+        from types import SimpleNamespace
+
+        from evaluation.tools.run_scheduled_eval import summarize_search_grounding
+
+        plugin = SimpleNamespace(unsearched_agents=lambda candidates: frozenset())
+        result = summarize_search_grounding(plugin)
+        assert result["researchers_grounded"] == result["researchers_total"]
+        assert result["unsearched"] == []
+
+    def test_aggregate_is_none_when_no_case_reported(self):
+        """An all-zero block would read as 'nothing was grounded' — omit it."""
+        from evaluation.tools.run_scheduled_eval import aggregate_search_grounding
+
+        assert aggregate_search_grounding([]) is None
+        assert aggregate_search_grounding([{"status": "evaluated"}]) is None
+
+    def test_aggregate_ranks_repeat_offenders(self):
+        """Which researcher skips MOST is the actionable number: the offender
+        varies run to run rather than being one permanently broken agent."""
+        from evaluation.tools.run_scheduled_eval import aggregate_search_grounding
+
+        cases = [
+            {"search_grounding": {
+                "researchers_total": 4, "researchers_grounded": 3,
+                "unsearched": ["author_researcher"]}},
+            {"search_grounding": {
+                "researchers_total": 4, "researchers_grounded": 2,
+                "unsearched": ["author_researcher", "city_researcher"]}},
+            {"search_grounding": {
+                "researchers_total": 4, "researchers_grounded": 4,
+                "unsearched": []}},
+        ]
+        result = aggregate_search_grounding(cases)
+        assert result["cases"] == 3
+        assert result["cases_fully_grounded"] == 1
+        assert result["researchers_grounded"] == 9
+        assert result["researchers_total"] == 12
+        # Ordered most-frequent first.
+        assert list(result["unsearched_by_agent"]) == [
+            "author_researcher",
+            "city_researcher",
+        ]
+
+    def test_reporting_never_fails_the_run(self):
+        """No pass rule yet — a fully-unsearched run must not be a failure."""
+        from evaluation.tools.run_scheduled_eval import (
+            aggregate_search_grounding,
+            dataset_failure_reason,
+        )
+
+        case = {
+            "status": "evaluated",
+            "scores": {"overall": 4.0},
+            "search_grounding": {
+                "researchers_total": 4, "researchers_grounded": 0,
+                "unsearched": ["city_researcher"]},
+        }
+        result = {
+            "dataset_name": "d", "total_cases": 1, "evaluated_cases": 1,
+            "failed_cases": 0, "skipped_cases": 0, "placeholder_cases": 0,
+            "case_results": [case],
+            "search_grounding": aggregate_search_grounding([case]),
+        }
+        assert dataset_failure_reason(result) is None

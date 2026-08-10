@@ -5,7 +5,7 @@ Tracks token usage, costs, and agent performance metrics in Langfuse.
 """
 
 import asyncio
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 from dataclasses import dataclass
 
 from google.adk.plugins import BasePlugin
@@ -142,6 +142,19 @@ class LangfusePlugin(BasePlugin):
         self._agent_stacks: dict[str, list] = {}  # branch key -> that branch's own LIFO agent stack
         self._spans: dict[str, Any] = {}  # branch key -> open tool span
         self._propagation_cm = None
+        # Per-run search-receipt ledger (MYS-816). Keyed by AGENT name, not
+        # branch: the question it answers ("did the city researcher search?")
+        # is about the agent, and one agent may make several model calls.
+        # ANY call carrying receipts means that agent searched -- a follow-up
+        # turn that merely formats an earlier search result reports no
+        # receipts of its own and must not retract the first one.
+        #
+        # Deliberately NOT gated on self.enabled: these sets feed the
+        # fail-closed guard in WorkflowExecutor.discover(), so a deploy
+        # without Langfuse credentials must still get the protection. See
+        # _log_search_grounding, which populates them before the enabled gate.
+        self._agents_seen: set[str] = set()
+        self._agents_searched: set[str] = set()
         # Last final-response event text, used as the trace's output. A plain
         # scalar is correct here even under ParallelAgent: unlike the
         # before_model/after_model pairs above, events are consumed one at a
@@ -482,6 +495,11 @@ class LangfusePlugin(BasePlugin):
         """
         agent_name = getattr(callback_context, "agent_name", None) or "unknown"
         search = extract_search_metadata(llm_response)
+        # Ledger first, and unconditionally: WorkflowExecutor.discover() reads
+        # it to decide which discovery payloads may support a grounded claim.
+        self._agents_seen.add(agent_name)
+        if search is not None:
+            self._agents_searched.add(agent_name)
         if search is None:
             logger.info("search_grounding_absent", agent=agent_name)
             return None
@@ -493,6 +511,26 @@ class LangfusePlugin(BasePlugin):
             source_hosts=",".join(search.hosts()),
         )
         return search
+
+    def unsearched_agents(self, candidates: "Iterable[str]") -> frozenset:
+        """Which of ``candidates`` ran on this plugin but never searched.
+
+        Deliberately three-valued rather than a bare "did it search" boolean:
+        an agent that never ran at all is NOT reported as unsearched. Absence
+        of evidence is not evidence of absence — a workflow that never reached
+        an agent (an early error, a flow that has no such agent) must leave
+        downstream behaviour exactly as it was, not trigger the fail-closed
+        path. Only an agent we actually observed producing responses, none of
+        which carried search receipts, is reported here.
+
+        Works with the plugin disabled: the ledger is populated before the
+        Langfuse gate, so the guard survives a deploy with no credentials.
+        """
+        return frozenset(
+            name
+            for name in candidates
+            if name in self._agents_seen and name not in self._agents_searched
+        )
 
     def _extract_token_usage(self, response: LlmResponse) -> Optional[TokenUsage]:
         """

@@ -24,6 +24,7 @@ from core.prompts import build_composition_prompt
 from core.retry import build_retry_options
 from core.session_state import SessionStateAccessor
 from services.session_service import create_session_service
+from core.executor import DISCOVERY_RESEARCHER_AUTHORS
 from agents.orchestrator import (
     create_book_to_place_discovery_workflow,
     create_book_to_place_composition_workflow,
@@ -79,6 +80,60 @@ def count_itinerary_cities(itinerary_data: Optional[Dict[str, Any]]) -> int:
     if isinstance(inner, dict):
         return len(inner.get("cities") or [])
     return len(itinerary_data.get("cities") or [])
+
+
+def summarize_search_grounding(langfuse_plugin) -> Dict[str, Any]:
+    """Which discovery researchers actually called google_search (MYS-817).
+
+    A DETERMINISTIC fact, reported beside the judge's scores rather than
+    folded into them. The judge grades itinerary quality and has no way to
+    tell a searched answer from a remembered one — which is precisely how
+    MYS-816 went unnoticed: a researcher that skips the search still returns a
+    plausible itinerary that scores fine.
+
+    Report-only for now, deliberately. Skips are currently near-universal
+    (~1-2 of 4 researchers on most runs), so a hard gate would be red on every
+    run from day one and would simply get switched off. Turn `grounded` vs
+    `total` into a pass rule once MYS-816's fix has driven it green.
+    """
+    unsearched = sorted(langfuse_plugin.unsearched_agents(DISCOVERY_RESEARCHER_AUTHORS))
+    total = len(DISCOVERY_RESEARCHER_AUTHORS)
+    return {
+        "researchers_total": total,
+        "researchers_grounded": total - len(unsearched),
+        "unsearched": unsearched,
+    }
+
+
+def aggregate_search_grounding(
+    case_results: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Roll the per-case grounding facts up to a dataset-level view.
+
+    Returns None when no case carried the field (an older results file, or a
+    run that failed before discovery), so the summary can omit the block
+    rather than print a misleading all-zero one.
+    """
+    present = [c["search_grounding"] for c in case_results if c.get("search_grounding")]
+    if not present:
+        return None
+    offenders: Dict[str, int] = {}
+    for entry in present:
+        for agent in entry.get("unsearched") or []:
+            offenders[agent] = offenders.get(agent, 0) + 1
+    return {
+        "cases": len(present),
+        "cases_fully_grounded": sum(
+            1 for e in present if not (e.get("unsearched") or [])
+        ),
+        "researchers_grounded": sum(e.get("researchers_grounded", 0) for e in present),
+        "researchers_total": sum(e.get("researchers_total", 0) for e in present),
+        # Which researcher skips most often — the actionable number, since the
+        # offender varies run to run rather than being one broken agent.
+        "unsearched_by_agent": dict(
+            sorted(offenders.items(), key=lambda kv: (-kv[1], kv[0]))
+        ),
+    }
 
 
 def count_scored_cases(result: Dict[str, Any]) -> int:
@@ -556,6 +611,12 @@ async def run_evaluation_on_dataset(
         # 100% of prod traffic takes (MYS-392). Gates read the shapes
         # separately — never a silent blend.
         "by_shape": _summarize_by_shape(case_results),
+        # Deterministic grounding roll-up (MYS-817). Kept OUT of the judge
+        # scores on purpose: it is a measured fact about whether the
+        # researchers searched, not an opinion about the output. None when no
+        # case reached discovery, so an all-zero block never reads as "nothing
+        # was grounded". No pass rule yet — see summarize_search_grounding.
+        "search_grounding": aggregate_search_grounding(case_results),
     }
 
     logger.info(
@@ -731,6 +792,14 @@ Find cities, landmarks, and author-related sites, then group them into practical
                 app_name="storyland", user_id=user_id, session_id=session_id
             )
             region_analysis = session.state.get("region_analysis", {})
+
+            # Deterministic grounding check (MYS-817). The judge scores output
+            # QUALITY and cannot tell a searched answer from a remembered one,
+            # which is how MYS-816 stayed invisible: a researcher that skips
+            # google_search still produces a plausible, well-scoring itinerary.
+            # Read off the plugin's ledger, which is populated regardless of
+            # whether Langfuse itself is enabled.
+            search_grounding = summarize_search_grounding(langfuse_plugin)
 
             logger.info(
                 "eval_regions_discovered",
@@ -1018,6 +1087,8 @@ Find cities, landmarks, and author-related sites, then group them into practical
             "num_cities": count_itinerary_cities(itinerary_data),
             "num_regions": len(selected_regions),
             "token_usage": token_stats,
+            # Deterministic, not judged — see summarize_search_grounding.
+            "search_grounding": search_grounding,
             # Full payload + the preferences the judge saw, so results JSONs
             # are self-contained for human review and judge calibration
             # (previously only Langfuse traces carried the itinerary).
@@ -1331,6 +1402,22 @@ def main():
             unscored = evaluated - count_scored_cases(result)
             if unscored > 0:
                 print(f"WARNING: {unscored} of {evaluated} case(s) evaluated but unscored")
+
+        # Deterministic (not judged): did the researchers actually search?
+        grounding = result.get("search_grounding")
+        if grounding:
+            print(
+                f"Search grounding [deterministic]: "
+                f"{grounding['researchers_grounded']}/{grounding['researchers_total']} "
+                f"researcher runs grounded; "
+                f"{grounding['cases_fully_grounded']}/{grounding['cases']} "
+                f"case(s) fully grounded"
+            )
+            if grounding["unsearched_by_agent"]:
+                offenders = ", ".join(
+                    f"{agent}×{n}" for agent, n in grounding["unsearched_by_agent"].items()
+                )
+                print(f"  skipped google_search: {offenders}")
 
     print("\n" + "=" * 60)
     print(f"Total: {total_evaluated} real evaluation(s), {total_placeholders} placeholder(s)")

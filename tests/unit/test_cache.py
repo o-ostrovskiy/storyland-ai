@@ -101,17 +101,23 @@ class TestDiscoveryCacheKey:
         assert k1 != k2
 
     def test_versioned_prefix(self):
-        assert self._key("Dune", "Herbert", None).startswith("discover:v2:")
+        # v3 since MYS-816: the bundle gained `unverified_discovery`, and a v2
+        # entry replayed without it would serve results whose ungrounded stops
+        # are never downgraded. Bumping makes those entries unreachable.
+        assert self._key("Dune", "Herbert", None).startswith("discover:v3:")
 
     def test_absent_vibe_key_is_unchanged(self):
-        # An absent vibe must produce the exact pre-vibe key (cache continuity).
+        # An absent vibe must produce the exact un-vibed key: passing no vibe
+        # and passing None must not land in different cache namespaces. Pinned
+        # against the current version prefix, which bumps deliberately when the
+        # bundle shape changes (v3 = MYS-816's unverified_discovery).
         from core.executor import WorkflowExecutor
 
         with_default = WorkflowExecutor._discovery_cache_key("Dune", "Herbert", None)
         explicit_none = WorkflowExecutor._discovery_cache_key(
             "Dune", "Herbert", None, None
         )
-        assert with_default == explicit_none == "discover:v2:dune|herbert|" + (
+        assert with_default == explicit_none == "discover:v3:dune|herbert|" + (
             with_default.split("|")[-1]
         )
 

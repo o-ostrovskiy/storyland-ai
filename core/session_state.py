@@ -35,6 +35,9 @@ class SessionStateKeys:
     BOOK_RECS_IN_PROGRESS = "book_recs_in_progress"
     BOOK_RECOMMENDATION_CHIP_ID = "book_recommendation_chip_id"
     BOOK_RECOMMENDATION_CHIP = "book_recommendation_chip"
+    # Discovery payload keys whose researcher never called google_search on
+    # this run (MYS-816). Written by discover(), read by grounding_research_text.
+    UNVERIFIED_DISCOVERY = "unverified_discovery"
     USER_PREFERENCES = "user:preferences"
     USER_LOCATION = "user_location"
     JOB_FAILED = "job_failed"
@@ -146,6 +149,12 @@ class SessionStateAccessor:
         return self._state.get(SessionStateKeys.AUTHOR_SITES)
 
     @property
+    def unverified_discovery(self) -> List[str]:
+        """Discovery payload keys produced without a search (MYS-816)."""
+        value = self._state.get(SessionStateKeys.UNVERIFIED_DISCOVERY)
+        return value if isinstance(value, list) else []
+
+    @property
     def grounding_research_text(self) -> str:
         """Concatenate the grounded discovery research into one text blob.
 
@@ -155,15 +164,28 @@ class SessionStateAccessor:
         chain actually found. Returns "" when no discovery research is present
         (e.g. the local-atmosphere path), which callers treat as "cannot prove
         anything ungrounded" and leave labels unchanged.
+
+        **Payloads whose researcher never searched are excluded** (MYS-816).
+        Researchers skip ``google_search`` stochastically -- roughly one to two
+        of the four on most runs -- and still emit places from model memory
+        (an observed run produced the author site "Personal Office"). Those
+        names are not evidence, so they must not appear in the haystack that
+        ``downgrade_ungrounded_match_types`` treats as proof. Excluding them
+        is the entire enforcement: a composer stop traceable only to an
+        unsearched payload stops qualifying as grounded and is demoted to the
+        weakest claim. The composer still SEES those payloads -- they are
+        often correct, and dropping them would thin results -- they just can
+        no longer back a literal/historical claim.
         """
+        skip = set(self.unverified_discovery)
         parts: List[str] = []
-        for value in (
-            self.book_context,
-            self.city_discovery,
-            self.landmark_discovery,
-            self.author_sites,
+        for key, value in (
+            (SessionStateKeys.BOOK_CONTEXT, self.book_context),
+            (SessionStateKeys.CITY_DISCOVERY, self.city_discovery),
+            (SessionStateKeys.LANDMARK_DISCOVERY, self.landmark_discovery),
+            (SessionStateKeys.AUTHOR_SITES, self.author_sites),
         ):
-            if not value:
+            if not value or key in skip:
                 continue
             if isinstance(value, str):
                 parts.append(value)

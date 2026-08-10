@@ -148,6 +148,17 @@ DISCOVERY_RESEARCHER_AUTHORS: tuple[str, ...] = (
     "author_researcher",
 )
 
+# Researcher -> the session-state payload its findings become (MYS-816). When
+# a researcher returns no search receipts, everything it produced is model
+# memory rather than research, so its payload is struck from the grounding
+# haystack — see SessionStateAccessor.grounding_research_text.
+RESEARCHER_PAYLOAD_KEYS: dict[str, str] = {
+    "book_context_researcher": SessionStateKeys.BOOK_CONTEXT,
+    "city_researcher": SessionStateKeys.CITY_DISCOVERY,
+    "landmark_researcher": SessionStateKeys.LANDMARK_DISCOVERY,
+    "author_researcher": SessionStateKeys.AUTHOR_SITES,
+}
+
 DISCOVERY_AGENT_STEPS: dict[str, str] = {
     "book_context_researcher": "Researching book setting and themes",
     "book_context_formatter": "Formatting book context",
@@ -276,8 +287,37 @@ class WorkflowExecutor:
             retry_options=retry_config,
         )
 
+    def _unverified_discovery_keys(self, job_id: str, langfuse_plugin) -> list:
+        """Payload keys whose researcher produced no search receipts.
+
+        The fail-closed input for MYS-816. Measured, not assumed: researchers
+        skip ``google_search`` stochastically (roughly one to two of the four
+        on most observed runs, on realist and fictional books alike) while
+        still emitting places from model memory.
+
+        Returns a sorted list so the value written to session state — and
+        therefore the cached bundle — is stable across runs and diffable.
+        Empty when every researcher searched, which is also what a plugin
+        that never saw them returns; both mean "change nothing".
+        """
+        unsearched = langfuse_plugin.unsearched_agents(RESEARCHER_PAYLOAD_KEYS)
+        if not unsearched:
+            return []
+        keys = sorted(RESEARCHER_PAYLOAD_KEYS[name] for name in unsearched)
+        logger.info(
+            "discovery_unverified_payloads",
+            job_id=job_id[:8],
+            agents=",".join(sorted(unsearched)),
+            kind=",".join(keys),
+        )
+        return keys
+
     def _audit_discovery_grounding(
-        self, job_id: str, capture: RunCapture, run_state: SessionStateAccessor
+        self,
+        job_id: str,
+        capture: RunCapture,
+        run_state: SessionStateAccessor,
+        unverified: Optional[list] = None,
     ) -> None:
         """Log how much of the discovery payload traces to the researchers.
 
@@ -285,13 +325,27 @@ class WorkflowExecutor:
         ``audit_discovery_grounding`` for why this stage measures rather than
         enforces.
 
+        ``unverified`` makes the numbers provenance-aware. Without it the
+        audit unions all four researchers' text into one haystack, so a
+        researcher that DID search vouches for one that did not — which is
+        exactly how the MYS-816 defect read as "100% grounded" on the runs
+        that first exposed it. Text from an unsearched researcher is dropped
+        from the haystack here, matching what the composer-stage guard will
+        see via ``grounding_research_text``.
+
         Fresh runs ONLY. The cached-discovery replay path deliberately does
         not call this: a cache hit has no researcher text by construction, so
         auditing there would emit a permanent no-evidence warning on exactly
         the popular, repeated titles the cache serves most.
         """
+        # Only researchers that actually searched contribute evidence. Text
+        # from an unsearched one is model memory, and letting it into the
+        # haystack is what made this defect read as fully grounded.
+        unverified_keys = set(unverified or ())
         researcher_text = "\n".join(
-            capture.text_for(author) for author in DISCOVERY_RESEARCHER_AUTHORS
+            capture.text_for(author)
+            for author in DISCOVERY_RESEARCHER_AUTHORS
+            if RESEARCHER_PAYLOAD_KEYS[author] not in unverified_keys
         )
         counts = audit_discovery_grounding(
             {
@@ -361,13 +415,20 @@ class WorkflowExecutor:
         """Replay a cached discovery result without invoking Gemini.
 
         The session already exists (created by ``discover`` before the cache
-        lookup). ``cached`` is the v2 grounding bundle: region_analysis PLUS
-        book_context and the three discovery payloads. ALL of it is written
-        into session state via ``append_event`` so the downstream
-        discover->compose handoff behaves identically to a fresh run —
-        compose() reads the grounding from state (ADR #24 graph scoping), so
-        a hit that replayed only regions would compose from city names alone
-        on precisely the popular, repeated titles the cache serves most.
+        lookup). ``cached`` is the v3 grounding bundle: region_analysis PLUS
+        book_context, the three discovery payloads, and the unverified-payload
+        list. ALL of it is written into session state via ``append_event`` so
+        the downstream discover->compose handoff behaves identically to a
+        fresh run — compose() reads the grounding from state (ADR #24 graph
+        scoping), so a hit that replayed only regions would compose from city
+        names alone on precisely the popular, repeated titles the cache serves
+        most.
+
+        The unverified list rides along for the same reason (MYS-816): it is
+        what stops an unsearched researcher's places from claiming grounding,
+        and a hit that dropped it would silently serve UNPROTECTED results on
+        the most-requested titles — the exact shape of bug the v2 bundle was
+        introduced to fix.
         """
         region_analysis = cached.get("region_analysis") or {}
         # A cache HIT must never replay a region with no place_key: hits land
@@ -392,12 +453,20 @@ class WorkflowExecutor:
             SessionStateKeys.BOOK_METADATA: book_metadata.model_dump(),
             SessionStateKeys.REGION_ANALYSIS: region_analysis,
         }
-        # Replay the grounding payloads compose() will read from state.
+        # Replay the grounding payloads compose() will read from state, plus
+        # the unverified-payload list that governs which of them count as
+        # evidence. A pre-v3 entry has no such key and reads back as empty,
+        # which is the old (fail-open) behaviour rather than a crash — but the
+        # key version was bumped so those entries are unreachable anyway.
         for key, value in (
             (SessionStateKeys.BOOK_CONTEXT, cached.get("book_context")),
             (SessionStateKeys.CITY_DISCOVERY, cached.get("city_discovery")),
             (SessionStateKeys.LANDMARK_DISCOVERY, cached.get("landmark_discovery")),
             (SessionStateKeys.AUTHOR_SITES, cached.get("author_sites")),
+            (
+                SessionStateKeys.UNVERIFIED_DISCOVERY,
+                cached.get("unverified_discovery"),
+            ),
         ):
             if value:
                 state_delta[key] = value
@@ -449,7 +518,13 @@ class WorkflowExecutor:
         # v2: the cached value is the full grounding bundle (region_analysis +
         # book_context + the three discovery payloads), not just region_analysis —
         # a cache HIT must compose with the same grounding as a fresh run.
-        key = f"discover:v2:{norm_title}|{norm_author}|{pref_sig}"
+        # v3 (MYS-816): the bundle also carries `unverified_discovery`. Bumped
+        # rather than tolerated: a v2 entry reads back as "everything verified",
+        # which is safe but means serving UNPROTECTED results for up to the TTL,
+        # and compute_cache_version() does not hash the modules changed here so
+        # nothing else would invalidate them. One bounded cold-cache period is
+        # the right price for the guard actually applying.
+        key = f"discover:v3:{norm_title}|{norm_author}|{pref_sig}"
         norm_vibe = (vibe or "").strip().lower()
         if norm_vibe:
             key += f"|vibe={norm_vibe}"
@@ -621,7 +696,32 @@ class WorkflowExecutor:
                 num_regions=len(run_state.regions),
             )
 
-            self._audit_discovery_grounding(job_id, capture, run_state)
+            # Fail closed on researchers that never searched (MYS-816). Written
+            # to session state BEFORE compose() can run: the two are separate
+            # requests, and a typed setter here would be a silent no-op against
+            # persisted state (MYS-172) — append_event is the only real write.
+            unverified = self._unverified_discovery_keys(job_id, langfuse_plugin)
+            if unverified:
+                await self._session_service.append_event(
+                    session,
+                    Event(
+                        invocation_id="system",
+                        author="system",
+                        actions=EventActions(
+                            state_delta={
+                                SessionStateKeys.UNVERIFIED_DISCOVERY: unverified
+                            }
+                        ),
+                    ),
+                )
+                # Re-read: the accessor above wraps the pre-write dict, and the
+                # cache bundle below must store what compose() will actually see.
+                session = await self._session_service.get_session(
+                    app_name=APP_NAME, user_id=user_id, session_id=job_id
+                )
+                run_state = SessionStateAccessor(session.state)
+
+            self._audit_discovery_grounding(job_id, capture, run_state, unverified)
 
             # Empty-discovery guard: when discovery yields zero regions
             # (obscure book, failed/empty google_search, extraction miss),
@@ -667,6 +767,10 @@ class WorkflowExecutor:
                         "city_discovery": run_state.city_discovery,
                         "landmark_discovery": run_state.landmark_discovery,
                         "author_sites": run_state.author_sites,
+                        # Which of the above are model memory rather than
+                        # research (MYS-816). Cached WITH the payloads so a
+                        # hit labels stops exactly as the fresh run did.
+                        "unverified_discovery": unverified,
                     },
                 )
 

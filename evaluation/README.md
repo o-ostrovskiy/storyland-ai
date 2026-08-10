@@ -41,11 +41,28 @@ make eval-setup
 This creates the Langfuse datasets:
 - `storyland_eval` — 10 diverse scenarios for comprehensive testing. Two of
   them (*Piranesi*, *Project Hail Mary*) are **fictional/non-Earth-setting**
-  books, a shape the set carried none of until 2026-08-09. That gap is likely
-  why MYS-816 went unnoticed: those are exactly the books where discovery
-  researchers were observed skipping `google_search` entirely. Note the judge
-  scores itinerary *quality* and does not itself assert that a search
-  happened — see MYS-817 for making the runner check that.
+  books, a shape the set carried none of until 2026-08-09.
+
+### Search grounding (deterministic, MYS-817)
+
+The itinerary runner reports `search_grounding` per case and as a dataset
+roll-up: how many discovery researchers actually called `google_search`, and
+which ones skipped. **Deterministic — measured, not judged.** It sits beside
+the judge scores and is never folded into them.
+
+It exists because the judge cannot ask the question. Judge dimensions grade
+itinerary *quality*, and a researcher that skips the search still returns a
+plausible, well-scoring itinerary — which is how MYS-816 stayed invisible.
+
+**No pass rule yet, deliberately.** Skips are currently near-universal (~1–2 of
+4 researchers per run), so a hard gate would be red from day one and would get
+switched off. Turn `researchers_grounded` vs `researchers_total` into a gate
+once MYS-816's fix has driven it green; `summarize_search_grounding()` marks
+the spot.
+
+Read `unsearched_by_agent` for the actionable number — it ranks repeat
+offenders, which matters because the skipping researcher varies run to run
+rather than being one permanently broken agent.
 - `books_v1` — 10 cases with expected outputs and book-specific scoring criteria
 - `place_to_book_v1` — 11 cases for the **place→book reverse-routing** grounding gate (literal/vibe labelling + not-found state). Register with `make eval-setup-one EVALSET_FILE=evaluation/place_to_book_v1.evalset.json`.
 - `local_atmosphere_v1` — 8 cases for the **local-atmosphere** ("book near me") flow: mixed preference shapes (4 with / 4 without `user:preferences`), LLM judge + deterministic envelope/radius gate.

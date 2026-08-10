@@ -237,13 +237,40 @@ guarantee, so it is logged. Four events, all INFO:
 | `search_grounding_absent` | every model response | No grounding metadata came back. **Expected for every formatter** (they are tool-less by design — ADK forbids `tools` + `output_schema` on one agent); notable for anything named `*_researcher`. |
 | `discovery_grounding_audit` | end of a fresh `discover()` | How many entries in each discovery payload trace back to the researchers' text: `kind`, `grounded`, `total`. |
 | `discovery_grounding_no_capture` | end of a fresh `discover()` | No researcher text or no entries — "cannot say", never "nothing was grounded". |
+| `discovery_unverified_payloads` | fresh `discover()`, when a researcher skipped | Names the researchers that never searched and the payloads struck from the grounding evidence. |
 
 Read them together: `search_grounding_absent agent=city_researcher` means that
-researcher answered from model memory. Observed most often on books with
-fictional or non-Earth settings — exactly the case `city_researcher`'s prompt
-has a mandatory-redirect clause for. The audit is **observation only**: it
-drops nothing, because a miss can equally mean the token rule was strict
-about a paraphrase.
+researcher answered from model memory.
+
+**Measured rate (2026-08-10, `gemini-3.1-flash-lite`):** roughly one to two of
+the four researchers skip on most runs, on realist and fictional books alike.
+Which one varies run to run — all four have been observed skipping, and a
+skipped researcher still emits places (one run produced the author site
+"Personal Office"). It is stochastic, not a broken prompt clause.
+
+### Fail closed: unsearched researchers cannot ground a claim (MYS-816)
+
+`discover()` records which researchers searched and writes the payloads of
+those that did not to `unverified_discovery` in session state.
+`SessionStateAccessor.grounding_research_text` then omits them, so at compose
+time the existing `downgrade_ungrounded_match_types` guard cannot find those
+names as evidence and demotes any stop resting on them to `match_type="vibe"`
+with `grounding_source` cleared.
+
+No new enforcement was added — the haystack was narrowed and the existing
+guard did the rest. Notes that matter when changing this:
+
+- The composer still **receives** unverified payloads; they are often correct
+  and dropping them would thin results. They just cannot back a
+  `literal`/`historical` claim.
+- The flag rides in the discovery **cache bundle** (`discover:v3:`). A hit that
+  dropped it would serve unprotected results on the most-requested titles.
+- An agent that never *ran* is not "unsearched" — fail open on missing
+  evidence, the same rule every grounding guard here follows.
+- The `discovery_grounding_audit` numbers are provenance-aware for the same
+  reason: unioning all four researchers' text let a searching researcher
+  vouch for a non-searching one, which is why this read as 100% grounded
+  when it was first measured.
 
 Query strings are deliberately never logged — they embed the user's book
 title, and `common/logging.py` forwards INFO logs to Sentry against an
@@ -439,7 +466,7 @@ The unit suite (`tests/unit/`) by area — per-module counts rot with every PR, 
 | Place features | `test_place_key.py`, `test_place_to_book.py`, `test_place_to_book_eval.py` |
 | Quality & guardrails | `test_llm_scorer.py`, `test_tone_guardrail.py`, `test_recommendation_floor.py`, `test_judge_calibration.py`, `test_spot_check.py` |
 | Eval harnesses | `test_local_atmosphere_eval.py`, `test_expansion_eval.py`, `test_eval_dataset_routing.py` |
-| Observability | `test_sentry.py`, `test_langfuse_plugin_concurrency.py`, `test_langfuse_pricing.py`, `test_search_grounding.py`, `test_langfuse_search_grounding.py`, `test_discovery_grounding_audit.py` |
+| Observability | `test_sentry.py`, `test_langfuse_plugin_concurrency.py`, `test_langfuse_pricing.py`, `test_search_grounding.py`, `test_langfuse_search_grounding.py`, `test_discovery_grounding_audit.py`, `test_unverified_discovery_downgrade.py` |
 | Sessions & ops | `test_services.py`, `test_session_retention.py` |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).
