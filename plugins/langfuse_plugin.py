@@ -532,6 +532,18 @@ class LangfusePlugin(BasePlugin):
             if name in self._agents_seen and name not in self._agents_searched
         )
 
+    def observed_any(self, candidates: "Iterable[str]") -> bool:
+        """Did the ledger see ANY of ``candidates`` produce a model response?
+
+        The positive half of ``unsearched_agents``. That method is correctly
+        silent when it saw nothing, but on a path where the agents run by
+        construction, "saw nothing" means the observation broke rather than
+        that everything was fine — and the caller needs to be able to say so
+        out loud. Reads the same ledger, so it is true exactly when at least
+        one candidate was observed.
+        """
+        return any(name in self._agents_seen for name in candidates)
+
     def _extract_token_usage(self, response: LlmResponse) -> Optional[TokenUsage]:
         """
         Extract token counts from Gemini API response.

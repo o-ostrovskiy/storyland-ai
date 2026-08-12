@@ -299,9 +299,26 @@ class WorkflowExecutor:
         therefore the cached bundle — is stable across runs and diffable.
         Empty when every researcher searched, which is also what a plugin
         that never saw them returns; both mean "change nothing".
+
+        r2: that last sentence is exactly the hole this now covers. On the
+        FRESH discovery path the four researchers run by construction, so a
+        ledger that saw none of them is not "they didn't run" — it is "the
+        observation seam broke", and the enforcement path cannot tell the two
+        apart. "Everything was verified" has no positive representation
+        anywhere here; it is only ever inferred from an absence. So the empty
+        case is logged rather than returned silently: a positive control, not
+        a behaviour change — the return value is identical either way, and the
+        three-valued rule in ``unsearched_agents`` (an agent that never ran is
+        not unsearched) is deliberately left alone.
         """
         unsearched = langfuse_plugin.unsearched_agents(RESEARCHER_PAYLOAD_KEYS)
         if not unsearched:
+            if not langfuse_plugin.observed_any(RESEARCHER_PAYLOAD_KEYS):
+                logger.warning(
+                    "discovery_search_ledger_empty",
+                    job_id=job_id[:8],
+                    total=len(RESEARCHER_PAYLOAD_KEYS),
+                )
             return []
         keys = sorted(RESEARCHER_PAYLOAD_KEYS[name] for name in unsearched)
         logger.info(

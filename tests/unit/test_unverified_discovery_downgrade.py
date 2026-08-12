@@ -479,3 +479,44 @@ class TestExtractionWiring:
         stops = {s["name"]: s for s in itinerary["cities"][0]["stops"]}
         assert stops["Dublin"]["match_type"] == "literal"
         assert stops["Personal Office"]["match_type"] == "literal"
+
+
+# --------------------------------------------------------------------------
+# r2 (@el): "everything was verified" had no positive representation — it was
+# only ever inferred from an absence. On the fresh path the four researchers
+# run by construction, so an empty ledger means the observation seam broke,
+# and that state used to be indistinguishable from a clean run.
+# --------------------------------------------------------------------------
+
+class TestLedgerEmptyIsVisible:
+    def test_observed_any_is_false_before_anything_runs(self):
+        assert LangfusePlugin().observed_any(RESEARCHER_PAYLOAD_KEYS) is False
+
+    def test_observed_any_is_true_once_one_researcher_is_seen(self):
+        plugin = LangfusePlugin()
+        plugin._agents_seen.add(next(iter(RESEARCHER_PAYLOAD_KEYS)))
+        assert plugin.observed_any(RESEARCHER_PAYLOAD_KEYS) is True
+
+    def test_a_broken_seam_is_logged_and_a_clean_run_is_not(self, monkeypatch):
+        """Both cases return [] — the log is the only thing that separates them."""
+        from core import executor as executor_module
+
+        seen = []
+        monkeypatch.setattr(
+            executor_module.logger,
+            "warning",
+            lambda event, **kw: seen.append(event),
+        )
+        keys = executor_module.WorkflowExecutor._unverified_discovery_keys
+
+        broken = LangfusePlugin()  # nothing observed at all
+        assert keys(None, "job12345", broken) == []
+        assert seen == ["discovery_search_ledger_empty"]
+
+        seen.clear()
+        clean = LangfusePlugin()
+        for name in RESEARCHER_PAYLOAD_KEYS:
+            clean._agents_seen.add(name)
+            clean._agents_searched.add(name)
+        assert keys(None, "job12345", clean) == []
+        assert seen == [], "a run where every researcher searched must stay quiet"
