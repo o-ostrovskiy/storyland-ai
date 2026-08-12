@@ -154,6 +154,29 @@ class SessionStateAccessor:
         value = self._state.get(SessionStateKeys.UNVERIFIED_DISCOVERY)
         return value if isinstance(value, list) else []
 
+    @property
+    def discovery_verification_ran(self) -> bool:
+        """Did the fail-closed pass actually write a verdict for this run?
+
+        The positive representation of "every researcher searched" (MYS-816
+        r3). ``unverified_discovery`` returns ``[]`` for two opposite states:
+        the pass ran and cleared every researcher, and the pass never ran at
+        all (an early error, a pre-v3 cache entry, a broken observation seam).
+        Both make ``all_discovery_unverified`` False, so the guard fails OPEN
+        -- and until now it did so silently, with nothing anywhere able to say
+        which of the two had happened.
+
+        That is the same absence-as-evidence shape this ticket has had to
+        close three times over: on the metric, on the ledger, and here on the
+        state that feeds the guard. The presence of the KEY is the receipt, so
+        the executor writes it unconditionally -- including the empty list --
+        and the cache bundle replays it by TYPE rather than by truthiness. An
+        empty list is a verdict; a missing key is silence.
+        """
+        return isinstance(
+            self._state.get(SessionStateKeys.UNVERIFIED_DISCOVERY), list
+        )
+
     def _discovery_payloads(self) -> List[tuple]:
         """The (key, value) discovery payloads that are actually present."""
         return [
@@ -169,20 +192,44 @@ class SessionStateAccessor:
 
     @property
     def all_discovery_unverified(self) -> bool:
-        """True when discovery produced payloads and EVERY one is unverified.
+        """True when NO PRESENT discovery payload is usable as evidence.
 
         The difference between *no evidence* and *disqualified evidence*, and
         they need opposite handling (MYS-816 r2). ``grounding_research_text``
         returns "" for both: the local-atmosphere path has no discovery
-        research at all, and a run where all four researchers skipped
-        ``google_search`` has research that may not be used as proof. The
-        downstream guard is fail-OPEN on an empty haystack -- correct for the
-        first case, exactly backwards for the second, where every literal
-        claim survives *because* nothing was verified. Callers pass this to
+        research at all, and a run whose researchers skipped ``google_search``
+        has research that may not be used as proof. The downstream guard is
+        fail-OPEN on an empty haystack -- correct for the first case, exactly
+        backwards for the second, where every literal claim survives *because*
+        nothing was verified. Callers pass this to
         ``downgrade_ungrounded_match_types`` so the second case fails closed.
 
+        🔴 **The exact trigger, because every earlier description of this flag
+        overstated it** (MYS-816 r3). It is NOT "the run where all four
+        researchers skipped". ``_discovery_payloads`` filters on ``if value``,
+        so an EMPTY payload counts as absent, and ``all()`` over a
+        single-element list is True. The real rule is:
+
+            at least one discovery payload is non-empty, and every non-empty
+            one came from a researcher with no search receipt.
+
+        A run where three researchers returned nothing and the fourth answered
+        from memory therefore blanket-demotes the whole itinerary -- and that
+        is CORRECT, which is why the trigger is documented rather than
+        tightened. Requiring the full researcher set would restore the
+        fail-open at a slightly different maximum: the haystack in that run is
+        empty (the one payload present is excluded as unverified), so without
+        the flag every literal claim would survive on no evidence at all --
+        precisely the inversion r2 fixed. The words were wrong, not the rule.
+        Pinned by ``test_a_single_unverified_payload_still_disqualifies`` and
+        its converse.
+
         False when no discovery ran, which keeps the local-atmosphere path
-        untouched.
+        untouched -- and ALSO false when the fail-closed pass never ran, which
+        is a different state entirely. This property cannot tell those two
+        apart and does not try; ``discovery_verification_ran`` is the positive
+        receipt that separates them, and callers that fail open on this flag
+        should read it before treating False as "everything checked out".
         """
         present = self._discovery_payloads()
         if not present:

@@ -1092,6 +1092,35 @@ Tech Radar's AI review (2026-07-09, MYS-401) flagged that `expand()`'s and `reco
 
 ---
 
+## 26. Search-Grounding Receipts + Fail-Closed Discovery Enforcement (2026-08-12)
+
+### Context
+
+Researcher agents are configured with Gemini's built-in `google_search` and their prompts instruct them to use it — `city_researcher` carries an explicit "You MUST call google_search at least once" clause. Nothing verified that it happened. A researcher answering from model memory produced output structurally identical to a grounded one, and every downstream stage treated it as researched fact; one observed run returned an author site named `Personal Office`. Measured across the full evalset (18 cases, 72 researcher calls), **46% of researcher calls skipped search** — `book_context_researcher`, the first node in the chain, at 83%. The skipping is stochastic and near-universal, not an edge case tied to fictional settings (an earlier framing this ticket's own measurement refuted), and its root cause is the task framing in `build_discovery_prompt` (MYS-846): reframing the request as research drops the skip rate to 0/12, while appending an explicit search instruction to the real prompt moves nothing (6/12 either way).
+
+### Decision
+
+- **Receipts, not inference.** `LangfusePlugin` keeps a per-agent ledger written in `after_model_callback` *before* the Langfuse `enabled` gate, so grounding remains answerable on a deploy with no credentials. `searched_agents()` reports only agents **positively observed** calling `google_search`; `unsearched_agents()` is deliberately three-valued (an agent that never ran is not a skip); `observed_any()` reports whether the ledger saw anything at all. Receipts are read from **both** channels a response can carry them on — reading only `grounding_metadata` made every server-side-invocation agent read as "never searched".
+- **Fail closed on unverified evidence, not on missing evidence.** Payload keys whose researcher produced no receipt are written to session state as `unverified_discovery` and excluded from `grounding_research_text`, so the existing `downgrade_ungrounded_match_types` guard stops finding evidence for them. The load-bearing asymmetry: an empty haystack means *"cannot prove anything ungrounded — change nothing"* on the local-atmosphere path, and *"nothing here can possibly be grounded — demote everything"* when discovery ran and every present payload is unverified. Both arrive at the guard identically, so the caller passes `all_discovery_unverified` to tell them apart. Without it the guard is weakest precisely when the run is least trustworthy.
+- **"Everything was verified" is always a measurement, never an inference from an absence.** This shape had to be closed at three separate sites in one feature, and the third only surfaced in review round 3: the ledger (`searched_agents` is positive-only, because `total - len(unsearched)` reported a clean 4/4 on an empty ledger); the enforcement path (`observed_any()` + a `discovery_search_ledger_empty` warning, because a broken observation seam and a clean run both returned `[]`); and session state itself (`discovery_verification_ran`, because writing the verdict only `if unverified:` left a clean run and a run where the pass never happened byte-identical). **The verdict is therefore written unconditionally, empty list included, and the cache bundle replays it by type rather than truthiness** — an empty list is a verdict; a missing key is silence.
+- **The trigger is documented rather than tightened.** `all_discovery_unverified` is true when *at least one* discovery payload is non-empty and every non-empty one is unverified — not, as earlier descriptions claimed, only when all four researchers skipped. Empty payloads filter out as absent and `all()` over one element is `True`, so a lone unsearched payload blanket-demotes the itinerary. That is correct: the lone payload is excluded from the haystack, so requiring the full researcher set would restore the fail-open at a different maximum.
+- **Report, don't gate, in the eval.** Skips are near-universal today, so a hard eval gate would be red from day one and get switched off. `search_grounding` is reported beside the judge scores; the eval applies production's downgrade before scoring so it stops measuring claims the product would never ship.
+
+### Files Affected
+
+- `common/search_grounding.py` (new), `common/logging.py` (Sentry allowlist; query strings deliberately never forwarded — they embed the user-supplied book title)
+- `plugins/langfuse_plugin.py` (the ledger), `core/place_to_book.py` (registers a credential-less `LangfusePlugin` so its researcher is not invisible to the ledger)
+- `core/session_state.py` (`unverified_discovery`, `all_discovery_unverified`, `discovery_verification_ran`), `core/extraction.py` (`evidence_disqualified`), `core/executor.py` (verdict write + cache replay; cache key `v2` → `v3`)
+- `evaluation/tools/run_scheduled_eval.py`
+
+### Trade-offs
+
+**Benefits:** a claim the product cannot support is demoted rather than shipped at full confidence; the skip rate is measurable per researcher instead of invisible; the guard's blind spot at its own maximum is closed; a broken observation seam is now loud rather than indistinguishable from a clean run.
+
+**Costs:** a user-visible downgrade — stops that would previously have read `literal`/`historical` now read `vibe` with no source whenever their supporting researcher skipped, which at today's 46% rate is a substantial fraction of stops; one bounded cold-cache window for the `v3` key bump; `search_grounding_absent` fires for every tool-less formatter (roughly half of all model calls) and is INFO-level noise a Sentry health pass must learn to ignore; the Sentry allowlist widening is per-key across the whole codebase, so generic keys (`kind`, `total`, `agent`) now forward from anywhere — namespacing them is deferred to its own card. This does **not** fix the skipping; MYS-846 owns the cause.
+
+---
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |

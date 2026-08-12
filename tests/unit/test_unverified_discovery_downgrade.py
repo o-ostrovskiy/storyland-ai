@@ -303,7 +303,17 @@ class TestExecutorWiring:
         assert state.unverified_discovery == [SessionStateKeys.AUTHOR_SITES]
         assert "Personal Office" not in state.grounding_research_text
 
-    async def test_all_searched_writes_nothing(self, monkeypatch):
+    async def test_all_searched_writes_an_EMPTY_VERDICT_not_nothing(
+        self, monkeypatch
+    ):
+        """🔴 r3: this row used to assert only ``unverified_discovery == []``.
+
+        That is satisfied by writing nothing at all, which is what the code
+        did — so "every researcher searched" and "the fail-closed pass never
+        ran" left session state byte-identical, both fail the guard open, and
+        no reader could tell them apart. The empty list must actually be
+        written; its presence is the receipt.
+        """
         from core.executor import APP_NAME
         from core.events import JobStarted
 
@@ -318,7 +328,38 @@ class TestExecutorWiring:
         session = await executor.session_service.get_session(
             app_name=APP_NAME, user_id="default", session_id=job_id
         )
-        assert SessionStateAccessor(session.state).unverified_discovery == []
+        state = SessionStateAccessor(session.state)
+        assert state.unverified_discovery == []
+        assert state.discovery_verification_ran is True
+        # The key is genuinely in the dict, not merely readable as empty.
+        assert SessionStateKeys.UNVERIFIED_DISCOVERY in session.state
+
+    async def test_a_cache_hit_replays_an_EMPTY_verdict_too(self, monkeypatch):
+        """The replay filtered on truthiness, so `[]` was dropped on every hit.
+
+        A cached clean run therefore came back as a run with no verdict —
+        same fail-open, and the receipt lost exactly where results are served
+        most often.
+        """
+        from core.executor import APP_NAME
+        from core.events import JobStarted
+
+        ex = _runner_with_skip(monkeypatch, skipped_agent=None)
+        executor = _executor(monkeypatch, cache_enabled=True)
+
+        async for _ in executor.discover(book_title="Dune", author="Herbert"):
+            pass
+
+        monkeypatch.setattr(ex, "Runner", None)  # a fresh run would crash
+        hit_job = None
+        async for evt in executor.discover(book_title="Dune", author="Herbert"):
+            if isinstance(evt, JobStarted):
+                hit_job = evt.job_id
+
+        session = await executor.session_service.get_session(
+            app_name=APP_NAME, user_id="default", session_id=hit_job
+        )
+        assert SessionStateAccessor(session.state).discovery_verification_ran is True
 
     async def test_cache_hit_replays_the_flag(self, monkeypatch):
         """A hit that dropped it would serve UNPROTECTED results on the most
@@ -382,6 +423,69 @@ class TestAllPayloadsUnverified:
         # ...and the haystack is empty, which is what makes it indistinguishable
         # from "no discovery ran" without this flag.
         assert accessor.grounding_research_text == ""
+
+    def test_a_single_unverified_payload_still_disqualifies(self):
+        """🔴 The degenerate case NO description of this flag admitted to.
+
+        Every docstring, comment and review reply framed the trigger as "the
+        run where all four researchers skipped". It is not. Empty payloads are
+        filtered out as absent and ``all()`` over a one-element list is True,
+        so THREE researchers returning nothing plus one answering from memory
+        blanket-demotes the entire itinerary.
+
+        Pinned rather than tightened, because the behaviour is right and only
+        the words were wrong: the single present payload is excluded from the
+        haystack as unverified, so without the flag the guard sees an empty
+        haystack and lets every literal claim through on no evidence at all —
+        the r2 inversion, restored. Requiring the full researcher set would
+        reintroduce it at a slightly different maximum.
+        """
+        state = {
+            SessionStateKeys.BOOK_CONTEXT: {},
+            SessionStateKeys.CITY_DISCOVERY: None,
+            SessionStateKeys.AUTHOR_SITES: _STATE[SessionStateKeys.AUTHOR_SITES],
+            SessionStateKeys.UNVERIFIED_DISCOVERY: [SessionStateKeys.AUTHOR_SITES],
+        }
+        accessor = SessionStateAccessor(state)
+        assert accessor.all_discovery_unverified is True
+        assert accessor.grounding_research_text == ""
+
+    def test_the_same_lone_payload_VERIFIED_disqualifies_nothing(self):
+        """Converse control, so the row above is about the receipt, not the count."""
+        state = {
+            SessionStateKeys.BOOK_CONTEXT: {},
+            SessionStateKeys.CITY_DISCOVERY: None,
+            SessionStateKeys.AUTHOR_SITES: _STATE[SessionStateKeys.AUTHOR_SITES],
+            SessionStateKeys.UNVERIFIED_DISCOVERY: [],
+        }
+        accessor = SessionStateAccessor(state)
+        assert accessor.all_discovery_unverified is False
+        assert accessor.grounding_research_text != ""
+
+    def test_a_missing_verdict_fails_open_but_is_no_longer_indistinguishable(self):
+        """The silent half of the same finding.
+
+        No ``unverified_discovery`` key reads back as ``[]``, so the flag is
+        False and the guard fails open — identical, from the flag alone, to a
+        run where all four researchers searched. ``discovery_verification_ran``
+        is the positive receipt that separates them.
+        """
+        no_verdict = SessionStateAccessor(dict(_STATE))
+        assert no_verdict.all_discovery_unverified is False
+        assert no_verdict.discovery_verification_ran is False
+
+        cleared = dict(_STATE)
+        cleared[SessionStateKeys.UNVERIFIED_DISCOVERY] = []
+        cleared_accessor = SessionStateAccessor(cleared)
+        # Same flag, same fail-open, opposite meaning — and now it says which.
+        assert cleared_accessor.all_discovery_unverified is False
+        assert cleared_accessor.discovery_verification_ran is True
+
+    def test_a_non_list_verdict_is_not_a_verdict(self):
+        """A corrupted/legacy value must not read as "the pass ran"."""
+        state = dict(_STATE)
+        state[SessionStateKeys.UNVERIFIED_DISCOVERY] = "author_sites"
+        assert SessionStateAccessor(state).discovery_verification_ran is False
 
     def test_a_key_listed_but_not_present_does_not_make_it_true(self):
         """`unverified` naming an absent payload is not "everything failed"."""
@@ -510,7 +614,7 @@ class TestLedgerEmptyIsVisible:
         keys = executor_module.WorkflowExecutor._unverified_discovery_keys
 
         broken = LangfusePlugin()  # nothing observed at all
-        assert keys(None, "job12345", broken) == []
+        assert keys("job12345", broken) == []
         assert seen == ["discovery_search_ledger_empty"]
 
         seen.clear()
@@ -518,5 +622,5 @@ class TestLedgerEmptyIsVisible:
         for name in RESEARCHER_PAYLOAD_KEYS:
             clean._agents_seen.add(name)
             clean._agents_searched.add(name)
-        assert keys(None, "job12345", clean) == []
+        assert keys("job12345", clean) == []
         assert seen == [], "a run where every researcher searched must stay quiet"

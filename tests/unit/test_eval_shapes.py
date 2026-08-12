@@ -437,6 +437,72 @@ class TestSearchGroundingReporting:
         assert result["unsearched"] == ["author_researcher"]
         assert len(result["unobserved"]) == 2
 
+    async def test_the_summary_reads_a_REAL_plugin_through_the_seam(self):
+        """The row that makes every other row in this class mean something.
+
+        Every case above feeds ``summarize_search_grounding`` a
+        ``SimpleNamespace`` carrying the two accessors independently — a
+        fixture that can express arrangements the real ledger cannot produce,
+        and one that stays green through a rename or signature change on
+        ``LangfusePlugin.searched_agents``. That is the label-pinning shape:
+        a test of the summary's arithmetic standing in for a test of the seam.
+
+        So this drives ``after_model_callback`` on a real credential-less
+        plugin and summarises THAT — no stub anywhere in the path. The
+        disjointness the other rows assert is here a consequence of the real
+        ledger's write order rather than of how the fixture was written.
+        """
+        from evaluation.tools.run_scheduled_eval import summarize_search_grounding
+        from core.executor import DISCOVERY_RESEARCHER_AUTHORS
+        from plugins.langfuse_plugin import LangfusePlugin
+        from types import SimpleNamespace
+
+        authors = list(DISCOVERY_RESEARCHER_AUTHORS)
+        searched_name, skipped_name = authors[0], authors[1]
+
+        def _ctx(agent_name):
+            return SimpleNamespace(
+                agent_name=agent_name,
+                _invocation_context=SimpleNamespace(branch="b"),
+            )
+
+        grounded = SimpleNamespace(
+            usage_metadata=None,
+            grounding_metadata=SimpleNamespace(
+                web_search_queries=["dublin literary sites"],
+                grounding_chunks=[
+                    SimpleNamespace(
+                        web=SimpleNamespace(
+                            uri="https://example.com/d", title="D", domain=None
+                        )
+                    )
+                ],
+            ),
+        )
+        toolless = SimpleNamespace(usage_metadata=None, grounding_metadata=None)
+
+        plugin = LangfusePlugin(secret_key=None, public_key=None, host=None)
+        await plugin.after_model_callback(
+            callback_context=_ctx(searched_name), llm_response=grounded
+        )
+        await plugin.after_model_callback(
+            callback_context=_ctx(skipped_name), llm_response=toolless
+        )
+
+        result = summarize_search_grounding(plugin)
+
+        assert result["researchers_grounded"] == 1
+        assert result["unsearched"] == [skipped_name]
+        # The two never driven through the callback are neither grounded nor
+        # skips — they are holes, and the real ledger is what says so.
+        assert result["unobserved"] == sorted(authors[2:])
+        assert (
+            result["researchers_grounded"]
+            + len(result["unsearched"])
+            + len(result["unobserved"])
+            == result["researchers_total"]
+        )
+
     def test_the_three_states_partition_the_researchers(self):
         """grounded + unsearched + unobserved == total, in every arrangement.
 
@@ -642,6 +708,90 @@ class TestProductionGroundingDowngradeInEval:
 
         assert apply_production_grounding_downgrade(None, self._state([])) is None
         assert apply_production_grounding_downgrade("nope", self._state([])) == "nope"
+
+    def test_an_unrecognised_dict_shape_is_reported_not_silently_skipped(
+        self, monkeypatch
+    ):
+        """The silent no-op Codex's finding named, surviving inside its own fix.
+
+        A dict that is neither an envelope nor a bare itinerary reached the
+        downgrade, iterated ``.get("cities") or []`` over nothing, and returned
+        untouched — so the results file could not tell "gated, nothing to
+        change" from "shape unrecognised, nothing gated". Exactly the class
+        this function exists to close.
+        """
+        from evaluation.tools import run_scheduled_eval as mod
+
+        seen = []
+        monkeypatch.setattr(
+            mod.logger, "warning", lambda event, **kw: seen.append(event)
+        )
+        weird = {"trip": {"days": []}}
+        assert mod.apply_production_grounding_downgrade(weird, self._state([])) is weird
+        assert seen == ["eval_grounding_downgrade_shape_unrecognised"]
+
+    def test_a_recognised_shape_does_not_warn(self, monkeypatch):
+        """Control. A warning that fires on a good shape misleads just as much."""
+        from evaluation.tools import run_scheduled_eval as mod
+
+        seen = []
+        monkeypatch.setattr(
+            mod.logger, "warning", lambda event, **kw: seen.append(event)
+        )
+        mod.apply_production_grounding_downgrade(
+            self._itinerary(), self._state([SessionStateKeys.AUTHOR_SITES])
+        )
+        assert seen == []
+
+    def test_a_session_with_no_verdict_fails_open_OUT_LOUD(self, monkeypatch):
+        """Fail-open is right for the eval; silent fail-open is not.
+
+        A state with no ``unverified_discovery`` key at all reads back as
+        ``[]``, ``all_discovery_unverified`` is False, and every literal claim
+        survives — indistinguishable from a run where all four researchers
+        genuinely searched. The verdict's PRESENCE is the receipt.
+        """
+        from evaluation.tools import run_scheduled_eval as mod
+
+        payloads = {
+            SessionStateKeys.CITY_DISCOVERY: {"cities": [{"name": "Dublin"}]},
+            SessionStateKeys.AUTHOR_SITES: {
+                "author_sites": [{"name": "Personal Office"}]
+            },
+        }
+        no_verdict = SessionStateAccessor(dict(payloads))
+        assert no_verdict.discovery_verification_ran is False
+
+        seen = []
+        monkeypatch.setattr(
+            mod.logger, "warning", lambda event, **kw: seen.append(event)
+        )
+        data = mod.apply_production_grounding_downgrade(self._itinerary(), no_verdict)
+
+        assert seen == ["eval_grounding_downgrade_no_verdict"]
+        # It really did fail open: with no verdict the author-sites payload
+        # counts as evidence, so the claim resting on it survives at full
+        # strength. That is the right default for an eval and the reason the
+        # log has to exist.
+        assert data["itinerary"]["cities"][0]["stops"][0]["match_type"] == "literal"
+
+        # The discriminating half: the SAME payloads with a verdict naming
+        # author_sites demote it. Identical state but for the receipt.
+        with_verdict = dict(payloads)
+        with_verdict[SessionStateKeys.UNVERIFIED_DISCOVERY] = [
+            SessionStateKeys.AUTHOR_SITES
+        ]
+        seen.clear()
+        demoted = mod.apply_production_grounding_downgrade(
+            self._itinerary(), SessionStateAccessor(with_verdict)
+        )
+        assert seen == [], "a run carrying a verdict must not warn"
+        assert demoted["itinerary"]["cities"][0]["stops"][0]["match_type"] == "vibe"
+
+    def test_an_empty_verdict_is_a_verdict_and_stays_quiet(self):
+        """Converse: `[]` means the pass ran and cleared everyone."""
+        state = self._state([])
+        assert state.discovery_verification_ran is True
 
     def test_unverified_keys_match_the_production_derivation(self):
         from core.executor import RESEARCHER_PAYLOAD_KEYS

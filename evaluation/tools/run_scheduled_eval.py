@@ -105,11 +105,31 @@ def apply_production_grounding_downgrade(itinerary_data, grounding_state):
 
     Mutates and returns ``itinerary_data`` (envelope or bare itinerary, both
     shapes occur -- see ``count_itinerary_cities``).
+
+    r3: both ways this can quietly do nothing now say so. A dict that is
+    neither an envelope nor a bare itinerary used to fall through to a
+    zero-city loop and return untouched, so the results file could not
+    distinguish "gated, nothing to change" from "shape unrecognised, nothing
+    gated" -- which is exactly the eval-stopped-representing-production
+    failure this function was added to fix, surviving as a property of the
+    fix. And a session whose fail-closed pass never ran fails the guard open;
+    that is the right default for an eval, but it must not be silent.
     """
     if not isinstance(itinerary_data, dict):
         return itinerary_data
     inner = itinerary_data.get("itinerary")
     payload = inner if isinstance(inner, dict) else itinerary_data
+    if not isinstance(payload.get("cities"), list):
+        logger.warning(
+            "eval_grounding_downgrade_shape_unrecognised",
+            keys=",".join(sorted(k for k in payload if isinstance(k, str))[:10]),
+        )
+        return itinerary_data
+    if not grounding_state.discovery_verification_ran:
+        logger.warning(
+            "eval_grounding_downgrade_no_verdict",
+            reason="unverified_discovery key absent; guard fails open",
+        )
     downgrade_ungrounded_match_types(
         payload,
         grounding_state.grounding_research_text,
@@ -168,9 +188,16 @@ def aggregate_search_grounding(
     `cases_fully_grounded` is `grounded == total`, NOT "nothing in `unsearched`".
     The second form counts a case whose ledger observed nobody at all as fully
     grounded — the same absence-as-evidence inversion `summarize_search_grounding`
-    fixes one level down. Reading the two counts also keeps this correct on
-    results files written before `unobserved` existed, since both shapes carry
-    them.
+    fixes one level down.
+
+    ⚠️ Forward-only, and the previous version of this docstring overclaimed
+    (r3). It does not crash on a results file written before `unobserved`
+    existed, but those files carry a `researchers_grounded` produced by the
+    old `total - len(unsearched)` subtraction -- so a broken-ledger case was
+    serialised as a clean 4/4, and `grounded == total` still counts it fully
+    grounded. Old numbers cannot be repaired from here; only runs recorded
+    after `summarize_search_grounding` became positive-receipt-only are
+    trustworthy.
     """
     present = [c["search_grounding"] for c in case_results if c.get("search_grounding")]
     if not present:

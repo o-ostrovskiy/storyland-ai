@@ -287,7 +287,8 @@ class WorkflowExecutor:
             retry_options=retry_config,
         )
 
-    def _unverified_discovery_keys(self, job_id: str, langfuse_plugin) -> list:
+    @staticmethod
+    def _unverified_discovery_keys(job_id: str, langfuse_plugin) -> list:
         """Payload keys whose researcher produced no search receipts.
 
         The fail-closed input for MYS-816. Measured, not assumed: researchers
@@ -310,6 +311,11 @@ class WorkflowExecutor:
         a behaviour change — the return value is identical either way, and the
         three-valued rule in ``unsearched_agents`` (an agent that never ran is
         not unsearched) is deliberately left alone.
+
+        ``@staticmethod`` because it touches no instance state and its test
+        drives it directly. It used to be called unbound with ``None`` as
+        ``self`` — which worked only by accident and would have broken the
+        moment anyone added an ``self.`` reference here.
         """
         unsearched = langfuse_plugin.unsearched_agents(RESEARCHER_PAYLOAD_KEYS)
         if not unsearched:
@@ -480,13 +486,16 @@ class WorkflowExecutor:
             (SessionStateKeys.CITY_DISCOVERY, cached.get("city_discovery")),
             (SessionStateKeys.LANDMARK_DISCOVERY, cached.get("landmark_discovery")),
             (SessionStateKeys.AUTHOR_SITES, cached.get("author_sites")),
-            (
-                SessionStateKeys.UNVERIFIED_DISCOVERY,
-                cached.get("unverified_discovery"),
-            ),
         ):
             if value:
                 state_delta[key] = value
+        # Replayed by TYPE, not truthiness (r3). An empty unverified list means
+        # "the pass ran and cleared everyone" -- dropping it here would replay a
+        # verified run as an unverified-pass one and silently re-open the hole
+        # discovery_verification_ran exists to close.
+        replayed_verdict = cached.get("unverified_discovery")
+        if isinstance(replayed_verdict, list):
+            state_delta[SessionStateKeys.UNVERIFIED_DISCOVERY] = replayed_verdict
         cache_event = Event(
             invocation_id="system",
             author="system",
@@ -718,25 +727,30 @@ class WorkflowExecutor:
             # requests, and a typed setter here would be a silent no-op against
             # persisted state (MYS-172) — append_event is the only real write.
             unverified = self._unverified_discovery_keys(job_id, langfuse_plugin)
-            if unverified:
-                await self._session_service.append_event(
-                    session,
-                    Event(
-                        invocation_id="system",
-                        author="system",
-                        actions=EventActions(
-                            state_delta={
-                                SessionStateKeys.UNVERIFIED_DISCOVERY: unverified
-                            }
-                        ),
+            # r3: written UNCONDITIONALLY, empty list included. The key's
+            # presence is the only positive evidence that this pass ran at
+            # all -- `if unverified:` left "every researcher searched" and
+            # "the pass never happened" as the same absent key, and both then
+            # fail the guard OPEN with nothing able to say which occurred.
+            # See SessionStateAccessor.discovery_verification_ran.
+            await self._session_service.append_event(
+                session,
+                Event(
+                    invocation_id="system",
+                    author="system",
+                    actions=EventActions(
+                        state_delta={
+                            SessionStateKeys.UNVERIFIED_DISCOVERY: unverified
+                        }
                     ),
-                )
-                # Re-read: the accessor above wraps the pre-write dict, and the
-                # cache bundle below must store what compose() will actually see.
-                session = await self._session_service.get_session(
-                    app_name=APP_NAME, user_id=user_id, session_id=job_id
-                )
-                run_state = SessionStateAccessor(session.state)
+                ),
+            )
+            # Re-read: the accessor above wraps the pre-write dict, and the
+            # cache bundle below must store what compose() will actually see.
+            session = await self._session_service.get_session(
+                app_name=APP_NAME, user_id=user_id, session_id=job_id
+            )
+            run_state = SessionStateAccessor(session.state)
 
             self._audit_discovery_grounding(job_id, capture, run_state, unverified)
 
