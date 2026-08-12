@@ -231,6 +231,80 @@ class TestGenerationMetadata:
         assert metadata["search"] is None
 
 
+class TestSearchedAgentsIsPositive:
+    """``searched_agents`` must be a MEASUREMENT, not the complement of a gap.
+
+    ``unsearched_agents`` is deliberately three-valued: an agent that never ran
+    is not reported. That makes ``total - len(unsearched)`` wrong as a count of
+    grounded researchers — an EMPTY ledger subtracts nothing and reads as
+    everything-grounded, which is the exact inversion the fail-closed guard on
+    this same plugin had to fix one level down.
+    """
+
+    CANDIDATES = ("city_researcher", "author_researcher", "book_context_researcher")
+
+    async def test_empty_ledger_grounds_nobody(self):
+        """The row the old derivation got backwards. Nothing observed = 0."""
+        plugin = LangfusePlugin(secret_key=None, public_key=None, host=None)
+
+        assert plugin.searched_agents(self.CANDIDATES) == frozenset()
+        # and the negative half is correctly silent, which is why the
+        # subtraction lied: 3 - 0 == 3.
+        assert plugin.unsearched_agents(self.CANDIDATES) == frozenset()
+
+    async def test_only_the_researcher_that_searched_is_counted(self):
+        plugin = LangfusePlugin(secret_key=None, public_key=None, host=None)
+
+        await plugin.after_model_callback(
+            callback_context=_ctx(agent_name="city_researcher"),
+            llm_response=_grounded_response(),
+        )
+        await plugin.after_model_callback(
+            callback_context=_ctx(agent_name="author_researcher"),
+            llm_response=SimpleNamespace(usage_metadata=None, grounding_metadata=None),
+        )
+
+        assert plugin.searched_agents(self.CANDIDATES) == frozenset({"city_researcher"})
+        assert plugin.unsearched_agents(self.CANDIDATES) == frozenset(
+            {"author_researcher"}
+        )
+        # book_context_researcher was never observed: in neither set. That
+        # third state is the whole point — it is not grounded and it is not
+        # a skip, it is a hole in the instrumentation.
+
+    async def test_a_later_toolless_turn_does_not_retract_a_receipt(self):
+        """Same rule the ledger already holds for ``unsearched_agents``."""
+        plugin = LangfusePlugin(secret_key=None, public_key=None, host=None)
+
+        await plugin.after_model_callback(
+            callback_context=_ctx(agent_name="city_researcher"),
+            llm_response=_grounded_response(),
+        )
+        await plugin.after_model_callback(
+            callback_context=_ctx(agent_name="city_researcher"),
+            llm_response=SimpleNamespace(usage_metadata=None, grounding_metadata=None),
+        )
+
+        assert plugin.searched_agents(self.CANDIDATES) == frozenset({"city_researcher"})
+        assert plugin.unsearched_agents(self.CANDIDATES) == frozenset()
+
+    async def test_searched_is_a_subset_of_observed(self):
+        """Pins the ordering ``_log_search_grounding`` relies on.
+
+        ``_agents_searched`` is only ever written after ``_agents_seen``. If
+        that ever inverts, an agent could be "grounded" without having been
+        observed and the three states would stop partitioning the candidates.
+        """
+        plugin = LangfusePlugin(secret_key=None, public_key=None, host=None)
+
+        await plugin.after_model_callback(
+            callback_context=_ctx(agent_name="city_researcher"),
+            llm_response=_server_side_response(),
+        )
+
+        assert plugin._agents_searched <= plugin._agents_seen
+
+
 class TestNeverBreaksTheRequest:
     async def test_malformed_response_does_not_raise(self, capsys):
         class Exploding:

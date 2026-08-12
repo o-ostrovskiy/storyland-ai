@@ -63,6 +63,18 @@ the spot.
 Read `unsearched_by_agent` for the actionable number — it ranks repeat
 offenders, which matters because the skipping researcher varies run to run
 rather than being one permanently broken agent.
+
+**Three states, not two.** `researchers_grounded` counts only researchers
+*positively observed* calling `google_search`. A researcher the ledger never
+saw at all is reported in `unobserved` (and `unobserved_by_agent` on the
+roll-up) — an instrumentation failure to chase, not a model that ignored its
+prompt. `grounded + unsearched + unobserved == total`, always.
+
+That split is load-bearing rather than cosmetic. The count used to be derived
+as `total - len(unsearched)`, and `unsearched_agents()` deliberately omits an
+agent it never observed — so an empty ledger, the one state that means the
+measurement itself broke, reported a clean 4/4. `cases_fully_grounded` reads
+`grounded == total` for the same reason.
 - `books_v1` — 10 cases with expected outputs and book-specific scoring criteria
 - `place_to_book_v1` — 11 cases for the **place→book reverse-routing** grounding gate (literal/vibe labelling + not-found state). Register with `make eval-setup-one EVALSET_FILE=evaluation/place_to_book_v1.evalset.json`.
 - `local_atmosphere_v1` — 8 cases for the **local-atmosphere** ("book near me") flow: mixed preference shapes (4 with / 4 without `user:preferences`), LLM judge + deterministic envelope/radius gate.

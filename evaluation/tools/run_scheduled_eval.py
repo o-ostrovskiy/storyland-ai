@@ -131,13 +131,28 @@ def summarize_search_grounding(langfuse_plugin) -> Dict[str, Any]:
     (~1-2 of 4 researchers on most runs), so a hard gate would be red on every
     run from day one and would simply get switched off. Turn `grounded` vs
     `total` into a pass rule once MYS-816's fix has driven it green.
+
+    THREE-WAY, not two-way. `researchers_grounded` counts only researchers
+    POSITIVELY observed calling google_search; a researcher the ledger never
+    saw at all is reported as `unobserved`, never silently folded into either
+    side. Deriving it as `total - len(unsearched)` was the bug this docstring
+    used to describe as a feature: `unsearched_agents` omits a never-observed
+    agent by design, so an empty ledger — a broken observation seam — reported
+    a clean 4/4, and a partial ledger inflated the number the same way. That is
+    the MYS-492 class the enforcement path already had to fix: "everything was
+    verified" must be a measurement, never an inference from an absence.
+
+    Invariant: grounded + unsearched + unobserved == total.
     """
+    searched = sorted(langfuse_plugin.searched_agents(DISCOVERY_RESEARCHER_AUTHORS))
     unsearched = sorted(langfuse_plugin.unsearched_agents(DISCOVERY_RESEARCHER_AUTHORS))
-    total = len(DISCOVERY_RESEARCHER_AUTHORS)
+    accounted = set(searched) | set(unsearched)
+    unobserved = sorted(a for a in DISCOVERY_RESEARCHER_AUTHORS if a not in accounted)
     return {
-        "researchers_total": total,
-        "researchers_grounded": total - len(unsearched),
+        "researchers_total": len(DISCOVERY_RESEARCHER_AUTHORS),
+        "researchers_grounded": len(searched),
         "unsearched": unsearched,
+        "unobserved": unobserved,
     }
 
 
@@ -149,26 +164,44 @@ def aggregate_search_grounding(
     Returns None when no case carried the field (an older results file, or a
     run that failed before discovery), so the summary can omit the block
     rather than print a misleading all-zero one.
+
+    `cases_fully_grounded` is `grounded == total`, NOT "nothing in `unsearched`".
+    The second form counts a case whose ledger observed nobody at all as fully
+    grounded — the same absence-as-evidence inversion `summarize_search_grounding`
+    fixes one level down. Reading the two counts also keeps this correct on
+    results files written before `unobserved` existed, since both shapes carry
+    them.
     """
     present = [c["search_grounding"] for c in case_results if c.get("search_grounding")]
     if not present:
         return None
+
+    def by_frequency(counts: Dict[str, int]) -> Dict[str, int]:
+        return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
     offenders: Dict[str, int] = {}
+    unobserved_counts: Dict[str, int] = {}
     for entry in present:
         for agent in entry.get("unsearched") or []:
             offenders[agent] = offenders.get(agent, 0) + 1
+        for agent in entry.get("unobserved") or []:
+            unobserved_counts[agent] = unobserved_counts.get(agent, 0) + 1
     return {
         "cases": len(present),
         "cases_fully_grounded": sum(
-            1 for e in present if not (e.get("unsearched") or [])
+            1
+            for e in present
+            if e.get("researchers_total")
+            and e.get("researchers_grounded") == e.get("researchers_total")
         ),
         "researchers_grounded": sum(e.get("researchers_grounded", 0) for e in present),
         "researchers_total": sum(e.get("researchers_total", 0) for e in present),
         # Which researcher skips most often — the actionable number, since the
         # offender varies run to run rather than being one broken agent.
-        "unsearched_by_agent": dict(
-            sorted(offenders.items(), key=lambda kv: (-kv[1], kv[0]))
-        ),
+        "unsearched_by_agent": by_frequency(offenders),
+        # Kept separate from the offenders: a researcher we never saw is an
+        # instrumentation failure to chase, not a model that ignored its prompt.
+        "unobserved_by_agent": by_frequency(unobserved_counts),
     }
 
 
@@ -1466,6 +1499,15 @@ def main():
                     f"{agent}×{n}" for agent, n in grounding["unsearched_by_agent"].items()
                 )
                 print(f"  skipped google_search: {offenders}")
+            if grounding.get("unobserved_by_agent"):
+                missing = ", ".join(
+                    f"{agent}×{n}"
+                    for agent, n in grounding["unobserved_by_agent"].items()
+                )
+                print(
+                    "  NEVER OBSERVED (instrumentation, not the model): "
+                    f"{missing}"
+                )
 
     print("\n" + "=" * 60)
     print(f"Total: {total_evaluated} real evaluation(s), {total_placeholders} placeholder(s)")

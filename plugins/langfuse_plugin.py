@@ -532,6 +532,26 @@ class LangfusePlugin(BasePlugin):
             if name in self._agents_seen and name not in self._agents_searched
         )
 
+    def searched_agents(self, candidates: "Iterable[str]") -> frozenset:
+        """Which of ``candidates`` were POSITIVELY observed calling google_search.
+
+        The affirmative statement of grounding, and the only honest basis for a
+        "N of 4 researchers were grounded" number. Deriving that count as
+        ``total - len(unsearched_agents(...))`` is wrong for the same reason
+        ``observed_any`` exists: ``unsearched_agents`` deliberately omits an
+        agent that never ran, so an EMPTY ledger — the broken-observation-seam
+        state — subtracts nothing and reports every researcher as grounded. A
+        partial ledger inflates the number the same way, just less visibly.
+
+        ``_agents_searched`` is only ever written after ``_agents_seen`` in
+        ``_log_search_grounding``, so this set is a subset of the observed
+        ones: membership here means a receipt was actually seen, never
+        inferred from an absence.
+
+        Works with the plugin disabled, like the rest of the ledger.
+        """
+        return frozenset(name for name in candidates if name in self._agents_searched)
+
     def observed_any(self, candidates: "Iterable[str]") -> bool:
         """Did the ledger see ANY of ``candidates`` produce a model response?
 

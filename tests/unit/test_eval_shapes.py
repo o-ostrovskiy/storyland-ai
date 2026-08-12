@@ -367,29 +367,100 @@ class TestSearchGroundingReporting:
     gate would be red on every run and would get switched off.
     """
 
-    def test_summarize_counts_unsearched_researchers(self):
+    @staticmethod
+    def _ledger(searched=(), unsearched=()):
+        """A plugin whose ledger observed exactly these agents.
+
+        Deliberately stubs BOTH accessors. A stub carrying only
+        ``unsearched_agents`` is what let the grounded count be derived from an
+        absence in the first place — it could not express "observed and
+        searched" at all, so the only number available was a subtraction.
+        """
         from types import SimpleNamespace
 
-        from evaluation.tools.run_scheduled_eval import summarize_search_grounding
-
-        plugin = SimpleNamespace(
-            unsearched_agents=lambda candidates: frozenset({"author_researcher"})
+        return SimpleNamespace(
+            searched_agents=lambda candidates: frozenset(searched),
+            unsearched_agents=lambda candidates: frozenset(unsearched),
         )
-        assert summarize_search_grounding(plugin) == {
+
+    def test_summarize_counts_unsearched_researchers(self):
+        from evaluation.tools.run_scheduled_eval import summarize_search_grounding
+        from core.executor import DISCOVERY_RESEARCHER_AUTHORS
+
+        others = [a for a in DISCOVERY_RESEARCHER_AUTHORS if a != "author_researcher"]
+        result = summarize_search_grounding(
+            self._ledger(searched=others, unsearched=["author_researcher"])
+        )
+        assert result == {
             "researchers_total": 4,
             "researchers_grounded": 3,
             "unsearched": ["author_researcher"],
+            "unobserved": [],
         }
 
     def test_summarize_all_grounded(self):
-        from types import SimpleNamespace
-
         from evaluation.tools.run_scheduled_eval import summarize_search_grounding
+        from core.executor import DISCOVERY_RESEARCHER_AUTHORS
 
-        plugin = SimpleNamespace(unsearched_agents=lambda candidates: frozenset())
-        result = summarize_search_grounding(plugin)
+        result = summarize_search_grounding(
+            self._ledger(searched=DISCOVERY_RESEARCHER_AUTHORS)
+        )
         assert result["researchers_grounded"] == result["researchers_total"]
         assert result["unsearched"] == []
+        assert result["unobserved"] == []
+
+    def test_an_empty_ledger_grounds_nobody(self):
+        """The row the previous derivation got exactly backwards.
+
+        ``total - len(unsearched)`` reported a clean 4/4 here, because
+        ``unsearched_agents`` correctly omits an agent it never observed. So
+        the single state that means "the instrumentation broke" produced the
+        best possible score — the MYS-492 shape, on the metric built to catch
+        it: a confident claim from a computation that never ran.
+        """
+        from evaluation.tools.run_scheduled_eval import summarize_search_grounding
+        from core.executor import DISCOVERY_RESEARCHER_AUTHORS
+
+        result = summarize_search_grounding(self._ledger())
+        assert result["researchers_grounded"] == 0
+        assert result["unsearched"] == []
+        assert result["unobserved"] == sorted(DISCOVERY_RESEARCHER_AUTHORS)
+
+    def test_a_partial_ledger_does_not_inflate_the_count(self):
+        """Less visible than the empty case and the same defect."""
+        from evaluation.tools.run_scheduled_eval import summarize_search_grounding
+
+        result = summarize_search_grounding(
+            self._ledger(searched=["city_researcher"], unsearched=["author_researcher"])
+        )
+        assert result["researchers_grounded"] == 1
+        assert result["unsearched"] == ["author_researcher"]
+        assert len(result["unobserved"]) == 2
+
+    def test_the_three_states_partition_the_researchers(self):
+        """grounded + unsearched + unobserved == total, in every arrangement.
+
+        The invariant is what makes the number readable: any researcher missing
+        from the grounded count is accounted for as either a skip or a hole,
+        never dropped.
+        """
+        from evaluation.tools.run_scheduled_eval import summarize_search_grounding
+        from core.executor import DISCOVERY_RESEARCHER_AUTHORS
+
+        authors = list(DISCOVERY_RESEARCHER_AUTHORS)
+        arrangements = [
+            ((), ()),
+            (authors, ()),
+            ((), authors),
+            (authors[:1], authors[1:2]),
+            (authors[:2], authors[2:]),
+        ]
+        for searched, unsearched in arrangements:
+            r = summarize_search_grounding(self._ledger(searched, unsearched))
+            assert (
+                r["researchers_grounded"] + len(r["unsearched"]) + len(r["unobserved"])
+                == r["researchers_total"]
+            ), (searched, unsearched)
 
     def test_aggregate_is_none_when_no_case_reported(self):
         """An all-zero block would read as 'nothing was grounded' — omit it."""
@@ -419,11 +490,54 @@ class TestSearchGroundingReporting:
         assert result["cases_fully_grounded"] == 1
         assert result["researchers_grounded"] == 9
         assert result["researchers_total"] == 12
+        assert result["unobserved_by_agent"] == {}
         # Ordered most-frequent first.
         assert list(result["unsearched_by_agent"]) == [
             "author_researcher",
             "city_researcher",
         ]
+
+    def test_an_unobserved_case_is_not_fully_grounded(self):
+        """The roll-up carried the same inversion as the per-case metric.
+
+        "nothing in `unsearched`" is true of a case whose ledger saw nobody, so
+        the dataset line reported it as a fully grounded case. Reading
+        `grounded == total` instead makes the two states differ.
+        """
+        from evaluation.tools.run_scheduled_eval import aggregate_search_grounding
+
+        cases = [
+            {"search_grounding": {
+                "researchers_total": 4, "researchers_grounded": 0,
+                "unsearched": [], "unobserved": [
+                    "author_researcher", "city_researcher",
+                    "book_context_researcher", "landmark_researcher"]}},
+            {"search_grounding": {
+                "researchers_total": 4, "researchers_grounded": 4,
+                "unsearched": [], "unobserved": []}},
+        ]
+        result = aggregate_search_grounding(cases)
+        # The control sits in the same row: the genuinely grounded case still
+        # counts, so this is not a change that simply reports less.
+        assert result["cases_fully_grounded"] == 1
+        assert result["unobserved_by_agent"]["city_researcher"] == 1
+        assert result["unsearched_by_agent"] == {}
+
+    def test_older_results_files_without_unobserved_still_aggregate(self):
+        """Both shapes carry the two counts, so the new rule reads either."""
+        from evaluation.tools.run_scheduled_eval import aggregate_search_grounding
+
+        cases = [
+            {"search_grounding": {
+                "researchers_total": 4, "researchers_grounded": 4,
+                "unsearched": []}},
+            {"search_grounding": {
+                "researchers_total": 4, "researchers_grounded": 2,
+                "unsearched": ["city_researcher", "author_researcher"]}},
+        ]
+        result = aggregate_search_grounding(cases)
+        assert result["cases_fully_grounded"] == 1
+        assert result["unobserved_by_agent"] == {}
 
     def test_reporting_never_fails_the_run(self):
         """No pass rule yet — a fully-unsearched run must not be a failure."""
