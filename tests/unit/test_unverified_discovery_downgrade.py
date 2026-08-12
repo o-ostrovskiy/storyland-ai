@@ -30,7 +30,10 @@ from google.adk.events.event_actions import EventActions
 from google.genai import types
 
 from core.executor import DISCOVERY_RESEARCHER_AUTHORS, RESEARCHER_PAYLOAD_KEYS
-from core.extraction import downgrade_ungrounded_match_types
+from core.extraction import (
+    downgrade_ungrounded_match_types,
+    extract_itinerary_from_response,
+)
 from core.session_state import SessionStateAccessor, SessionStateKeys
 from core.types import ExecutorConfig
 from plugins.langfuse_plugin import LangfusePlugin
@@ -345,3 +348,134 @@ class TestExecutorWiring:
     def test_payload_map_covers_every_researcher(self):
         """A new researcher without a payload mapping would silently escape."""
         assert set(RESEARCHER_PAYLOAD_KEYS) == set(DISCOVERY_RESEARCHER_AUTHORS)
+
+
+# --------------------------------------------------------------------------
+# r2 (Codex P2): "no evidence" and "all evidence disqualified" are not the
+# same state. Both reach the guard as an empty haystack, and the fail-open
+# rule is correct for the first and exactly backwards for the second — the
+# worst run on the board (nobody searched) got the most permissive handling.
+# --------------------------------------------------------------------------
+
+_ALL_KEYS = [SessionStateKeys.CITY_DISCOVERY, SessionStateKeys.AUTHOR_SITES]
+
+
+class TestAllPayloadsUnverified:
+    def test_flag_is_false_when_no_discovery_ran(self):
+        """The local-atmosphere path must stay untouched — this is the control.
+
+        If this ever reads True, every itinerary with no discovery research
+        gets blanket-demoted, which is a worse product than the bug.
+        """
+        assert SessionStateAccessor({}).all_discovery_unverified is False
+
+    def test_flag_is_false_when_one_payload_searched(self):
+        state = dict(_STATE)
+        state[SessionStateKeys.UNVERIFIED_DISCOVERY] = [SessionStateKeys.AUTHOR_SITES]
+        assert SessionStateAccessor(state).all_discovery_unverified is False
+
+    def test_flag_is_true_when_every_present_payload_is_unverified(self):
+        state = dict(_STATE)
+        state[SessionStateKeys.UNVERIFIED_DISCOVERY] = list(_ALL_KEYS)
+        accessor = SessionStateAccessor(state)
+        assert accessor.all_discovery_unverified is True
+        # ...and the haystack is empty, which is what makes it indistinguishable
+        # from "no discovery ran" without this flag.
+        assert accessor.grounding_research_text == ""
+
+    def test_a_key_listed_but_not_present_does_not_make_it_true(self):
+        """`unverified` naming an absent payload is not "everything failed"."""
+        state = {SessionStateKeys.CITY_DISCOVERY: _STATE[SessionStateKeys.CITY_DISCOVERY]}
+        state[SessionStateKeys.UNVERIFIED_DISCOVERY] = [SessionStateKeys.AUTHOR_SITES]
+        assert SessionStateAccessor(state).all_discovery_unverified is False
+
+    def test_disqualified_evidence_demotes_every_grounded_claim(self):
+        result = downgrade_ungrounded_match_types(_itinerary(), "", True)
+        stops = {s["name"]: s for s in result["cities"][0]["stops"]}
+        assert stops["Personal Office"]["match_type"] == "vibe"
+        assert stops["Personal Office"]["grounding_source"] is None
+        # Dublin was "grounded" only in a payload nobody searched, so it falls too.
+        assert stops["Dublin"]["match_type"] == "vibe"
+        assert stops["Dublin"]["grounding_source"] is None
+
+    def test_empty_haystack_without_the_flag_still_fails_open(self):
+        """The converse row: this is the pre-fix behaviour, and it must persist
+        for the no-discovery case. If this ever demotes, the flag has stopped
+        being what does the work."""
+        result = downgrade_ungrounded_match_types(_itinerary(), "", False)
+        stops = {s["name"]: s for s in result["cities"][0]["stops"]}
+        assert stops["Personal Office"]["match_type"] == "literal"
+        assert stops["Dublin"]["match_type"] == "literal"
+
+    def test_weak_claims_are_never_touched_even_when_disqualified(self):
+        itinerary = {
+            "cities": [
+                {
+                    "name": "Dublin",
+                    "stops": [
+                        {"name": "A pub", "match_type": "vibe", "grounding_source": None},
+                        {"name": "A walk", "match_type": "thematic", "grounding_source": "x"},
+                    ],
+                }
+            ]
+        }
+        result = downgrade_ungrounded_match_types(itinerary, "", True)
+        stops = {s["name"]: s for s in result["cities"][0]["stops"]}
+        assert stops["A pub"]["match_type"] == "vibe"
+        assert stops["A walk"]["match_type"] == "thematic"
+        assert stops["A walk"]["grounding_source"] == "x"
+
+
+# --------------------------------------------------------------------------
+# The wiring. A property nobody reads is not a fix -- these drive the real
+# extraction entry point, which is what production calls.
+# --------------------------------------------------------------------------
+
+def _envelope_state(unverified):
+    state = dict(_STATE)
+    state[SessionStateKeys.UNVERIFIED_DISCOVERY] = list(unverified)
+    state["composer_envelope"] = {"itinerary": _envelope_itinerary(), "suggestions": []}
+    return state
+
+
+def _envelope_itinerary():
+    """`_itinerary()`'s stops, filled out to what the composer envelope validates."""
+    city = dict(_itinerary()["cities"][0])
+    city.update({"country": "Ireland", "days_suggested": 2, "overview": "t"})
+    city["stops"] = [
+        {**stop, "type": "landmark", "reason": "r", "time_of_day": "morning"}
+        for stop in city["stops"]
+    ]
+    return {"cities": [city], "summary_text": "t"}
+
+
+class TestExtractionWiring:
+    def test_extraction_fails_closed_when_nothing_was_searched(self):
+        accessor = SessionStateAccessor(_envelope_state(_ALL_KEYS))
+        itinerary, _ = extract_itinerary_from_response(None, accessor)
+        stops = {s["name"]: s for s in itinerary["cities"][0]["stops"]}
+        assert stops["Dublin"]["match_type"] == "vibe"
+        assert stops["Personal Office"]["match_type"] == "vibe"
+
+    def test_extraction_keeps_the_searched_payload_when_one_researcher_worked(self):
+        """The control: the flag must not blanket-demote a partially good run."""
+        accessor = SessionStateAccessor(_envelope_state([SessionStateKeys.AUTHOR_SITES]))
+        itinerary, _ = extract_itinerary_from_response(None, accessor)
+        stops = {s["name"]: s for s in itinerary["cities"][0]["stops"]}
+        assert stops["Dublin"]["match_type"] == "literal"
+        assert stops["Personal Office"]["match_type"] == "vibe"
+
+    def test_extraction_leaves_a_no_discovery_run_alone(self):
+        """Local-atmosphere: no discovery payloads at all, nothing demoted."""
+        accessor = SessionStateAccessor(
+            {
+                "composer_envelope": {
+                    "itinerary": _envelope_itinerary(),
+                    "suggestions": [],
+                }
+            }
+        )
+        itinerary, _ = extract_itinerary_from_response(None, accessor)
+        stops = {s["name"]: s for s in itinerary["cities"][0]["stops"]}
+        assert stops["Dublin"]["match_type"] == "literal"
+        assert stops["Personal Office"]["match_type"] == "literal"

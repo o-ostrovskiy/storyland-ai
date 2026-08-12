@@ -157,7 +157,9 @@ _DOWNGRADE_TARGET = "vibe"
 
 
 def downgrade_ungrounded_match_types(
-    itinerary_dict: Optional[dict], grounding_text: str
+    itinerary_dict: Optional[dict],
+    grounding_text: str,
+    evidence_disqualified: bool = False,
 ) -> Optional[dict]:
     """Downgrade literal/historical stops that don't trace to grounded research.
 
@@ -174,12 +176,22 @@ def downgrade_ungrounded_match_types(
       * No grounding text captured -> return unchanged (we cannot prove anything
         is ungrounded, e.g. the local-atmosphere path has no discovery research).
       * ``thematic``/``vibe`` stops are left untouched (no source required).
+
+    ``evidence_disqualified`` is the one case where an empty haystack must NOT
+    fail open (MYS-816 r2). "No research ran" and "research ran and every
+    payload came from a researcher that never searched" both arrive here as an
+    empty ``grounding_text``, and they are opposite situations: in the second,
+    nothing on the itinerary can possibly be grounded, so every literal/
+    historical stop is downgraded rather than every one surviving. Without the
+    flag the guard is weakest precisely when the run is least trustworthy --
+    the same inversion this whole ticket is about, one layer down. The caller
+    supplies it from ``SessionStateAccessor.all_discovery_unverified``.
     """
     if not itinerary_dict:
         return itinerary_dict
 
     haystack = grounding_token_set(grounding_text)
-    if not haystack:
+    if not haystack and not evidence_disqualified:
         return itinerary_dict
 
     downgraded = 0
@@ -187,14 +199,18 @@ def downgrade_ungrounded_match_types(
         for stop in city.get("stops") or []:
             if stop.get("match_type") not in _GROUNDED_MATCH_TYPES:
                 continue
-            if is_title_grounded(stop.get("name"), haystack):
+            if not evidence_disqualified and is_title_grounded(stop.get("name"), haystack):
                 continue
             stop["match_type"] = _DOWNGRADE_TARGET
             stop["grounding_source"] = None
             downgraded += 1
 
     if downgraded:
-        logger.info("itinerary_match_type_downgraded", downgraded=downgraded)
+        logger.info(
+            "itinerary_match_type_downgraded",
+            downgraded=downgraded,
+            reason="no_verified_research" if evidence_disqualified else "ungrounded_title",
+        )
     return itinerary_dict
 
 
@@ -737,9 +753,14 @@ def extract_itinerary_from_response(
         (itinerary_dict, suggestions_list) tuple or None
     """
     grounding_text = state_accessor.grounding_research_text
+    # An empty grounding_text means either "no discovery ran" or "every
+    # discovery payload is unverified"; only the second must fail closed.
+    evidence_disqualified = state_accessor.all_discovery_unverified
 
     def _finalize(itinerary_dict, suggestions):
-        itinerary_dict = downgrade_ungrounded_match_types(itinerary_dict, grounding_text)
+        itinerary_dict = downgrade_ungrounded_match_types(
+            itinerary_dict, grounding_text, evidence_disqualified
+        )
         identities_before = _city_names(itinerary_dict)
         itinerary_dict = reconcile_stop_city_grouping(itinerary_dict)
         # MYS-660 r6/r7: a city the guard above just removed can orphan a

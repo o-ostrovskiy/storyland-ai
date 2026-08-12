@@ -326,3 +326,56 @@ class TestCreateAppWiring:
         with patch("api.app.init_sentry") as mock_init_sentry:
             create_app()
         mock_init_sentry.assert_called_once()
+
+
+class TestSearchGroundingAllowlist:
+    """MYS-816 r2 (Codex P2): the offender list IS the event's payload.
+
+    ``discovery_unverified_payloads`` names the researchers that skipped
+    google_search under the plural key ``agents``. The allowlist carried only
+    the singular ``agent``, so Sentry recorded ``redacted_keys=agents`` and an
+    operator reading the log could see that a researcher skipped but never
+    which one -- the only actionable field, dropped by the guard meant to drop
+    user content.
+    """
+
+    def test_plural_agents_key_survives_the_scrubber(self):
+        from unittest.mock import patch
+
+        from common.logging import _sentry_error_processor
+
+        with patch("sentry_sdk.logger.info") as mock_log:
+            _sentry_error_processor(
+                None,
+                "info",
+                {
+                    "event": "discovery_unverified_payloads",
+                    "job_id": "j1",
+                    "agents": "author_researcher,city_researcher",
+                    "kind": "author_sites,city_discovery",
+                },
+            )
+        attrs = mock_log.call_args.kwargs["attributes"]
+        assert attrs["agents"] == "author_researcher,city_researcher"
+        assert "redacted_keys" not in attrs
+
+    def test_user_content_alongside_it_is_still_dropped(self):
+        """The control: widening the allowlist by one key widened it by one."""
+        from unittest.mock import patch
+
+        from common.logging import _sentry_error_processor
+
+        with patch("sentry_sdk.logger.info") as mock_log:
+            _sentry_error_processor(
+                None,
+                "info",
+                {
+                    "event": "discovery_unverified_payloads",
+                    "agents": "city_researcher",
+                    "book_title": "Rebecca",
+                },
+            )
+        attrs = mock_log.call_args.kwargs["attributes"]
+        assert attrs["agents"] == "city_researcher"
+        assert "book_title" not in attrs
+        assert attrs["redacted_keys"] == "book_title"

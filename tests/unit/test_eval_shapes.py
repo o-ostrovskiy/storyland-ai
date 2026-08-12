@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from core.session_state import SessionStateAccessor, SessionStateKeys
 from evaluation.tools.llm_scorer import ItineraryScores
 from evaluation.tools.run_scheduled_eval import _summarize_by_shape
 
@@ -445,3 +446,100 @@ class TestSearchGroundingReporting:
             "search_grounding": aggregate_search_grounding([case]),
         }
         assert dataset_failure_reason(result) is None
+
+
+# --------------------------------------------------------------------------
+# r2 (Codex P2): the eval must score what production would SHIP.
+#
+# The scheduled eval extracts the composer's JSON by hand and never runs
+# extract_itinerary_from_response, which is where production demotes claims no
+# searched researcher supports. So the judge scored literal/historical stops
+# the product would have downgraded — in exactly the unsearched-researcher
+# scenario this eval exists to measure.
+# --------------------------------------------------------------------------
+
+class TestProductionGroundingDowngradeInEval:
+    def _itinerary(self):
+        return {
+            "itinerary": {
+                "cities": [
+                    {
+                        "name": "Dublin",
+                        "stops": [
+                            {
+                                "name": "Personal Office",
+                                "match_type": "literal",
+                                "grounding_source": "invented",
+                            }
+                        ],
+                    }
+                ]
+            },
+            "suggestions": [],
+        }
+
+    def _state(self, unverified):
+        state = {
+            SessionStateKeys.CITY_DISCOVERY: {"cities": [{"name": "Dublin"}]},
+            SessionStateKeys.AUTHOR_SITES: {"author_sites": [{"name": "Personal Office"}]},
+            SessionStateKeys.UNVERIFIED_DISCOVERY: list(unverified),
+        }
+        return SessionStateAccessor(state)
+
+    def test_unsupported_claim_is_demoted_before_scoring(self):
+        from evaluation.tools.run_scheduled_eval import apply_production_grounding_downgrade
+
+        data = apply_production_grounding_downgrade(
+            self._itinerary(), self._state([SessionStateKeys.AUTHOR_SITES])
+        )
+        stop = data["itinerary"]["cities"][0]["stops"][0]
+        assert stop["match_type"] == "vibe"
+        assert stop["grounding_source"] is None
+
+    def test_nothing_searched_still_fails_closed(self):
+        from evaluation.tools.run_scheduled_eval import apply_production_grounding_downgrade
+
+        data = apply_production_grounding_downgrade(
+            self._itinerary(),
+            self._state([SessionStateKeys.AUTHOR_SITES, SessionStateKeys.CITY_DISCOVERY]),
+        )
+        assert data["itinerary"]["cities"][0]["stops"][0]["match_type"] == "vibe"
+
+    def test_a_supported_claim_survives(self):
+        """Control: this must not blanket-demote, or the eval measures nothing."""
+        from evaluation.tools.run_scheduled_eval import apply_production_grounding_downgrade
+
+        data = self._itinerary()
+        data["itinerary"]["cities"][0]["stops"][0]["name"] = "Dublin"
+        data = apply_production_grounding_downgrade(data, self._state([]))
+        assert data["itinerary"]["cities"][0]["stops"][0]["match_type"] == "literal"
+
+    def test_bare_itinerary_shape_is_handled_too(self):
+        from evaluation.tools.run_scheduled_eval import apply_production_grounding_downgrade
+
+        bare = self._itinerary()["itinerary"]
+        data = apply_production_grounding_downgrade(
+            bare, self._state([SessionStateKeys.AUTHOR_SITES])
+        )
+        assert data["cities"][0]["stops"][0]["match_type"] == "vibe"
+
+    def test_none_and_junk_are_returned_unchanged(self):
+        from evaluation.tools.run_scheduled_eval import apply_production_grounding_downgrade
+
+        assert apply_production_grounding_downgrade(None, self._state([])) is None
+        assert apply_production_grounding_downgrade("nope", self._state([])) == "nope"
+
+    def test_unverified_keys_match_the_production_derivation(self):
+        from core.executor import RESEARCHER_PAYLOAD_KEYS
+        from evaluation.tools.run_scheduled_eval import unverified_payload_keys
+        from plugins.langfuse_plugin import LangfusePlugin
+
+        plugin = LangfusePlugin()
+        # One researcher ran and searched; one ran and did not.
+        searched, unsearched = list(RESEARCHER_PAYLOAD_KEYS)[:2]
+        plugin._agents_seen.update({searched, unsearched})
+        plugin._agents_searched.add(searched)
+
+        assert unverified_payload_keys(plugin) == [RESEARCHER_PAYLOAD_KEYS[unsearched]]
+        # An agent that never ran is not "unsearched" — same asymmetry as prod.
+        assert RESEARCHER_PAYLOAD_KEYS[searched] not in unverified_payload_keys(plugin)

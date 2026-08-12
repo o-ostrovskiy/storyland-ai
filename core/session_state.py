@@ -154,6 +154,42 @@ class SessionStateAccessor:
         value = self._state.get(SessionStateKeys.UNVERIFIED_DISCOVERY)
         return value if isinstance(value, list) else []
 
+    def _discovery_payloads(self) -> List[tuple]:
+        """The (key, value) discovery payloads that are actually present."""
+        return [
+            (key, value)
+            for key, value in (
+                (SessionStateKeys.BOOK_CONTEXT, self.book_context),
+                (SessionStateKeys.CITY_DISCOVERY, self.city_discovery),
+                (SessionStateKeys.LANDMARK_DISCOVERY, self.landmark_discovery),
+                (SessionStateKeys.AUTHOR_SITES, self.author_sites),
+            )
+            if value
+        ]
+
+    @property
+    def all_discovery_unverified(self) -> bool:
+        """True when discovery produced payloads and EVERY one is unverified.
+
+        The difference between *no evidence* and *disqualified evidence*, and
+        they need opposite handling (MYS-816 r2). ``grounding_research_text``
+        returns "" for both: the local-atmosphere path has no discovery
+        research at all, and a run where all four researchers skipped
+        ``google_search`` has research that may not be used as proof. The
+        downstream guard is fail-OPEN on an empty haystack -- correct for the
+        first case, exactly backwards for the second, where every literal
+        claim survives *because* nothing was verified. Callers pass this to
+        ``downgrade_ungrounded_match_types`` so the second case fails closed.
+
+        False when no discovery ran, which keeps the local-atmosphere path
+        untouched.
+        """
+        present = self._discovery_payloads()
+        if not present:
+            return False
+        skip = set(self.unverified_discovery)
+        return all(key in skip for key, _ in present)
+
     @property
     def grounding_research_text(self) -> str:
         """Concatenate the grounded discovery research into one text blob.
@@ -179,13 +215,8 @@ class SessionStateAccessor:
         """
         skip = set(self.unverified_discovery)
         parts: List[str] = []
-        for key, value in (
-            (SessionStateKeys.BOOK_CONTEXT, self.book_context),
-            (SessionStateKeys.CITY_DISCOVERY, self.city_discovery),
-            (SessionStateKeys.LANDMARK_DISCOVERY, self.landmark_discovery),
-            (SessionStateKeys.AUTHOR_SITES, self.author_sites),
-        ):
-            if not value or key in skip:
+        for key, value in self._discovery_payloads():
+            if key in skip:
                 continue
             if isinstance(value, str):
                 parts.append(value)

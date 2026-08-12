@@ -19,12 +19,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from common.logging import get_logger, configure_logging
 from common.config import load_config
-from core.extraction import validate_composer_envelope
+from core.extraction import downgrade_ungrounded_match_types, validate_composer_envelope
 from core.prompts import build_composition_prompt
 from core.retry import build_retry_options
-from core.session_state import SessionStateAccessor
+from core.session_state import SessionStateAccessor, SessionStateKeys
 from services.session_service import create_session_service
-from core.executor import DISCOVERY_RESEARCHER_AUTHORS
+from core.executor import DISCOVERY_RESEARCHER_AUTHORS, RESEARCHER_PAYLOAD_KEYS
 from agents.orchestrator import (
     create_book_to_place_discovery_workflow,
     create_book_to_place_composition_workflow,
@@ -80,6 +80,42 @@ def count_itinerary_cities(itinerary_data: Optional[Dict[str, Any]]) -> int:
     if isinstance(inner, dict):
         return len(inner.get("cities") or [])
     return len(itinerary_data.get("cities") or [])
+
+
+def unverified_payload_keys(langfuse_plugin) -> List[str]:
+    """Discovery payload keys whose researcher never searched (MYS-816).
+
+    The same derivation ``WorkflowExecutor._unverified_discovery_keys`` makes in
+    production, so the eval's session state carries the same fact production's
+    does. Without it the eval scores an itinerary production would have
+    demoted, and the artifact stops describing the deployed system precisely in
+    the unsearched-researcher scenario this metric exists to measure.
+    """
+    unsearched = langfuse_plugin.unsearched_agents(RESEARCHER_PAYLOAD_KEYS)
+    return sorted(RESEARCHER_PAYLOAD_KEYS[name] for name in unsearched)
+
+
+def apply_production_grounding_downgrade(itinerary_data, grounding_state):
+    """Apply production's match-type downgrade to a composed eval itinerary.
+
+    The eval extracts JSON straight out of the composer's text and therefore
+    bypasses ``extract_itinerary_from_response``, which is where production
+    demotes literal/historical stops that no searched researcher supports. The
+    judge then scored claims the product would never have shipped.
+
+    Mutates and returns ``itinerary_data`` (envelope or bare itinerary, both
+    shapes occur -- see ``count_itinerary_cities``).
+    """
+    if not isinstance(itinerary_data, dict):
+        return itinerary_data
+    inner = itinerary_data.get("itinerary")
+    payload = inner if isinstance(inner, dict) else itinerary_data
+    downgrade_ungrounded_match_types(
+        payload,
+        grounding_state.grounding_research_text,
+        grounding_state.all_discovery_unverified,
+    )
+    return itinerary_data
 
 
 def summarize_search_grounding(langfuse_plugin) -> Dict[str, Any]:
@@ -879,9 +915,14 @@ Find cities, landmarks, and author-related sites, then group them into practical
             grounding_session = await session_service.get_session(
                 app_name="storyland", user_id=user_id, session_id=session_id
             )
-            grounding_state = SessionStateAccessor(
-                grounding_session.state if grounding_session else {}
+            # Carry the unverified-researcher fact into the eval's state the
+            # way discover() carries it in production, so grounding_research_text
+            # and all_discovery_unverified read the same here as they do there.
+            grounding_state_dict = dict(grounding_session.state if grounding_session else {})
+            grounding_state_dict[SessionStateKeys.UNVERIFIED_DISCOVERY] = (
+                unverified_payload_keys(langfuse_plugin)
             )
+            grounding_state = SessionStateAccessor(grounding_state_dict)
             composition_prompt = build_composition_prompt(
                 exact_title,
                 exact_author,
@@ -917,6 +958,13 @@ Find cities, landmarks, and author-related sites, then group them into practical
                                 break
                             except json.JSONDecodeError as e:
                                 logger.warning("eval_json_parse_error", error=str(e))
+
+            # Score what production would have SHIPPED, not what the composer
+            # said (MYS-817). This is the one place the eval can diverge from
+            # the deployed pipeline without anything going red.
+            itinerary_data = apply_production_grounding_downgrade(
+                itinerary_data, grounding_state
+            )
 
             logger.info(
                 "eval_composition_complete",
