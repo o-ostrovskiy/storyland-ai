@@ -191,6 +191,18 @@ class SessionStateAccessor:
         ]
 
     @property
+    def present_discovery_keys(self) -> frozenset:
+        """The discovery payload keys this run actually produced.
+
+        The enforcement path needs this to tell "the researcher did not run"
+        from "the researcher ran and we have no receipt for it" (MYS-816 r4).
+        A payload's EXISTENCE is proof its researcher ran, and it is the only
+        such proof available downstream — the ledger cannot supply it, because
+        the ledger being empty is exactly the state in question.
+        """
+        return frozenset(key for key, _ in self._discovery_payloads())
+
+    @property
     def all_discovery_unverified(self) -> bool:
         """True when NO PRESENT discovery payload is usable as evidence.
 

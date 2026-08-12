@@ -176,6 +176,30 @@ def _researcher_runner(monkeypatch):
     return ex
 
 
+def _with_search_receipts(monkeypatch, executor, *agents):
+    """Seed the search ledger the way a REAL run does.
+
+    🔴 MYS-816 r4. The fake Runner above bypasses ADK entirely, so
+    ``LangfusePlugin.after_model_callback`` never fires and no search receipt
+    is ever recorded — a state that, in production, only occurs when the
+    observation seam is broken. Enforcement is now positive-receipt-only, so
+    an unreceipted payload is struck from the grounding haystack and there is
+    nothing left for the audit to measure.
+
+    That is the intended behaviour, which makes the OLD fixture the thing that
+    was wrong: it described a run in which four researchers had searched while
+    recording that none of them had. Seeding the receipt makes the fixture
+    represent the production run these tests claim to be about. The converse
+    — no receipt — is now its own row rather than the implicit default.
+    """
+    plugin = executor._create_langfuse_plugin()
+    for name in agents:
+        plugin._agents_seen.add(name)
+        plugin._agents_searched.add(name)
+    monkeypatch.setattr(executor, "_create_langfuse_plugin", lambda: plugin)
+    return plugin
+
+
 def _make_executor(monkeypatch, cache_enabled):
     import core.executor as ex
     from core.executor import WorkflowExecutor
@@ -202,6 +226,9 @@ class TestExecutorWiring:
         """The capture seam actually reaches the audit: 1 of 2 cities grounded."""
         _researcher_runner(monkeypatch)
         executor = _make_executor(monkeypatch, cache_enabled=False)
+        # A clean production run: the researcher whose payload this delta
+        # writes DID search, and the ledger holds its receipt.
+        _with_search_receipts(monkeypatch, executor, "city_researcher")
 
         async for _ in executor.discover(book_title="Persuasion", author="Jane Austen"):
             pass
@@ -210,6 +237,36 @@ class TestExecutorWiring:
         assert "discovery_grounding_audit" in out
         assert "grounded=1" in out
         assert "total=2" in out
+
+    async def test_an_unreceipted_payload_does_not_reach_the_audit_as_evidence(
+        self, monkeypatch, capsys
+    ):
+        """🔴 The r4 property, driven end-to-end rather than at the helper.
+
+        Same run as above, one difference: no search receipt for
+        ``city_researcher``. Its payload is therefore struck from the
+        grounding haystack, so the audit has no evidence to measure and says
+        ``no_capture`` instead of reporting the payload as grounded.
+
+        This is the enforcement change reaching the user-visible path: before
+        r4, a researcher the ledger never observed was treated as a searched
+        one, and its places went on vouching for ``literal``/``historical``
+        claims. It is also the fixture difference made explicit — the row
+        above passes BECAUSE the receipt is seeded, not by default.
+        """
+        _researcher_runner(monkeypatch)
+        executor = _make_executor(monkeypatch, cache_enabled=False)
+        # deliberately NO receipts
+
+        async for _ in executor.discover(book_title="Persuasion", author="Jane Austen"):
+            pass
+
+        out = capsys.readouterr().out
+        assert "discovery_grounding_no_capture" in out
+        assert "discovery_grounding_audit" not in out
+        assert "discovery_search_ledger_empty" in out, (
+            "a blanket strike from an empty ledger must be announced"
+        )
 
     async def test_no_researcher_text_logs_no_capture_not_a_false_alarm(
         self, monkeypatch, capsys

@@ -82,17 +82,33 @@ def count_itinerary_cities(itinerary_data: Optional[Dict[str, Any]]) -> int:
     return len(itinerary_data.get("cities") or [])
 
 
-def unverified_payload_keys(langfuse_plugin) -> List[str]:
-    """Discovery payload keys whose researcher never searched (MYS-816).
+def unverified_payload_keys(langfuse_plugin, present_keys) -> List[str]:
+    """Discovery payload keys that no positive search receipt vouches for.
 
     The same derivation ``WorkflowExecutor._unverified_discovery_keys`` makes in
     production, so the eval's session state carries the same fact production's
     does. Without it the eval scores an itinerary production would have
     demoted, and the artifact stops describing the deployed system precisely in
     the unsearched-researcher scenario this metric exists to measure.
+
+    🔴 r4 — and "the same derivation" is a claim that has to be re-earned every
+    time production's changes. This function asked ``unsearched_agents``, which
+    omits an agent the ledger never observed; when the production path moved to
+    positive receipts over PRESENT payloads, this one silently became the more
+    permissive of the two and the docstring above went from true to false
+    without a line of it changing. Fixing a class means sweeping every site
+    that makes the inference, not the one review pointed at.
+
+    ``present_keys`` is the caller's ``SessionStateAccessor.present_discovery_keys``
+    — required rather than defaulted, because a default here is exactly how the
+    two derivations drift apart again.
     """
-    unsearched = langfuse_plugin.unsearched_agents(RESEARCHER_PAYLOAD_KEYS)
-    return sorted(RESEARCHER_PAYLOAD_KEYS[name] for name in unsearched)
+    searched = langfuse_plugin.searched_agents(RESEARCHER_PAYLOAD_KEYS)
+    return sorted(
+        key
+        for name, key in RESEARCHER_PAYLOAD_KEYS.items()
+        if key in present_keys and name not in searched
+    )
 
 
 def apply_production_grounding_downgrade(itinerary_data, grounding_state):
@@ -980,7 +996,10 @@ Find cities, landmarks, and author-related sites, then group them into practical
             # and all_discovery_unverified read the same here as they do there.
             grounding_state_dict = dict(grounding_session.state if grounding_session else {})
             grounding_state_dict[SessionStateKeys.UNVERIFIED_DISCOVERY] = (
-                unverified_payload_keys(langfuse_plugin)
+                unverified_payload_keys(
+                    langfuse_plugin,
+                    SessionStateAccessor(grounding_state_dict).present_discovery_keys,
+                )
             )
             grounding_state = SessionStateAccessor(grounding_state_dict)
             composition_prompt = build_composition_prompt(

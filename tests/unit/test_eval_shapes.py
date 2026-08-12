@@ -794,16 +794,61 @@ class TestProductionGroundingDowngradeInEval:
         assert state.discovery_verification_ran is True
 
     def test_unverified_keys_match_the_production_derivation(self):
-        from core.executor import RESEARCHER_PAYLOAD_KEYS
+        """🔴 r4 — this now COMPARES the two derivations instead of restating
+        the rule in the eval's own words.
+
+        The old row asserted the eval's output against a hand-written expected
+        list. That is satisfied by an eval whose rule has drifted away from
+        production, as long as it still happens to agree on the one fixture —
+        and it did drift: production moved to positive receipts over PRESENT
+        payloads while this function still asked ``unsearched_agents``, and
+        nothing here objected. Calling both on identical inputs is the only
+        version of this test that can catch the next divergence.
+        """
+        from core.executor import RESEARCHER_PAYLOAD_KEYS, WorkflowExecutor
         from evaluation.tools.run_scheduled_eval import unverified_payload_keys
         from plugins.langfuse_plugin import LangfusePlugin
 
+        production = WorkflowExecutor._unverified_discovery_keys
+        all_present = frozenset(RESEARCHER_PAYLOAD_KEYS.values())
+
+        # One researcher ran and searched; one ran and did not; two unobserved.
         plugin = LangfusePlugin()
-        # One researcher ran and searched; one ran and did not.
         searched, unsearched = list(RESEARCHER_PAYLOAD_KEYS)[:2]
         plugin._agents_seen.update({searched, unsearched})
         plugin._agents_searched.add(searched)
 
-        assert unverified_payload_keys(plugin) == [RESEARCHER_PAYLOAD_KEYS[unsearched]]
-        # An agent that never ran is not "unsearched" — same asymmetry as prod.
-        assert RESEARCHER_PAYLOAD_KEYS[searched] not in unverified_payload_keys(plugin)
+        assert unverified_payload_keys(plugin, all_present) == production(
+            "evaljob00", plugin, all_present
+        )
+        assert RESEARCHER_PAYLOAD_KEYS[unsearched] in unverified_payload_keys(
+            plugin, all_present
+        )
+        assert RESEARCHER_PAYLOAD_KEYS[searched] not in unverified_payload_keys(
+            plugin, all_present
+        )
+
+        # And they agree on the degenerate ends too, not just the middle.
+        for present in (frozenset(), all_present):
+            for seeded in (LangfusePlugin(), plugin):
+                assert unverified_payload_keys(seeded, present) == production(
+                    "evaljob00", seeded, present
+                )
+
+    def test_the_eval_needs_no_payload_to_disagree_with_production(self):
+        """An agent that never ran contributes no payload, in BOTH derivations.
+
+        The asymmetry `unsearched_agents`' three-valued rule exists for, kept
+        after the move to positive receipts: scoping to present payloads is
+        what preserves it, and it is the reason r4 did not simply disqualify
+        every expected researcher.
+        """
+        from core.executor import RESEARCHER_PAYLOAD_KEYS, WorkflowExecutor
+        from evaluation.tools.run_scheduled_eval import unverified_payload_keys
+        from plugins.langfuse_plugin import LangfusePlugin
+
+        plugin = LangfusePlugin()  # nothing ran, nothing observed
+        assert unverified_payload_keys(plugin, frozenset()) == []
+        assert WorkflowExecutor._unverified_discovery_keys(
+            "evaljob00", plugin, frozenset()
+        ) == []

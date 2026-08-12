@@ -614,7 +614,7 @@ class TestLedgerEmptyIsVisible:
         keys = executor_module.WorkflowExecutor._unverified_discovery_keys
 
         broken = LangfusePlugin()  # nothing observed at all
-        assert keys("job12345", broken) == []
+        assert keys("job12345", broken, frozenset()) == []
         assert seen == ["discovery_search_ledger_empty"]
 
         seen.clear()
@@ -622,5 +622,108 @@ class TestLedgerEmptyIsVisible:
         for name in RESEARCHER_PAYLOAD_KEYS:
             clean._agents_seen.add(name)
             clean._agents_searched.add(name)
-        assert keys("job12345", clean) == []
+        assert keys("job12345", clean, frozenset()) == []
         assert seen == [], "a run where every researcher searched must stay quiet"
+
+
+# --------------------------------------------------------------------------
+# r4 — an UNOBSERVED researcher is not a verified one.
+#
+# The enforcement path asked `unsearched_agents`, which omits an agent the
+# ledger never saw. So a researcher whose receipts were missed kept its
+# payload in the grounding haystack and went on vouching for literal claims,
+# while the metric path (fixed at c2c5474) already refused to call the same
+# researcher grounded. Enforcement is now positive-receipt-only, scoped to
+# the payloads that are actually PRESENT — because a payload's existence is
+# the proof that its researcher ran.
+# --------------------------------------------------------------------------
+
+class TestUnobservedIsNotVerified:
+    @staticmethod
+    def _keys():
+        from core import executor as executor_module
+
+        return executor_module.WorkflowExecutor._unverified_discovery_keys
+
+    @staticmethod
+    def _all_keys():
+        return frozenset(RESEARCHER_PAYLOAD_KEYS.values())
+
+    def test_a_present_payload_with_no_receipt_is_unverified(self):
+        """🔴 The defect. The ledger never saw this researcher, so the old
+        negative test omitted it and its payload vouched for the itinerary."""
+        plugin = LangfusePlugin()  # observed nobody: the seam missed them
+        unverified = self._keys()("job12345", plugin, self._all_keys())
+        assert sorted(unverified) == sorted(RESEARCHER_PAYLOAD_KEYS.values())
+
+    def test_an_agent_that_never_ran_is_still_untouched(self):
+        """The converse, and the reason this is scoped to PRESENT payloads.
+
+        `unsearched_agents`' three-valued rule exists so an agent that never
+        ran cannot trip the guard. Disqualifying every EXPECTED payload would
+        have re-broken exactly that. No payload, no claim, nothing to strike.
+        """
+        plugin = LangfusePlugin()
+        assert self._keys()("job12345", plugin, frozenset()) == []
+
+    def test_only_the_unreceipted_payload_is_struck(self):
+        """It discriminates rather than blanket-demoting — the Piranesi shape:
+        two researchers searched, two did not, only the unsupported ones go."""
+        names = list(RESEARCHER_PAYLOAD_KEYS)
+        plugin = LangfusePlugin()
+        for name in names:
+            plugin._agents_seen.add(name)
+        for name in names[:2]:
+            plugin._agents_searched.add(name)
+        unverified = self._keys()("job12345", plugin, self._all_keys())
+        assert sorted(unverified) == sorted(
+            RESEARCHER_PAYLOAD_KEYS[n] for n in names[2:]
+        )
+
+    def test_every_researcher_searched_strikes_nothing(self):
+        """The vacuity direction. 🔴 Note this asserts against a run where the
+        payloads are PRESENT — the old `== []` row was satisfiable by a run
+        that produced nothing at all, which is how a fail-open survived."""
+        plugin = LangfusePlugin()
+        for name in RESEARCHER_PAYLOAD_KEYS:
+            plugin._agents_seen.add(name)
+            plugin._agents_searched.add(name)
+        assert self._keys()("job12345", plugin, self._all_keys()) == []
+
+    def test_a_total_seam_break_disqualifies_every_present_payload(self, monkeypatch):
+        """The stated cost of failing in this direction, pinned so it is a
+        decision and not a surprise: an instrumentation fault demotes every
+        strong claim, and says so out loud in the same breath."""
+        from core import executor as executor_module
+
+        warned = []
+        monkeypatch.setattr(
+            executor_module.logger,
+            "warning",
+            lambda event, **kw: warned.append(event),
+        )
+        plugin = LangfusePlugin()  # receipts never recorded at all
+        unverified = self._keys()("job12345", plugin, self._all_keys())
+        assert sorted(unverified) == sorted(RESEARCHER_PAYLOAD_KEYS.values())
+        assert warned == ["discovery_search_ledger_empty"], (
+            "a blanket demote from a broken seam must never be silent — the "
+            "warning is the compensating control for choosing this direction"
+        )
+
+    def test_enforcement_and_the_metric_now_agree_on_an_unobserved_receipt(self):
+        """The property the whole item is about: two paths, one answer.
+
+        `searched_agents` (metric) refuses to call an unobserved researcher
+        grounded. Enforcement must refuse too, or the PR asserts two different
+        answers and the permissive one is the one that reaches the user.
+        """
+        plugin = LangfusePlugin()
+        name = next(iter(RESEARCHER_PAYLOAD_KEYS))
+        metric_says_grounded = name in plugin.searched_agents(RESEARCHER_PAYLOAD_KEYS)
+        enforcement_says_verified = (
+            RESEARCHER_PAYLOAD_KEYS[name]
+            not in self._keys()("job12345", plugin, self._all_keys())
+        )
+        assert metric_says_grounded is False
+        assert enforcement_says_verified is False
+        assert metric_says_grounded == enforcement_says_verified

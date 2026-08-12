@@ -288,8 +288,10 @@ class WorkflowExecutor:
         )
 
     @staticmethod
-    def _unverified_discovery_keys(job_id: str, langfuse_plugin) -> list:
-        """Payload keys whose researcher produced no search receipts.
+    def _unverified_discovery_keys(
+        job_id: str, langfuse_plugin, present_keys: frozenset
+    ) -> list:
+        """Payload keys that no positive search receipt vouches for.
 
         The fail-closed input for MYS-816. Measured, not assumed: researchers
         skip ``google_search`` stochastically (roughly one to two of the four
@@ -298,39 +300,77 @@ class WorkflowExecutor:
 
         Returns a sorted list so the value written to session state — and
         therefore the cached bundle — is stable across runs and diffable.
-        Empty when every researcher searched, which is also what a plugin
-        that never saw them returns; both mean "change nothing".
 
-        r2: that last sentence is exactly the hole this now covers. On the
-        FRESH discovery path the four researchers run by construction, so a
-        ledger that saw none of them is not "they didn't run" — it is "the
-        observation seam broke", and the enforcement path cannot tell the two
-        apart. "Everything was verified" has no positive representation
-        anywhere here; it is only ever inferred from an absence. So the empty
-        case is logged rather than returned silently: a positive control, not
-        a behaviour change — the return value is identical either way, and the
-        three-valued rule in ``unsearched_agents`` (an agent that never ran is
-        not unsearched) is deliberately left alone.
+        🔴 **r4 — this is a positive test, and it used to be a negative one.**
+        It asked ``unsearched_agents`` for the researchers *observed and known
+        not to have searched*. That method deliberately omits an agent it
+        never saw (an agent that never ran must not trip the guard), so a
+        researcher the ledger missed was **omitted from the unverified list
+        and went on vouching for ``literal``/``historical`` claims** — an
+        unobserved receipt counted as verification. Meanwhile ``c2c5474``
+        fixed the identical inference on the METRIC path, where
+        ``searched_agents`` is positive-receipt-only and reports such a
+        researcher as ``unobserved`` rather than grounded. The PR asserted two
+        different answers to "does an unobserved receipt count?" and the
+        permissive one was the one reaching the user.
+
+        The reconciliation is not to disqualify every *expected* payload —
+        that would re-break the case ``unsearched_agents``' three-valued rule
+        exists for. It is to disqualify every payload that **is present**:
+
+            a payload's EXISTENCE is proof its researcher ran, and it is the
+            only such proof available here, because the ledger being empty is
+            precisely the state under test.
+
+        So an agent that never ran contributes no payload and is untouched,
+        while an agent that ran, produced a payload and left no receipt is
+        unverified — whether it skipped the search or the observation seam
+        broke. Those two are indistinguishable from here and, for the purpose
+        of "may this vouch for a claim about a real place", identical.
+
+        ⚠️ **The cost, stated rather than discovered later.** If the receipt
+        seam breaks wholesale — an ADK callback rename, an agent renamed
+        without ``RESEARCHER_PAYLOAD_KEYS`` following — every present payload
+        becomes unverified and ``all_discovery_unverified`` blanket-demotes
+        each itinerary's strong claims to ``vibe``. That is a broad product
+        effect from an instrumentation fault, and it is the deliberate
+        direction to fail in: the alternative is asserting ``literal`` with a
+        ``grounding_source`` for places nobody checked, which is the MYS-492
+        class this branch exists to end. ``discovery_search_ledger_empty`` is
+        the compensating control and now fires unconditionally on that state;
+        ``test_payload_map_covers_every_researcher`` is what stops the rename
+        half. Pinned by ``test_a_total_seam_break_disqualifies_every_present_payload``.
 
         ``@staticmethod`` because it touches no instance state and its test
         drives it directly. It used to be called unbound with ``None`` as
         ``self`` — which worked only by accident and would have broken the
         moment anyone added an ``self.`` reference here.
         """
-        unsearched = langfuse_plugin.unsearched_agents(RESEARCHER_PAYLOAD_KEYS)
-        if not unsearched:
-            if not langfuse_plugin.observed_any(RESEARCHER_PAYLOAD_KEYS):
-                logger.warning(
-                    "discovery_search_ledger_empty",
-                    job_id=job_id[:8],
-                    total=len(RESEARCHER_PAYLOAD_KEYS),
-                )
+        # A broken seam is loud whatever it implies for the payloads, and it
+        # is reported BEFORE the return so it cannot be shadowed by the
+        # unverified branch below.
+        if not langfuse_plugin.observed_any(RESEARCHER_PAYLOAD_KEYS):
+            logger.warning(
+                "discovery_search_ledger_empty",
+                job_id=job_id[:8],
+                total=len(RESEARCHER_PAYLOAD_KEYS),
+                present=len(present_keys),
+            )
+
+        # POSITIVE RECEIPTS ONLY, over the payloads that actually exist.
+        searched = langfuse_plugin.searched_agents(RESEARCHER_PAYLOAD_KEYS)
+        unverified = sorted(
+            name
+            for name, key in RESEARCHER_PAYLOAD_KEYS.items()
+            if key in present_keys and name not in searched
+        )
+        if not unverified:
             return []
-        keys = sorted(RESEARCHER_PAYLOAD_KEYS[name] for name in unsearched)
+        keys = sorted(RESEARCHER_PAYLOAD_KEYS[name] for name in unverified)
         logger.info(
             "discovery_unverified_payloads",
             job_id=job_id[:8],
-            agents=",".join(sorted(unsearched)),
+            agents=",".join(unverified),
             kind=",".join(keys),
         )
         return keys
@@ -726,7 +766,9 @@ class WorkflowExecutor:
             # to session state BEFORE compose() can run: the two are separate
             # requests, and a typed setter here would be a silent no-op against
             # persisted state (MYS-172) — append_event is the only real write.
-            unverified = self._unverified_discovery_keys(job_id, langfuse_plugin)
+            unverified = self._unverified_discovery_keys(
+                job_id, langfuse_plugin, run_state.present_discovery_keys
+            )
             # r3: written UNCONDITIONALLY, empty list included. The key's
             # presence is the only positive evidence that this pass ran at
             # all -- `if unverified:` left "every researcher searched" and
