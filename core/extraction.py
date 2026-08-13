@@ -157,7 +157,9 @@ _DOWNGRADE_TARGET = "vibe"
 
 
 def downgrade_ungrounded_match_types(
-    itinerary_dict: Optional[dict], grounding_text: str
+    itinerary_dict: Optional[dict],
+    grounding_text: str,
+    evidence_disqualified: bool = False,
 ) -> Optional[dict]:
     """Downgrade literal/historical stops that don't trace to grounded research.
 
@@ -174,12 +176,22 @@ def downgrade_ungrounded_match_types(
       * No grounding text captured -> return unchanged (we cannot prove anything
         is ungrounded, e.g. the local-atmosphere path has no discovery research).
       * ``thematic``/``vibe`` stops are left untouched (no source required).
+
+    ``evidence_disqualified`` is the one case where an empty haystack must NOT
+    fail open (MYS-816 r2). "No research ran" and "research ran and every
+    payload came from a researcher that never searched" both arrive here as an
+    empty ``grounding_text``, and they are opposite situations: in the second,
+    nothing on the itinerary can possibly be grounded, so every literal/
+    historical stop is downgraded rather than every one surviving. Without the
+    flag the guard is weakest precisely when the run is least trustworthy --
+    the same inversion this whole ticket is about, one layer down. The caller
+    supplies it from ``SessionStateAccessor.all_discovery_unverified``.
     """
     if not itinerary_dict:
         return itinerary_dict
 
     haystack = grounding_token_set(grounding_text)
-    if not haystack:
+    if not haystack and not evidence_disqualified:
         return itinerary_dict
 
     downgraded = 0
@@ -187,14 +199,18 @@ def downgrade_ungrounded_match_types(
         for stop in city.get("stops") or []:
             if stop.get("match_type") not in _GROUNDED_MATCH_TYPES:
                 continue
-            if is_title_grounded(stop.get("name"), haystack):
+            if not evidence_disqualified and is_title_grounded(stop.get("name"), haystack):
                 continue
             stop["match_type"] = _DOWNGRADE_TARGET
             stop["grounding_source"] = None
             downgraded += 1
 
     if downgraded:
-        logger.info("itinerary_match_type_downgraded", downgraded=downgraded)
+        logger.info(
+            "itinerary_match_type_downgraded",
+            downgraded=downgraded,
+            reason="no_verified_research" if evidence_disqualified else "ungrounded_title",
+        )
     return itinerary_dict
 
 
@@ -737,9 +753,14 @@ def extract_itinerary_from_response(
         (itinerary_dict, suggestions_list) tuple or None
     """
     grounding_text = state_accessor.grounding_research_text
+    # An empty grounding_text means either "no discovery ran" or "every
+    # discovery payload is unverified"; only the second must fail closed.
+    evidence_disqualified = state_accessor.all_discovery_unverified
 
     def _finalize(itinerary_dict, suggestions):
-        itinerary_dict = downgrade_ungrounded_match_types(itinerary_dict, grounding_text)
+        itinerary_dict = downgrade_ungrounded_match_types(
+            itinerary_dict, grounding_text, evidence_disqualified
+        )
         identities_before = _city_names(itinerary_dict)
         itinerary_dict = reconcile_stop_city_grouping(itinerary_dict)
         # MYS-660 r6/r7: a city the guard above just removed can orphan a
@@ -871,6 +892,64 @@ def is_title_grounded(title: object, haystack_tokens: frozenset) -> bool:
     missing = len(title_tokens - haystack_tokens)
     allowed_missing = _GROUNDING_MAX_MISSING if len(title_tokens) >= 3 else 0
     return missing <= allowed_missing
+
+
+# Discovery payload key -> the list field holding its entries. All three entry
+# shapes identify themselves with ``name`` (models/discovery.py), so one check
+# covers cities, landmarks, and author sites.
+_DISCOVERY_PAYLOAD_LISTS: dict[str, str] = {
+    "cities": "cities",
+    "landmarks": "landmarks",
+    "author_sites": "author_sites",
+}
+
+
+def audit_discovery_grounding(
+    payloads: dict[str, Optional[object]], researcher_text: str
+) -> Optional[dict[str, tuple]]:
+    """Measure how much of the discovery output traces back to the research.
+
+    OBSERVATION ONLY — returns counts and mutates nothing. It exists to answer
+    a question we currently cannot: the discovery *formatters* turn researcher
+    prose into the structured payloads that every downstream stage then treats
+    as ground truth, and nothing checks that a formatted place was actually
+    found by the researcher. A fabrication entering there is laundered into
+    fact by the time the composer sees it.
+
+    Note the deliberate asymmetry with the composer-stage guard
+    (``downgrade_ungrounded_match_types``), which DOES act on its finding.
+    That guard is safe to enforce because the composer's haystack is exactly
+    its own input, so a miss is unambiguously an invention. Here the haystack
+    is free-form researcher prose, so a miss may equally be the token rule
+    being strict about a paraphrase. We measure first and decide enforcement
+    from the numbers.
+
+    Returns ``{payload_key: (grounded, total)}``, or None when there is no
+    usable evidence — no researcher text (fail-open, same rule as every other
+    grounding guard here) or no entries at all. A None means "cannot say",
+    never "nothing was grounded"; the caller logs the two cases apart.
+    """
+    haystack = grounding_token_set(researcher_text)
+    if not haystack:
+        return None
+
+    counts: dict[str, tuple] = {}
+    for key, list_field in _DISCOVERY_PAYLOAD_LISTS.items():
+        payload = payloads.get(key)
+        if not isinstance(payload, dict):
+            continue
+        entries = payload.get(list_field) or []
+        if not entries:
+            continue
+        grounded = sum(
+            1
+            for entry in entries
+            if isinstance(entry, dict)
+            and is_title_grounded(entry.get("name"), haystack)
+        )
+        counts[key] = (grounded, len(entries))
+
+    return counts or None
 
 
 def filter_grounded_recommendations(

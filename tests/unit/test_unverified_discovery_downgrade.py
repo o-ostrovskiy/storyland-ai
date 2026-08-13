@@ -1,0 +1,729 @@
+"""MYS-816: places from a researcher that never searched cannot claim grounding.
+
+The defect, measured against production Gemini: discovery researchers skip
+``google_search`` stochastically — roughly one to two of the four on most runs,
+on realist and fictional books alike — and still emit places from model memory.
+One observed run returned the author site "Personal Office", which is not a
+visitable place at all. Nothing caught it, because the composer-stage guard
+checked stops against the UNION of all four payloads, so a researcher that did
+search vouched for one that did not.
+
+The fix deliberately adds no new enforcement. It narrows the haystack that
+``downgrade_ungrounded_match_types`` already trusts, and the existing guard
+does the rest. These tests pin that seam end to end:
+
+  ledger (which agents searched)
+    -> unverified payload keys, persisted to session state
+    -> excluded from grounding_research_text
+    -> composer stops traceable only there demoted to `vibe`
+
+Note the asymmetry these tests protect: an agent that never RAN is not
+"unsearched". Fail-open on missing evidence is the rule every grounding guard
+in this codebase follows, and breaking it would turn an early error or a
+cache hit into a false fabrication alarm.
+"""
+
+from types import SimpleNamespace
+
+from google.adk.events import Event
+from google.adk.events.event_actions import EventActions
+from google.genai import types
+
+from core.executor import DISCOVERY_RESEARCHER_AUTHORS, RESEARCHER_PAYLOAD_KEYS
+from core.extraction import (
+    downgrade_ungrounded_match_types,
+    extract_itinerary_from_response,
+)
+from core.session_state import SessionStateAccessor, SessionStateKeys
+from core.types import ExecutorConfig
+from plugins.langfuse_plugin import LangfusePlugin
+
+
+# --------------------------------------------------------------------------
+# The ledger
+# --------------------------------------------------------------------------
+
+def _ctx(agent_name):
+    return SimpleNamespace(
+        agent_name=agent_name,
+        _invocation_context=SimpleNamespace(branch=agent_name),
+    )
+
+
+def _searched_response():
+    return SimpleNamespace(
+        usage_metadata=None,
+        grounding_metadata=SimpleNamespace(
+            web_search_queries=["real locations"], grounding_chunks=[]
+        ),
+    )
+
+
+def _unsearched_response():
+    return SimpleNamespace(usage_metadata=None, grounding_metadata=None)
+
+
+class TestLedger:
+    async def test_records_searched_and_unsearched(self):
+        plugin = LangfusePlugin(secret_key=None, public_key=None, host=None)
+        await plugin.after_model_callback(
+            callback_context=_ctx("city_researcher"), llm_response=_searched_response()
+        )
+        await plugin.after_model_callback(
+            callback_context=_ctx("author_researcher"),
+            llm_response=_unsearched_response(),
+        )
+        assert plugin.unsearched_agents(DISCOVERY_RESEARCHER_AUTHORS) == frozenset(
+            {"author_researcher"}
+        )
+
+    async def test_works_with_langfuse_disabled(self):
+        """The guard must not vanish on a deploy with no Langfuse credentials."""
+        plugin = LangfusePlugin(secret_key=None, public_key=None, host=None)
+        assert plugin.enabled is False
+        await plugin.after_model_callback(
+            callback_context=_ctx("author_researcher"),
+            llm_response=_unsearched_response(),
+        )
+        assert "author_researcher" in plugin.unsearched_agents(
+            DISCOVERY_RESEARCHER_AUTHORS
+        )
+
+    async def test_any_call_with_receipts_counts_as_searched(self):
+        """A later formatting turn reports no receipts; it must not retract."""
+        plugin = LangfusePlugin(secret_key=None, public_key=None, host=None)
+        await plugin.after_model_callback(
+            callback_context=_ctx("city_researcher"), llm_response=_searched_response()
+        )
+        await plugin.after_model_callback(
+            callback_context=_ctx("city_researcher"),
+            llm_response=_unsearched_response(),
+        )
+        assert plugin.unsearched_agents(DISCOVERY_RESEARCHER_AUTHORS) == frozenset()
+
+    async def test_agent_that_never_ran_is_not_unsearched(self):
+        """Absence of evidence is not evidence of absence."""
+        plugin = LangfusePlugin(secret_key=None, public_key=None, host=None)
+        assert plugin.unsearched_agents(DISCOVERY_RESEARCHER_AUTHORS) == frozenset()
+
+
+# --------------------------------------------------------------------------
+# The haystack
+# --------------------------------------------------------------------------
+
+_STATE = {
+    SessionStateKeys.CITY_DISCOVERY: {"cities": [{"name": "Dublin"}]},
+    SessionStateKeys.AUTHOR_SITES: {
+        "author_sites": [{"name": "Personal Office"}]
+    },
+}
+
+
+class TestGroundingHaystack:
+    def test_unverified_payload_excluded(self):
+        state = dict(_STATE)
+        state[SessionStateKeys.UNVERIFIED_DISCOVERY] = [SessionStateKeys.AUTHOR_SITES]
+        text = SessionStateAccessor(state).grounding_research_text
+        assert "Dublin" in text
+        assert "Personal Office" not in text
+
+    def test_nothing_unverified_keeps_everything(self):
+        text = SessionStateAccessor(dict(_STATE)).grounding_research_text
+        assert "Dublin" in text and "Personal Office" in text
+
+    def test_malformed_flag_is_ignored(self):
+        """A corrupt value must fail open, not crash discovery's successor."""
+        state = dict(_STATE)
+        state[SessionStateKeys.UNVERIFIED_DISCOVERY] = "author_sites"  # not a list
+        assert "Personal Office" in SessionStateAccessor(state).grounding_research_text
+
+
+# --------------------------------------------------------------------------
+# The payoff: the existing guard now demotes the ungrounded stop
+# --------------------------------------------------------------------------
+
+def _itinerary():
+    return {
+        "cities": [
+            {
+                "name": "Dublin",
+                "stops": [
+                    {
+                        "name": "Dublin",
+                        "match_type": "literal",
+                        "grounding_source": "searched",
+                    },
+                    {
+                        "name": "Personal Office",
+                        "match_type": "literal",
+                        "grounding_source": "invented",
+                    },
+                ],
+            }
+        ]
+    }
+
+
+class TestDowngrade:
+    def test_stop_only_in_unsearched_payload_is_demoted(self):
+        state = dict(_STATE)
+        state[SessionStateKeys.UNVERIFIED_DISCOVERY] = [SessionStateKeys.AUTHOR_SITES]
+        haystack = SessionStateAccessor(state).grounding_research_text
+
+        result = downgrade_ungrounded_match_types(_itinerary(), haystack)
+        stops = {s["name"]: s for s in result["cities"][0]["stops"]}
+
+        assert stops["Personal Office"]["match_type"] == "vibe"
+        assert stops["Personal Office"]["grounding_source"] is None
+        # The searched payload is untouched — this must not blanket-demote.
+        assert stops["Dublin"]["match_type"] == "literal"
+        assert stops["Dublin"]["grounding_source"] == "searched"
+
+    def test_without_the_flag_the_fabrication_survives(self):
+        """Characterises the bug: proves the flag is what does the work."""
+        haystack = SessionStateAccessor(dict(_STATE)).grounding_research_text
+        result = downgrade_ungrounded_match_types(_itinerary(), haystack)
+        stops = {s["name"]: s for s in result["cities"][0]["stops"]}
+        assert stops["Personal Office"]["match_type"] == "literal"
+
+
+# --------------------------------------------------------------------------
+# Executor wiring: computed, persisted, and cached
+# --------------------------------------------------------------------------
+
+_REGION_STATE = {
+    SessionStateKeys.REGION_ANALYSIS: {
+        "regions": [
+            {
+                "region_id": 1,
+                "region_name": "Dublin, Ireland",
+                "cities": [{"name": "Dublin", "country": "Ireland"}],
+                "travel_note": "n",
+                "highlights": "h",
+            }
+        ],
+        "analysis_note": "note",
+    },
+    **_STATE,
+}
+
+
+def _runner_with_skip(monkeypatch, skipped_agent):
+    """Fake Runner where one researcher speaks but reports no search receipts."""
+    import core.executor as ex
+    from core.executor import APP_NAME
+
+    class _FakeRunner:
+        def __init__(self, *args, **kwargs):
+            self._session_service = kwargs.get("session_service")
+            self._plugins = kwargs.get("plugins") or []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def run_async(self, user_id, session_id, new_message):
+            # Drive the ledger as ADK would: every researcher reports, one of
+            # them without receipts. Only the Langfuse plugin is driven —
+            # ADK's own LoggingPlugin reads fields (error_code, …) that a
+            # minimal fake response does not carry, and it is not under test.
+            ledgers = [p for p in self._plugins if hasattr(p, "unsearched_agents")]
+            for agent in DISCOVERY_RESEARCHER_AUTHORS:
+                response = (
+                    _unsearched_response()
+                    if agent == skipped_agent
+                    else _searched_response()
+                )
+                for plugin in ledgers:
+                    await plugin.after_model_callback(
+                        callback_context=_ctx(agent), llm_response=response
+                    )
+            session = await self._session_service.get_session(
+                app_name=APP_NAME, user_id=user_id, session_id=session_id
+            )
+            await self._session_service.append_event(
+                session,
+                Event(
+                    invocation_id="i",
+                    author="system",
+                    actions=EventActions(state_delta=dict(_REGION_STATE)),
+                ),
+            )
+            yield Event(
+                invocation_id="i",
+                author="city_researcher",
+                content=types.Content(
+                    role="model", parts=[types.Part(text="Dublin is central.")]
+                ),
+            )
+
+    monkeypatch.setattr(ex, "Runner", _FakeRunner)
+    return ex
+
+
+def _executor(monkeypatch, cache_enabled):
+    import core.executor as ex
+    from core.executor import WorkflowExecutor
+    from services.session_service import create_session_service
+
+    monkeypatch.setattr(
+        ex, "create_book_to_place_discovery_workflow", lambda *a, **k: object()
+    )
+    return WorkflowExecutor(
+        config=ExecutorConfig(
+            model_name="gemini-2.0-flash",
+            google_api_key="test-key",
+            cache_enabled=cache_enabled,
+        ),
+        session_service=create_session_service(use_database=False),
+        model=object(),
+    )
+
+
+class TestExecutorWiring:
+    async def test_unverified_key_persisted_for_compose(self, monkeypatch):
+        """discover() and compose() are separate requests — it must persist."""
+        from core.executor import APP_NAME
+        from core.events import JobStarted
+
+        _runner_with_skip(monkeypatch, "author_researcher")
+        executor = _executor(monkeypatch, cache_enabled=False)
+
+        job_id = None
+        async for ev in executor.discover(book_title="Dune", author="Herbert"):
+            if isinstance(ev, JobStarted):
+                job_id = ev.job_id
+
+        session = await executor.session_service.get_session(
+            app_name=APP_NAME, user_id="default", session_id=job_id
+        )
+        state = SessionStateAccessor(session.state)
+        assert state.unverified_discovery == [SessionStateKeys.AUTHOR_SITES]
+        assert "Personal Office" not in state.grounding_research_text
+
+    async def test_all_searched_writes_an_EMPTY_VERDICT_not_nothing(
+        self, monkeypatch
+    ):
+        """🔴 r3: this row used to assert only ``unverified_discovery == []``.
+
+        That is satisfied by writing nothing at all, which is what the code
+        did — so "every researcher searched" and "the fail-closed pass never
+        ran" left session state byte-identical, both fail the guard open, and
+        no reader could tell them apart. The empty list must actually be
+        written; its presence is the receipt.
+        """
+        from core.executor import APP_NAME
+        from core.events import JobStarted
+
+        _runner_with_skip(monkeypatch, skipped_agent=None)
+        executor = _executor(monkeypatch, cache_enabled=False)
+
+        job_id = None
+        async for ev in executor.discover(book_title="Dune", author="Herbert"):
+            if isinstance(ev, JobStarted):
+                job_id = ev.job_id
+
+        session = await executor.session_service.get_session(
+            app_name=APP_NAME, user_id="default", session_id=job_id
+        )
+        state = SessionStateAccessor(session.state)
+        assert state.unverified_discovery == []
+        assert state.discovery_verification_ran is True
+        # The key is genuinely in the dict, not merely readable as empty.
+        assert SessionStateKeys.UNVERIFIED_DISCOVERY in session.state
+
+    async def test_a_cache_hit_replays_an_EMPTY_verdict_too(self, monkeypatch):
+        """The replay filtered on truthiness, so `[]` was dropped on every hit.
+
+        A cached clean run therefore came back as a run with no verdict —
+        same fail-open, and the receipt lost exactly where results are served
+        most often.
+        """
+        from core.executor import APP_NAME
+        from core.events import JobStarted
+
+        ex = _runner_with_skip(monkeypatch, skipped_agent=None)
+        executor = _executor(monkeypatch, cache_enabled=True)
+
+        async for _ in executor.discover(book_title="Dune", author="Herbert"):
+            pass
+
+        monkeypatch.setattr(ex, "Runner", None)  # a fresh run would crash
+        hit_job = None
+        async for evt in executor.discover(book_title="Dune", author="Herbert"):
+            if isinstance(evt, JobStarted):
+                hit_job = evt.job_id
+
+        session = await executor.session_service.get_session(
+            app_name=APP_NAME, user_id="default", session_id=hit_job
+        )
+        assert SessionStateAccessor(session.state).discovery_verification_ran is True
+
+    async def test_cache_hit_replays_the_flag(self, monkeypatch):
+        """A hit that dropped it would serve UNPROTECTED results on the most
+        popular titles — the exact bug class the v2 bundle was created for."""
+        from core.executor import APP_NAME
+        from core.events import JobStarted
+
+        ex = _runner_with_skip(monkeypatch, "author_researcher")
+        executor = _executor(monkeypatch, cache_enabled=True)
+
+        async for _ in executor.discover(book_title="Dune", author="Herbert"):
+            pass
+
+        monkeypatch.setattr(ex, "Runner", None)  # a fresh run would crash
+        hit_job = None
+        async for evt in executor.discover(book_title="Dune", author="Herbert"):
+            if isinstance(evt, JobStarted):
+                hit_job = evt.job_id
+
+        session = await executor.session_service.get_session(
+            app_name=APP_NAME, user_id="default", session_id=hit_job
+        )
+        state = SessionStateAccessor(session.state)
+        assert state.unverified_discovery == [SessionStateKeys.AUTHOR_SITES]
+        assert "Personal Office" not in state.grounding_research_text
+
+    def test_payload_map_covers_every_researcher(self):
+        """A new researcher without a payload mapping would silently escape."""
+        assert set(RESEARCHER_PAYLOAD_KEYS) == set(DISCOVERY_RESEARCHER_AUTHORS)
+
+
+# --------------------------------------------------------------------------
+# r2 (Codex P2): "no evidence" and "all evidence disqualified" are not the
+# same state. Both reach the guard as an empty haystack, and the fail-open
+# rule is correct for the first and exactly backwards for the second — the
+# worst run on the board (nobody searched) got the most permissive handling.
+# --------------------------------------------------------------------------
+
+_ALL_KEYS = [SessionStateKeys.CITY_DISCOVERY, SessionStateKeys.AUTHOR_SITES]
+
+
+class TestAllPayloadsUnverified:
+    def test_flag_is_false_when_no_discovery_ran(self):
+        """The local-atmosphere path must stay untouched — this is the control.
+
+        If this ever reads True, every itinerary with no discovery research
+        gets blanket-demoted, which is a worse product than the bug.
+        """
+        assert SessionStateAccessor({}).all_discovery_unverified is False
+
+    def test_flag_is_false_when_one_payload_searched(self):
+        state = dict(_STATE)
+        state[SessionStateKeys.UNVERIFIED_DISCOVERY] = [SessionStateKeys.AUTHOR_SITES]
+        assert SessionStateAccessor(state).all_discovery_unverified is False
+
+    def test_flag_is_true_when_every_present_payload_is_unverified(self):
+        state = dict(_STATE)
+        state[SessionStateKeys.UNVERIFIED_DISCOVERY] = list(_ALL_KEYS)
+        accessor = SessionStateAccessor(state)
+        assert accessor.all_discovery_unverified is True
+        # ...and the haystack is empty, which is what makes it indistinguishable
+        # from "no discovery ran" without this flag.
+        assert accessor.grounding_research_text == ""
+
+    def test_a_single_unverified_payload_still_disqualifies(self):
+        """🔴 The degenerate case NO description of this flag admitted to.
+
+        Every docstring, comment and review reply framed the trigger as "the
+        run where all four researchers skipped". It is not. Empty payloads are
+        filtered out as absent and ``all()`` over a one-element list is True,
+        so THREE researchers returning nothing plus one answering from memory
+        blanket-demotes the entire itinerary.
+
+        Pinned rather than tightened, because the behaviour is right and only
+        the words were wrong: the single present payload is excluded from the
+        haystack as unverified, so without the flag the guard sees an empty
+        haystack and lets every literal claim through on no evidence at all —
+        the r2 inversion, restored. Requiring the full researcher set would
+        reintroduce it at a slightly different maximum.
+        """
+        state = {
+            SessionStateKeys.BOOK_CONTEXT: {},
+            SessionStateKeys.CITY_DISCOVERY: None,
+            SessionStateKeys.AUTHOR_SITES: _STATE[SessionStateKeys.AUTHOR_SITES],
+            SessionStateKeys.UNVERIFIED_DISCOVERY: [SessionStateKeys.AUTHOR_SITES],
+        }
+        accessor = SessionStateAccessor(state)
+        assert accessor.all_discovery_unverified is True
+        assert accessor.grounding_research_text == ""
+
+    def test_the_same_lone_payload_VERIFIED_disqualifies_nothing(self):
+        """Converse control, so the row above is about the receipt, not the count."""
+        state = {
+            SessionStateKeys.BOOK_CONTEXT: {},
+            SessionStateKeys.CITY_DISCOVERY: None,
+            SessionStateKeys.AUTHOR_SITES: _STATE[SessionStateKeys.AUTHOR_SITES],
+            SessionStateKeys.UNVERIFIED_DISCOVERY: [],
+        }
+        accessor = SessionStateAccessor(state)
+        assert accessor.all_discovery_unverified is False
+        assert accessor.grounding_research_text != ""
+
+    def test_a_missing_verdict_fails_open_but_is_no_longer_indistinguishable(self):
+        """The silent half of the same finding.
+
+        No ``unverified_discovery`` key reads back as ``[]``, so the flag is
+        False and the guard fails open — identical, from the flag alone, to a
+        run where all four researchers searched. ``discovery_verification_ran``
+        is the positive receipt that separates them.
+        """
+        no_verdict = SessionStateAccessor(dict(_STATE))
+        assert no_verdict.all_discovery_unverified is False
+        assert no_verdict.discovery_verification_ran is False
+
+        cleared = dict(_STATE)
+        cleared[SessionStateKeys.UNVERIFIED_DISCOVERY] = []
+        cleared_accessor = SessionStateAccessor(cleared)
+        # Same flag, same fail-open, opposite meaning — and now it says which.
+        assert cleared_accessor.all_discovery_unverified is False
+        assert cleared_accessor.discovery_verification_ran is True
+
+    def test_a_non_list_verdict_is_not_a_verdict(self):
+        """A corrupted/legacy value must not read as "the pass ran"."""
+        state = dict(_STATE)
+        state[SessionStateKeys.UNVERIFIED_DISCOVERY] = "author_sites"
+        assert SessionStateAccessor(state).discovery_verification_ran is False
+
+    def test_a_key_listed_but_not_present_does_not_make_it_true(self):
+        """`unverified` naming an absent payload is not "everything failed"."""
+        state = {SessionStateKeys.CITY_DISCOVERY: _STATE[SessionStateKeys.CITY_DISCOVERY]}
+        state[SessionStateKeys.UNVERIFIED_DISCOVERY] = [SessionStateKeys.AUTHOR_SITES]
+        assert SessionStateAccessor(state).all_discovery_unverified is False
+
+    def test_disqualified_evidence_demotes_every_grounded_claim(self):
+        result = downgrade_ungrounded_match_types(_itinerary(), "", True)
+        stops = {s["name"]: s for s in result["cities"][0]["stops"]}
+        assert stops["Personal Office"]["match_type"] == "vibe"
+        assert stops["Personal Office"]["grounding_source"] is None
+        # Dublin was "grounded" only in a payload nobody searched, so it falls too.
+        assert stops["Dublin"]["match_type"] == "vibe"
+        assert stops["Dublin"]["grounding_source"] is None
+
+    def test_empty_haystack_without_the_flag_still_fails_open(self):
+        """The converse row: this is the pre-fix behaviour, and it must persist
+        for the no-discovery case. If this ever demotes, the flag has stopped
+        being what does the work."""
+        result = downgrade_ungrounded_match_types(_itinerary(), "", False)
+        stops = {s["name"]: s for s in result["cities"][0]["stops"]}
+        assert stops["Personal Office"]["match_type"] == "literal"
+        assert stops["Dublin"]["match_type"] == "literal"
+
+    def test_weak_claims_are_never_touched_even_when_disqualified(self):
+        itinerary = {
+            "cities": [
+                {
+                    "name": "Dublin",
+                    "stops": [
+                        {"name": "A pub", "match_type": "vibe", "grounding_source": None},
+                        {"name": "A walk", "match_type": "thematic", "grounding_source": "x"},
+                    ],
+                }
+            ]
+        }
+        result = downgrade_ungrounded_match_types(itinerary, "", True)
+        stops = {s["name"]: s for s in result["cities"][0]["stops"]}
+        assert stops["A pub"]["match_type"] == "vibe"
+        assert stops["A walk"]["match_type"] == "thematic"
+        assert stops["A walk"]["grounding_source"] == "x"
+
+
+# --------------------------------------------------------------------------
+# The wiring. A property nobody reads is not a fix -- these drive the real
+# extraction entry point, which is what production calls.
+# --------------------------------------------------------------------------
+
+def _envelope_state(unverified):
+    state = dict(_STATE)
+    state[SessionStateKeys.UNVERIFIED_DISCOVERY] = list(unverified)
+    state["composer_envelope"] = {"itinerary": _envelope_itinerary(), "suggestions": []}
+    return state
+
+
+def _envelope_itinerary():
+    """`_itinerary()`'s stops, filled out to what the composer envelope validates."""
+    city = dict(_itinerary()["cities"][0])
+    city.update({"country": "Ireland", "days_suggested": 2, "overview": "t"})
+    city["stops"] = [
+        {**stop, "type": "landmark", "reason": "r", "time_of_day": "morning"}
+        for stop in city["stops"]
+    ]
+    return {"cities": [city], "summary_text": "t"}
+
+
+class TestExtractionWiring:
+    def test_extraction_fails_closed_when_nothing_was_searched(self):
+        accessor = SessionStateAccessor(_envelope_state(_ALL_KEYS))
+        itinerary, _ = extract_itinerary_from_response(None, accessor)
+        stops = {s["name"]: s for s in itinerary["cities"][0]["stops"]}
+        assert stops["Dublin"]["match_type"] == "vibe"
+        assert stops["Personal Office"]["match_type"] == "vibe"
+
+    def test_extraction_keeps_the_searched_payload_when_one_researcher_worked(self):
+        """The control: the flag must not blanket-demote a partially good run."""
+        accessor = SessionStateAccessor(_envelope_state([SessionStateKeys.AUTHOR_SITES]))
+        itinerary, _ = extract_itinerary_from_response(None, accessor)
+        stops = {s["name"]: s for s in itinerary["cities"][0]["stops"]}
+        assert stops["Dublin"]["match_type"] == "literal"
+        assert stops["Personal Office"]["match_type"] == "vibe"
+
+    def test_extraction_leaves_a_no_discovery_run_alone(self):
+        """Local-atmosphere: no discovery payloads at all, nothing demoted."""
+        accessor = SessionStateAccessor(
+            {
+                "composer_envelope": {
+                    "itinerary": _envelope_itinerary(),
+                    "suggestions": [],
+                }
+            }
+        )
+        itinerary, _ = extract_itinerary_from_response(None, accessor)
+        stops = {s["name"]: s for s in itinerary["cities"][0]["stops"]}
+        assert stops["Dublin"]["match_type"] == "literal"
+        assert stops["Personal Office"]["match_type"] == "literal"
+
+
+# --------------------------------------------------------------------------
+# r2 (@el): "everything was verified" had no positive representation — it was
+# only ever inferred from an absence. On the fresh path the four researchers
+# run by construction, so an empty ledger means the observation seam broke,
+# and that state used to be indistinguishable from a clean run.
+# --------------------------------------------------------------------------
+
+class TestLedgerEmptyIsVisible:
+    def test_observed_any_is_false_before_anything_runs(self):
+        assert LangfusePlugin().observed_any(RESEARCHER_PAYLOAD_KEYS) is False
+
+    def test_observed_any_is_true_once_one_researcher_is_seen(self):
+        plugin = LangfusePlugin()
+        plugin._agents_seen.add(next(iter(RESEARCHER_PAYLOAD_KEYS)))
+        assert plugin.observed_any(RESEARCHER_PAYLOAD_KEYS) is True
+
+    def test_a_broken_seam_is_logged_and_a_clean_run_is_not(self, monkeypatch):
+        """Both cases return [] — the log is the only thing that separates them."""
+        from core import executor as executor_module
+
+        seen = []
+        monkeypatch.setattr(
+            executor_module.logger,
+            "warning",
+            lambda event, **kw: seen.append(event),
+        )
+        keys = executor_module.WorkflowExecutor._unverified_discovery_keys
+
+        broken = LangfusePlugin()  # nothing observed at all
+        assert keys("job12345", broken, frozenset()) == []
+        assert seen == ["discovery_search_ledger_empty"]
+
+        seen.clear()
+        clean = LangfusePlugin()
+        for name in RESEARCHER_PAYLOAD_KEYS:
+            clean._agents_seen.add(name)
+            clean._agents_searched.add(name)
+        assert keys("job12345", clean, frozenset()) == []
+        assert seen == [], "a run where every researcher searched must stay quiet"
+
+
+# --------------------------------------------------------------------------
+# r4 — an UNOBSERVED researcher is not a verified one.
+#
+# The enforcement path asked `unsearched_agents`, which omits an agent the
+# ledger never saw. So a researcher whose receipts were missed kept its
+# payload in the grounding haystack and went on vouching for literal claims,
+# while the metric path (fixed at c2c5474) already refused to call the same
+# researcher grounded. Enforcement is now positive-receipt-only, scoped to
+# the payloads that are actually PRESENT — because a payload's existence is
+# the proof that its researcher ran.
+# --------------------------------------------------------------------------
+
+class TestUnobservedIsNotVerified:
+    @staticmethod
+    def _keys():
+        from core import executor as executor_module
+
+        return executor_module.WorkflowExecutor._unverified_discovery_keys
+
+    @staticmethod
+    def _all_keys():
+        return frozenset(RESEARCHER_PAYLOAD_KEYS.values())
+
+    def test_a_present_payload_with_no_receipt_is_unverified(self):
+        """🔴 The defect. The ledger never saw this researcher, so the old
+        negative test omitted it and its payload vouched for the itinerary."""
+        plugin = LangfusePlugin()  # observed nobody: the seam missed them
+        unverified = self._keys()("job12345", plugin, self._all_keys())
+        assert sorted(unverified) == sorted(RESEARCHER_PAYLOAD_KEYS.values())
+
+    def test_an_agent_that_never_ran_is_still_untouched(self):
+        """The converse, and the reason this is scoped to PRESENT payloads.
+
+        `unsearched_agents`' three-valued rule exists so an agent that never
+        ran cannot trip the guard. Disqualifying every EXPECTED payload would
+        have re-broken exactly that. No payload, no claim, nothing to strike.
+        """
+        plugin = LangfusePlugin()
+        assert self._keys()("job12345", plugin, frozenset()) == []
+
+    def test_only_the_unreceipted_payload_is_struck(self):
+        """It discriminates rather than blanket-demoting — the Piranesi shape:
+        two researchers searched, two did not, only the unsupported ones go."""
+        names = list(RESEARCHER_PAYLOAD_KEYS)
+        plugin = LangfusePlugin()
+        for name in names:
+            plugin._agents_seen.add(name)
+        for name in names[:2]:
+            plugin._agents_searched.add(name)
+        unverified = self._keys()("job12345", plugin, self._all_keys())
+        assert sorted(unverified) == sorted(
+            RESEARCHER_PAYLOAD_KEYS[n] for n in names[2:]
+        )
+
+    def test_every_researcher_searched_strikes_nothing(self):
+        """The vacuity direction. 🔴 Note this asserts against a run where the
+        payloads are PRESENT — the old `== []` row was satisfiable by a run
+        that produced nothing at all, which is how a fail-open survived."""
+        plugin = LangfusePlugin()
+        for name in RESEARCHER_PAYLOAD_KEYS:
+            plugin._agents_seen.add(name)
+            plugin._agents_searched.add(name)
+        assert self._keys()("job12345", plugin, self._all_keys()) == []
+
+    def test_a_total_seam_break_disqualifies_every_present_payload(self, monkeypatch):
+        """The stated cost of failing in this direction, pinned so it is a
+        decision and not a surprise: an instrumentation fault demotes every
+        strong claim, and says so out loud in the same breath."""
+        from core import executor as executor_module
+
+        warned = []
+        monkeypatch.setattr(
+            executor_module.logger,
+            "warning",
+            lambda event, **kw: warned.append(event),
+        )
+        plugin = LangfusePlugin()  # receipts never recorded at all
+        unverified = self._keys()("job12345", plugin, self._all_keys())
+        assert sorted(unverified) == sorted(RESEARCHER_PAYLOAD_KEYS.values())
+        assert warned == ["discovery_search_ledger_empty"], (
+            "a blanket demote from a broken seam must never be silent — the "
+            "warning is the compensating control for choosing this direction"
+        )
+
+    def test_enforcement_and_the_metric_now_agree_on_an_unobserved_receipt(self):
+        """The property the whole item is about: two paths, one answer.
+
+        `searched_agents` (metric) refuses to call an unobserved researcher
+        grounded. Enforcement must refuse too, or the PR asserts two different
+        answers and the permissive one is the one that reaches the user.
+        """
+        plugin = LangfusePlugin()
+        name = next(iter(RESEARCHER_PAYLOAD_KEYS))
+        metric_says_grounded = name in plugin.searched_agents(RESEARCHER_PAYLOAD_KEYS)
+        enforcement_says_verified = (
+            RESEARCHER_PAYLOAD_KEYS[name]
+            not in self._keys()("job12345", plugin, self._all_keys())
+        )
+        assert metric_says_grounded is False
+        assert enforcement_says_verified is False
+        assert metric_says_grounded == enforcement_says_verified

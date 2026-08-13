@@ -1,9 +1,10 @@
 """
 LLM-as-judge scorer for itinerary evaluation.
 
-This module provides automated scoring of travel itineraries using Gemini 2.0 Flash Lite
-with structured output. Scores are based on 6 quality dimensions aligned with the
-scoring functions defined in langfuse_eval.py.
+This module provides automated scoring of travel itineraries with structured
+output, across 6 quality dimensions aligned with the scoring functions defined
+in langfuse_eval.py. The judge model is ``_DEFAULT_JUDGE_MODEL`` below — read
+its comment before changing it; the choice is load-bearing, not incidental.
 
 Issue: #96 - Add LLM-as-judge scoring to evaluation pipeline
 """
@@ -20,6 +21,25 @@ from google.genai import types
 from common.logging import get_logger
 
 logger = get_logger("storyland.llm_scorer")
+
+# The judge model. Three constraints, learned the hard way (MYS-825).
+#
+# 1. AVAILABILITY. This was `gemini-2.5-flash-lite` until 2026-08-09, when the
+#    API began answering it — and the whole 2.5 line on this key — with 404
+#    "no longer available to new users". The failure was per-case and caught,
+#    so `make eval-run` still exited 0 and printed "All evaluations completed
+#    successfully" while every case recorded `scores: None`. A dead judge that
+#    reports success is worse than no judge at all.
+# 2. INDEPENDENCE. The agents under test run `gemini-3.1-flash-lite`
+#    (common/config.py). Scoring their output with the same model has the
+#    family grade its own work — backwards for the book_relevance /
+#    geographical_accuracy fabrication watch. Keep judge and generator apart.
+# 3. PINNED, NOT ALIASED. `gemini-flash-latest` / `gemini-pro-latest` resolve
+#    to whatever is current, so the instrument would drift under the
+#    measurements without anything in the diff — the same silent-change class
+#    as (1). A pinned id fails loudly when it is retired, which is what we
+#    want. Re-pin here when it 404s; that is the only place to change it.
+_DEFAULT_JUDGE_MODEL = "gemini-3.1-pro-preview"
 
 
 # Scoring criteria mirror the scoring-function prompts in langfuse_eval.py
@@ -230,7 +250,7 @@ async def score_itinerary(
     preferences: Optional[Dict[str, Any]] = None,
     quality_criteria: Optional[Dict[str, str]] = None,
     expected_output: Optional[Dict[str, Any]] = None,
-    model_name: str = "gemini-2.5-flash-lite",
+    model_name: str = _DEFAULT_JUDGE_MODEL,
 ) -> ItineraryScores:
     """Score an itinerary using LLM-as-judge with structured output (6 dimensions, 1-5 scale)."""
     logger.info(
@@ -445,7 +465,7 @@ async def score_criteria_coverage(
     author: str,
     quality_criteria: Dict[str, str],
     itinerary: Dict[str, Any],
-    model_name: str = "gemini-2.5-flash-lite",
+    model_name: str = _DEFAULT_JUDGE_MODEL,
 ) -> int:
     """Score coverage of book-specific criteria (1-5), separate from quality.
 

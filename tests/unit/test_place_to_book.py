@@ -7,6 +7,8 @@ grounded path, literal/vibe labelling, fabricated-title drop, ungroundable
 not-found state, and result caching.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 from google.adk.agents import LlmAgent
@@ -443,3 +445,70 @@ class TestResolverCaptureUnderRealGraph:
         )
         assert titles == ["The Book of Disquiet"]
         assert result.found is True
+
+
+class TestSearchReceiptsAreRegistered:
+    """MYS-815 r2 (Codex P2): the reverse-discovery researcher was invisible.
+
+    ``place_to_book_researcher`` is configured with ``google_search``, so it is
+    part of the population "do researchers actually search?" measures. The
+    resolver's runner registered only ``LoggingPlugin``, and the receipts are
+    emitted from ``LangfusePlugin.after_model_callback`` — so every
+    /place-to-book cache miss was silently excluded from the numbers rather
+    than counted as searched or unsearched.
+    """
+
+    def test_runner_gets_the_search_receipt_observer(self, monkeypatch):
+        import core.place_to_book as p2b
+        from google.adk.plugins.logging_plugin import LoggingPlugin
+        from services.session_service import create_session_service
+
+        from plugins.langfuse_plugin import LangfusePlugin
+
+        captured = {}
+
+        class _CapturingRunner:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        monkeypatch.setattr(p2b, "Runner", _CapturingRunner)
+        resolver = PlaceToBookResolver(
+            model=object(), session_service=create_session_service(use_database=False)
+        )
+        resolver._build_runner(SimpleNamespace(name="place_to_book_workflow"))
+
+        kinds = [type(plugin) for plugin in captured["plugins"]]
+        assert LoggingPlugin in kinds, "the existing logging plugin must survive"
+        assert LangfusePlugin in kinds, "no observer means no search receipts on this path"
+
+        observer = next(p for p in captured["plugins"] if isinstance(p, LangfusePlugin))
+        # Credential-less: this adds measurement, not tracing or spend.
+        assert observer.enabled is False
+        assert observer.client is None
+        assert observer.root_name == "place_to_book_workflow"
+
+    def test_the_observer_still_records_receipts_while_disabled(self):
+        """The property the fix rests on, asserted rather than assumed.
+
+        If receipts ever move behind the `enabled` gate, registering a
+        credential-less plugin becomes a no-op and this path goes quiet again
+        with every test above still green.
+        """
+        from plugins.langfuse_plugin import LangfusePlugin
+
+        plugin = LangfusePlugin()
+        assert plugin.enabled is False
+        plugin._log_search_grounding(
+            SimpleNamespace(
+                agent_name="place_to_book_researcher",
+                _invocation_context=SimpleNamespace(branch="place_to_book_researcher"),
+            ),
+            SimpleNamespace(
+                usage_metadata=None,
+                grounding_metadata=SimpleNamespace(
+                    web_search_queries=["books set in Lisbon"], grounding_chunks=[]
+                ),
+            ),
+        )
+        assert plugin.unsearched_agents({"place_to_book_researcher": "x"}) == frozenset()
+        assert "place_to_book_researcher" in plugin._agents_searched

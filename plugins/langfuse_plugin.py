@@ -5,7 +5,7 @@ Tracks token usage, costs, and agent performance metrics in Langfuse.
 """
 
 import asyncio
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 from dataclasses import dataclass
 
 from google.adk.plugins import BasePlugin
@@ -18,6 +18,7 @@ from google.adk.tools.tool_context import ToolContext
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from common.logging import get_logger
+from common.search_grounding import SearchMetadata, extract_search_metadata
 
 logger = get_logger(__name__)
 
@@ -141,6 +142,19 @@ class LangfusePlugin(BasePlugin):
         self._agent_stacks: dict[str, list] = {}  # branch key -> that branch's own LIFO agent stack
         self._spans: dict[str, Any] = {}  # branch key -> open tool span
         self._propagation_cm = None
+        # Per-run search-receipt ledger (MYS-816). Keyed by AGENT name, not
+        # branch: the question it answers ("did the city researcher search?")
+        # is about the agent, and one agent may make several model calls.
+        # ANY call carrying receipts means that agent searched -- a follow-up
+        # turn that merely formats an earlier search result reports no
+        # receipts of its own and must not retract the first one.
+        #
+        # Deliberately NOT gated on self.enabled: these sets feed the
+        # fail-closed guard in WorkflowExecutor.discover(), so a deploy
+        # without Langfuse credentials must still get the protection. See
+        # _log_search_grounding, which populates them before the enabled gate.
+        self._agents_seen: set[str] = set()
+        self._agents_searched: set[str] = set()
         # Last final-response event text, used as the trace's output. A plain
         # scalar is correct here even under ParallelAgent: unlike the
         # before_model/after_model pairs above, events are consumed one at a
@@ -353,18 +367,44 @@ class LangfusePlugin(BasePlugin):
         self, *, callback_context: CallbackContext, llm_response: LlmResponse
     ) -> Optional[LlmResponse]:
         """
-        Track model response and extract token usage.
+        Track model response, search grounding, and extract token usage.
 
         This is where we capture actual token counts from Gemini API.
         """
         key = self._branch_key(callback_context)
         generation = self._generations.get(key)
+
+        # Search receipts are logged BEFORE the Langfuse gate below, and
+        # deliberately so: "did this researcher actually search?" is a
+        # correctness question about the product, not a tracing nicety, and
+        # it must stay answerable on a deploy with no Langfuse credentials
+        # (the plugin disables itself there but ADK still calls this hook).
+        search = self._log_search_grounding(callback_context, llm_response)
+
         if not self.enabled or not self.client or not generation:
             return None
 
         try:
             usage = self._extract_token_usage(llm_response)
             model_name = self._models.get(key, "")
+
+            # Search receipts ride on the generation's metadata in BOTH
+            # branches below. They are independent of token usage, and a
+            # response missing usage_metadata is exactly when we most want to
+            # know whether it was a grounded call — so this must not live
+            # inside the usage branch.
+            search_metadata = (
+                {
+                    "search": {
+                        "queries": list(search.queries),
+                        "sources": [
+                            {"title": s.title, "uri": s.uri} for s in search.sources
+                        ],
+                    }
+                }
+                if search is not None
+                else {"search": None}
+            )
 
             # Explicit None check: _extract_token_usage never returns an
             # all-zero TokenUsage, and a dataclass instance is always truthy,
@@ -397,6 +437,7 @@ class LangfusePlugin(BasePlugin):
                             "input_per_1m": input_rate,
                             "output_per_1m": output_rate,
                         },
+                        **search_metadata,
                     },
                 )
                 logger.debug(
@@ -417,6 +458,9 @@ class LangfusePlugin(BasePlugin):
                     branch=key,
                     response_type=type(llm_response).__name__,
                 )
+                # Still record the search receipts: a usage-less response is
+                # the case where the trace is otherwise emptiest.
+                generation.update(metadata=search_metadata)
 
             generation.end()
             self._generations.pop(key, None)
@@ -425,6 +469,100 @@ class LangfusePlugin(BasePlugin):
             logger.warning("langfuse_model_response_error", error=str(e), error_type=type(e).__name__)
 
         return None
+
+    def _log_search_grounding(
+        self, callback_context: CallbackContext, llm_response: LlmResponse
+    ) -> Optional[SearchMetadata]:
+        """Log whether this response was actually search-grounded.
+
+        Emits exactly one of two events per model response:
+          * ``search_grounding_captured`` — the model ran ``google_search``;
+            carries query/source counts and the distinct source hosts.
+          * ``search_grounding_absent`` — no grounding metadata came back.
+
+        The absent case is the point of this method. Researcher prompts
+        instruct the model to search ("You MUST call google_search at least
+        once"), but an instruction is not a guarantee, and a researcher that
+        answers from memory is otherwise indistinguishable from one that
+        searched. It is logged at INFO, not WARNING: every formatter agent is
+        tool-less by design (ADK forbids tools + output_schema on one agent),
+        so absence is expected for roughly half of all calls and a warning
+        would be noise. Filter by agent name to read it.
+
+        Counts and hosts only — never the query strings. Queries embed the
+        user-supplied book title, and ``common/logging.py`` forwards INFO logs
+        to Sentry against an allowlist that deliberately excludes user content.
+        """
+        agent_name = getattr(callback_context, "agent_name", None) or "unknown"
+        search = extract_search_metadata(llm_response)
+        # Ledger first, and unconditionally: WorkflowExecutor.discover() reads
+        # it to decide which discovery payloads may support a grounded claim.
+        self._agents_seen.add(agent_name)
+        if search is not None:
+            self._agents_searched.add(agent_name)
+        if search is None:
+            logger.info("search_grounding_absent", agent=agent_name)
+            return None
+        logger.info(
+            "search_grounding_captured",
+            agent=agent_name,
+            query_count=len(search.queries),
+            source_count=len(search.sources),
+            source_hosts=",".join(search.hosts()),
+        )
+        return search
+
+    def unsearched_agents(self, candidates: "Iterable[str]") -> frozenset:
+        """Which of ``candidates`` ran on this plugin but never searched.
+
+        Deliberately three-valued rather than a bare "did it search" boolean:
+        an agent that never ran at all is NOT reported as unsearched. Absence
+        of evidence is not evidence of absence — a workflow that never reached
+        an agent (an early error, a flow that has no such agent) must leave
+        downstream behaviour exactly as it was, not trigger the fail-closed
+        path. Only an agent we actually observed producing responses, none of
+        which carried search receipts, is reported here.
+
+        Works with the plugin disabled: the ledger is populated before the
+        Langfuse gate, so the guard survives a deploy with no credentials.
+        """
+        return frozenset(
+            name
+            for name in candidates
+            if name in self._agents_seen and name not in self._agents_searched
+        )
+
+    def searched_agents(self, candidates: "Iterable[str]") -> frozenset:
+        """Which of ``candidates`` were POSITIVELY observed calling google_search.
+
+        The affirmative statement of grounding, and the only honest basis for a
+        "N of 4 researchers were grounded" number. Deriving that count as
+        ``total - len(unsearched_agents(...))`` is wrong for the same reason
+        ``observed_any`` exists: ``unsearched_agents`` deliberately omits an
+        agent that never ran, so an EMPTY ledger — the broken-observation-seam
+        state — subtracts nothing and reports every researcher as grounded. A
+        partial ledger inflates the number the same way, just less visibly.
+
+        ``_agents_searched`` is only ever written after ``_agents_seen`` in
+        ``_log_search_grounding``, so this set is a subset of the observed
+        ones: membership here means a receipt was actually seen, never
+        inferred from an absence.
+
+        Works with the plugin disabled, like the rest of the ledger.
+        """
+        return frozenset(name for name in candidates if name in self._agents_searched)
+
+    def observed_any(self, candidates: "Iterable[str]") -> bool:
+        """Did the ledger see ANY of ``candidates`` produce a model response?
+
+        The positive half of ``unsearched_agents``. That method is correctly
+        silent when it saw nothing, but on a path where the agents run by
+        construction, "saw nothing" means the observation broke rather than
+        that everything was fine — and the caller needs to be able to say so
+        out loud. Reads the same ledger, so it is true exactly when at least
+        one candidate was observed.
+        """
+        return any(name in self._agents_seen for name in candidates)
 
     def _extract_token_usage(self, response: LlmResponse) -> Optional[TokenUsage]:
         """

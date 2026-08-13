@@ -47,6 +47,25 @@ _SENTRY_SAFE_LOG_ATTR_KEYS = frozenset(
         "traces_sample_rate",
         "logs_enabled",
         "metrics_enabled",
+        # Search-grounding observability. All derived, never user content:
+        # agent/model names come from a fixed in-code vocabulary, the rest are
+        # counts and result hostnames. The search QUERIES are deliberately
+        # absent — they embed the user-supplied book title.
+        "agent",
+        # Plural sibling of "agent": discovery_unverified_payloads names the
+        # researchers that skipped the search, and that offender list IS the
+        # event's actionable payload -- dropped, the Sentry log says only
+        # redacted_keys=agents and nobody can tell which researcher it was.
+        # Same fixed in-code vocabulary as "agent"; never user content.
+        "agents",
+        "model",
+        "query_count",
+        "source_count",
+        "source_hosts",
+        "grounded",
+        "total",
+        "kind",
+        "captured_chars",
     }
 )
 

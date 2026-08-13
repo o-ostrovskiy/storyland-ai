@@ -36,6 +36,7 @@ from google.genai import types
 from agents.orchestrator import create_place_to_book_workflow
 from common.logging import get_logger
 from models.place_to_book import PlaceBookCandidate, PlaceToBookCandidates, PlaceToBookResult
+from plugins.langfuse_plugin import LangfusePlugin
 from services.session_service import create_session_service
 
 from .cache import TTLCache
@@ -218,11 +219,24 @@ class PlaceToBookResolver:
         module-level ``Runner`` name so tests keep monkeypatching
         ``core.place_to_book.Runner`` as the single fake seam.
         """
+        # MYS-815 r2: the reverse-discovery researcher is configured with
+        # google_search, so it belongs in the "did researchers actually
+        # search?" measurement -- and with only LoggingPlugin registered it
+        # emitted neither search_grounding_captured nor _absent, silently
+        # excluding every /place-to-book cache miss from the numbers.
+        #
+        # Constructed WITHOUT credentials on purpose: this adds the receipts
+        # and nothing else. LangfusePlugin with no keys sets enabled=False and
+        # opens no client, while _log_search_grounding runs BEFORE that gate
+        # (see its docstring) -- so this changes what we can measure, not what
+        # this path sends anywhere.
+        observer = LangfusePlugin()
+        observer.root_name = getattr(workflow, "name", None)
         return Runner(
             node=workflow,
             app_name=APP_NAME,
             session_service=self._session_service,
-            plugins=[LoggingPlugin()],
+            plugins=[LoggingPlugin(), observer],
         )
 
     async def resolve(self, place: str) -> PlaceToBookResult:

@@ -19,10 +19,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from common.logging import get_logger, configure_logging
 from common.config import load_config
+from core.extraction import downgrade_ungrounded_match_types, validate_composer_envelope
 from core.prompts import build_composition_prompt
 from core.retry import build_retry_options
-from core.session_state import SessionStateAccessor
+from core.session_state import SessionStateAccessor, SessionStateKeys
 from services.session_service import create_session_service
+from core.executor import DISCOVERY_RESEARCHER_AUTHORS, RESEARCHER_PAYLOAD_KEYS
 from agents.orchestrator import (
     create_book_to_place_discovery_workflow,
     create_book_to_place_composition_workflow,
@@ -53,6 +55,242 @@ DEDICATED_RUNNERS = {
     "local_atmosphere": "evaluation/tools/run_local_atmosphere_eval.py",
     "expansion": "evaluation/tools/run_expansion_eval.py",
 }
+
+
+def count_itinerary_cities(itinerary_data: Optional[Dict[str, Any]]) -> int:
+    """Cities in a composer payload, whichever shape it arrives in.
+
+    The composer emits a ComposerEnvelope — ``{"itinerary": {"cities": [...]},
+    "suggestions": [...]}`` — so the top-level ``["cities"]`` read this replaced
+    returned 0 for every successful run, including the 11-city itineraries sat
+    right beside it in the same result file. The count is reported to Langfuse
+    and to the summary, so "0 cities" read as a broken composition when nothing
+    was wrong.
+
+    Prefers ``validate_composer_envelope`` (the same validator the executor
+    uses) and falls back to a plain nested read so a payload that fails schema
+    validation still counts rather than silently reporting zero.
+    """
+    if not itinerary_data:
+        return 0
+    envelope = validate_composer_envelope(itinerary_data)
+    if envelope is not None:
+        return len(envelope[0].get("cities") or [])
+    inner = itinerary_data.get("itinerary")
+    if isinstance(inner, dict):
+        return len(inner.get("cities") or [])
+    return len(itinerary_data.get("cities") or [])
+
+
+def unverified_payload_keys(langfuse_plugin, present_keys) -> List[str]:
+    """Discovery payload keys that no positive search receipt vouches for.
+
+    The same derivation ``WorkflowExecutor._unverified_discovery_keys`` makes in
+    production, so the eval's session state carries the same fact production's
+    does. Without it the eval scores an itinerary production would have
+    demoted, and the artifact stops describing the deployed system precisely in
+    the unsearched-researcher scenario this metric exists to measure.
+
+    🔴 r4 — and "the same derivation" is a claim that has to be re-earned every
+    time production's changes. This function asked ``unsearched_agents``, which
+    omits an agent the ledger never observed; when the production path moved to
+    positive receipts over PRESENT payloads, this one silently became the more
+    permissive of the two and the docstring above went from true to false
+    without a line of it changing. Fixing a class means sweeping every site
+    that makes the inference, not the one review pointed at.
+
+    ``present_keys`` is the caller's ``SessionStateAccessor.present_discovery_keys``
+    — required rather than defaulted, because a default here is exactly how the
+    two derivations drift apart again.
+    """
+    searched = langfuse_plugin.searched_agents(RESEARCHER_PAYLOAD_KEYS)
+    return sorted(
+        key
+        for name, key in RESEARCHER_PAYLOAD_KEYS.items()
+        if key in present_keys and name not in searched
+    )
+
+
+def apply_production_grounding_downgrade(itinerary_data, grounding_state):
+    """Apply production's match-type downgrade to a composed eval itinerary.
+
+    The eval extracts JSON straight out of the composer's text and therefore
+    bypasses ``extract_itinerary_from_response``, which is where production
+    demotes literal/historical stops that no searched researcher supports. The
+    judge then scored claims the product would never have shipped.
+
+    Mutates and returns ``itinerary_data`` (envelope or bare itinerary, both
+    shapes occur -- see ``count_itinerary_cities``).
+
+    r3: both ways this can quietly do nothing now say so. A dict that is
+    neither an envelope nor a bare itinerary used to fall through to a
+    zero-city loop and return untouched, so the results file could not
+    distinguish "gated, nothing to change" from "shape unrecognised, nothing
+    gated" -- which is exactly the eval-stopped-representing-production
+    failure this function was added to fix, surviving as a property of the
+    fix. And a session whose fail-closed pass never ran fails the guard open;
+    that is the right default for an eval, but it must not be silent.
+    """
+    if not isinstance(itinerary_data, dict):
+        return itinerary_data
+    inner = itinerary_data.get("itinerary")
+    payload = inner if isinstance(inner, dict) else itinerary_data
+    if not isinstance(payload.get("cities"), list):
+        logger.warning(
+            "eval_grounding_downgrade_shape_unrecognised",
+            keys=",".join(sorted(k for k in payload if isinstance(k, str))[:10]),
+        )
+        return itinerary_data
+    if not grounding_state.discovery_verification_ran:
+        logger.warning(
+            "eval_grounding_downgrade_no_verdict",
+            reason="unverified_discovery key absent; guard fails open",
+        )
+    downgrade_ungrounded_match_types(
+        payload,
+        grounding_state.grounding_research_text,
+        grounding_state.all_discovery_unverified,
+    )
+    return itinerary_data
+
+
+def summarize_search_grounding(langfuse_plugin) -> Dict[str, Any]:
+    """Which discovery researchers actually called google_search (MYS-817).
+
+    A DETERMINISTIC fact, reported beside the judge's scores rather than
+    folded into them. The judge grades itinerary quality and has no way to
+    tell a searched answer from a remembered one — which is precisely how
+    MYS-816 went unnoticed: a researcher that skips the search still returns a
+    plausible itinerary that scores fine.
+
+    Report-only for now, deliberately. Skips are currently near-universal
+    (~1-2 of 4 researchers on most runs), so a hard gate would be red on every
+    run from day one and would simply get switched off. Turn `grounded` vs
+    `total` into a pass rule once MYS-816's fix has driven it green.
+
+    THREE-WAY, not two-way. `researchers_grounded` counts only researchers
+    POSITIVELY observed calling google_search; a researcher the ledger never
+    saw at all is reported as `unobserved`, never silently folded into either
+    side. Deriving it as `total - len(unsearched)` was the bug this docstring
+    used to describe as a feature: `unsearched_agents` omits a never-observed
+    agent by design, so an empty ledger — a broken observation seam — reported
+    a clean 4/4, and a partial ledger inflated the number the same way. That is
+    the MYS-492 class the enforcement path already had to fix: "everything was
+    verified" must be a measurement, never an inference from an absence.
+
+    Invariant: grounded + unsearched + unobserved == total.
+    """
+    searched = sorted(langfuse_plugin.searched_agents(DISCOVERY_RESEARCHER_AUTHORS))
+    unsearched = sorted(langfuse_plugin.unsearched_agents(DISCOVERY_RESEARCHER_AUTHORS))
+    accounted = set(searched) | set(unsearched)
+    unobserved = sorted(a for a in DISCOVERY_RESEARCHER_AUTHORS if a not in accounted)
+    return {
+        "researchers_total": len(DISCOVERY_RESEARCHER_AUTHORS),
+        "researchers_grounded": len(searched),
+        "unsearched": unsearched,
+        "unobserved": unobserved,
+    }
+
+
+def aggregate_search_grounding(
+    case_results: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Roll the per-case grounding facts up to a dataset-level view.
+
+    Returns None when no case carried the field (an older results file, or a
+    run that failed before discovery), so the summary can omit the block
+    rather than print a misleading all-zero one.
+
+    `cases_fully_grounded` is `grounded == total`, NOT "nothing in `unsearched`".
+    The second form counts a case whose ledger observed nobody at all as fully
+    grounded — the same absence-as-evidence inversion `summarize_search_grounding`
+    fixes one level down.
+
+    ⚠️ Forward-only, and the previous version of this docstring overclaimed
+    (r3). It does not crash on a results file written before `unobserved`
+    existed, but those files carry a `researchers_grounded` produced by the
+    old `total - len(unsearched)` subtraction -- so a broken-ledger case was
+    serialised as a clean 4/4, and `grounded == total` still counts it fully
+    grounded. Old numbers cannot be repaired from here; only runs recorded
+    after `summarize_search_grounding` became positive-receipt-only are
+    trustworthy.
+    """
+    present = [c["search_grounding"] for c in case_results if c.get("search_grounding")]
+    if not present:
+        return None
+
+    def by_frequency(counts: Dict[str, int]) -> Dict[str, int]:
+        return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+    offenders: Dict[str, int] = {}
+    unobserved_counts: Dict[str, int] = {}
+    for entry in present:
+        for agent in entry.get("unsearched") or []:
+            offenders[agent] = offenders.get(agent, 0) + 1
+        for agent in entry.get("unobserved") or []:
+            unobserved_counts[agent] = unobserved_counts.get(agent, 0) + 1
+    return {
+        "cases": len(present),
+        "cases_fully_grounded": sum(
+            1
+            for e in present
+            if e.get("researchers_total")
+            and e.get("researchers_grounded") == e.get("researchers_total")
+        ),
+        "researchers_grounded": sum(e.get("researchers_grounded", 0) for e in present),
+        "researchers_total": sum(e.get("researchers_total", 0) for e in present),
+        # Which researcher skips most often — the actionable number, since the
+        # offender varies run to run rather than being one broken agent.
+        "unsearched_by_agent": by_frequency(offenders),
+        # Kept separate from the offenders: a researcher we never saw is an
+        # instrumentation failure to chase, not a model that ignored its prompt.
+        "unobserved_by_agent": by_frequency(unobserved_counts),
+    }
+
+
+def count_scored_cases(result: Dict[str, Any]) -> int:
+    """Cases in a dataset result that actually carry judge scores."""
+    return sum(1 for c in (result.get("case_results") or []) if c.get("scores"))
+
+
+def dataset_failure_reason(result: Dict[str, Any]) -> Optional[str]:
+    """Why this dataset result should fail CI, or None if it passes.
+
+    "The judge scored nothing" is a failure in its own right (MYS-825). On
+    2026-08-09 the judge model began answering 404; because each case caught
+    its own scoring error, all 18 cases recorded ``scores: None`` and the run
+    still exited 0 under "✅ All evaluations completed successfully". A quality
+    gate that measured nothing must not report success — "no result" is the one
+    outcome that looks identical to a passing one, so it has to be called out
+    explicitly rather than inferred from the numbers nobody reads.
+
+    An empty dataset (no cases at all) is NOT a failure; the caller reports
+    that separately as a configuration state.
+    """
+    if "error" in result:
+        return f"ERROR: {result['error']}"
+
+    failed = result.get("failed_cases", 0)
+    if failed:
+        return (
+            f"ERROR: {failed} case(s) failed evaluation "
+            f"(out of {result.get('total_cases', 0)})"
+        )
+
+    skipped = result.get("skipped_cases", 0)
+    if skipped:
+        return f"ERROR: {skipped} case(s) skipped due to parsing failures"
+
+    evaluated = result.get("evaluated_cases", 0)
+    if evaluated > 0 and count_scored_cases(result) == 0:
+        return (
+            f"ERROR: the judge scored 0 of {evaluated} evaluated case(s) — "
+            "this run measured nothing. Check the judge model in "
+            "evaluation/tools/llm_scorer.py (_DEFAULT_JUDGE_MODEL); model "
+            "retirements surface here as a per-case 404."
+        )
+
+    return None
 
 
 def select_itinerary_datasets(
@@ -485,6 +723,12 @@ async def run_evaluation_on_dataset(
         # 100% of prod traffic takes (MYS-392). Gates read the shapes
         # separately — never a silent blend.
         "by_shape": _summarize_by_shape(case_results),
+        # Deterministic grounding roll-up (MYS-817). Kept OUT of the judge
+        # scores on purpose: it is a measured fact about whether the
+        # researchers searched, not an opinion about the output. None when no
+        # case reached discovery, so an all-zero block never reads as "nothing
+        # was grounded". No pass rule yet — see summarize_search_grounding.
+        "search_grounding": aggregate_search_grounding(case_results),
     }
 
     logger.info(
@@ -661,6 +905,14 @@ Find cities, landmarks, and author-related sites, then group them into practical
             )
             region_analysis = session.state.get("region_analysis", {})
 
+            # Deterministic grounding check (MYS-817). The judge scores output
+            # QUALITY and cannot tell a searched answer from a remembered one,
+            # which is how MYS-816 stayed invisible: a researcher that skips
+            # google_search still produces a plausible, well-scoring itinerary.
+            # Read off the plugin's ledger, which is populated regardless of
+            # whether Langfuse itself is enabled.
+            search_grounding = summarize_search_grounding(langfuse_plugin)
+
             logger.info(
                 "eval_regions_discovered",
                 num_regions=len(region_analysis.get("regions", []))
@@ -739,9 +991,17 @@ Find cities, landmarks, and author-related sites, then group them into practical
             grounding_session = await session_service.get_session(
                 app_name="storyland", user_id=user_id, session_id=session_id
             )
-            grounding_state = SessionStateAccessor(
-                grounding_session.state if grounding_session else {}
+            # Carry the unverified-researcher fact into the eval's state the
+            # way discover() carries it in production, so grounding_research_text
+            # and all_discovery_unverified read the same here as they do there.
+            grounding_state_dict = dict(grounding_session.state if grounding_session else {})
+            grounding_state_dict[SessionStateKeys.UNVERIFIED_DISCOVERY] = (
+                unverified_payload_keys(
+                    langfuse_plugin,
+                    SessionStateAccessor(grounding_state_dict).present_discovery_keys,
+                )
             )
+            grounding_state = SessionStateAccessor(grounding_state_dict)
             composition_prompt = build_composition_prompt(
                 exact_title,
                 exact_author,
@@ -778,10 +1038,17 @@ Find cities, landmarks, and author-related sites, then group them into practical
                             except json.JSONDecodeError as e:
                                 logger.warning("eval_json_parse_error", error=str(e))
 
+            # Score what production would have SHIPPED, not what the composer
+            # said (MYS-817). This is the one place the eval can diverge from
+            # the deployed pipeline without anything going red.
+            itinerary_data = apply_production_grounding_downgrade(
+                itinerary_data, grounding_state
+            )
+
             logger.info(
                 "eval_composition_complete",
                 itinerary_created=itinerary_data is not None,
-                num_cities=len(itinerary_data.get("cities", [])) if itinerary_data else 0,
+                num_cities=count_itinerary_cities(itinerary_data),
             )
 
             root_span.update(
@@ -789,7 +1056,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
                 metadata={
                     "phase_3_complete": True,
                     "itinerary_created": itinerary_data is not None,
-                    "num_cities": len(itinerary_data.get("cities", [])) if itinerary_data else 0,
+                    "num_cities": count_itinerary_cities(itinerary_data),
                 }
             )
         except Exception as e:
@@ -838,7 +1105,6 @@ Find cities, landmarks, and author-related sites, then group them into practical
                     itinerary=itinerary_data,
                     preferences=preferences,
                     expected_output=expected_output,
-                    model_name="gemini-2.5-flash-lite",
                 )
 
                 root_span.score_trace(
@@ -880,7 +1146,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
                     "geographical_accuracy": scores.geographical_accuracy,
                     "engagement": scores.engagement,
                     "average": round(scores.average_score(), 2),
-                    "scoring_method": "llm_judge_gemini_flash_lite",
+                    "scoring_method": "llm_judge",
                     "scored_at": datetime.now().isoformat(),
                 }
                 # Present only when scored (no-preference cases average 5 dims).
@@ -899,8 +1165,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
                             author=exact_author,
                             quality_criteria=quality_criteria,
                             itinerary=itinerary_data,
-                            model_name="gemini-2.5-flash-lite",
-                        )
+                                )
                         scores_data["criteria_coverage"] = coverage
                         root_span.score_trace(
                             name="criteria_coverage",
@@ -946,9 +1211,11 @@ Find cities, landmarks, and author-related sites, then group them into practical
             # initial_state (always bound), not the scoring-block local.
             "has_preferences": bool(initial_state.get("user:preferences")),
             "itinerary_created": itinerary_data is not None,
-            "num_cities": len(itinerary_data.get("cities", [])) if itinerary_data else 0,
+            "num_cities": count_itinerary_cities(itinerary_data),
             "num_regions": len(selected_regions),
             "token_usage": token_stats,
+            # Deterministic, not judged — see summarize_search_grounding.
+            "search_grounding": search_grounding,
             # Full payload + the preferences the judge saw, so results JSONs
             # are self-contained for human review and judge calibration
             # (previously only Langfuse traces carried the itinerary).
@@ -1247,23 +1514,46 @@ def main():
         total_evaluated += evaluated
         total_placeholders += placeholders
 
-        # Failure = explicit error OR failed cases OR skipped cases (any dataset
-        # failure should fail CI). Empty dataset (total_cases == 0) is NOT a failure.
-        has_error = 'error' in result
-        has_failures = failed_cases > 0
-        has_skipped = skipped_cases > 0
+        # Failure = explicit error, failed cases, skipped cases, OR a judge that
+        # scored nothing (MYS-825). Empty dataset (total_cases == 0) is NOT a
+        # failure. See dataset_failure_reason for why "measured nothing" counts.
+        failure = dataset_failure_reason(result)
 
-        if has_error or has_failures or has_skipped:
+        if failure:
             total_failed_datasets += 1
-            if has_error:
-                print(f"ERROR: {result['error']}")
-            elif has_failures:
-                print(f"ERROR: {failed_cases} case(s) failed evaluation (out of {total_cases})")
-            elif has_skipped:
-                print(f"ERROR: {skipped_cases} case(s) skipped due to parsing failures")
+            print(failure)
         elif total_cases == 0:
             total_skipped += 1
             print("INFO: Dataset is empty (no test cases)")
+        else:
+            unscored = evaluated - count_scored_cases(result)
+            if unscored > 0:
+                print(f"WARNING: {unscored} of {evaluated} case(s) evaluated but unscored")
+
+        # Deterministic (not judged): did the researchers actually search?
+        grounding = result.get("search_grounding")
+        if grounding:
+            print(
+                f"Search grounding [deterministic]: "
+                f"{grounding['researchers_grounded']}/{grounding['researchers_total']} "
+                f"researcher runs grounded; "
+                f"{grounding['cases_fully_grounded']}/{grounding['cases']} "
+                f"case(s) fully grounded"
+            )
+            if grounding["unsearched_by_agent"]:
+                offenders = ", ".join(
+                    f"{agent}×{n}" for agent, n in grounding["unsearched_by_agent"].items()
+                )
+                print(f"  skipped google_search: {offenders}")
+            if grounding.get("unobserved_by_agent"):
+                missing = ", ".join(
+                    f"{agent}×{n}"
+                    for agent, n in grounding["unobserved_by_agent"].items()
+                )
+                print(
+                    "  NEVER OBSERVED (instrumentation, not the model): "
+                    f"{missing}"
+                )
 
     print("\n" + "=" * 60)
     print(f"Total: {total_evaluated} real evaluation(s), {total_placeholders} placeholder(s)")

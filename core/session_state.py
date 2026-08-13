@@ -35,6 +35,9 @@ class SessionStateKeys:
     BOOK_RECS_IN_PROGRESS = "book_recs_in_progress"
     BOOK_RECOMMENDATION_CHIP_ID = "book_recommendation_chip_id"
     BOOK_RECOMMENDATION_CHIP = "book_recommendation_chip"
+    # Discovery payload keys whose researcher never called google_search on
+    # this run (MYS-816). Written by discover(), read by grounding_research_text.
+    UNVERIFIED_DISCOVERY = "unverified_discovery"
     USER_PREFERENCES = "user:preferences"
     USER_LOCATION = "user_location"
     JOB_FAILED = "job_failed"
@@ -146,6 +149,107 @@ class SessionStateAccessor:
         return self._state.get(SessionStateKeys.AUTHOR_SITES)
 
     @property
+    def unverified_discovery(self) -> List[str]:
+        """Discovery payload keys produced without a search (MYS-816)."""
+        value = self._state.get(SessionStateKeys.UNVERIFIED_DISCOVERY)
+        return value if isinstance(value, list) else []
+
+    @property
+    def discovery_verification_ran(self) -> bool:
+        """Did the fail-closed pass actually write a verdict for this run?
+
+        The positive representation of "every researcher searched" (MYS-816
+        r3). ``unverified_discovery`` returns ``[]`` for two opposite states:
+        the pass ran and cleared every researcher, and the pass never ran at
+        all (an early error, a pre-v3 cache entry, a broken observation seam).
+        Both make ``all_discovery_unverified`` False, so the guard fails OPEN
+        -- and until now it did so silently, with nothing anywhere able to say
+        which of the two had happened.
+
+        That is the same absence-as-evidence shape this ticket has had to
+        close three times over: on the metric, on the ledger, and here on the
+        state that feeds the guard. The presence of the KEY is the receipt, so
+        the executor writes it unconditionally -- including the empty list --
+        and the cache bundle replays it by TYPE rather than by truthiness. An
+        empty list is a verdict; a missing key is silence.
+        """
+        return isinstance(
+            self._state.get(SessionStateKeys.UNVERIFIED_DISCOVERY), list
+        )
+
+    def _discovery_payloads(self) -> List[tuple]:
+        """The (key, value) discovery payloads that are actually present."""
+        return [
+            (key, value)
+            for key, value in (
+                (SessionStateKeys.BOOK_CONTEXT, self.book_context),
+                (SessionStateKeys.CITY_DISCOVERY, self.city_discovery),
+                (SessionStateKeys.LANDMARK_DISCOVERY, self.landmark_discovery),
+                (SessionStateKeys.AUTHOR_SITES, self.author_sites),
+            )
+            if value
+        ]
+
+    @property
+    def present_discovery_keys(self) -> frozenset:
+        """The discovery payload keys this run actually produced.
+
+        The enforcement path needs this to tell "the researcher did not run"
+        from "the researcher ran and we have no receipt for it" (MYS-816 r4).
+        A payload's EXISTENCE is proof its researcher ran, and it is the only
+        such proof available downstream — the ledger cannot supply it, because
+        the ledger being empty is exactly the state in question.
+        """
+        return frozenset(key for key, _ in self._discovery_payloads())
+
+    @property
+    def all_discovery_unverified(self) -> bool:
+        """True when NO PRESENT discovery payload is usable as evidence.
+
+        The difference between *no evidence* and *disqualified evidence*, and
+        they need opposite handling (MYS-816 r2). ``grounding_research_text``
+        returns "" for both: the local-atmosphere path has no discovery
+        research at all, and a run whose researchers skipped ``google_search``
+        has research that may not be used as proof. The downstream guard is
+        fail-OPEN on an empty haystack -- correct for the first case, exactly
+        backwards for the second, where every literal claim survives *because*
+        nothing was verified. Callers pass this to
+        ``downgrade_ungrounded_match_types`` so the second case fails closed.
+
+        🔴 **The exact trigger, because every earlier description of this flag
+        overstated it** (MYS-816 r3). It is NOT "the run where all four
+        researchers skipped". ``_discovery_payloads`` filters on ``if value``,
+        so an EMPTY payload counts as absent, and ``all()`` over a
+        single-element list is True. The real rule is:
+
+            at least one discovery payload is non-empty, and every non-empty
+            one came from a researcher with no search receipt.
+
+        A run where three researchers returned nothing and the fourth answered
+        from memory therefore blanket-demotes the whole itinerary -- and that
+        is CORRECT, which is why the trigger is documented rather than
+        tightened. Requiring the full researcher set would restore the
+        fail-open at a slightly different maximum: the haystack in that run is
+        empty (the one payload present is excluded as unverified), so without
+        the flag every literal claim would survive on no evidence at all --
+        precisely the inversion r2 fixed. The words were wrong, not the rule.
+        Pinned by ``test_a_single_unverified_payload_still_disqualifies`` and
+        its converse.
+
+        False when no discovery ran, which keeps the local-atmosphere path
+        untouched -- and ALSO false when the fail-closed pass never ran, which
+        is a different state entirely. This property cannot tell those two
+        apart and does not try; ``discovery_verification_ran`` is the positive
+        receipt that separates them, and callers that fail open on this flag
+        should read it before treating False as "everything checked out".
+        """
+        present = self._discovery_payloads()
+        if not present:
+            return False
+        skip = set(self.unverified_discovery)
+        return all(key in skip for key, _ in present)
+
+    @property
     def grounding_research_text(self) -> str:
         """Concatenate the grounded discovery research into one text blob.
 
@@ -155,15 +259,23 @@ class SessionStateAccessor:
         chain actually found. Returns "" when no discovery research is present
         (e.g. the local-atmosphere path), which callers treat as "cannot prove
         anything ungrounded" and leave labels unchanged.
+
+        **Payloads whose researcher never searched are excluded** (MYS-816).
+        Researchers skip ``google_search`` stochastically -- roughly one to two
+        of the four on most runs -- and still emit places from model memory
+        (an observed run produced the author site "Personal Office"). Those
+        names are not evidence, so they must not appear in the haystack that
+        ``downgrade_ungrounded_match_types`` treats as proof. Excluding them
+        is the entire enforcement: a composer stop traceable only to an
+        unsearched payload stops qualifying as grounded and is demoted to the
+        weakest claim. The composer still SEES those payloads -- they are
+        often correct, and dropping them would thin results -- they just can
+        no longer back a literal/historical claim.
         """
+        skip = set(self.unverified_discovery)
         parts: List[str] = []
-        for value in (
-            self.book_context,
-            self.city_discovery,
-            self.landmark_discovery,
-            self.author_sites,
-        ):
-            if not value:
+        for key, value in self._discovery_payloads():
+            if key in skip:
                 continue
             if isinstance(value, str):
                 parts.append(value)

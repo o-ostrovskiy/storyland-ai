@@ -225,6 +225,73 @@ Failed jobs can be retried by calling `/compose` again with the same `job_id`; t
 
 StoryLand AI uses Google Gemini models (default: `gemini-3.1-flash-lite`) for all agents, chosen for native ADK integration, fast parallel execution (sub-2s response times), and excellent structured output adherence across 16 Pydantic data models. The complete workflow takes 60-100 seconds end-to-end with parallel discovery providing 3x speedup over sequential execution.
 
+### Search-grounding observability
+
+Researcher agents ground their answers with Gemini's built-in `google_search`.
+Whether a given call *actually* searched is not something the prompt can
+guarantee, so it is logged. Four events, all INFO:
+
+| Event | Where | Meaning |
+|-------|-------|---------|
+| `search_grounding_captured` | every model response | The call ran `google_search`. Carries `query_count`, `source_count`, `source_hosts`. |
+| `search_grounding_absent` | every model response | No grounding metadata came back. **Expected for every formatter** (they are tool-less by design — ADK forbids `tools` + `output_schema` on one agent); notable for anything named `*_researcher`. |
+| `discovery_grounding_audit` | end of a fresh `discover()` | How many entries in each discovery payload trace back to the researchers' text: `kind`, `grounded`, `total`. |
+| `discovery_grounding_no_capture` | end of a fresh `discover()` | No researcher text or no entries — "cannot say", never "nothing was grounded". |
+| `discovery_unverified_payloads` | fresh `discover()`, when a researcher skipped | Names the researchers that never searched and the payloads struck from the grounding evidence. |
+
+Read them together: `search_grounding_absent agent=city_researcher` means that
+researcher answered from model memory.
+
+**Measured rate (2026-08-10, `gemini-3.1-flash-lite`):** roughly one to two of
+the four researchers skip on most runs, on realist and fictional books alike.
+Which one varies run to run — all four have been observed skipping, and a
+skipped researcher still emits places (one run produced the author site
+"Personal Office"). It is stochastic, not a broken prompt clause.
+
+### Fail closed: unsearched researchers cannot ground a claim (MYS-816)
+
+`discover()` records which researchers searched and writes the payloads of
+those that did not to `unverified_discovery` in session state.
+`SessionStateAccessor.grounding_research_text` then omits them, so at compose
+time the existing `downgrade_ungrounded_match_types` guard cannot find those
+names as evidence and demotes any stop resting on them to `match_type="vibe"`
+with `grounding_source` cleared.
+
+No new enforcement was added — the haystack was narrowed and the existing
+guard did the rest. Notes that matter when changing this:
+
+- The composer still **receives** unverified payloads; they are often correct
+  and dropping them would thin results. They just cannot back a
+  `literal`/`historical` claim.
+- The flag rides in the discovery **cache bundle** (`discover:v3:`). A hit that
+  dropped it would serve unprotected results on the most-requested titles.
+- An agent that never *ran* is not "unsearched" — fail open on missing
+  evidence, the same rule every grounding guard here follows.
+- The `discovery_grounding_audit` numbers are provenance-aware for the same
+  reason: unioning all four researchers' text let a searching researcher
+  vouch for a non-searching one, which is why this read as 100% grounded
+  when it was first measured.
+
+Query strings are deliberately never logged — they embed the user's book
+title, and `common/logging.py` forwards INFO logs to Sentry against an
+allowlist that excludes user content. Full source URIs go to Langfuse
+generation metadata instead. Note those URIs are `vertexaisearch.cloud.google.com`
+redirects, not publisher domains.
+
+**Gemini reports a search on one of two channels**, and `extract_search_metadata`
+reads both — checking only the first reports a searching agent as unsearched:
+
+| Request shape | Channel | Sources? |
+|---------------|---------|----------|
+| built-in `google_search` alone | `grounding_metadata.web_search_queries` | yes, `grounding_chunks[].web` |
+| plus `tool_config.include_server_side_tool_invocations` | `tool_call` parts on the response content; `grounding_metadata` is `None` | no — `tool_response` carries only Google's suggestion-chip markup |
+
+The second shape is not optional where it applies: the API rejects a built-in
+tool alongside any function declaration without that flag (400
+`INVALID_ARGUMENT`), and ADK injects a `set_model_response` declaration into
+every agent carrying both `tools` and `output_schema`. A queries-only receipt
+from that channel is fully grounded, not degraded.
+
 ## Configuration
 
 All configuration is via environment variables in `.env`. Copy `.env.example` to get started.
@@ -306,7 +373,8 @@ storyland-ai/
 │
 ├── common/              # Shared utilities
 │   ├── config.py        # Configuration management
-│   └── logging.py       # Structured logging (structlog)
+│   ├── logging.py       # Structured logging (structlog)
+│   └── search_grounding.py  # Search receipts (queries/sources) off a model response
 │
 ├── plugins/             # ADK runner plugins
 │   └── langfuse_plugin.py  # Langfuse observability & token tracking
@@ -398,7 +466,7 @@ The unit suite (`tests/unit/`) by area — per-module counts rot with every PR, 
 | Place features | `test_place_key.py`, `test_place_to_book.py`, `test_place_to_book_eval.py` |
 | Quality & guardrails | `test_llm_scorer.py`, `test_tone_guardrail.py`, `test_recommendation_floor.py`, `test_judge_calibration.py`, `test_spot_check.py` |
 | Eval harnesses | `test_local_atmosphere_eval.py`, `test_expansion_eval.py`, `test_eval_dataset_routing.py` |
-| Observability | `test_sentry.py`, `test_langfuse_plugin_concurrency.py`, `test_langfuse_pricing.py` |
+| Observability | `test_sentry.py`, `test_langfuse_plugin_concurrency.py`, `test_langfuse_pricing.py`, `test_search_grounding.py`, `test_langfuse_search_grounding.py`, `test_discovery_grounding_audit.py`, `test_unverified_discovery_downgrade.py` |
 | Sessions & ops | `test_services.py`, `test_session_retention.py` |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).

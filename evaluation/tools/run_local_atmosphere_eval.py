@@ -44,6 +44,7 @@ from typing import Any, Dict, List, Optional, Tuple
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from common.logging import get_logger
+from evaluation.tools.llm_scorer import _DEFAULT_JUDGE_MODEL
 from models.itinerary import ComposerEnvelope
 
 try:
@@ -226,7 +227,7 @@ def build_mechanism_section() -> Dict[str, Any]:
         ],
         "llm_judge": {
             "scorer": "evaluation/tools/llm_scorer.score_itinerary",
-            "model": "gemini-2.5-flash-lite",
+            "model": _DEFAULT_JUDGE_MODEL,
             "dimensions": list(JUDGE_DIMS_ALWAYS) + ["preference_adherence"],
             "note": "preference_adherence reported only for cases with "
                     "user:preferences; per-shape aggregates split on that flag",
