@@ -162,13 +162,21 @@ class TestFetchHumanScores:
 
 
 class TestHydrateCandidate:
-    def _trace(self, output, input_data=None, scores=None, html_path="/project/p/traces/t1"):
-        trace = MagicMock()
-        trace.output = output
-        trace.input = input_data or {}
-        trace.scores = scores or []
-        trace.html_path = html_path
-        return trace
+    """hydrate_candidate reads the v2 Observations API (root observation
+    I/O arrives as raw JSON strings) plus the v3 Scores API — the legacy
+    GET /traces/{id} it replaced is served only until 2026-11-16."""
+
+    def _obs_page(self, output, input_data=None, parent=None):
+        import json as _json
+
+        obs = MagicMock()
+        obs.parent_observation_id = parent
+        obs.output = _json.dumps(output) if output is not None else None
+        obs.input = _json.dumps(input_data) if input_data is not None else None
+        page = MagicMock()
+        page.data = [obs]
+        page.meta.cursor = None
+        return page
 
     def _judge_score(self, name, value):
         score = MagicMock()
@@ -177,50 +185,76 @@ class TestHydrateCandidate:
         score.source = "API"
         return score
 
+    def _wire(self, langfuse, obs_page, scores):
+        langfuse.api.observations.get_many.return_value = obs_page
+        langfuse.api.scores_v3.get_many_v3.return_value = MagicMock(data=scores)
+
     def test_builds_manifest_entry(self):
         langfuse = MagicMock()
-        langfuse.api.trace.get.return_value = self._trace(
-            output={"summary": "an itinerary"},
-            input_data={
-                "book_title": "Dracula",
-                "author": "Bram Stoker",
-                "preferences": {"budget": "low"},
-            },
+        self._wire(
+            langfuse,
+            self._obs_page(
+                output={"summary": "an itinerary"},
+                input_data={
+                    "book_title": "Dracula",
+                    "author": "Bram Stoker",
+                    "preferences": {"budget": "low"},
+                },
+            ),
             scores=[self._judge_score("book_relevance", 4.0)],
         )
         entry = hydrate_candidate(
-            langfuse, "https://lf.example", _candidate("books_v1", "q1", "run1")
+            langfuse, "https://lf.example", _candidate("books_v1", "q1", "run1"),
+            project_id="p",
         )
         assert entry["book_title"] == "Dracula"
         assert entry["has_preferences"] is True
         assert entry["judge_scores"]["book_relevance"] == 4
         assert entry["judge_scores"]["engagement"] is None
-        assert entry["trace_url"] == "https://lf.example/project/p/traces/t1"
+        assert entry["trace_url"] == (
+            "https://lf.example/project/p/traces/trace-books_v1-q1-run1"
+        )
 
     def test_no_preferences_shape(self):
         langfuse = MagicMock()
-        langfuse.api.trace.get.return_value = self._trace(
-            output={"summary": "x"},
-            input_data={"book_title": "Wild", "preferences": {}},
+        self._wire(
+            langfuse,
+            self._obs_page(
+                output={"summary": "x"},
+                input_data={"book_title": "Wild", "preferences": {}},
+            ),
             scores=[self._judge_score("engagement", 3.0)],
         )
         entry = hydrate_candidate(
             langfuse, "https://lf.example", _candidate("books_v1", "q1", "run1")
         )
         assert entry["has_preferences"] is False
+        # No project id -> no URL, but the entry still hydrates.
+        assert entry["trace_url"] is None
 
     def test_drops_trace_without_output(self):
         langfuse = MagicMock()
-        langfuse.api.trace.get.return_value = self._trace(output=None)
+        self._wire(langfuse, self._obs_page(output=None), scores=[])
+        assert hydrate_candidate(
+            langfuse, "h", _candidate("books_v1", "q1", "run1")
+        ) is None
+
+    def test_drops_trace_without_root_observation(self):
+        # Every observation has a parent: the root never arrived (partial
+        # ingest). Must drop, not crash on root=None.
+        langfuse = MagicMock()
+        self._wire(
+            langfuse,
+            self._obs_page(output={"summary": "x"}, parent="some-parent"),
+            scores=[self._judge_score("engagement", 3.0)],
+        )
         assert hydrate_candidate(
             langfuse, "h", _candidate("books_v1", "q1", "run1")
         ) is None
 
     def test_drops_trace_without_judge_scores(self):
         langfuse = MagicMock()
-        langfuse.api.trace.get.return_value = self._trace(
-            output={"summary": "x"}, scores=[]
-        )
+        self._wire(langfuse, self._obs_page(output={"summary": "x"}), scores=[])
         assert hydrate_candidate(
             langfuse, "h", _candidate("books_v1", "q1", "run1")
         ) is None
@@ -229,31 +263,46 @@ class TestHydrateCandidate:
         langfuse = MagicMock()
         human = self._judge_score("book_relevance", 1.0)
         human.source = "ANNOTATION"
-        langfuse.api.trace.get.return_value = self._trace(
-            output={"summary": "x"}, scores=[human]
-        )
+        self._wire(langfuse, self._obs_page(output={"summary": "x"}), scores=[human])
         assert hydrate_candidate(
             langfuse, "h", _candidate("books_v1", "q1", "run1")
         ) is None
 
+    def test_root_found_on_later_page(self):
+        # Pages sort newest-first, so the root span (started first) lands on
+        # the LAST page of a large trace — pagination must reach it.
+        langfuse = MagicMock()
+        first_page = self._obs_page(output={"leaf": True}, parent="the-root")
+        first_page.meta.cursor = "next"
+        last_page = self._obs_page(output={"summary": "x"})
+        langfuse.api.observations.get_many.side_effect = [first_page, last_page]
+        langfuse.api.scores_v3.get_many_v3.return_value = MagicMock(
+            data=[self._judge_score("engagement", 3.0)]
+        )
+        entry = hydrate_candidate(
+            langfuse, "h", _candidate("books_v1", "q1", "run1")
+        )
+        assert entry is not None
+        assert langfuse.api.observations.get_many.call_count == 2
+
     def test_fetch_error_drops_candidate_after_retries(self):
         langfuse = MagicMock()
-        langfuse.api.trace.get.side_effect = Exception("timeout")
+        langfuse.api.observations.get_many.side_effect = Exception("timeout")
         assert hydrate_candidate(
             langfuse, "h", _candidate("books_v1", "q1", "run1"),
             attempts=3, retry_delays=(0,),
         ) is None
-        assert langfuse.api.trace.get.call_count == 3
+        assert langfuse.api.observations.get_many.call_count == 3
 
     def test_transient_fetch_error_recovers(self):
         langfuse = MagicMock()
-        langfuse.api.trace.get.side_effect = [
+        langfuse.api.observations.get_many.side_effect = [
             Exception("timeout"),
-            self._trace(
-                output={"summary": "x"},
-                scores=[self._judge_score("engagement", 3.0)],
-            ),
+            self._obs_page(output={"summary": "x"}),
         ]
+        langfuse.api.scores_v3.get_many_v3.return_value = MagicMock(
+            data=[self._judge_score("engagement", 3.0)]
+        )
         entry = hydrate_candidate(
             langfuse, "h", _candidate("books_v1", "q1", "run1"),
             attempts=3, retry_delays=(0,),
