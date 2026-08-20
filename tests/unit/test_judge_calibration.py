@@ -346,6 +346,44 @@ class TestHydrateCandidate:
         assert entry is not None
         assert entry["judge_scores"]["book_relevance"] == 4
 
+    def test_rescored_trace_keeps_the_newest_judge_score(self):
+        # Scores API v3 returns newest first. A rescored trace carries several
+        # judge scores per dimension, and taking the last one calibrates the
+        # human labels against a superseded judge result -- silently, since
+        # every value in the list is a real score. fetch_human_scores() has
+        # kept this guard since it was written; this loop did not.
+        langfuse = MagicMock()
+        newest = self._judge_score("book_relevance", 5.0)
+        oldest = self._judge_score("book_relevance", 2.0)
+        self._wire(
+            langfuse,
+            self._obs_page(output={"summary": "x"}),
+            scores=[newest, oldest],
+        )
+        entry = hydrate_candidate(
+            langfuse, "h", _candidate("books_v1", "q1", "run1")
+        )
+        assert entry["judge_scores"]["book_relevance"] == 5
+
+    def test_an_annotation_never_shadows_a_later_judge_score(self):
+        # The converse the newest-first guard could break: an ANNOTATION
+        # arriving first must not occupy the dimension and lock the judge
+        # score out. It is dropped before the slot is taken, so the judge
+        # score behind it still lands.
+        langfuse = MagicMock()
+        human = self._judge_score("book_relevance", 1.0)
+        human.source = "ANNOTATION"
+        judged = self._judge_score("book_relevance", 4.0)
+        self._wire(
+            langfuse,
+            self._obs_page(output={"summary": "x"}),
+            scores=[human, judged],
+        )
+        entry = hydrate_candidate(
+            langfuse, "h", _candidate("books_v1", "q1", "run1")
+        )
+        assert entry["judge_scores"]["book_relevance"] == 4
+
     def test_root_found_on_later_page(self):
         # Pages sort newest-first, so the root span (started first) lands on
         # the LAST page of a large trace — pagination must reach it.

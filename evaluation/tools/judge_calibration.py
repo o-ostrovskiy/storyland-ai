@@ -350,7 +350,19 @@ def hydrate_candidate(
         # judge score on the one it doesn't. Read the value, not the member.
         source = getattr(score, "source", None)
         source_value = getattr(source, "value", source)
-        if score.name in DIMENSIONS and source_value != "ANNOTATION":
+        # Codex P2, valid: v3 returns scores NEWEST FIRST, so a rescored trace
+        # carries several judge scores per dimension and assigning every match
+        # let the OLDEST win -- the manifest would then calibrate the human
+        # labels against a judge result that is no longer the judge's. The
+        # sibling loop in fetch_human_scores() below has carried exactly this
+        # guard (`dimension not in human_scores`) since it was written, with
+        # the ordering documented in its own comment: one rule, two hand-kept
+        # copies, and only one of them was kept.
+        if (
+            score.name in DIMENSIONS
+            and score.name not in judge_scores
+            and source_value != "ANNOTATION"
+        ):
             value = getattr(score, "value", None)
             if value is not None:
                 judge_scores[score.name] = int(value)
