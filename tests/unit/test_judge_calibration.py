@@ -5,7 +5,10 @@ Pure-logic coverage (selection, interleaving, agreement math) plus the
 Langfuse-facing helpers with mocked clients — no live API.
 """
 
+import enum
 from unittest.mock import MagicMock
+
+import pytest
 
 from evaluation.tools.judge_calibration import (
     DIMENSIONS,
@@ -18,6 +21,58 @@ from evaluation.tools.judge_calibration import (
     select_candidates,
 )
 from evaluation.tools.llm_scorer import SCORING_CRITERIA
+
+
+class _StrMixinSource(str, enum.Enum):
+    """The shape ``langfuse.api.core.enum.StrEnum`` degrades to below py3.11.
+
+    ``str(member)`` is "_StrMixinSource.ANNOTATION" here and "ANNOTATION" on
+    the native ``enum.StrEnum`` — which is why the source guard reads
+    ``.value`` instead of stringifying the member.
+    """
+
+    ANNOTATION = "ANNOTATION"
+    API = "API"
+
+
+class _PlainSource(enum.Enum):
+    ANNOTATION = "ANNOTATION"
+    API = "API"
+
+
+def _source_spellings():
+    """Every spelling of a score source hydrate_candidate can be handed.
+
+    The legacy API returned a plain string; v3 returns an enum member whose
+    ``str()`` depends on the interpreter. Pinning only the string is what let
+    the old guard pass on CI's 3.12 while inverting on the 3.10 this package
+    still supports, so the rows drive real members — including the pinned
+    SDK's own ``ScoreSource`` when it is importable.
+    """
+    cases = [
+        pytest.param("ANNOTATION", "API", id="plain-str"),
+        pytest.param(
+            _StrMixinSource.ANNOTATION, _StrMixinSource.API, id="str-enum-py310-shape"
+        ),
+        pytest.param(_PlainSource.ANNOTATION, _PlainSource.API, id="plain-enum"),
+    ]
+    if hasattr(enum, "StrEnum"):  # py>=3.11 shape, what CI actually runs
+        native = enum.StrEnum("_NativeSource", {"ANNOTATION": "ANNOTATION", "API": "API"})
+        cases.append(
+            pytest.param(native.ANNOTATION, native.API, id="native-strenum-py311")
+        )
+    try:  # the real member off the pinned SDK, so a v5 retype reds here
+        from langfuse.api.commons.types.score_source import ScoreSource
+
+        cases.append(
+            pytest.param(ScoreSource.ANNOTATION, ScoreSource.API, id="sdk-scoresource")
+        )
+    except ImportError:  # pragma: no cover - SDK layout moved; other rows still hold
+        pass
+    return cases
+
+
+SOURCE_SPELLINGS = _source_spellings()
 
 
 def _candidate(dataset, item_id, run_name):
@@ -259,14 +314,37 @@ class TestHydrateCandidate:
             langfuse, "h", _candidate("books_v1", "q1", "run1")
         ) is None
 
-    def test_annotation_scores_never_taken_as_judge_scores(self):
+    @pytest.mark.parametrize("annotation_source,api_source", SOURCE_SPELLINGS)
+    def test_annotation_scores_never_taken_as_judge_scores(
+        self, annotation_source, api_source
+    ):
+        # Human labels must never be read back as judge scores: that silently
+        # poisons the calibration pack with the very labels it is measured
+        # against. Driven for every spelling `source` can arrive in, because
+        # str(member) differs by interpreter version (see _source_spellings).
         langfuse = MagicMock()
         human = self._judge_score("book_relevance", 1.0)
-        human.source = "ANNOTATION"
+        human.source = annotation_source
         self._wire(langfuse, self._obs_page(output={"summary": "x"}), scores=[human])
         assert hydrate_candidate(
             langfuse, "h", _candidate("books_v1", "q1", "run1")
         ) is None
+
+    @pytest.mark.parametrize("annotation_source,api_source", SOURCE_SPELLINGS)
+    def test_judge_scores_survive_every_source_spelling(
+        self, annotation_source, api_source
+    ):
+        # Converse of the row above: the guard must drop ANNOTATION, not
+        # everything. A non-annotation source in the same spelling hydrates.
+        langfuse = MagicMock()
+        judged = self._judge_score("book_relevance", 4.0)
+        judged.source = api_source
+        self._wire(langfuse, self._obs_page(output={"summary": "x"}), scores=[judged])
+        entry = hydrate_candidate(
+            langfuse, "h", _candidate("books_v1", "q1", "run1")
+        )
+        assert entry is not None
+        assert entry["judge_scores"]["book_relevance"] == 4
 
     def test_root_found_on_later_page(self):
         # Pages sort newest-first, so the root span (started first) lands on

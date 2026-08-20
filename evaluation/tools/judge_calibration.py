@@ -292,6 +292,11 @@ def hydrate_candidate(
     Fetches retry on failure — Langfuse read endpoints time out transiently
     under burst reads, and a dropped candidate here silently shrinks the
     labeling pack.
+
+    This is the read-side slice only. The remaining deprecated calls in this
+    tree — ``dataset_run_items.create`` writes in the four eval tools and the
+    ``datasets.get_runs``/``get_run`` reads in ``collect_candidates`` — must
+    migrate together before the same 2026-11-16 cutoff; that work is MYS-909.
     """
     root = None
     scores_page = None
@@ -336,9 +341,16 @@ def hydrate_candidate(
 
     judge_scores: Dict[str, Optional[int]] = {}
     for score in scores_page.data if scores_page else []:
-        # str(): the v3 API types source as an enum; the ANNOTATION guard
-        # must keep excluding human labels either way.
-        if score.name in DIMENSIONS and str(getattr(score, "source", "")) != "ANNOTATION":
+        # The v3 API types `source` as langfuse.api.core.enum.StrEnum, which
+        # is enum.StrEnum on py>=3.11 (str(member) == "ANNOTATION") and falls
+        # back to `class StrEnum(str, Enum)` below it, where str(member) is
+        # "ScoreSource.ANNOTATION". CI runs 3.12; this package's own
+        # requires-python floor is 3.10, so a str()-based guard is correct on
+        # the interpreter that tests it and admits every human label as a
+        # judge score on the one it doesn't. Read the value, not the member.
+        source = getattr(score, "source", None)
+        source_value = getattr(source, "value", source)
+        if score.name in DIMENSIONS and source_value != "ANNOTATION":
             value = getattr(score, "value", None)
             if value is not None:
                 judge_scores[score.name] = int(value)
