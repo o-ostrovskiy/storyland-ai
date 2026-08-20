@@ -30,6 +30,7 @@ dependencies = [
     "sse-starlette>=2.0.0",
     "diskcache>=5.6.0",  # persistent SQLite-backed Discovery result cache (survives restart/redeploy)
     "sentry-sdk>=2.35.0,<3",  # error tracking; init is env-gated (SENTRY_DSN) in api/sentry.py
+    "sqlparse>=0.6.0",  # transitive via google-cloud-spanner (google-adk[db]), which allows >=0.4.4; floor lifts the lock off 0.5.5 (PYSEC-2026-3696/3697/3698/3699, all fixed in 0.6.0). Drop this pin when spanner floors it itself.
 ]
 
 [project.optional-dependencies]

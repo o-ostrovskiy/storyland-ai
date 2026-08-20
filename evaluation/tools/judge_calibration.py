@@ -232,25 +232,80 @@ def collect_candidates(
     return interleave_by_run(per_dataset_runs)
 
 
+def _parse_io(value: Any) -> Any:
+    """Observations API v2 returns input/output as raw strings; parse them.
+
+    The legacy trace endpoint parsed I/O to JSON server-side. v2 deliberately
+    does not (its ``parseIoAsJson=true`` returns a 400), so the JSON step
+    moves here. Non-JSON strings and already-parsed values pass through.
+    """
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (ValueError, TypeError):
+            return value
+    return value
+
+
+def _find_root_observation(langfuse: Any, trace_id: str) -> Optional[Any]:
+    """The trace's root observation, paging until found.
+
+    Pages are sorted by start time descending and the root span starts
+    FIRST, so on a large trace it lands on the LAST page — a single
+    first-page fetch would silently miss it and drop the candidate.
+    """
+    cursor = None
+    for _ in range(10):  # 1000 observations; eval traces run ~60
+        page = langfuse.api.observations.get_many(
+            trace_id=trace_id, fields="core,basic,io", limit=100, cursor=cursor
+        )
+        for obs in page.data:
+            if not getattr(obs, "parent_observation_id", None):
+                return obs
+        cursor = getattr(getattr(page, "meta", None), "cursor", None)
+        if not cursor:
+            return None
+    return None
+
+
 def hydrate_candidate(
     langfuse: Any,
     host: str,
     candidate: Dict[str, Any],
     attempts: int = 3,
     retry_delays: tuple = (2, 5),
+    project_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    Fetch the candidate's trace; return a manifest entry, or None (logged)
-    if the trace has no itinerary output or can't be fetched.
+    Fetch the candidate's trace data; return a manifest entry, or None
+    (logged) if the trace has no itinerary output or can't be fetched.
 
-    Trace fetches retry on failure — the Langfuse trace endpoint times out
-    transiently under burst reads, and a dropped candidate here silently
-    shrinks the labeling pack.
+    Reads the root observation via the Observations API v2 plus the trace's
+    scores via the Scores API v3 — the two v4 replacements for the deprecated
+    ``GET /traces/{id}`` (Langfuse Cloud serves it only until 2026-11-16, and
+    it already 422s under load telling callers to migrate). The eval harness
+    sets the itinerary I/O on the root span, and the root observation's
+    parsed input/output was verified equal to the legacy trace-level fields —
+    input actually IMPROVES: the legacy endpoint returned it as a raw string,
+    so book_title/author always fell back to "unknown"/"" here.
+
+    Fetches retry on failure — Langfuse read endpoints time out transiently
+    under burst reads, and a dropped candidate here silently shrinks the
+    labeling pack.
+
+    This is the read-side slice only. The remaining deprecated calls in this
+    tree — ``dataset_run_items.create`` writes in the four eval tools and the
+    ``datasets.get_runs``/``get_run`` reads in ``collect_candidates`` — must
+    migrate together before the same 2026-11-16 cutoff; that work is MYS-909.
     """
-    trace = None
+    root = None
+    scores_page = None
     for attempt in range(attempts):
         try:
-            trace = langfuse.api.trace.get(candidate["trace_id"])
+            root = _find_root_observation(langfuse, candidate["trace_id"])
+            scores_page = langfuse.api.scores_v3.get_many_v3(
+                trace_id=candidate["trace_id"], limit=100
+            )
             break
         except Exception as e:
             if attempt < attempts - 1:
@@ -272,7 +327,7 @@ def hydrate_candidate(
                 )
                 return None
 
-    output = trace.output
+    output = _parse_io(getattr(root, "output", None)) if root else None
     if not isinstance(output, dict) or not output:
         print(
             f"  ! Dropped {candidate['item_id']} ({candidate['run_name']}): "
@@ -280,12 +335,34 @@ def hydrate_candidate(
         )
         return None
 
-    trace_input = trace.input if isinstance(trace.input, dict) else {}
+    parsed_input = _parse_io(getattr(root, "input", None))
+    trace_input = parsed_input if isinstance(parsed_input, dict) else {}
     preferences = trace_input.get("preferences") or None
 
     judge_scores: Dict[str, Optional[int]] = {}
-    for score in trace.scores or []:
-        if score.name in DIMENSIONS and getattr(score, "source", None) != "ANNOTATION":
+    for score in scores_page.data if scores_page else []:
+        # The v3 API types `source` as langfuse.api.core.enum.StrEnum, which
+        # is enum.StrEnum on py>=3.11 (str(member) == "ANNOTATION") and falls
+        # back to `class StrEnum(str, Enum)` below it, where str(member) is
+        # "ScoreSource.ANNOTATION". CI runs 3.12; this package's own
+        # requires-python floor is 3.10, so a str()-based guard is correct on
+        # the interpreter that tests it and admits every human label as a
+        # judge score on the one it doesn't. Read the value, not the member.
+        source = getattr(score, "source", None)
+        source_value = getattr(source, "value", source)
+        # Codex P2, valid: v3 returns scores NEWEST FIRST, so a rescored trace
+        # carries several judge scores per dimension and assigning every match
+        # let the OLDEST win -- the manifest would then calibrate the human
+        # labels against a judge result that is no longer the judge's. The
+        # sibling loop in fetch_human_scores() below has carried exactly this
+        # guard (`dimension not in human_scores`) since it was written, with
+        # the ordering documented in its own comment: one rule, two hand-kept
+        # copies, and only one of them was kept.
+        if (
+            score.name in DIMENSIONS
+            and score.name not in judge_scores
+            and source_value != "ANNOTATION"
+        ):
             value = getattr(score, "value", None)
             if value is not None:
                 judge_scores[score.name] = int(value)
@@ -303,7 +380,11 @@ def hydrate_candidate(
         "author": trace_input.get("author") or "",
         "has_preferences": bool(preferences),
         "judge_scores": {d: judge_scores.get(d) for d in DIMENSIONS},
-        "trace_url": f"{host}{trace.html_path}" if trace.html_path else None,
+        "trace_url": (
+            f"{host}/project/{project_id}/traces/{candidate['trace_id']}"
+            if project_id
+            else None
+        ),
     }
 
 
@@ -400,6 +481,22 @@ def merge_manifest_items(
 
 # Subcommands
 
+def get_project_id(langfuse: Any) -> Optional[str]:
+    """Project id for building trace URLs; None (logged) if the lookup fails.
+
+    The legacy trace endpoint handed back ``html_path`` ready-made; the v2
+    Observations API doesn't, so the URL is assembled from the project id.
+    A manifest without trace URLs is degraded but usable, so this never
+    fails the build.
+    """
+    try:
+        projects = langfuse.api.projects.get()
+        return projects.data[0].id
+    except Exception as e:
+        logger.warning("project_id_lookup_failed", error=str(e))
+        return None
+
+
 def cmd_build_queue(args: argparse.Namespace) -> int:
     langfuse, host = make_langfuse_client()
 
@@ -411,9 +508,10 @@ def cmd_build_queue(args: argparse.Namespace) -> int:
     print(f"  {len(selected)} selected (cap 2 generations per case, target {args.target})")
 
     print("Fetching traces...")
+    project_id = get_project_id(langfuse)
     entries = []
     for candidate in selected:
-        entry = hydrate_candidate(langfuse, host, candidate)
+        entry = hydrate_candidate(langfuse, host, candidate, project_id=project_id)
         if entry:
             entries.append(entry)
     print(f"  {len(entries)} usable itineraries ({len(selected) - len(entries)} dropped, see above)")
