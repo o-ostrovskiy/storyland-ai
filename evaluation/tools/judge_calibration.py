@@ -30,7 +30,7 @@ import json
 import sys
 import time
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -181,6 +181,138 @@ def make_langfuse_client():
     return Langfuse(secret_key=secret_key, public_key=public_key, host=host), host
 
 
+# --- the Experiments leg of the union read (MYS-909 PR1) ---------------------
+#
+# The legacy `datasets.get_runs`/`get_run` path below is untouched. Every run is
+# either legacy-written or experiment-written and never both, so reading BOTH is
+# total at every moment of the migration -- before any write moves, during, and
+# after -- which is what lets the read side land ahead of the writes.
+#
+# ⚠️ `from_start_time` is REQUIRED by `experiments.list` and `list_items`
+# (no default, verified against the pinned langfuse 4.14.0, not mocked).
+#
+# 🔴 The card asks that it be derived from "the same window
+# collect_candidates already applies to the legacy path". THERE IS NO SUCH
+# WINDOW: the legacy path selects by COUNT -- the newest `max_runs_per_dataset`
+# matching runs -- and applies no time floor at all. A floor derived from the
+# oldest kept legacy run is only safe while that leg is SATURATED; the moment it
+# keeps fewer runs than the cap (a new dataset, or any point after the writes
+# move) a genuinely newer experiment run can sit below it and be dropped
+# silently. That is trap 2's own failure mode arriving through the derivation
+# instead of through a constant.
+#
+# So the floor is deliberately WIDE and is not the selector: both endpoints
+# return time-descending, and the same newest-N count is applied after the
+# union. A floor that is never later than anything cannot filter a candidate.
+_EXPERIMENTS_FLOOR = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+# All three metadata groups, because which one carries the root span's own
+# metadata is NOT documented -- each field's docstring says only "included when
+# `fields=<group>` is requested". Reading all three is not a fallback: the id is
+# still REQUIRED and its absence still raises. It removes a guess about where
+# the value lives from a code path whose whole job is that the value is there.
+_EXPERIMENT_ITEM_FIELDS = "core,metadata,itemMetadata,experimentMetadata"
+_EVAL_ID_GROUPS = ("metadata", "experiment_item_metadata", "experiment_metadata")
+
+
+def resolve_dataset_id(langfuse: Any, dataset_name: str) -> str:
+    """The dataset's ID, which `experiments.list` needs instead of its name.
+
+    Raises on a miss rather than returning None. A name that resolved to
+    nothing would make "this dataset has no experiment runs" and "I looked up
+    the wrong dataset" the same answer, and the union would serve the second
+    one as a slightly shorter green.
+    """
+    dataset = langfuse.api.datasets.get(dataset_name)
+    dataset_id = getattr(dataset, "id", None)
+    if not dataset_id:
+        raise LookupError(
+            f"dataset {dataset_name!r} did not resolve to an id -- refusing to "
+            f"read experiments for an unidentified dataset"
+        )
+    return dataset_id
+
+
+def experiment_item_case_id(item: Any) -> str:
+    """The DATASET-ITEM id of an experiment item, off the root span's metadata.
+
+    🔴 `ExperimentItem` exposes no dataset-item id of its own. Its
+    `experiment_item_id` is run-scoped by Langfuse's data model -- one per
+    dataset item PER EXPERIMENT -- so using it would give the same evalset case
+    a different id in every run, and `select_candidates`' per-case cap
+    (`(dataset, item_id)`) would silently stop capping: same key name, same
+    type, no error, a pack quietly crowded by one case.
+
+    The four eval writers put the dataset-item id on the root span as
+    `eval_id`. Missing means the write side is wrong, and `GET /experiments`
+    returns zero runs today -- so there is no history to be lenient about and
+    every experiment run that will ever exist is written after that write
+    lands. Raising here can only ever be raising on a bug.
+    """
+    for group in _EVAL_ID_GROUPS:
+        value = (getattr(item, group, None) or {}).get("eval_id")
+        if value:
+            return value
+    raise LookupError(
+        f"experiment item {getattr(item, 'id', '?')!r} carries no eval_id in "
+        f"{'/'.join(_EVAL_ID_GROUPS)} -- its dataset case cannot be named, and "
+        f"experiment_item_id is run-scoped so it is not a substitute"
+    )
+
+
+def collect_experiment_candidates(
+    langfuse: Any,
+    dataset_name: str,
+    run_prefix: str,
+    max_runs_per_dataset: int,
+) -> List[List[Dict[str, Any]]]:
+    """Candidate lists for `dataset_name`'s experiment-written runs, newest first."""
+    dataset_id = resolve_dataset_id(langfuse, dataset_name)
+    page = langfuse.api.experiments.list(
+        from_start_time=_EXPERIMENTS_FLOOR, dataset_id=dataset_id, limit=50
+    )
+    matching = [e for e in page.data if e.name.startswith(run_prefix)]
+    matching.sort(key=lambda e: e.start_time, reverse=True)
+
+    run_lists: List[List[Dict[str, Any]]] = []
+    for experiment in matching[:max_runs_per_dataset]:
+        items_page = langfuse.api.experiments.list_items(
+            from_start_time=_EXPERIMENTS_FLOOR,
+            experiment_id=experiment.id,
+            fields=_EXPERIMENT_ITEM_FIELDS,
+            limit=100,
+        )
+        run_lists.append([
+            {
+                "dataset": dataset_name,
+                "item_id": experiment_item_case_id(item),
+                "run_name": experiment.name,
+                "trace_id": item.trace_id,
+            }
+            for item in items_page.data
+            if item.trace_id
+        ])
+    return run_lists
+
+
+def _dedupe_by_trace(
+    run_lists: List[List[Dict[str, Any]]],
+) -> List[List[Dict[str, Any]]]:
+    """Drop candidates whose trace was already contributed by an earlier run.
+
+    Order is significant and legacy runs come first, so during the cutover a
+    trace described by both APIs keeps its legacy description. A duplicate
+    would silently double that generation's weight in the calibration pack.
+    """
+    seen: set = set()
+    deduped: List[List[Dict[str, Any]]] = []
+    for items in run_lists:
+        kept = [c for c in items if c["trace_id"] not in seen]
+        seen.update(c["trace_id"] for c in kept)
+        deduped.append(kept)
+    return deduped
+
+
 def collect_candidates(
     langfuse: Any,
     datasets: List[str],
@@ -226,8 +358,36 @@ def collect_candidates(
                 for item in run_details.dataset_run_items
                 if item.trace_id
             ])
-        per_dataset_runs[dataset_name] = run_lists
-        print(f"  {dataset_name}: {len(matching)} matching runs")
+        try:
+            experiment_lists = collect_experiment_candidates(
+                langfuse, dataset_name, run_prefix, max_runs_per_dataset
+            )
+        except Exception as e:
+            logger.warning(
+                "experiment_runs_fetch_failed", dataset=dataset_name, error=str(e)
+            )
+            print(f"  ! Skipping {dataset_name} experiment runs: {e}")
+            experiment_lists = []
+
+        # 🔴 De-duplicate by TRACE, and by trace ONLY. The card asks for run
+        # identity rather than run name; the two APIs have disjoint id spaces
+        # (that is the same partition that makes this read total), so a name is
+        # the only cross-API handle a RUN has -- and it is the wrong one. The
+        # real identity lives a level down: a generation is ONE trace whichever
+        # endpoint described it.
+        #
+        # A run-name net was written here first and then removed, because a
+        # mutation that deleted it left every row green: the trace net already
+        # subsumes it. Worse than redundant -- it drops a whole experiment run
+        # on a name collision, so two genuinely different runs that happen to
+        # share a name would lose one of them silently, which is the failure
+        # this de-dup exists to prevent, inverted.
+        run_lists.extend(experiment_lists)
+        per_dataset_runs[dataset_name] = _dedupe_by_trace(run_lists)
+        print(
+            f"  {dataset_name}: {len(matching)} matching runs "
+            f"(+{len(experiment_lists)} experiment)"
+        )
 
     return interleave_by_run(per_dataset_runs)
 

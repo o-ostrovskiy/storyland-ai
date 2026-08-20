@@ -11,6 +11,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from evaluation.tools.judge_calibration import (
+    collect_candidates,
+    collect_experiment_candidates,
+    experiment_item_case_id,
+    resolve_dataset_id,
     DIMENSIONS,
     compute_agreement,
     fetch_human_scores,
@@ -456,3 +460,268 @@ class TestGetEnqueuedTraceIds:
         langfuse = MagicMock()
         langfuse.api.annotation_queues.list_queue_items.side_effect = Exception("down")
         assert get_enqueued_trace_ids(langfuse, "q1") == set()
+
+
+# --- MYS-909 PR1: the union read -------------------------------------------
+
+
+class _Obj:
+    """A plain attribute bag.
+
+    Deliberately NOT a MagicMock: a MagicMock auto-creates every attribute, so
+    a row asserting `item.metadata["eval_id"]` passes against a mock even when
+    the SDK has no such field. This is the trap that stopped the first attempt
+    at this card, one level down.
+    """
+
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+def _legacy_run(name, items):
+    return _Obj(name=name, created_at=name)
+
+
+def _legacy_details(items):
+    return _Obj(dataset_run_items=[
+        _Obj(dataset_item_id=case, trace_id=trace) for case, trace in items
+    ])
+
+
+def _experiment(name, exp_id):
+    return _Obj(name=name, id=exp_id, start_time=name)
+
+
+def _experiment_item(case, trace, group="metadata", item_id="ei-1"):
+    """An experiment item carrying eval_id in exactly ONE metadata group."""
+    bag = {"metadata": None, "experiment_item_metadata": None,
+           "experiment_metadata": None}
+    bag[group] = {"eval_id": case}
+    return _Obj(id=item_id, trace_id=trace, experiment_item_id=f"scoped-{trace}",
+                **bag)
+
+
+def _client(legacy=None, experiments=None, dataset_id="ds-1"):
+    """A langfuse double whose api surface is exactly what the code may call."""
+    legacy = legacy or {}
+    experiments = experiments or {}
+
+    api = _Obj()
+    api.datasets = _Obj(
+        get=lambda name: _Obj(id=dataset_id) if dataset_id else _Obj(id=None),
+        get_runs=lambda name, limit=50: _Obj(
+            data=[_legacy_run(n, i) for n, i in legacy.items()]
+        ),
+        get_run=lambda name, run_name: _legacy_details(legacy[run_name]),
+    )
+    api.experiments = _Obj(
+        list=lambda **kw: _Obj(
+            data=[_experiment(n, f"exp-{n}") for n in experiments]
+        ),
+        list_items=lambda **kw: _Obj(
+            data=experiments[kw["experiment_id"].removeprefix("exp-")]
+        ),
+    )
+    return _Obj(api=api)
+
+
+class TestSymbolPresence:
+    """The pinned SDK really has these, asserted against the imported client."""
+
+    def test_experiments_client_exposes_list_and_list_items(self):
+        from langfuse.api.experiments.client import ExperimentsClient
+
+        for method in ("list", "list_items"):
+            assert callable(getattr(ExperimentsClient, method, None)), method
+
+    def test_from_start_time_is_required_on_both(self):
+        import inspect
+
+        from langfuse.api.experiments.client import ExperimentsClient
+
+        for method in ("list", "list_items"):
+            param = inspect.signature(
+                getattr(ExperimentsClient, method)
+            ).parameters["from_start_time"]
+            assert param.default is inspect.Parameter.empty, method
+
+    def test_experiment_item_has_no_dataset_item_id(self):
+        """The finding this PR's shape exists for, asserted rather than recalled."""
+        from langfuse.api.experiments import ExperimentItem
+
+        fields = set(ExperimentItem.model_fields)
+        assert "dataset_item_id" not in fields
+        assert {"metadata", "experiment_item_metadata",
+                "experiment_metadata"} <= fields
+
+    def test_datasets_client_exposes_get(self):
+        from langfuse.api.datasets.client import DatasetsClient
+
+        assert callable(getattr(DatasetsClient, "get", None))
+
+
+class TestResolveDatasetId:
+    def test_returns_the_id(self):
+        assert resolve_dataset_id(_client(), "books_v1") == "ds-1"
+
+    def test_raises_on_a_miss_rather_than_returning_falsy(self):
+        with pytest.raises(LookupError, match="did not resolve to an id"):
+            resolve_dataset_id(_client(dataset_id=None), "nope")
+
+
+class TestExperimentItemCaseId:
+    @pytest.mark.parametrize(
+        "group", ["metadata", "experiment_item_metadata", "experiment_metadata"]
+    )
+    def test_reads_eval_id_from_any_group(self, group):
+        item = _experiment_item("case-a", "t1", group=group)
+        assert experiment_item_case_id(item) == "case-a"
+
+    def test_raises_when_no_group_carries_it(self):
+        item = _Obj(id="ei-9", metadata={}, experiment_item_metadata=None,
+                    experiment_metadata=None, experiment_item_id="scoped-9")
+        with pytest.raises(LookupError, match="no eval_id"):
+            experiment_item_case_id(item)
+
+    def test_does_not_substitute_the_run_scoped_id(self):
+        """experiment_item_id is present and must NOT be used as the case id."""
+        item = _Obj(id="ei-9", metadata={}, experiment_item_metadata=None,
+                    experiment_metadata=None, experiment_item_id="scoped-9")
+        with pytest.raises(LookupError):
+            experiment_item_case_id(item)
+
+
+class TestUnionIsTotal:
+    def test_legacy_only(self):
+        """The row that proves this PR ships safely TODAY, before any write moves."""
+        client = _client(legacy={"run-a": [("case-1", "t1"), ("case-2", "t2")]})
+        got = collect_candidates(client, ["books_v1"], "run-")
+        assert [c["trace_id"] for c in got] == ["t1", "t2"]
+        assert [c["item_id"] for c in got] == ["case-1", "case-2"]
+
+    def test_experiment_only(self):
+        client = _client(experiments={"run-b": [
+            _experiment_item("case-1", "t3"), _experiment_item("case-2", "t4")]})
+        got = collect_candidates(client, ["books_v1"], "run-")
+        assert [c["trace_id"] for c in got] == ["t3", "t4"]
+        assert [c["item_id"] for c in got] == ["case-1", "case-2"]
+
+    def test_both_sides(self):
+        client = _client(
+            legacy={"run-a": [("case-1", "t1")]},
+            experiments={"run-b": [_experiment_item("case-1", "t3")]},
+        )
+        got = collect_candidates(client, ["books_v1"], "run-")
+        assert sorted(c["trace_id"] for c in got) == ["t1", "t3"]
+
+    def test_same_run_name_on_both_sides_yields_one_candidate(self):
+        """Caught by the trace net, not by a name comparison -- see the sibling
+        row below for why there is no longer a name net to catch it."""
+        client = _client(
+            legacy={"run-a": [("case-1", "t1")]},
+            experiments={"run-a": [_experiment_item("case-1", "t1")]},
+        )
+        got = collect_candidates(client, ["books_v1"], "run-")
+        assert [c["trace_id"] for c in got] == ["t1"]
+
+    def test_same_trace_under_DIFFERENT_run_names_yields_one_candidate(self):
+        """\U0001f534 The row the trace net actually needs, and the one the row
+        above does not carry: with matching names the name net drops the
+        duplicate first, so removing the trace de-dup left the suite green.
+        A generation is ONE trace whichever endpoint described it -- a second
+        copy silently doubles its weight in the calibration pack."""
+        client = _client(
+            legacy={"run-a": [("case-1", "t1")]},
+            experiments={"run-b": [_experiment_item("case-1", "t1")]},
+        )
+        got = collect_candidates(client, ["books_v1"], "run-")
+        assert [c["trace_id"] for c in got] == ["t1"]
+
+
+class TestCapSurvivesTheUnion:
+    """\U0001f534 The row a golden-shape contract row cannot see.
+
+    The keys are byte-identical whichever id space fills them; only their
+    MEANING moves. So the falsification is two runs of the SAME case.
+    """
+
+    @staticmethod
+    def _cap(client):
+        return select_candidates(
+            collect_candidates(client, ["books_v1"], "run-"),
+            target=30, max_per_case=2,
+        )
+
+    def test_two_legacy_runs_of_one_case_admit_two(self):
+        client = _client(legacy={
+            "run-a": [("case-1", "t1")], "run-b": [("case-1", "t2")]})
+        assert len(self._cap(client)) == 2
+
+    def test_three_experiment_runs_of_one_case_admit_two_not_three(self):
+        client = _client(experiments={
+            "run-a": [_experiment_item("case-1", "t1")],
+            "run-b": [_experiment_item("case-1", "t2")],
+            "run-c": [_experiment_item("case-1", "t3")],
+        })
+        assert len(self._cap(client)) == 2
+
+    def test_mixed_legacy_and_experiment_share_one_case_key(self):
+        """The case that matters: a mapping self-consistent WITHIN a leg passes
+        the two rows above and still puts two id spaces in one column."""
+        client = _client(
+            legacy={"run-a": [("case-1", "t1")]},
+            experiments={"run-b": [_experiment_item("case-1", "t2")],
+                         "run-c": [_experiment_item("case-1", "t3")]},
+        )
+        selected = self._cap(client)
+        assert len(selected) == 2
+        assert {(c["dataset"], c["item_id"]) for c in selected} == {
+            ("books_v1", "case-1")
+        }
+
+    def test_converse_two_different_cases_both_survive(self):
+        """Or the cap rows above are satisfied by a cap that admits nothing."""
+        client = _client(
+            legacy={"run-a": [("case-1", "t1")]},
+            experiments={"run-b": [_experiment_item("case-2", "t2")]},
+        )
+        assert len(self._cap(client)) == 2
+
+
+class TestExperimentLegDetails:
+    def test_run_prefix_filters_experiments(self):
+        client = _client(experiments={
+            "run-a": [_experiment_item("case-1", "t1")],
+            "probe-x": [_experiment_item("case-2", "t2")],
+        })
+        got = collect_candidates(client, ["books_v1"], "run-")
+        assert [c["trace_id"] for c in got] == ["t1"]
+
+    def test_items_without_a_trace_are_dropped(self):
+        client = _client(experiments={"run-a": [
+            _experiment_item("case-1", "t1"),
+            _experiment_item("case-2", None),
+        ]})
+        got = collect_candidates(client, ["books_v1"], "run-")
+        assert [c["trace_id"] for c in got] == ["t1"]
+
+    def test_from_start_time_is_passed_and_is_not_a_selector(self):
+        seen = {}
+
+        client = _client(experiments={"run-a": [_experiment_item("c", "t1")]})
+        original = client.api.experiments.list
+
+        def spy(**kw):
+            seen.update(kw)
+            return original(**kw)
+
+        client.api.experiments.list = spy
+        collect_candidates(client, ["books_v1"], "run-")
+        floor = seen["from_start_time"]
+        assert floor.year <= 2020, "the floor must never be able to filter a run"
+        assert seen["dataset_id"] == "ds-1", "the ID, not the name"
+
+    def test_a_failing_experiment_leg_does_not_lose_the_legacy_leg(self):
+        client = _client(legacy={"run-a": [("case-1", "t1")]}, dataset_id=None)
+        got = collect_candidates(client, ["books_v1"], "run-")
+        assert [c["trace_id"] for c in got] == ["t1"]

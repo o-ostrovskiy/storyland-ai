@@ -628,7 +628,16 @@ async def run_evaluation_on_dataset(
             with langfuse.start_as_current_observation(
                 as_type="span",
                 name=run_name,
-                metadata={"prompt_version": prompt_version, **run_metadata},
+                # eval_id is the DATASET-ITEM id, matching the three sibling
+                # eval writers. The Experiments API exposes no dataset-item id
+                # on an experiment item -- its experiment_item_id is run-scoped
+                # -- so this is the only thing that lets a calibration read name
+                # the same evalset case across runs (MYS-909).
+                metadata={
+                    "prompt_version": prompt_version,
+                    **run_metadata,
+                    "eval_id": item.id,
+                },
             ) as root_span:
                 try:
                     result = await _run_evaluation_case(

@@ -1122,6 +1122,33 @@ Researcher agents are configured with Gemini's built-in `google_search` and thei
 
 ---
 
+## 27. Judge-Calibration Reads a UNION of the Legacy Runs API and the Experiments API (2026-08-20)
+
+### Context
+
+Langfuse retires the legacy dataset-run endpoints on **2026-11-16**. The obvious sequencing — move the writes and the reads together — was argued for on real evidence: `GET /experiments` returns **zero** runs today, so a reads-only cutover finds nothing and calibration goes dark.
+
+That argument rules out a *switch*, not a *union*. Every run is either legacy-written or experiment-written and never both, so reading both is total at every moment of the migration, and the read side can therefore land first and alone.
+
+Building it surfaced the constraint that decides the shape: **`ExperimentItem` exposes no dataset-item id.** Its `experiment_item_id` is run-scoped by Langfuse's data model — one per dataset item *per experiment* — while `select_candidates` caps generations per case on `(dataset, item_id)` so one evalset case cannot crowd the pack. Fed run-scoped ids, that cap silently stops capping: same key name, same type, no error.
+
+### Decision
+
+The dataset-item id travels on the **root span's metadata as `eval_id`**, written by all four eval tools (three already did; `run_scheduled_eval.py` was the gap), and the experiment leg reads it back and **raises when it is absent**. It never falls back to `experiment_item_id`.
+
+Raising is safe rather than brittle precisely because the population is empty: zero experiment runs exist, so every experiment run that will ever exist is written after the `eval_id` write. A leg that raises on absence is raising on a bug, never on history.
+
+Two supporting choices:
+
+- **`from_start_time` is required by the endpoint and is deliberately wide.** The legacy path applies no time window at all — it selects the newest *N* runs by count — so there is no existing window to derive a floor from, and a floor derived from the oldest kept legacy run is only safe while that leg is saturated. Both endpoints return time-descending and the same count is applied after the union, so a floor that is never later than anything cannot filter a candidate.
+- **De-duplication keys on `trace_id`, not on run name.** The two APIs' id spaces are disjoint — the same partition that makes the union total — so a name is the only cross-API handle a *run* has, and it is the wrong one: two genuinely different runs sharing a name would lose one silently. A generation is one trace whichever endpoint described it.
+
+### Consequences
+
+The read is additive, flagless and revertible, and it is correct before, during and after the write migration (PR2) and after the legacy leg is removed (PR3). The cost is that calibration now depends on a metadata key rather than a first-class API field, and that dependence is enforced by a raise rather than a degradation — a missing `eval_id` stops the pack instead of quietly skewing it.
+
+---
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -1151,4 +1178,5 @@ Researcher agents are configured with Gemini's built-in `google_search` and thei
 | **Per-session lock + merge re-validation (ADR #25)** | No double-billed Gemini calls on overlapping requests, incl. delayed chip replay; a degraded merge never reaches `/status`; lock registry now bounded | Word-boundary city match is a capitalization heuristic, not a gazetteer |
 | **Search-grounding receipts + fail-closed discovery (ADR #26)** | A claim the product cannot support is demoted rather than shipped at full confidence; skip rate measurable per researcher; enforcement and the metric give one answer on an unobserved receipt | User-visible downgrade at today's 46% skip rate; a wholesale instrumentation fault demotes everything (loud, by design); one cold-cache window at the `v3` bump |
 
+| **Union eval reads + `eval_id` case key (ADR #27)** | Read side migrates alone and stays total at every step of the Nov 16 cutoff; a run-scoped id can never silently disable the per-case cap | Calibration depends on a metadata key, not an API field; a missing `eval_id` raises rather than degrades |
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.
