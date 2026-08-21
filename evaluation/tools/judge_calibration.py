@@ -301,12 +301,20 @@ def collect_experiment_candidates(
 
     run_lists: List[Any] = []
     for experiment in matching[:max_runs_per_dataset]:
-        items_page = langfuse.api.experiments.list_items(
-            from_start_time=_EXPERIMENTS_FLOOR,
-            experiment_id=experiment.id,
-            fields=_EXPERIMENT_ITEM_FIELDS,
-            limit=100,
-        )
+        items: List[Any] = []
+        cursor = None
+        for _ in range(20):  # 2000 items; eval runs are ~30
+            items_page = langfuse.api.experiments.list_items(
+                from_start_time=_EXPERIMENTS_FLOOR,
+                experiment_id=experiment.id,
+                fields=_EXPERIMENT_ITEM_FIELDS,
+                limit=100,
+                cursor=cursor,
+            )
+            items.extend(items_page.data)
+            cursor = getattr(getattr(items_page, "meta", None), "cursor", None)
+            if not cursor:
+                break
         candidates = [
             {
                 "dataset": dataset_name,
@@ -314,7 +322,7 @@ def collect_experiment_candidates(
                 "run_name": experiment.name,
                 "trace_id": item.trace_id,
             }
-            for item in items_page.data
+            for item in items
             if item.trace_id
         ]
         run_lists.append((experiment.start_time, candidates))

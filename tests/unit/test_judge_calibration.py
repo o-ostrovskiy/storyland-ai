@@ -526,6 +526,27 @@ def _client(legacy=None, experiments=None, dataset_id="ds-1"):
     return _Obj(api=api)
 
 
+def _paging_client(experiment_id, pages, dataset_id="ds-1"):
+    """A langfuse double whose `experiments.list_items` hands back `pages` in
+    order, one per call — `pages` is a list of `(items, next_cursor)` pairs.
+    Returns `(client, calls)`; `calls` records each call's kwargs so a test
+    can assert call count and the `cursor` actually threaded through."""
+    calls = []
+
+    def list_items(**kw):
+        calls.append(kw)
+        items, cursor = pages[len(calls) - 1]
+        return _Obj(data=items, meta=_Obj(cursor=cursor))
+
+    api = _Obj()
+    api.datasets = _Obj(get=lambda name: _Obj(id=dataset_id))
+    api.experiments = _Obj(
+        list=lambda **kw: _Obj(data=[_experiment("run-a", experiment_id)]),
+        list_items=list_items,
+    )
+    return _Obj(api=api), calls
+
+
 class TestSymbolPresence:
     """The pinned SDK really has these, asserted against the imported client."""
 
@@ -559,6 +580,15 @@ class TestSymbolPresence:
         from langfuse.api.datasets.client import DatasetsClient
 
         assert callable(getattr(DatasetsClient, "get", None))
+
+    def test_list_items_accepts_a_pagination_cursor(self):
+        """The pinned SDK's own pagination handle, asserted rather than
+        assumed -- same discipline as the `from_start_time` rows above."""
+        import inspect
+
+        from langfuse.api.experiments.client import ExperimentsClient
+
+        assert "cursor" in inspect.signature(ExperimentsClient.list_items).parameters
 
 
 class TestResolveDatasetId:
@@ -734,6 +764,57 @@ class TestExperimentLegDetails:
         client.api.experiments.list = _raise
         got = collect_candidates(client, ["books_v1"], "run-")
         assert [c["trace_id"] for c in got] == ["t1"]
+
+
+# --- MYS-914 PR1 FIX 1: `list_items` paging (discussion_r3829698246) --------
+# 🔴 One request, no paging: an experiment run with more than 100 linked
+# items silently contributed only its first 100 traces, unlike the legacy
+# leg's `datasets.get_run`, which returns `dataset_run_items` whole. These
+# rows drive the fix the way `_find_root_observation` already proves its own
+# paging loop -- from a double, not a live run.
+
+
+class TestExperimentItemPaging:
+    def test_an_experiment_run_longer_than_one_page_contributes_from_every_page(self):
+        page1 = [_experiment_item(f"case-{i}", f"t{i}") for i in range(100)]
+        page2 = [_experiment_item(f"case-{i}", f"t{i}") for i in range(100, 150)]
+        client, calls = _paging_client(
+            "exp-run-a", [(page1, "cursor-1"), (page2, None)]
+        )
+        (start_time, candidates) = collect_experiment_candidates(
+            client, "books_v1", "run-", 8
+        )[0]
+        assert len(candidates) == 150
+        assert {c["trace_id"] for c in candidates} == {f"t{i}" for i in range(150)}
+        assert len(calls) == 2
+        assert calls[1]["cursor"] == "cursor-1"
+
+    def test_a_single_page_run_issues_no_second_request(self):
+        """The converse, not optional: a run that fits in one page still
+        yields exactly its items and makes ONE call. Without this row the
+        fix is satisfiable by a loop that pages forever or re-reads page 1."""
+        page1 = [_experiment_item("case-0", "t0")]
+        client, calls = _paging_client("exp-run-a", [(page1, None)])
+        (_, candidates) = collect_experiment_candidates(
+            client, "books_v1", "run-", 8
+        )[0]
+        assert [c["trace_id"] for c in candidates] == ["t0"]
+        assert len(calls) == 1
+
+    def test_item_paging_stops_at_its_bound(self):
+        """Mirrors `_find_root_observation`'s `range(10)`: a double that
+        always returns a cursor terminates at the bound rather than looping
+        forever."""
+        pages = [
+            ([_experiment_item(f"case-{i}", f"t{i}")], "always-more")
+            for i in range(100)
+        ]
+        client, calls = _paging_client("exp-run-a", pages)
+        (_, candidates) = collect_experiment_candidates(
+            client, "books_v1", "run-", 8
+        )[0]
+        assert len(calls) == 20
+        assert len(candidates) == 20
 
 
 # --- MYS-914 Codex P1 fixes --------------------------------------------------
