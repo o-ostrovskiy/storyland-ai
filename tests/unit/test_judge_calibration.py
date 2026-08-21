@@ -14,6 +14,10 @@ import pytest
 from evaluation.tools.judge_calibration import (
     CalibrationDataError,
     CalibrationTruncatedError,
+    _EVAL_ID_GROUPS,
+    _EVAL_ID_GROUP_OBSERVED,
+    _EVAL_ID_GROUP_REQUEST_FIELDS,
+    _EXPERIMENT_ITEM_FIELDS,
     collect_candidates,
     collect_experiment_candidates,
     experiment_item_case_id,
@@ -592,6 +596,34 @@ class TestSymbolPresence:
 
         assert "cursor" in inspect.signature(ExperimentsClient.list_items).parameters
 
+    def test_list_items_response_carries_the_cursor_at_meta_cursor(self):
+        """🔴 @el r3 FL-1 — the RESPONSE half of that same contract.
+
+        The row above asserts `cursor` is a PARAMETER. Nothing asserted where
+        the reply puts the next one, and `_experiment_items` reads
+        `items_page.meta.cursor` — a shape carried over from
+        `_find_root_observation`'s read of `observations.get_many`, a
+        DIFFERENT endpoint with a different response model. If the real name
+        were `next_cursor`, or top-level, or `meta` were absent, the double
+        `getattr` yields `None`, the loop breaks on page 1 and
+        `CalibrationTruncatedError` never fires — and every row in
+        `TestExperimentItemPaging` stays green, because `_paging_client`
+        supplies `meta.cursor` by construction: the double defines the
+        contract it is testing. Only the pinned SDK can refute it, so this
+        row reads the SDK.
+
+        Deliberately strict: no unwrapping of `Optional`, no `getattr`
+        fallback. A shape that stops being exactly this one must red loudly
+        here rather than degrade quietly in the loop."""
+        import inspect
+
+        from langfuse.api.experiments.client import ExperimentsClient
+
+        response = inspect.signature(ExperimentsClient.list_items).return_annotation
+        assert "meta" in response.model_fields, response
+        meta = response.model_fields["meta"].annotation
+        assert "cursor" in meta.model_fields, meta
+
 
 class TestResolveDatasetId:
     def test_returns_the_id(self):
@@ -854,6 +886,113 @@ class TestExperimentItemPaging:
         client.api.datasets.get_runs = lambda name, limit: _Obj(data=[])
         with pytest.raises(CalibrationTruncatedError):
             collect_candidates(client, ["books_v1"], "run-")
+
+
+class TestEvalIdGroupsAreStillRequested:
+    """⚠️ @el r3 FL-2 — `_EVAL_ID_GROUP_OBSERVED` was defined and never read.
+
+    Its stated job is to stop a future narrowing of `_EXPERIMENT_ITEM_FIELDS`
+    from dropping the one group the live probe found `eval_id` in. A comment
+    cannot do that job: it is a claim about intent, and only a caller is a
+    claim about behaviour — this file's own r2 lesson.
+
+    The assertion is not trivial because the claim spans two vocabularies.
+    `_EVAL_ID_GROUPS` is the RESPONSE spelling (snake_case attributes on
+    `ExperimentItem`, pinned by
+    `TestSymbolPresence.test_experiment_item_has_no_dataset_item_id`);
+    `_EXPERIMENT_ITEM_FIELDS` is the REQUEST spelling (the camelCase enum the
+    API reads). One of them is what the server sees, and it is not the one the
+    constant is written in.
+    """
+
+    def test_the_observed_group_is_read_and_is_still_requested(self):
+        assert _EVAL_ID_GROUP_OBSERVED in _EVAL_ID_GROUPS
+        requested = _EXPERIMENT_ITEM_FIELDS.split(",")
+        assert _EVAL_ID_GROUP_REQUEST_FIELDS[_EVAL_ID_GROUP_OBSERVED] in requested
+
+    def test_every_group_the_code_reads_is_also_asked_for(self):
+        """The generalisation, so the guard is not satisfiable by keeping ONE
+        spelling alive: reading a group the request never asked for is a
+        silent always-None, which is exactly how `eval_id` would go missing."""
+        requested = set(_EXPERIMENT_ITEM_FIELDS.split(","))
+        for group in _EVAL_ID_GROUPS:
+            assert group in _EVAL_ID_GROUP_REQUEST_FIELDS, group
+            assert _EVAL_ID_GROUP_REQUEST_FIELDS[group] in requested, group
+
+    def test_the_two_spellings_are_genuinely_different(self):
+        """Vacuity guard. If the map were identity everywhere, the rows above
+        would pass while asserting nothing about the camelCase enum the API
+        actually reads."""
+        assert (
+            _EVAL_ID_GROUP_REQUEST_FIELDS["experiment_item_metadata"]
+            != "experiment_item_metadata"
+        )
+
+
+def _flaky_items_client(fail_on, exc, runs=("run-c", "run-b", "run-a")):
+    """A langfuse double whose `experiments.list_items` raises `exc` for the
+    experiment whose run name is `fail_on`, and returns one item otherwise.
+    Run names sort time-descending as given."""
+    def list_items(**kw):
+        run = kw["experiment_id"].removeprefix("exp-")
+        if run == fail_on:
+            raise exc
+        return _Obj(data=[_experiment_item(f"case-{run}", f"t-{run}")], meta=_Obj(cursor=None))
+
+    api = _Obj()
+    api.datasets = _Obj(get=lambda name: _Obj(id="ds-1"))
+    api.experiments = _Obj(
+        list=lambda **kw: _Obj(data=[_experiment(n, f"exp-{n}") for n in runs]),
+        list_items=list_items,
+    )
+    return _Obj(api=api)
+
+
+class TestOneBadRunDoesNotDiscardTheGoodOnes:
+    """🔴 Codex `r3832494812` (P2), against head `47773e5`.
+
+    A transport failure on one experiment propagated out of
+    `collect_experiment_candidates`, and `collect_candidates`'s broad arm then
+    replaced the WHOLE experiments leg with `[]` — so one flaky read discarded
+    every run already fetched. After the legacy endpoint retires that dataset
+    yields nothing at all. The legacy per-run loop has always skipped the run
+    and kept the rest."""
+
+    def test_a_transient_failure_skips_its_run_and_keeps_the_others(self):
+        """RED before the fix: this returned zero runs, because the exception
+        left the function instead of the loop iteration."""
+        client = _flaky_items_client("run-b", RuntimeError("connection reset"))
+        runs = collect_experiment_candidates(client, "books_v1", "run-", 8)
+        assert len(runs) == 2
+        traces = {c["trace_id"] for _st, cands in runs for c in cands}
+        assert traces == {"t-run-c", "t-run-a"}
+
+    def test_the_fail_closed_signal_still_propagates(self):
+        """CONVERSE 1, and the reason this is not a bare `except Exception`.
+        `CalibrationDataError` is the malformed-write signal FL-A exists for;
+        swallowing it here restores the silent degrade it was raised to stop."""
+        client = _flaky_items_client("run-b", CalibrationDataError("no eval_id"))
+        with pytest.raises(CalibrationDataError):
+            collect_experiment_candidates(client, "books_v1", "run-", 8)
+
+    def test_a_truncated_run_still_propagates(self):
+        """CONVERSE 2: `CalibrationTruncatedError` subclasses
+        `CalibrationDataError` precisely so a refusal cannot be re-read as
+        "transient". Without this row the fix is satisfiable by catching
+        everything except the one class named in the row above."""
+        client = _flaky_items_client("run-b", CalibrationTruncatedError("short"))
+        with pytest.raises(CalibrationTruncatedError):
+            collect_experiment_candidates(client, "books_v1", "run-", 8)
+
+    def test_the_skip_names_the_run_it_dropped(self, capsys):
+        """A skip that prints nothing is a silent shortfall wearing a
+        different hat: a thinner pack would be indistinguishable from a
+        smaller dataset. The legacy loop names its run; so does this one."""
+        client = _flaky_items_client("run-b", RuntimeError("connection reset"))
+        collect_experiment_candidates(client, "books_v1", "run-", 8)
+        out = capsys.readouterr().out
+        assert "run-b" in out
+        assert "connection reset" in out
 
 
 # --- MYS-914 Codex P1 fixes --------------------------------------------------

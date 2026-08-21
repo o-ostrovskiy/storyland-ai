@@ -222,6 +222,21 @@ _EVAL_ID_GROUPS = ("metadata", "experiment_item_metadata", "experiment_metadata"
 # parametrises all three as equally live, so those rows would stay green
 # while the only group that matters was dropped.
 _EVAL_ID_GROUP_OBSERVED = "experiment_item_metadata"
+# ⚠️ @el r3 FL-2 -- the note above was a comment, and a comment is a claim
+# about intent, not a guard. What it has to protect spans TWO vocabularies:
+# the response object exposes snake_case attributes
+# (`experiment_item_metadata`), while `fields=` takes a camelCase enum
+# (`itemMetadata`). The mapping is NOT mechanical, so it cannot be derived --
+# it is established at source: the Local Runner's 2026-08-21 probe sent the
+# snake_case spelling and the API answered 400 with the valid values listed.
+# Naming it here gives `TestEvalIdGroupsAreStillRequested` something to assert
+# in both spellings; without it, narrowing `_EXPERIMENT_ITEM_FIELDS` drops the
+# one group observed to carry `eval_id` with every parametrised row green.
+_EVAL_ID_GROUP_REQUEST_FIELDS = {
+    "metadata": "metadata",
+    "experiment_item_metadata": "itemMetadata",
+    "experiment_metadata": "experimentMetadata",
+}
 
 # Page bound for `experiments.list_items` (100 per page). Eval runs are ~30
 # items, so this is four orders of magnitude of headroom -- it exists to
@@ -342,6 +357,53 @@ def experiment_item_case_id(item: Any) -> str:
     )
 
 
+def _experiment_items(langfuse: Any, experiment: Any) -> List[Any]:
+    """Every item of one experiment run, paged to exhaustion.
+
+    Split out of `collect_experiment_candidates` so a transport failure on
+    ONE run can be caught at the loop that owns the run, and the runs already
+    fetched survive it (Codex `r3832494812`). The refusal below is deliberately
+    INSIDE this function rather than at the call site: it is a statement about
+    this run's completeness, and the caller re-raises it unchanged.
+    """
+    items: List[Any] = []
+    cursor = None
+    # 🔴 The bound RAISES when it is reached with a cursor still
+    # outstanding (Codex `r3832093213`), rather than returning what it
+    # has. The first version of this loop stopped at `range(20)`
+    # unconditionally, and a row -- `test_item_paging_stops_at_its_bound`
+    # -- asserted that truncation as the expected behaviour, so the
+    # suite pinned it.
+    #
+    # ➡️ The bound was copied from `_find_root_observation` together with
+    # its shape but not with its MEANING. There, exhausting the pages
+    # returns `None` and the caller drops one candidate: a defined,
+    # local degrade. Here, exhausting them returns a run that LOOKS
+    # complete and is short -- which is precisely the silent-shortfall
+    # this whole card exists to remove, reintroduced by the fix for it.
+    # A bound is a promise about termination; it is not permission to
+    # answer a different question than the one asked.
+    for _ in range(_ITEM_PAGE_BOUND):  # 2000 items; eval runs are ~30
+        items_page = langfuse.api.experiments.list_items(
+            from_start_time=_EXPERIMENTS_FLOOR,
+            experiment_id=experiment.id,
+            fields=_EXPERIMENT_ITEM_FIELDS,
+            limit=100,
+            cursor=cursor,
+        )
+        items.extend(items_page.data)
+        cursor = getattr(getattr(items_page, "meta", None), "cursor", None)
+        if not cursor:
+            break
+    else:
+        raise CalibrationTruncatedError(
+            f"experiment {getattr(experiment, 'name', '?')!r} still had "
+            f"more items after {_ITEM_PAGE_BOUND} pages of 100 -- refusing "
+            f"to treat a truncated run as a complete one"
+        )
+    return items
+
+
 def collect_experiment_candidates(
     langfuse: Any,
     dataset_name: str,
@@ -361,41 +423,36 @@ def collect_experiment_candidates(
 
     run_lists: List[Any] = []
     for experiment in matching[:max_runs_per_dataset]:
-        items: List[Any] = []
-        cursor = None
-        # 🔴 The bound RAISES when it is reached with a cursor still
-        # outstanding (Codex `r3832093213`), rather than returning what it
-        # has. The first version of this loop stopped at `range(20)`
-        # unconditionally, and a row -- `test_item_paging_stops_at_its_bound`
-        # -- asserted that truncation as the expected behaviour, so the
-        # suite pinned it.
+        # 🔴 Codex `r3832494812` (P2). Until this round a transport failure on
+        # ONE experiment -- including on a later page of a run that had already
+        # yielded a hundred items -- propagated out of this function, and
+        # `collect_candidates`'s `except Exception` arm replaced the ENTIRE
+        # experiments leg with `[]`. So one flaky read discarded every run that
+        # had been fetched successfully; once the legacy endpoint retires, that
+        # dataset contributes nothing at all. The legacy per-run loop in
+        # `collect_candidates` has always skipped the individual run and kept
+        # the rest, and the rule did not travel to this second site when the
+        # experiments leg was added.
         #
-        # ➡️ The bound was copied from `_find_root_observation` together with
-        # its shape but not with its MEANING. There, exhausting the pages
-        # returns `None` and the caller drops one candidate: a defined,
-        # local degrade. Here, exhausting them returns a run that LOOKS
-        # complete and is short -- which is precisely the silent-shortfall
-        # this whole card exists to remove, reintroduced by the fix for it.
-        # A bound is a promise about termination; it is not permission to
-        # answer a different question than the one asked.
-        for _ in range(_ITEM_PAGE_BOUND):  # 2000 items; eval runs are ~30
-            items_page = langfuse.api.experiments.list_items(
-                from_start_time=_EXPERIMENTS_FLOOR,
-                experiment_id=experiment.id,
-                fields=_EXPERIMENT_ITEM_FIELDS,
-                limit=100,
-                cursor=cursor,
+        # ➡️ `CalibrationDataError` is re-raised UNCHANGED and that is the whole
+        # care in this arm: it is the fail-closed signal (a dataset that does
+        # not resolve, an item with no `eval_id`), and `CalibrationTruncatedError`
+        # subclasses it precisely so a truncated read cannot be re-read as
+        # "transient" by a broad `except`. A bare `except Exception: continue`
+        # here would restore the silent degrade this card exists to remove --
+        # which is why the rows below drive both directions.
+        try:
+            items = _experiment_items(langfuse, experiment)
+        except CalibrationDataError:
+            raise
+        except Exception as e:
+            run_name = getattr(experiment, "name", "?")
+            logger.warning(
+                "experiment_items_fetch_failed",
+                dataset=dataset_name, run_name=run_name, error=str(e),
             )
-            items.extend(items_page.data)
-            cursor = getattr(getattr(items_page, "meta", None), "cursor", None)
-            if not cursor:
-                break
-        else:
-            raise CalibrationTruncatedError(
-                f"experiment {getattr(experiment, 'name', '?')!r} still had "
-                f"more items after {_ITEM_PAGE_BOUND} pages of 100 -- refusing "
-                f"to treat a truncated run as a complete one"
-            )
+            print(f"  ! Skipping experiment run {run_name}: {e}")
+            continue
         candidates = [
             {
                 "dataset": dataset_name,

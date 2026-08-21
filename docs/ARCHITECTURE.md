@@ -1138,7 +1138,9 @@ The dataset-item id travels on the **root span's metadata as `eval_id`**, writte
 
 🔴 **Correction (2026-08-21).** This entry originally justified the raise with *"the population is empty: zero experiment runs exist, so a leg that raises on absence is raising on a bug, never on history."* A live probe on 2026-08-20 found **ten** pre-existing experiment runs. The premise was false, and it was the entire argument.
 
-The raise stands, on a different and weaker footing: the runs the probe read do carry `eval_id`, but no one has asserted that over all ten. So it is safe by **loudness**, not by an empty population — a build that stops is recoverable; a green pack quietly missing a leg is not. A probe over all ten is queued. The distinction matters because the two sentences have different failure modes, and only the second one is true.
+The raise stands, on a different and weaker footing: the runs the probe read do carry `eval_id`, but no one has asserted that over all ten. So it is safe by **loudness**, not by an empty population — a build that stops is recoverable; a green pack quietly missing a leg is not. The distinction matters because the two sentences have different failure modes, and only the second one is true.
+
+🟢 **Probe returned 2026-08-21** (live Langfuse, read-only, zero spend): **54** experiment runs, **248** items, **0** missing `eval_id` — every one carried in `experiment_item_metadata`, and no run hit the page bound. The raise is now safe on evidence over the whole population rather than on loudness alone. ⚠️ The probe also established a fact the code depends on and could not have derived: the **request** spelling of the metadata groups is the camelCase enum (`itemMetadata`, `experimentMetadata`) while the **response** exposes snake_case attributes — sending the snake_case spelling is a 400. `_EVAL_ID_GROUP_REQUEST_FIELDS` names that mapping so a narrowing of `_EXPERIMENT_ITEM_FIELDS` reds a row instead of silently reading a group nobody asked for.
 
 Two supporting choices:
 
@@ -1149,6 +1151,7 @@ Two decisions from review, both about what the leg does when the data is not wha
 
 - **The data-contract signal has its own class, `CalibrationDataError(LookupError)`.** The caller must re-raise our fail-closed signal while still degrading on a transport fault, and stating that guard over bare `LookupError` over-reaches badly: it is the base class of `KeyError` and `IndexError`, so any incidental container miss inside the langfuse SDK became indistinguishable from a malformed write and aborted the whole build. *A guard stated over a base class inherits every meaning that class already had.*
 - **A paged read that hits its page bound with a cursor outstanding raises (`CalibrationTruncatedError`) rather than returning what it has.** The bound guarantees termination; it is not permission to answer a different question. The first version returned the first 2000 items silently — and a test asserted that truncation as correct, so the suite pinned it.
+- **A transport fault is scoped to the ONE run it happened on; a data-contract fault is not.** `_experiment_items` is split out so `collect_experiment_candidates` can skip a single unreadable run — naming it on stdout — and keep the runs already fetched, the way the legacy per-run loop always has. Previously one flaky read propagated out of the function and the caller's broad arm replaced the entire experiments leg with `[]`; after the legacy endpoint retires that dataset would contribute nothing. `CalibrationDataError` (and therefore `CalibrationTruncatedError`) is re-raised unchanged: *the scope of a degrade is a claim about the fault's subject, and a run-scoped catch must not acquire a dataset-scoped one.*
 
 ### Consequences
 
