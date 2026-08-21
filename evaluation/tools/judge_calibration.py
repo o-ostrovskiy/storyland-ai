@@ -215,8 +215,8 @@ _EXPERIMENT_ITEM_FIELDS = "core,metadata,itemMetadata,experimentMetadata"
 _EVAL_ID_GROUPS = ("metadata", "experiment_item_metadata", "experiment_metadata")
 
 # Leg-rank tie-break for the cross-leg recency merge in collect_candidates:
-# at equal timestamps the legacy leg sorts first, matching _dedupe_by_trace's
-# own contract that a trace described by both APIs keeps its legacy
+# at equal timestamps the legacy leg sorts first, matching the trace-identity
+# dedupe's own contract that a trace described by both APIs keeps its legacy
 # description.
 _LEG_RANK_EXPERIMENT = 0
 _LEG_RANK_LEGACY = 1
@@ -321,24 +321,6 @@ def collect_experiment_candidates(
     return run_lists
 
 
-def _dedupe_by_trace(
-    run_lists: List[List[Dict[str, Any]]],
-) -> List[List[Dict[str, Any]]]:
-    """Drop candidates whose trace was already contributed by an earlier run.
-
-    Order is significant and legacy runs come first, so during the cutover a
-    trace described by both APIs keeps its legacy description. A duplicate
-    would silently double that generation's weight in the calibration pack.
-    """
-    seen: set = set()
-    deduped: List[List[Dict[str, Any]]] = []
-    for items in run_lists:
-        kept = [c for c in items if c["trace_id"] not in seen]
-        seen.update(c["trace_id"] for c in kept)
-        deduped.append(kept)
-    return deduped
-
-
 def collect_candidates(
     langfuse: Any,
     datasets: List[str],
@@ -395,6 +377,16 @@ def collect_candidates(
             experiment_runs = collect_experiment_candidates(
                 langfuse, dataset_name, run_prefix, max_runs_per_dataset
             )
+        except LookupError:
+            # 🔴 MYS-914 Codex P1 (discussion_r3827349867): `LookupError` is
+            # the fail-closed signal from `resolve_dataset_id` and
+            # `experiment_item_case_id` -- a malformed write or a dataset
+            # name that does not resolve. Swallowing it here restores exactly
+            # the silent-degrade behaviour those raises exist to prevent:
+            # once the legacy leg retires, `legacy_runs` is empty by
+            # construction, so one malformed item would collapse the whole
+            # union to `[]` behind a warning log instead of surfacing.
+            raise
         except Exception as e:
             logger.warning(
                 "experiment_runs_fetch_failed", dataset=dataset_name, error=str(e)
@@ -412,21 +404,28 @@ def collect_candidates(
         # each leg is a superset of the true newest max_runs_per_dataset
         # overall) -- only the ORDER and the CAP move to after the merge.
         # Ties keep the legacy description via `_LEG_RANK_LEGACY`, matching
-        # `_dedupe_by_trace`'s own contract below.
+        # the trace-identity dedupe below.
         merged = (
             [(_normalize_ts(ts), _LEG_RANK_LEGACY, cands) for ts, cands in legacy_runs]
             + [(_normalize_ts(ts), _LEG_RANK_EXPERIMENT, cands) for ts, cands in experiment_runs]
         )
         merged.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        merged = merged[:max_runs_per_dataset]
-        run_lists = [cands for _, _, cands in merged]
 
-        # 🔴 De-duplicate by TRACE, and by trace ONLY. The card asks for run
-        # identity rather than run name; the two APIs have disjoint id spaces
-        # (that is the same partition that makes this read total), so a name is
-        # the only cross-API handle a RUN has -- and it is the wrong one. The
-        # real identity lives a level down: a generation is ONE trace whichever
-        # endpoint described it.
+        # 🔴 De-duplicate by TRACE, and by trace ONLY, WHILE walking the
+        # recency-sorted merge -- not after capping it (MYS-914 Codex P2,
+        # discussion_r3827349872). The two APIs partition RUNS, not TRACES:
+        # during the cutover the same trace can be described by both legs, so
+        # capping on run-count first and dedeuping after let one overlapping
+        # trace consume a cap slot and then empty it, under-filling the pack
+        # and losing run diversity silently. A run that contributes NO
+        # surviving trace consumes no slot; only runs with at least one fresh
+        # trace count toward `max_runs_per_dataset`.
+        #
+        # The card asks for run identity rather than run name; the two APIs
+        # have disjoint id spaces (that is the same partition that makes this
+        # read total), so a name is the only cross-API handle a RUN has --
+        # and it is the wrong one. The real identity lives a level down: a
+        # generation is ONE trace whichever endpoint described it.
         #
         # A run-name net was written here first and then removed, because a
         # mutation that deleted it left every row green: the trace net already
@@ -434,7 +433,17 @@ def collect_candidates(
         # on a name collision, so two genuinely different runs that happen to
         # share a name would lose one of them silently, which is the failure
         # this de-dup exists to prevent, inverted.
-        per_dataset_runs[dataset_name] = _dedupe_by_trace(run_lists)
+        seen: set = set()
+        kept_runs: List[List[Dict[str, Any]]] = []
+        for _ts, _leg, cands in merged:
+            kept = [c for c in cands if c["trace_id"] not in seen]
+            if not kept:
+                continue
+            seen.update(c["trace_id"] for c in kept)
+            kept_runs.append(kept)
+            if len(kept_runs) >= max_runs_per_dataset:
+                break
+        per_dataset_runs[dataset_name] = kept_runs
         print(
             f"  {dataset_name}: {len(legacy_runs)} matching runs "
             f"(+{len(experiment_runs)} experiment)"

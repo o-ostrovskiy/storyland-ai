@@ -723,7 +723,15 @@ class TestExperimentLegDetails:
         assert seen["dataset_id"] == "ds-1", "the ID, not the name"
 
     def test_a_failing_experiment_leg_does_not_lose_the_legacy_leg(self):
-        client = _client(legacy={"run-a": [("case-1", "t1")]}, dataset_id=None)
+        # 🔴 MYS-914 Codex P1 (discussion_r3827349867): this used to drive the
+        # failure via `dataset_id=None`, i.e. a `LookupError` out of
+        # `resolve_dataset_id` -- but that is now a fail-closed signal that
+        # must PROPAGATE (see TestExperimentLookupErrorsPropagate below), not
+        # a degrade-gracefully case. A TRANSPORT failure is what this row is
+        # actually about: the experiments leg answering with an error the
+        # legacy leg should still survive.
+        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        client.api.experiments.list = _raise
         got = collect_candidates(client, ["books_v1"], "run-")
         assert [c["trace_id"] for c in got] == ["t1"]
 
@@ -751,6 +759,96 @@ class TestLegacyFailureDoesNotBlockExperiments:
         client.api.datasets.get_runs = _raise
         client.api.datasets.get = _raise
         assert collect_candidates(client, ["books_v1"], "run-") == []
+
+
+# --- MYS-914 Codex P2 fixes (discussion_r3827349867, discussion_r3827349872) -
+
+
+class TestExperimentLookupErrorsPropagate:
+    """discussion_r3827349867: a bare `except Exception` around the
+    experiments leg re-opened the two fail-closed guards it wraps
+    (`resolve_dataset_id`, `experiment_item_case_id`) -- `LookupError` is an
+    `Exception`, so a malformed write or an unresolvable dataset name
+    degraded to an empty experiment leg behind a warning log, exactly the
+    silence those raises exist to prevent."""
+
+    def test_missing_eval_id_aborts_rather_than_falling_back_to_legacy(self):
+        client = _client(
+            legacy={"run-a": [("case-1", "t-legacy")]},
+            experiments={"run-a": [_Obj(
+                id="ei-1", trace_id="t-exp",
+                metadata=None, experiment_item_metadata=None,
+                experiment_metadata=None,
+            )]},
+        )
+        with pytest.raises(LookupError, match="carries no eval_id"):
+            collect_candidates(client, ["books_v1"], "run-")
+
+    def test_unresolvable_dataset_name_aborts(self):
+        client = _client(
+            legacy={"run-a": [("case-1", "t-legacy")]}, dataset_id=None
+        )
+        with pytest.raises(LookupError, match="did not resolve to an id"):
+            collect_candidates(client, ["books_v1"], "run-")
+
+    def test_transport_failure_on_experiments_list_still_degrades(self):
+        """🔴 The converse, and it is not optional: a plain transport error
+        (not a LookupError) must still degrade to an empty experiment leg and
+        return the legacy candidates, rather than raising. Without this row
+        the fix trades a fail-open for a fail-closed that cannot survive a
+        flaky endpoint. Identical in shape to
+        TestLegacyFailureDoesNotBlockExperiments's own row above, asserted
+        here too so this class states its own converse rather than pointing
+        at one two classes away."""
+        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        client.api.experiments.list = _raise
+        got = collect_candidates(client, ["books_v1"], "run-")
+        assert [c["trace_id"] for c in got] == ["t1"]
+
+
+class TestDedupeBeforeCap:
+    """discussion_r3827349872: the cap used to count RUN SLOTS before
+    `_dedupe_by_trace` removed overlapping traces, so a run sharing its
+    trace with an earlier one still consumed a slot and then emptied it --
+    the pack under-filled and lost run diversity silently."""
+
+    def test_a_duplicated_trace_does_not_evict_a_distinct_run(self):
+        newer = datetime(2026, 6, 3, tzinfo=timezone.utc)
+        dup = datetime(2026, 6, 2, tzinfo=timezone.utc)
+        older = datetime(2026, 6, 1, tzinfo=timezone.utc)
+        client = _client(
+            legacy={
+                "run-newest": [("case-1", "t-shared")],
+                "run-third": [("case-3", "t-distinct")],
+            },
+            experiments={"run-dup": [_experiment_item("case-2", "t-shared")]},
+        )
+        client.api.datasets.get_runs = lambda name, limit=50: _Obj(data=[
+            _Obj(name="run-newest", created_at=newer),
+            _Obj(name="run-third", created_at=older),
+        ])
+        client.api.experiments.list = lambda **kw: _Obj(data=[
+            _Obj(name="run-dup", id="exp-run-dup", start_time=dup),
+        ])
+        got = collect_candidates(client, ["books_v1"], "run-", max_runs_per_dataset=2)
+        traces = {c["trace_id"] for c in got}
+        assert traces == {"t-shared", "t-distinct"}, (
+            f"a fully-duplicate run must not consume a cap slot and evict a "
+            f"distinct run: got {traces}"
+        )
+
+    def test_cap_still_caps_when_nothing_overlaps(self):
+        """The converse, already covered by
+        TestCapAppliesOnceAfterMerge::test_eight_plus_eight_survives_as_eight_not_sixteen
+        above -- eight legacy plus eight experiment runs with no overlapping
+        traces still caps to exactly eight. Restated here as its own row so
+        this class's converse is not merely a cross-reference."""
+        legacy = {f"run-l{i}": [(f"case-l{i}", f"t-l{i}")] for i in range(8)}
+        experiments = {f"run-e{i}": [_experiment_item(f"case-e{i}", f"t-e{i}")]
+                       for i in range(8)}
+        client = _client(legacy=legacy, experiments=experiments)
+        got = collect_candidates(client, ["books_v1"], "run-", max_runs_per_dataset=8)
+        assert len(got) == 8
 
 
 class TestRecencyAcrossLegs:
