@@ -6,6 +6,7 @@ Langfuse-facing helpers with mocked clients — no live API.
 """
 
 import enum
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -725,3 +726,98 @@ class TestExperimentLegDetails:
         client = _client(legacy={"run-a": [("case-1", "t1")]}, dataset_id=None)
         got = collect_candidates(client, ["books_v1"], "run-")
         assert [c["trace_id"] for c in got] == ["t1"]
+
+
+# --- MYS-914 Codex P1 fixes --------------------------------------------------
+
+
+def _raise(*_a, **_kw):
+    raise RuntimeError("boom")
+
+
+class TestLegacyFailureDoesNotBlockExperiments:
+    """discussion_r3825860886: the legacy leg's `continue` used to skip the
+    WHOLE dataset, experiments leg included -- exactly the moment
+    `datasets.get_runs` retires and every dataset takes this branch."""
+
+    def test_legacy_raises_experiments_still_collected(self):
+        client = _client(experiments={"run-a": [_experiment_item("case-1", "t1")]})
+        client.api.datasets.get_runs = _raise
+        got = collect_candidates(client, ["books_v1"], "run-")
+        assert [c["trace_id"] for c in got] == ["t1"]
+
+    def test_both_legs_raising_returns_empty_not_raise(self):
+        client = _client()
+        client.api.datasets.get_runs = _raise
+        client.api.datasets.get = _raise
+        assert collect_candidates(client, ["books_v1"], "run-") == []
+
+
+class TestRecencyAcrossLegs:
+    """discussion_r3825860891: legacy always sorted first by PROVENANCE, not
+    by time -- a genuinely newer experiment run could sit behind up to
+    max_runs_per_dataset older legacy runs and be dropped by the cap."""
+
+    def test_a_newer_experiment_run_outranks_an_older_legacy_run(self):
+        old = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        new = datetime(2026, 6, 1, tzinfo=timezone.utc)
+        client = _client(
+            legacy={"run-old": [("case-1", "t-old")]},
+            experiments={"run-new": [_experiment_item("case-1", "t-new")]},
+        )
+        client.api.datasets.get_runs = lambda name, limit=50: _Obj(
+            data=[_Obj(name="run-old", created_at=old)]
+        )
+        client.api.experiments.list = lambda **kw: _Obj(
+            data=[_Obj(name="run-new", id="exp-run-new", start_time=new)]
+        )
+        got = collect_candidates(client, ["books_v1"], "run-")
+        selected = select_candidates(got, target=30, max_per_case=1)
+        assert [c["trace_id"] for c in selected] == ["t-new"]
+
+    def test_naive_and_aware_timestamps_do_not_raise(self):
+        """A naive datetime from one leg must not TypeError against an aware
+        one from the other -- normalize explicitly, per the finding's note,
+        rather than papering over it with a try."""
+        naive_old = datetime(2026, 1, 1)
+        aware_new = datetime(2026, 6, 1, tzinfo=timezone.utc)
+        client = _client(
+            legacy={"run-old": [("case-1", "t-old")]},
+            experiments={"run-new": [_experiment_item("case-1", "t-new")]},
+        )
+        client.api.datasets.get_runs = lambda name, limit=50: _Obj(
+            data=[_Obj(name="run-old", created_at=naive_old)]
+        )
+        client.api.experiments.list = lambda **kw: _Obj(
+            data=[_Obj(name="run-new", id="exp-run-new", start_time=aware_new)]
+        )
+        got = collect_candidates(client, ["books_v1"], "run-")
+        assert sorted(c["trace_id"] for c in got) == ["t-new", "t-old"]
+
+
+class TestCapAppliesOnceAfterMerge:
+    def test_eight_plus_eight_survives_as_eight_not_sixteen(self):
+        legacy = {f"run-l{i}": [(f"case-l{i}", f"t-l{i}")] for i in range(8)}
+        experiments = {f"run-e{i}": [_experiment_item(f"case-e{i}", f"t-e{i}")]
+                       for i in range(8)}
+        client = _client(legacy=legacy, experiments=experiments)
+        got = collect_candidates(client, ["books_v1"], "run-", max_runs_per_dataset=8)
+        assert len(got) == 8
+
+
+class TestDedupePrecedenceSurvivesTheReSort:
+    def test_a_tied_timestamp_keeps_the_legacy_description(self):
+        tied = datetime(2026, 3, 1, tzinfo=timezone.utc)
+        client = _client(
+            legacy={"run-legacy": [("case-1", "t1")]},
+            experiments={"run-exp": [_experiment_item("case-1", "t1")]},
+        )
+        client.api.datasets.get_runs = lambda name, limit=50: _Obj(
+            data=[_Obj(name="run-legacy", created_at=tied)]
+        )
+        client.api.experiments.list = lambda **kw: _Obj(
+            data=[_Obj(name="run-exp", id="exp-run-exp", start_time=tied)]
+        )
+        got = collect_candidates(client, ["books_v1"], "run-")
+        assert len(got) == 1
+        assert got[0]["run_name"] == "run-legacy"

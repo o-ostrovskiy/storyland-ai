@@ -214,6 +214,28 @@ _EXPERIMENTS_FLOOR = datetime(2020, 1, 1, tzinfo=timezone.utc)
 _EXPERIMENT_ITEM_FIELDS = "core,metadata,itemMetadata,experimentMetadata"
 _EVAL_ID_GROUPS = ("metadata", "experiment_item_metadata", "experiment_metadata")
 
+# Leg-rank tie-break for the cross-leg recency merge in collect_candidates:
+# at equal timestamps the legacy leg sorts first, matching _dedupe_by_trace's
+# own contract that a trace described by both APIs keeps its legacy
+# description.
+_LEG_RANK_EXPERIMENT = 0
+_LEG_RANK_LEGACY = 1
+
+
+def _normalize_ts(value: Any) -> Any:
+    """UTC-normalize a naive datetime; pass everything else through unchanged.
+
+    Legacy `run.created_at` and experiment `run.start_time` are both
+    timezone-aware `datetime`s against the pinned langfuse 4.14.0 client, but
+    a naive/aware mix raises `TypeError` at comparison time -- so only a
+    naive `datetime` gets a UTC tzinfo attached here, explicitly, rather than
+    papered over with a `try`. An already-aware datetime, or any non-datetime
+    sort key a test double supplies, is returned unchanged.
+    """
+    if isinstance(value, datetime) and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
 
 def resolve_dataset_id(langfuse: Any, dataset_name: str) -> str:
     """The dataset's ID, which `experiments.list` needs instead of its name.
@@ -265,8 +287,11 @@ def collect_experiment_candidates(
     dataset_name: str,
     run_prefix: str,
     max_runs_per_dataset: int,
-) -> List[List[Dict[str, Any]]]:
-    """Candidate lists for `dataset_name`'s experiment-written runs, newest first."""
+) -> List[Any]:
+    """(start_time, candidates) pairs for `dataset_name`'s experiment-written
+    runs, newest first. The timestamp travels with each run so
+    `collect_candidates` can merge it against the legacy leg by actual
+    recency rather than by which leg it came from."""
     dataset_id = resolve_dataset_id(langfuse, dataset_name)
     page = langfuse.api.experiments.list(
         from_start_time=_EXPERIMENTS_FLOOR, dataset_id=dataset_id, limit=50
@@ -274,7 +299,7 @@ def collect_experiment_candidates(
     matching = [e for e in page.data if e.name.startswith(run_prefix)]
     matching.sort(key=lambda e: e.start_time, reverse=True)
 
-    run_lists: List[List[Dict[str, Any]]] = []
+    run_lists: List[Any] = []
     for experiment in matching[:max_runs_per_dataset]:
         items_page = langfuse.api.experiments.list_items(
             from_start_time=_EXPERIMENTS_FLOOR,
@@ -282,7 +307,7 @@ def collect_experiment_candidates(
             fields=_EXPERIMENT_ITEM_FIELDS,
             limit=100,
         )
-        run_lists.append([
+        candidates = [
             {
                 "dataset": dataset_name,
                 "item_id": experiment_item_case_id(item),
@@ -291,7 +316,8 @@ def collect_experiment_candidates(
             }
             for item in items_page.data
             if item.trace_id
-        ])
+        ]
+        run_lists.append((experiment.start_time, candidates))
     return run_lists
 
 
@@ -326,18 +352,23 @@ def collect_candidates(
     per_dataset_runs: Dict[str, List[List[Dict[str, Any]]]] = {}
 
     for dataset_name in datasets:
+        legacy_runs: List[Any] = []
+        matching: List[Any] = []
         try:
             runs_page = langfuse.api.datasets.get_runs(dataset_name, limit=50)
         except Exception as e:
             logger.warning("dataset_runs_fetch_failed", dataset=dataset_name, error=str(e))
-            print(f"  ! Skipping dataset {dataset_name}: {e}")
-            continue
+            print(f"  ! Legacy runs unavailable for {dataset_name}: {e}")
+        else:
+            matching = [r for r in runs_page.data if r.name.startswith(run_prefix)]
+            matching.sort(key=lambda r: r.created_at, reverse=True)
+            matching = matching[:max_runs_per_dataset]
 
-        matching = [r for r in runs_page.data if r.name.startswith(run_prefix)]
-        matching.sort(key=lambda r: r.created_at, reverse=True)
-        matching = matching[:max_runs_per_dataset]
-
-        run_lists: List[List[Dict[str, Any]]] = []
+        # 🔴 A legacy-leg failure above no longer `continue`s past the
+        # experiments leg below it (MYS-914 Codex P1, discussion_r3825860886):
+        # once `datasets.get_runs` is retired every dataset would hit this
+        # branch, and skipping the whole loop body here would have zeroed the
+        # union out at precisely the moment it exists to carry the load.
         for run in matching:
             try:
                 run_details = langfuse.api.datasets.get_run(dataset_name, run.name)
@@ -348,7 +379,7 @@ def collect_candidates(
                 )
                 print(f"  ! Skipping run {run.name}: {e}")
                 continue
-            run_lists.append([
+            candidates = [
                 {
                     "dataset": dataset_name,
                     "item_id": item.dataset_item_id,
@@ -357,9 +388,11 @@ def collect_candidates(
                 }
                 for item in run_details.dataset_run_items
                 if item.trace_id
-            ])
+            ]
+            legacy_runs.append((run.created_at, candidates))
+
         try:
-            experiment_lists = collect_experiment_candidates(
+            experiment_runs = collect_experiment_candidates(
                 langfuse, dataset_name, run_prefix, max_runs_per_dataset
             )
         except Exception as e:
@@ -367,7 +400,26 @@ def collect_candidates(
                 "experiment_runs_fetch_failed", dataset=dataset_name, error=str(e)
             )
             print(f"  ! Skipping {dataset_name} experiment runs: {e}")
-            experiment_lists = []
+            experiment_runs = []
+
+        # 🔴 Merge BOTH legs by actual recency, then cap ONCE (MYS-914 Codex
+        # P1, discussion_r3825860891) -- capping each leg to
+        # max_runs_per_dataset and concatenating gave an effective 2x cap,
+        # ordered by PROVENANCE rather than time: up to max_runs_per_dataset
+        # older legacy runs sat ahead of every newer experiment run. The
+        # per-leg pre-cap above stays (it bounds API work and each leg
+        # returns time-descending, so the newest max_runs_per_dataset of
+        # each leg is a superset of the true newest max_runs_per_dataset
+        # overall) -- only the ORDER and the CAP move to after the merge.
+        # Ties keep the legacy description via `_LEG_RANK_LEGACY`, matching
+        # `_dedupe_by_trace`'s own contract below.
+        merged = (
+            [(_normalize_ts(ts), _LEG_RANK_LEGACY, cands) for ts, cands in legacy_runs]
+            + [(_normalize_ts(ts), _LEG_RANK_EXPERIMENT, cands) for ts, cands in experiment_runs]
+        )
+        merged.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        merged = merged[:max_runs_per_dataset]
+        run_lists = [cands for _, _, cands in merged]
 
         # 🔴 De-duplicate by TRACE, and by trace ONLY. The card asks for run
         # identity rather than run name; the two APIs have disjoint id spaces
@@ -382,11 +434,10 @@ def collect_candidates(
         # on a name collision, so two genuinely different runs that happen to
         # share a name would lose one of them silently, which is the failure
         # this de-dup exists to prevent, inverted.
-        run_lists.extend(experiment_lists)
         per_dataset_runs[dataset_name] = _dedupe_by_trace(run_lists)
         print(
-            f"  {dataset_name}: {len(matching)} matching runs "
-            f"(+{len(experiment_lists)} experiment)"
+            f"  {dataset_name}: {len(legacy_runs)} matching runs "
+            f"(+{len(experiment_runs)} experiment)"
         )
 
     return interleave_by_run(per_dataset_runs)
