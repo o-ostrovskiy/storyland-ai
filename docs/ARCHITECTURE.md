@@ -1136,12 +1136,19 @@ Building it surfaced the constraint that decides the shape: **`ExperimentItem` e
 
 The dataset-item id travels on the **root span's metadata as `eval_id`**, written by all four eval tools (three already did; `run_scheduled_eval.py` was the gap), and the experiment leg reads it back and **raises when it is absent**. It never falls back to `experiment_item_id`.
 
-Raising is safe rather than brittle precisely because the population is empty: zero experiment runs exist, so every experiment run that will ever exist is written after the `eval_id` write. A leg that raises on absence is raising on a bug, never on history.
+🔴 **Correction (2026-08-21).** This entry originally justified the raise with *"the population is empty: zero experiment runs exist, so a leg that raises on absence is raising on a bug, never on history."* A live probe on 2026-08-20 found **ten** pre-existing experiment runs. The premise was false, and it was the entire argument.
+
+The raise stands, on a different and weaker footing: the runs the probe read do carry `eval_id`, but no one has asserted that over all ten. So it is safe by **loudness**, not by an empty population — a build that stops is recoverable; a green pack quietly missing a leg is not. A probe over all ten is queued. The distinction matters because the two sentences have different failure modes, and only the second one is true.
 
 Two supporting choices:
 
 - **`from_start_time` is required by the endpoint and is deliberately wide.** The legacy path applies no time window at all — it selects the newest *N* runs by count — so there is no existing window to derive a floor from, and a floor derived from the oldest kept legacy run is only safe while that leg is saturated. Both endpoints return time-descending and the same count is applied after the union, so a floor that is never later than anything cannot filter a candidate.
 - **De-duplication keys on `trace_id`, not on run name.** The two APIs' id spaces are disjoint — the same partition that makes the union total — so a name is the only cross-API handle a *run* has, and it is the wrong one: two genuinely different runs sharing a name would lose one silently. A generation is one trace whichever endpoint described it.
+
+Two decisions from review, both about what the leg does when the data is not what it expects:
+
+- **The data-contract signal has its own class, `CalibrationDataError(LookupError)`.** The caller must re-raise our fail-closed signal while still degrading on a transport fault, and stating that guard over bare `LookupError` over-reaches badly: it is the base class of `KeyError` and `IndexError`, so any incidental container miss inside the langfuse SDK became indistinguishable from a malformed write and aborted the whole build. *A guard stated over a base class inherits every meaning that class already had.*
+- **A paged read that hits its page bound with a cursor outstanding raises (`CalibrationTruncatedError`) rather than returning what it has.** The bound guarantees termination; it is not permission to answer a different question. The first version returned the first 2000 items silently — and a test asserted that truncation as correct, so the suite pinned it.
 
 ### Consequences
 
@@ -1177,6 +1184,6 @@ The read is additive, flagless and revertible, and it is correct before, during 
 | **Graph workflows + `book_to_place` naming (ADR #24)** | Explicit edges, no deprecated templates; primary flow named; semantics test-pinned | Factory renames; Langfuse trace names change |
 | **Per-session lock + merge re-validation (ADR #25)** | No double-billed Gemini calls on overlapping requests, incl. delayed chip replay; a degraded merge never reaches `/status`; lock registry now bounded | Word-boundary city match is a capitalization heuristic, not a gazetteer |
 | **Search-grounding receipts + fail-closed discovery (ADR #26)** | A claim the product cannot support is demoted rather than shipped at full confidence; skip rate measurable per researcher; enforcement and the metric give one answer on an unobserved receipt | User-visible downgrade at today's 46% skip rate; a wholesale instrumentation fault demotes everything (loud, by design); one cold-cache window at the `v3` bump |
+| **Union eval reads + `eval_id` case key (ADR #27)** | Read side migrates alone and stays total at every step of the Nov 16 cutoff; a run-scoped id can never silently disable the per-case cap; an incomplete read refuses rather than answering short | Calibration depends on a metadata key, not an API field; a missing `eval_id` or a truncated run stops the build rather than degrading it |
 
-| **Union eval reads + `eval_id` case key (ADR #27)** | Read side migrates alone and stays total at every step of the Nov 16 cutoff; a run-scoped id can never silently disable the per-case cap | Calibration depends on a metadata key, not an API field; a missing `eval_id` raises rather than degrades |
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.

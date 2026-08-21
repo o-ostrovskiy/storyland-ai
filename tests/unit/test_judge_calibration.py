@@ -12,6 +12,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from evaluation.tools.judge_calibration import (
+    CalibrationDataError,
+    CalibrationTruncatedError,
     collect_candidates,
     collect_experiment_candidates,
     experiment_item_case_id,
@@ -801,20 +803,57 @@ class TestExperimentItemPaging:
         assert [c["trace_id"] for c in candidates] == ["t0"]
         assert len(calls) == 1
 
-    def test_item_paging_stops_at_its_bound(self):
-        """Mirrors `_find_root_observation`'s `range(10)`: a double that
-        always returns a cursor terminates at the bound rather than looping
-        forever."""
+    def test_item_paging_raises_at_its_bound_rather_than_truncating(self):
+        """🔴 Codex `r3832093213`. This row previously read
+        `test_item_paging_stops_at_its_bound` and asserted
+        `len(candidates) == 20` — it pinned SILENT TRUNCATION as the expected
+        behaviour, which is the shortfall this whole card exists to remove,
+        reintroduced by the fix for it. The bound must still bound (the loop
+        terminates), but exhausting it with a cursor outstanding is a refusal,
+        not an answer.
+
+        RED on `2d633ef`, where this returned 20 partial candidates."""
         pages = [
             ([_experiment_item(f"case-{i}", f"t{i}")], "always-more")
             for i in range(100)
         ]
+        client, calls = _paging_client("exp-run-a", pages)
+        with pytest.raises(CalibrationTruncatedError) as excinfo:
+            collect_experiment_candidates(client, "books_v1", "run-", 8)
+        # it still TERMINATES -- the bound is doing its job
+        assert len(calls) == 20
+        # and it names the run it refused, or the operator cannot act on it
+        assert "run-a" in str(excinfo.value)
+
+    def test_a_run_ending_exactly_at_the_bound_does_not_raise(self):
+        """The converse, and the one that stops the fix being satisfied by
+        raising whenever the bound is REACHED: a run whose last page lands on
+        page 20 with no cursor is complete, not truncated. An off-by-one here
+        aborts a build on a perfectly good run."""
+        pages = [
+            ([_experiment_item(f"case-{i}", f"t{i}")], "more") for i in range(19)
+        ]
+        pages.append(([_experiment_item("case-19", "t19")], None))
         client, calls = _paging_client("exp-run-a", pages)
         (_, candidates) = collect_experiment_candidates(
             client, "books_v1", "run-", 8
         )[0]
         assert len(calls) == 20
         assert len(candidates) == 20
+
+    def test_a_truncated_run_is_not_swallowed_by_the_callers_broad_handler(self):
+        """The raise is worthless if `collect_candidates` degrades on it.
+        `CalibrationTruncatedError` is a `CalibrationDataError`, so the
+        caller's narrow arm re-raises it instead of returning a green,
+        legacy-only pack."""
+        pages = [
+            ([_experiment_item(f"case-{i}", f"t{i}")], "always-more")
+            for i in range(100)
+        ]
+        client, _calls = _paging_client("exp-run-a", pages)
+        client.api.datasets.get_runs = lambda name, limit: _Obj(data=[])
+        with pytest.raises(CalibrationTruncatedError):
+            collect_candidates(client, ["books_v1"], "run-")
 
 
 # --- MYS-914 Codex P1 fixes --------------------------------------------------
@@ -885,6 +924,49 @@ class TestExperimentLookupErrorsPropagate:
         client.api.experiments.list = _raise
         got = collect_candidates(client, ["books_v1"], "run-")
         assert [c["trace_id"] for c in got] == ["t1"]
+
+    def test_an_incidental_keyerror_in_the_sdk_still_degrades(self):
+        """🔴 @el review r2, FL-A. The narrow arm used to catch `LookupError`,
+        which is the BASE class of `KeyError` and `IndexError`. The leg it
+        wraps is a third-party SDK call chain, so ANY incidental container
+        miss under `experiments.list` — deserialization, a dict lookup — was
+        indistinguishable from our own data-contract signal and aborted the
+        whole calibration build.
+
+        ➡️ A guard stated over a base class inherits every meaning that class
+        already had. The signal now has its own name.
+
+        RED on `2d633ef`: this raised `KeyError` out of `collect_candidates`
+        instead of returning the legacy candidates."""
+
+        def _key_error(**_kw):
+            raise KeyError("data")
+
+        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        client.api.experiments.list = _key_error
+        got = collect_candidates(client, ["books_v1"], "run-")
+        assert [c["trace_id"] for c in got] == ["t1"]
+
+    def test_an_incidental_indexerror_in_the_sdk_still_degrades(self):
+        """Same class, the other member — `IndexError` is what an SDK raises
+        indexing an empty response list, so it is the likelier of the two."""
+
+        def _index_error(**_kw):
+            raise IndexError("list index out of range")
+
+        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        client.api.experiments.list = _index_error
+        got = collect_candidates(client, ["books_v1"], "run-")
+        assert [c["trace_id"] for c in got] == ["t1"]
+
+    def test_our_own_signal_is_still_loud(self):
+        """The converse of the two rows above: narrowing the arm must not also
+        let a genuine data-contract violation degrade. A dataset name that does
+        not resolve still aborts the build."""
+        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        client.api.datasets.get = lambda name: _Obj(id=None)
+        with pytest.raises(CalibrationDataError):
+            collect_candidates(client, ["books_v1"], "run-")
 
 
 class TestDedupeBeforeCap:

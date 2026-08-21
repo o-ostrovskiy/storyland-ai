@@ -213,6 +213,49 @@ _EXPERIMENTS_FLOOR = datetime(2020, 1, 1, tzinfo=timezone.utc)
 # the value lives from a code path whose whole job is that the value is there.
 _EXPERIMENT_ITEM_FIELDS = "core,metadata,itemMetadata,experimentMetadata"
 _EVAL_ID_GROUPS = ("metadata", "experiment_item_metadata", "experiment_metadata")
+# 🔴 The live probe (Local Runner, 2026-08-20) found `eval_id` in
+# `experiment_item_metadata` ONLY -- not in `metadata`, not in
+# `experiment_metadata`. All three are still read (the value's home is
+# undocumented and may move), but a future narrowing of
+# `_EXPERIMENT_ITEM_FIELDS` must keep `experiment_item_metadata`: it is the
+# one group observed to carry the id, and `TestExperimentItemCaseId`
+# parametrises all three as equally live, so those rows would stay green
+# while the only group that matters was dropped.
+_EVAL_ID_GROUP_OBSERVED = "experiment_item_metadata"
+
+# Page bound for `experiments.list_items` (100 per page). Eval runs are ~30
+# items, so this is four orders of magnitude of headroom -- it exists to
+# guarantee termination against a misbehaving cursor, not to trim a real run.
+_ITEM_PAGE_BOUND = 20
+
+
+class CalibrationDataError(LookupError):
+    """A data-contract violation in the experiments leg: the wrong dataset, or
+    a run whose write side never put `eval_id` on the root span.
+
+    🔴 Its own class, not a bare `LookupError` (@el review r2, FL-A). The two
+    raises this signal covers are ours, but the leg they sit in is a
+    third-party SDK call chain -- `experiments.list`, `list_items`, and
+    langfuse's response deserialization -- and `LookupError` is the BASE class
+    of `KeyError` and `IndexError`. A caller re-raising `LookupError` to keep
+    our fail-closed guards loud therefore also aborts the whole calibration
+    build on any incidental container miss anywhere beneath it: a fail-open
+    traded for a fail-closed that cannot survive an ordinary SDK hiccup.
+
+    ➡️ A guard stated over a base class inherits every meaning that class
+    already had. `LookupError` means "our data-integrity signal" only in this
+    file; to Python it means "a container lookup missed".
+
+    Subclasses `LookupError` so existing callers and rows keep working.
+    """
+
+
+class CalibrationTruncatedError(CalibrationDataError):
+    """A paged read hit its page bound with the cursor still outstanding.
+
+    Separate from a plain data error because it is the one case where we hold
+    a well-formed but INCOMPLETE answer -- see `collect_experiment_candidates`.
+    """
 
 # Leg-rank tie-break for the cross-leg recency merge in collect_candidates:
 # at equal timestamps the legacy leg sorts first, matching the trace-identity
@@ -248,7 +291,7 @@ def resolve_dataset_id(langfuse: Any, dataset_name: str) -> str:
     dataset = langfuse.api.datasets.get(dataset_name)
     dataset_id = getattr(dataset, "id", None)
     if not dataset_id:
-        raise LookupError(
+        raise CalibrationDataError(
             f"dataset {dataset_name!r} did not resolve to an id -- refusing to "
             f"read experiments for an unidentified dataset"
         )
@@ -266,16 +309,33 @@ def experiment_item_case_id(item: Any) -> str:
     type, no error, a pack quietly crowded by one case.
 
     The four eval writers put the dataset-item id on the root span as
-    `eval_id`. Missing means the write side is wrong, and `GET /experiments`
-    returns zero runs today -- so there is no history to be lenient about and
-    every experiment run that will ever exist is written after that write
-    lands. Raising here can only ever be raising on a bug.
+    `eval_id`, so a missing one means the write side is wrong.
+
+    🔴 This docstring used to justify the raise with "`GET /experiments`
+    returns ZERO runs today, so raising here can only ever be raising on a
+    bug." **That premise is false and the correction is the point.** The Local
+    Runner probed live on 2026-08-20 and found TEN pre-existing experiment
+    runs. The argument was one about an empty population; the population is
+    not empty, and since the raise now PROPAGATES (FL-1) it aborts the whole
+    build rather than shortening one leg.
+
+    What is actually known today: the runs the probe read do carry `eval_id`;
+    nobody has asserted it over all ten. So the honest sentence is that the
+    pre-existing runs are **unverified**, and what makes that survivable is
+    that the failure is loud -- a build that stops is recoverable, a green
+    pack quietly missing a leg is not. A probe over all ten is queued
+    (`handoffs/staff-engineer/`, zero spend, no model, not an eval); until it
+    reports, this raise is safe by LOUDNESS, not by an empty population.
+
+    ➡️ Do not restore the old sentence. A comment arguing from a population
+    nobody re-measured is worse than no comment: the next reader inherits the
+    conclusion without the check.
     """
     for group in _EVAL_ID_GROUPS:
         value = (getattr(item, group, None) or {}).get("eval_id")
         if value:
             return value
-    raise LookupError(
+    raise CalibrationDataError(
         f"experiment item {getattr(item, 'id', '?')!r} carries no eval_id in "
         f"{'/'.join(_EVAL_ID_GROUPS)} -- its dataset case cannot be named, and "
         f"experiment_item_id is run-scoped so it is not a substitute"
@@ -303,7 +363,22 @@ def collect_experiment_candidates(
     for experiment in matching[:max_runs_per_dataset]:
         items: List[Any] = []
         cursor = None
-        for _ in range(20):  # 2000 items; eval runs are ~30
+        # 🔴 The bound RAISES when it is reached with a cursor still
+        # outstanding (Codex `r3832093213`), rather than returning what it
+        # has. The first version of this loop stopped at `range(20)`
+        # unconditionally, and a row -- `test_item_paging_stops_at_its_bound`
+        # -- asserted that truncation as the expected behaviour, so the
+        # suite pinned it.
+        #
+        # ➡️ The bound was copied from `_find_root_observation` together with
+        # its shape but not with its MEANING. There, exhausting the pages
+        # returns `None` and the caller drops one candidate: a defined,
+        # local degrade. Here, exhausting them returns a run that LOOKS
+        # complete and is short -- which is precisely the silent-shortfall
+        # this whole card exists to remove, reintroduced by the fix for it.
+        # A bound is a promise about termination; it is not permission to
+        # answer a different question than the one asked.
+        for _ in range(_ITEM_PAGE_BOUND):  # 2000 items; eval runs are ~30
             items_page = langfuse.api.experiments.list_items(
                 from_start_time=_EXPERIMENTS_FLOOR,
                 experiment_id=experiment.id,
@@ -315,6 +390,12 @@ def collect_experiment_candidates(
             cursor = getattr(getattr(items_page, "meta", None), "cursor", None)
             if not cursor:
                 break
+        else:
+            raise CalibrationTruncatedError(
+                f"experiment {getattr(experiment, 'name', '?')!r} still had "
+                f"more items after {_ITEM_PAGE_BOUND} pages of 100 -- refusing "
+                f"to treat a truncated run as a complete one"
+            )
         candidates = [
             {
                 "dataset": dataset_name,
@@ -385,9 +466,9 @@ def collect_candidates(
             experiment_runs = collect_experiment_candidates(
                 langfuse, dataset_name, run_prefix, max_runs_per_dataset
             )
-        except LookupError:
-            # 🔴 MYS-914 Codex P1 (discussion_r3827349867): `LookupError` is
-            # the fail-closed signal from `resolve_dataset_id` and
+        except CalibrationDataError:
+            # 🔴 MYS-914 Codex P1 (discussion_r3827349867): this is the
+            # fail-closed signal from `resolve_dataset_id` and
             # `experiment_item_case_id` -- a malformed write or a dataset
             # name that does not resolve. Swallowing it here restores exactly
             # the silent-degrade behaviour those raises exist to prevent:
@@ -407,10 +488,14 @@ def collect_candidates(
         # max_runs_per_dataset and concatenating gave an effective 2x cap,
         # ordered by PROVENANCE rather than time: up to max_runs_per_dataset
         # older legacy runs sat ahead of every newer experiment run. The
-        # per-leg pre-cap above stays (it bounds API work and each leg
-        # returns time-descending, so the newest max_runs_per_dataset of
-        # each leg is a superset of the true newest max_runs_per_dataset
-        # overall) -- only the ORDER and the CAP move to after the merge.
+        # per-leg pre-cap above stays: it bounds API work, and each leg
+        # returns time-descending. ⚠️ That pre-cap was an EXACT superset while
+        # the cap counted runs; it is not any more (@el r2, nit 1). Since a
+        # run contributing no fresh trace now consumes no slot, filling N
+        # slots can need to reach further back than N runs per leg, so the
+        # pack can UNDER-fill. It still cannot mis-order: everything kept is
+        # newer than everything dropped. Bounded and one-directional, but no
+        # longer unconditional -- only the ORDER and the CAP move after the merge.
         # Ties keep the legacy description via `_LEG_RANK_LEGACY`, matching
         # the trace-identity dedupe below.
         merged = (
@@ -452,9 +537,13 @@ def collect_candidates(
             if len(kept_runs) >= max_runs_per_dataset:
                 break
         per_dataset_runs[dataset_name] = kept_runs
+        # ⚠️ Post-cap, post-dedupe (@el r2, nit 2). This used to print
+        # `len(legacy_runs)` and `len(experiment_runs)` -- both PRE-cap and
+        # PRE-dedupe -- so on a PR about not claiming more than you observed,
+        # the operator's one line named runs the code had just discarded.
         print(
-            f"  {dataset_name}: {len(legacy_runs)} matching runs "
-            f"(+{len(experiment_runs)} experiment)"
+            f"  {dataset_name}: {len(kept_runs)} runs kept "
+            f"(from {len(legacy_runs)} legacy + {len(experiment_runs)} experiment)"
         )
 
     return interleave_by_run(per_dataset_runs)
