@@ -11,6 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from langfuse.api.core import ApiError
+
 from evaluation.tools.judge_calibration import (
     CalibrationDataError,
     CalibrationTruncatedError,
@@ -19,6 +21,7 @@ from evaluation.tools.judge_calibration import (
     _EVAL_ID_GROUP_REQUEST_FIELDS,
     _EXPERIMENT_ITEM_FIELDS,
     collect_candidates,
+    _experiment_fault_is_systematic,
     collect_experiment_candidates,
     experiment_item_case_id,
     resolve_dataset_id,
@@ -1007,10 +1010,28 @@ class TestEvalIdGroupsAreStillRequested:
 
 
 def _raise_400(**_kw):
-    """Every request fails identically — a wrong `fields` spelling, an expired
-    key, a moved endpoint. Systematic, and indistinguishable per-iteration from
-    a run-scoped transport fault, which is @el's r4 FL-1."""
+    """Every request fails identically, as a plain `RuntimeError`.
+
+    🔴 r5 — worth being exact about what this double now models, because it is
+    NOT what its old docstring claimed. A real wrong-`fields` spelling arrives
+    from the pinned SDK as `ApiError(status_code=400)`, and an expired key as
+    `UnauthorizedError(401)`; this raises a bare `RuntimeError`, which the
+    classifier deliberately treats as UNCLASSIFIABLE and degrades. So this
+    fixture no longer exercises the classification rule at all — it exercises
+    the **gated count backstop**, at `attempted == 3`, which is exactly the
+    world the count is kept for. `_ApiError400` below is the classifier's
+    fixture, and it is a real `ApiError`.
+
+    ➡️ *A double that models a fault by its message models nothing about its
+    class.* The old docstring named three faults it could not represent."""
     raise RuntimeError("400 Bad Request: invalid value for 'fields'")
+
+
+def _api_error(status):
+    """A REAL `langfuse.api.core.ApiError`, not a look-alike. The classifier
+    reads `isinstance` and `.status_code`, so a duck-typed stand-in would make
+    every row below green regardless of what the rule does."""
+    return ApiError(status_code=status, body={"message": "fixture"})
 
 
 def _flaky_items_client(fail_on, exc, runs=("run-c", "run-b", "run-a")):
@@ -1131,6 +1152,132 @@ class TestEveryRunSkippedIsNotAnEmptyLeg:
         client.api.datasets.get_runs = _raise
         with pytest.raises(CalibrationDataError):
             collect_candidates(client, ["books_v1"], "run-", 8)
+
+
+class TestExperimentFaultClass:
+    """🔴 @el review r5 — the ruling that replaced his own r4 FL-1.
+
+    r4 asked for an OUTCOME rule: *a skip is only per-run if some other run
+    succeeded*. True as a sentence, and unable to be expressed by the predicate
+    it asked for — at `attempted == 1` there is no other run, so
+    `skipped == attempted` is satisfied by any single failure and carries zero
+    bits about systematicity. `storyland_eval` with a monthly prefix routinely
+    matches exactly one experiment, so n=1 is the MIDDLE of this distribution,
+    and the count rule both (a) aborted the build on an ordinary transient
+    failure there, and (b) could not fire at n=1 on the 400 it was justified
+    with.
+
+    ➡️ *An outcome-based discriminator inherits its population's SIZE as a hard
+    bound on what it can distinguish.*
+
+    These rows drive `attempted == 1` on purpose: it is the case the previous
+    rule could not speak about, and every row here is RED on `69379df`."""
+
+    @staticmethod
+    def _one_run(exc):
+        return _flaky_items_client("only", exc, runs=("only",))
+
+    def test_a_transient_failure_at_n_of_1_degrades_instead_of_aborting(self):
+        """RED on `69379df`: raised `CalibrationDataError`, because
+        `skipped == attempted` held vacuously at n=1. This is Codex
+        `r3835776926` and it is the common case for a monthly prefix."""
+        client = self._one_run(RuntimeError("connection reset by peer"))
+        assert collect_experiment_candidates(client, "books_v1", "on", 8) == []
+
+    def test_a_400_at_n_of_1_raises(self):
+        """RED on `69379df`: returned `[]` and the pack shipped legacy-only and
+        green. A narrowed camelCase spelling in `_EXPERIMENT_ITEM_FIELDS` is a
+        400 on EVERY request — the exact fault r4 FL-1 was written for, on the
+        exact n at which the counting rule cannot fire."""
+        client = self._one_run(_api_error(400))
+        with pytest.raises(CalibrationDataError) as excinfo:
+            collect_experiment_candidates(client, "books_v1", "on", 8)
+        assert "request-shaped" in str(excinfo.value)
+
+    @pytest.mark.parametrize("status", [401, 403, 404, 405])
+    def test_auth_and_endpoint_faults_raise_at_every_n(self, status):
+        """An expired key, a revoked scope, the endpoint moving. None of these
+        gets better on the next run and none is run-scoped."""
+        client = self._one_run(_api_error(status))
+        with pytest.raises(CalibrationDataError):
+            collect_experiment_candidates(client, "books_v1", "on", 8)
+
+    @pytest.mark.parametrize("status", [429, 408])
+    def test_the_carve_outs_degrade_although_they_are_4xx(self, status):
+        """🔴 @el's carve-outs, and the row he asked not to be skipped. 429 and
+        408 are 4xx by NUMBER and transport-shaped by NATURE. A monthly
+        calibration that hits a rate limit must not abort the build, and a bare
+        4xx band rule would silently eat both."""
+        client = self._one_run(_api_error(status))
+        assert collect_experiment_candidates(client, "books_v1", "on", 8) == []
+
+    @pytest.mark.parametrize("status", [500, 502, 503])
+    def test_server_side_faults_degrade(self, status):
+        """A 5xx is the server stating it could not answer THIS attempt."""
+        client = self._one_run(_api_error(status))
+        assert collect_experiment_candidates(client, "books_v1", "on", 8) == []
+
+    def test_an_api_error_with_no_status_degrades(self):
+        """`ApiError.status_code` is `Optional[int]` in the pinned SDK — see
+        `test_api_error_status_code_is_optional_in_the_pinned_sdk`. An
+        unclassifiable fault takes the branch that does not stop the build; the
+        gated count is the backstop for it."""
+        client = self._one_run(ApiError(body={"message": "no status"}))
+        assert collect_experiment_candidates(client, "books_v1", "on", 8) == []
+
+    def test_two_of_two_transport_failures_still_raise(self):
+        """🔴 The row that pins the count rule SURVIVED at `attempted >= 2`
+        rather than being deleted with its n=1 arm. This is the world
+        classification misses: an endpoint genuinely 5xx-ing on every request
+        degrades every run correctly, and after 2026-11-16 the legacy leg is
+        empty by construction, so the pack would go out thin and green."""
+        client = _flaky_items_client(None, RuntimeError("x"), runs=("a", "b"))
+        client.api.experiments.list_items = _raise_400
+        with pytest.raises(CalibrationDataError) as excinfo:
+            collect_experiment_candidates(client, "books_v1", "", 8)
+        assert "2/2" in str(excinfo.value)
+
+    def test_one_of_three_transport_failures_still_returns_two(self):
+        """CONVERSE — carried from r4 and re-asserted here, because the change
+        that removes the n=1 abort must not remove the per-run skip with it."""
+        client = _flaky_items_client("run-b", RuntimeError("connection reset"))
+        assert len(collect_experiment_candidates(client, "books_v1", "run-", 8)) == 2
+
+    def test_api_error_status_code_is_optional_in_the_pinned_sdk(self):
+        """🔴 Grounded against the SDK, not against a double — the technique
+        `TestSymbolPresence` exists for, applied to the fact the whole
+        classification rests on. If a future langfuse stops setting
+        `status_code`, or renames it, every behavioural row above would keep
+        passing against `_api_error()` while the real client degraded silently
+        on a 400. Only the SDK can refute that, and this is where it does."""
+        import inspect
+
+        params = inspect.signature(ApiError.__init__).parameters
+        assert "status_code" in params
+        assert ApiError(status_code=400, body=None).status_code == 400
+        assert ApiError(body=None).status_code is None
+
+    @pytest.mark.parametrize(
+        "name,status",
+        [("Error", 400), ("UnauthorizedError", 401), ("AccessDeniedError", 403),
+         ("NotFoundError", 404), ("MethodNotAllowedError", 405),
+         ("ServiceUnavailableError", 503)],
+    )
+    def test_the_sdks_typed_errors_carry_the_status_the_rule_reads(self, name, status):
+        """🔴 The half I would have got wrong by reasoning. langfuse raises
+        TYPED subclasses — `UnauthorizedError`, `NotFoundError` — not bare
+        `ApiError`s, so classifying on `status_code` is only sound while every
+        one of them actually sets it. They do, each with a fixed value, and
+        this row asserts that from the pinned package. A typed error that
+        stopped setting its status would degrade instead of raising, which is
+        the failure direction that ships."""
+        import langfuse.api as api
+
+        cls = getattr(api, name)
+        assert issubclass(cls, ApiError)
+        exc = cls(headers=None) if name == "ServiceUnavailableError" else cls(body=None)
+        assert exc.status_code == status
+        assert _experiment_fault_is_systematic(exc) is (400 <= status < 500)
 
 
 # --- MYS-914 Codex P1 fixes --------------------------------------------------

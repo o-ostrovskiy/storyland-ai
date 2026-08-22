@@ -37,6 +37,12 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from dotenv import load_dotenv
+# Imported at module level, not lazily like the `Langfuse` client below: this is
+# a pure class import with no credentials or network in it, and the classifier
+# that reads it must not be able to fall back to "unclassifiable" because an
+# import was deferred -- that fallback DEGRADES, so a silent import failure
+# would quietly restore the fault this round exists to raise on.
+from langfuse.api.core import ApiError
 
 from common.logging import get_logger
 from evaluation.tools.llm_scorer import SCORING_CRITERIA
@@ -213,6 +219,55 @@ _EXPERIMENTS_FLOOR = datetime(2020, 1, 1, tzinfo=timezone.utc)
 # the value lives from a code path whose whole job is that the value is there.
 _EXPERIMENT_ITEM_FIELDS = "core,metadata,itemMetadata,experimentMetadata"
 _EVAL_ID_GROUPS = ("metadata", "experiment_item_metadata", "experiment_metadata")
+
+# 🔴 r5 (@el) -- 4xx by number, transport-shaped by nature. Rate limiting and a
+# request timeout are the two statuses where the band and the meaning disagree,
+# and both must DEGRADE: a monthly calibration that hits a rate limit must not
+# abort the build. Named rather than inlined so the carve-out is one fact with
+# one row, not a condition re-derived at a call site.
+_DEGRADE_DESPITE_4XX = frozenset({408, 429})
+
+
+def _experiment_fault_is_systematic(exc: BaseException) -> bool:
+    """Is this fault evidence about the REQUEST rather than about the connection?
+
+    🔴 @el's r4 FL-1 asked for an OUTCOME rule -- "a skip is only per-run if some
+    other run succeeded" -- and his r5 ruling withdrew it, because at
+    `attempted == 1` there is no other run, so `skipped == attempted` is
+    satisfied by any single failure and carries **zero bits** about
+    systematicity. `storyland_eval` with a monthly prefix routinely matches
+    exactly one experiment, so n=1 is the middle of this distribution, not its
+    tail, and the counting rule turned an ordinary transient failure into a
+    build abort on the common case. Worse, it could not fire at n=1 on the very
+    fault it was written for: a narrowed camelCase spelling in
+    `_EXPERIMENT_ITEM_FIELDS` is a 400 on every request.
+
+    ➡️ *An outcome-based discriminator inherits its population's SIZE as a hard
+    bound on what it can distinguish.* So the primary rule classifies the
+    exception, which works at every n including n=1.
+
+    A 4xx is the server stating that the REQUEST is wrong -- a bad `fields`
+    spelling (400), an expired key (401), a revoked scope (403), the endpoint
+    moving (404/405). None of those gets better on the next run, and every one
+    of them is a data-contract violation that must be loud. A 5xx, a timeout, a
+    dropped connection or anything with no status at all is a fact about this
+    attempt, and degrades.
+
+    Classification is by `ApiError` alone. Everything else -- `httpx.HTTPError`,
+    a parse error, a bare `Exception` -- degrades, which is the branch that does
+    not stop the build; the gated count below is the backstop for the world this
+    misses. Note `ApiError.status_code` is `Optional[int]` in the pinned SDK, so
+    an ApiError with no status degrades too, and `TestExperimentFaultClass`
+    asserts that shape against the SDK rather than against a double.
+    """
+    if not isinstance(exc, ApiError):
+        return False
+    status = exc.status_code
+    if not isinstance(status, int):
+        return False
+    if status in _DEGRADE_DESPITE_4XX:
+        return False
+    return 400 <= status < 500
 # 🔴 The live probe (Local Runner, 2026-08-20) found `eval_id` in
 # `experiment_item_metadata` ONLY -- not in `metadata`, not in
 # `experiment_metadata`. All three are still read (the value's home is
@@ -435,10 +490,19 @@ def collect_experiment_candidates(
     # the fault is systematic.
     #
     # ➡️ *The scope of a degrade is a claim about the fault's SUBJECT, and the
-    # subject is not readable from the type.* It IS readable from the outcome:
-    # a skip is only per-run if some other run succeeded. So the property is
-    # checked where it becomes observable -- after the loop -- rather than
-    # guessed at inside it.
+    # subject is not readable from the type.*
+    #
+    # 🔴 r5 (@el) RULED against the answer this comment used to give. It said
+    # the subject IS readable from the OUTCOME -- "a skip is only per-run if
+    # some other run succeeded" -- and checked that after the loop. True as a
+    # sentence, and unable to be expressed by the predicate it asked for: at
+    # `attempted == 1` there is no other run, so the test carries zero bits,
+    # and a monthly prefix routinely matches exactly one experiment. The rule
+    # could not fire at n=1 on the 400 it was justified with, and it DID fire
+    # on an ordinary transient failure there. The classification below reads
+    # the fault's own evidence instead and works at every n; the count survives
+    # only where it is evidence at all (`attempted >= 2`), as the backstop for
+    # an endpoint that is genuinely 5xx-ing on every request.
     attempted = 0
     skipped = 0
     for experiment in matching[:max_runs_per_dataset]:
@@ -467,6 +531,17 @@ def collect_experiment_candidates(
             raise
         except Exception as e:
             run_name = getattr(experiment, "name", "?")
+            # 🔴 r5 -- PRIMARY rule, and it fires at every n including n=1. A
+            # 4xx (bar the two carve-outs) is the server telling us the request
+            # is wrong, which no retry and no other run can make right.
+            if _experiment_fault_is_systematic(e):
+                raise CalibrationDataError(
+                    f"experiment run {run_name!r} for {dataset_name!r} failed with "
+                    f"a request-shaped fault ({e}) -- a 4xx is evidence about the "
+                    "request, not about this attempt, so every run will fail the "
+                    "same way; skipping them would return an empty leg that reads "
+                    "as an empty dataset"
+                ) from e
             logger.warning(
                 "experiment_items_fetch_failed",
                 dataset=dataset_name, run_name=run_name, error=str(e),
@@ -496,7 +571,17 @@ def collect_experiment_candidates(
     # `attempted == 0` is NOT this case and must keep returning `[]`: a dataset
     # with no matching experiment runs is a legitimately empty leg, and raising
     # on it would fail every build until the writes move in PR2.
-    if attempted > 0 and skipped == attempted:
+    #
+    # 🔴 r5 (@el) -- SECONDARY, and gated at `attempted >= 2`. It is kept for the
+    # one world classification misses: an endpoint that is genuinely down
+    # answers 5xx on every request, every run degrades correctly, and post
+    # 2026-11-16 the legacy leg is empty by construction -- so the pack goes out
+    # thin and green. At `attempted >= 2` all-skipped is weak evidence, and weak
+    # evidence should still push a calibration pack in the fail-closed
+    # direction. At `attempted == 1` it is not evidence and must not fire: that
+    # is the n=1 false positive this round removes, and gating rather than
+    # deleting is what keeps the >= 2 case from being lost with it.
+    if attempted >= 2 and skipped == attempted:
         raise CalibrationDataError(
             f"every experiment run for {dataset_name!r} failed to read "
             f"({skipped}/{attempted}) -- the experiments leg could not be read at "
