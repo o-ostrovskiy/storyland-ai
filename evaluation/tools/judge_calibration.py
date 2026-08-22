@@ -658,6 +658,48 @@ def collect_candidates(
             # union to `[]` behind a warning log instead of surfacing.
             raise
         except Exception as e:
+            # 🔴 @el r6 FL-1 (Codex `r3836481943`). THE CLASSIFIER BELONGS AT THE
+            # LEG'S CHOKE POINT, not only inside the per-run loop.
+            #
+            # `collect_experiment_candidates()` opens with two un-`try`'d
+            # external calls -- `resolve_dataset_id()` (`datasets.get`) and
+            # `experiments.list` -- so neither reaches the in-loop check. An
+            # `ApiError` from either is not a `CalibrationDataError`, so it
+            # landed here and collapsed the whole experiments leg to `[]`
+            # behind a warning.
+            #
+            # 🔴 And it collapsed it on exactly the faults the classifier's own
+            # docstring names. An expired key (401), a revoked scope (403), the
+            # endpoint moving (404/405) do NOT arrive at `list_items` -- they
+            # arrive at the FIRST call, which is `experiments.list`, and on an
+            # expired key at `datasets.get` before even that. So the primary
+            # rule was absent from precisely the path its motivating examples
+            # take and present only on the path they never reach. Post
+            # 2026-11-16, with the legacy leg empty by construction, that is a
+            # green build and an empty pack -- this card's own failure, one
+            # call site above the fix for it.
+            #
+            # ➡️ *A rule installed at the site where the fault was OBSERVED does
+            # not cover the site where the fault ENTERS.* Fourth turn of this
+            # shape on this PR, so per the second-occurrence rule the fix has to
+            # make the class unreachable rather than patch today's member: this
+            # one handler is the single funnel for `resolve_dataset_id`,
+            # `experiments.list`, the per-run loop AND the call site nobody has
+            # written yet. Two `try` blocks would not be -- the fifth call would
+            # be added without one.
+            #
+            # The in-loop check STAYS. It does a different job: it scopes a
+            # degrade to ONE run instead of to the leg, and it feeds the
+            # `attempted >= 2` count rule. This one decides whether the leg
+            # exists at all.
+            if _experiment_fault_is_systematic(e):
+                raise CalibrationDataError(
+                    f"the experiments leg for {dataset_name!r} failed with a "
+                    f"request-shaped fault ({e}) -- a 4xx is evidence about the "
+                    "request, not about this attempt, so every call will fail "
+                    "the same way; degrading here would return an empty leg "
+                    "that reads as a dataset with no runs"
+                ) from e
             logger.warning(
                 "experiment_runs_fetch_failed", dataset=dataset_name, error=str(e)
             )

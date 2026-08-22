@@ -1283,6 +1283,21 @@ class TestExperimentFaultClass:
 # --- MYS-914 Codex P1 fixes --------------------------------------------------
 
 
+def _raise_api_error(status):
+    """A callable that raises a real SDK `ApiError` with `status`.
+
+    Deliberately an `ApiError` and not a `RuntimeError` carrying the number in
+    its message: 🔴 the r5 rule reads the CLASS and the `status_code`
+    attribute, so a double that models a fault by its MESSAGE models nothing
+    about the thing under test and is blind to the rule the moment it lands.
+    """
+
+    def _raiser(*_a, **_kw):
+        raise _api_error(status)
+
+    return _raiser
+
+
 def _raise(*_a, **_kw):
     raise RuntimeError("boom")
 
@@ -1390,6 +1405,92 @@ class TestExperimentLookupErrorsPropagate:
         client = _client(legacy={"run-a": [("case-1", "t1")]})
         client.api.datasets.get = lambda name: _Obj(id=None)
         with pytest.raises(CalibrationDataError):
+            collect_candidates(client, ["books_v1"], "run-")
+
+
+class TestSystematicFaultAtTheLegsEntryPoint:
+    """🔴 @el review r6 FL-1 (Codex `r3836481943`).
+
+    The r5 classifier went in at the per-run loop inside
+    `collect_experiment_candidates`. But that function OPENS with two un-`try`'d
+    external calls — `resolve_dataset_id()` (`datasets.get`) and
+    `experiments.list` — so neither reaches it. An `ApiError` from either is not
+    a `CalibrationDataError`, so it fell to `collect_candidates`'s broad arm and
+    collapsed the whole experiments leg to `[]` behind a warning.
+
+    🔴 And the faults the classifier's own docstring names — an expired key
+    (401), a revoked scope (403), the endpoint moving (404/405) — do not arrive
+    at `list_items`. They arrive HERE, at the first call. So the primary rule
+    was absent from exactly the path its motivating examples take. After
+    2026-11-16 the legacy leg is empty by construction, which makes that a green
+    build and an empty pack: this card's own failure, one call site above the
+    fix for it.
+
+    ➡️ *A rule installed at the site where a fault was OBSERVED does not cover
+    the site where it ENTERS.* The fix is the leg's single choke point rather
+    than a `try` per call, so the fifth call site added to this leg is covered
+    before it is written.
+
+    RED on `4fc05a3`: every raising row below returned the legacy candidates.
+    """
+
+    def test_a_401_from_experiments_list_aborts_rather_than_emptying_the_leg(self):
+        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        client.api.experiments.list = _raise_api_error(401)
+        with pytest.raises(CalibrationDataError, match="request-shaped fault"):
+            collect_candidates(client, ["books_v1"], "run-")
+
+    @pytest.mark.parametrize("status", [400, 403, 404, 405])
+    def test_every_request_shaped_status_aborts_at_the_entry_point(self, status):
+        """The rule is the CLASS, not the one status. 400 is the narrowed-field
+        spelling, 403 a revoked scope, 404/405 the endpoint moving."""
+        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        client.api.experiments.list = _raise_api_error(status)
+        with pytest.raises(CalibrationDataError):
+            collect_candidates(client, ["books_v1"], "run-")
+
+    def test_the_dataset_lookup_is_covered_too_not_just_the_list_call(self):
+        """🔴 `resolve_dataset_id` runs BEFORE `experiments.list`, so on an
+        expired key it is the call that fails first. A fix wrapping only
+        `experiments.list` passes every row above and still loses this one —
+        which is the whole reason @el asked for the choke point."""
+        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        client.api.datasets.get = _raise_api_error(401)
+        with pytest.raises(CalibrationDataError, match="request-shaped fault"):
+            collect_candidates(client, ["books_v1"], "run-")
+
+    @pytest.mark.parametrize("status", [500, 502, 503, 429, 408])
+    def test_the_converse_a_transient_fault_still_degrades_to_the_legacy_leg(self, status):
+        """🔴 Without this the fix is satisfiable by raising on everything,
+        which trades a fail-open for a build that cannot survive a flaky
+        endpoint. 429 and 408 are the r5 carve-outs: 4xx by number, transient
+        by meaning, and they must still degrade at this site too."""
+        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        client.api.experiments.list = _raise_api_error(status)
+        got = collect_candidates(client, ["books_v1"], "run-")
+        assert [c["trace_id"] for c in got] == ["t1"]
+
+    def test_an_api_error_with_no_status_still_degrades_here(self):
+        """`ApiError.status_code` is `Optional[int]` in the pinned SDK, and the
+        entry point must read it the same way the loop does — one predicate,
+        two call sites, no second interpretation."""
+        client = _client(legacy={"run-a": [("case-1", "t1")]})
+
+        def _no_status(**_kw):
+            raise ApiError(body={"message": "no status"})
+
+        client.api.experiments.list = _no_status
+        got = collect_candidates(client, ["books_v1"], "run-")
+        assert [c["trace_id"] for c in got] == ["t1"]
+
+    def test_the_in_loop_check_survives_it_was_not_replaced(self):
+        """The two checks do different jobs: this one decides whether the LEG
+        exists, the in-loop one scopes a degrade to ONE run and feeds the
+        `attempted >= 2` count rule. Moving the check up must not delete it —
+        a 400 from `list_items` still aborts, with the per-run message."""
+        client = _client(experiments={"run-a": [_experiment_item("case-1", "t1")]})
+        client.api.experiments.list_items = _raise_api_error(400)
+        with pytest.raises(CalibrationDataError, match="experiment run"):
             collect_candidates(client, ["books_v1"], "run-")
 
 
