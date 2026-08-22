@@ -624,6 +624,83 @@ class TestSymbolPresence:
         meta = response.model_fields["meta"].annotation
         assert "cursor" in meta.model_fields, meta
 
+    def test_observation_metadata_is_flattened_per_key_not_stored_whole(self):
+        """🔴 Codex `r3834098109` (P1) — the finding is REFUTED here, and the
+        row exists because refuting it in a reply would leave nothing behind.
+
+        Codex read `run_scheduled_eval.py`'s four `root_span.update(metadata=…)`
+        calls and argued that "Langfuse v4 stores observation metadata in a
+        single OpenTelemetry span attribute", so each update REPLACES the
+        mapping set at creation and erases the `eval_id` this PR adds — which
+        would make `experiment_item_case_id` abort every build once those runs
+        are read. The premise is checkable against the pinned SDK and it is
+        false: `_flatten_and_serialize_metadata` emits ONE attribute PER KEY
+        (`langfuse.observation.metadata.<key>`) for a dict, and OTel's
+        `set_attributes` merges by key, so an update naming `current_phase`
+        cannot touch `eval_id`.
+
+        ⚠️ Why it earns a row rather than a reply. The probe recorded in ADR #27
+        (54 runs / 248 items / 0 missing `eval_id`) cannot speak to this: all
+        three sibling writers pass only `input`/`output` to `root_span.update`,
+        never `metadata`, so no run in that population ever exercised the path.
+        `run_scheduled_eval.py` is the FIRST writer that does. The claim
+        therefore rests entirely on the SDK's flattening, exactly as r3 FL-1's
+        cursor shape did — and if a langfuse bump ever serialises the dict
+        whole, `eval_id` starts disappearing silently on the one writer that
+        matters. That must red HERE, loudly, not in a calibration run months
+        later."""
+        from langfuse._client.attributes import (
+            LangfuseOtelSpanAttributes,
+            _flatten_and_serialize_metadata,
+        )
+
+        prefix = LangfuseOtelSpanAttributes.OBSERVATION_METADATA
+        at_creation = _flatten_and_serialize_metadata(
+            {"prompt_version": "v3", "eval_id": "item-1"}, "observation"
+        )
+        on_update = _flatten_and_serialize_metadata(
+            {"current_phase": "discovery"}, "observation"
+        )
+
+        # Per-key, not whole: the single-attribute shape Codex assumed would
+        # put `prefix` itself in the mapping, and it does not.
+        assert f"{prefix}.eval_id" in at_creation
+        assert prefix not in at_creation
+
+        # And the update cannot collide with it, which is the actual claim.
+        assert f"{prefix}.eval_id" not in on_update
+        merged = {**at_creation, **on_update}  # OTel set_attributes semantics
+        assert merged[f"{prefix}.eval_id"] == "item-1"
+
+    def test_the_fields_parameter_exposes_no_valid_value_set_to_ground_against(self):
+        """⚠️ @el r4 FL-2 — this is the "say so in a line" branch, written as a
+        row so it cannot go stale.
+
+        FL-2 is right that `_EVAL_ID_GROUP_REQUEST_FIELDS` is self-consistent
+        rather than grounded: every row checks it against `_EVAL_ID_GROUPS` and
+        `_EXPERIMENT_ITEM_FIELDS`, all three of which are ours, and the doubles
+        ignore `fields=` entirely — so a wrong camelCase spelling is green
+        everywhere in this suite and only fails against the live API. The ask
+        was to ground the values in the pinned SDK IF it exposes them.
+
+        It does not: `fields` is annotated `Optional[str]`, a bare string with
+        no `Literal` and no enum, so the 2026-08-21 probe (which sent the
+        snake_case spelling and read the valid values back off a 400) remains
+        the strongest authority available and stays recorded in a comment.
+        This row asserts the ABSENCE, so that a langfuse bump introducing a
+        `Literal` reds here and tells the next reader the stronger grounding
+        has become available — rather than the note quietly staying true-looking
+        forever."""
+        import typing
+
+        from langfuse.api.experiments.client import ExperimentsClient
+
+        hint = typing.get_type_hints(ExperimentsClient.list_items).get("fields")
+        assert hint == typing.Optional[str], (
+            "the pinned SDK now constrains `fields` — ground "
+            "_EVAL_ID_GROUP_REQUEST_FIELDS against it and delete this row"
+        )
+
 
 class TestResolveDatasetId:
     def test_returns_the_id(self):
@@ -929,6 +1006,13 @@ class TestEvalIdGroupsAreStillRequested:
         )
 
 
+def _raise_400(**_kw):
+    """Every request fails identically — a wrong `fields` spelling, an expired
+    key, a moved endpoint. Systematic, and indistinguishable per-iteration from
+    a run-scoped transport fault, which is @el's r4 FL-1."""
+    raise RuntimeError("400 Bad Request: invalid value for 'fields'")
+
+
 def _flaky_items_client(fail_on, exc, runs=("run-c", "run-b", "run-a")):
     """A langfuse double whose `experiments.list_items` raises `exc` for the
     experiment whose run name is `fail_on`, and returns one item otherwise.
@@ -993,6 +1077,60 @@ class TestOneBadRunDoesNotDiscardTheGoodOnes:
         out = capsys.readouterr().out
         assert "run-b" in out
         assert "connection reset" in out
+
+
+class TestEveryRunSkippedIsNotAnEmptyLeg:
+    """🔴 @el r4 FL-1, against head `3dc7e53`.
+
+    The per-run skip arm discriminates on the exception CLASS, and class
+    cannot see whether a fault is per-RUN. A wrong or narrowed camelCase
+    spelling in `_EXPERIMENT_ITEM_FIELDS` is a 400 on EVERY request — not
+    transport, not run-scoped — and so are an expired key, a revoked scope and
+    the endpoint moving. Each arrives as a plain exception once per iteration,
+    so every run was skipped, `run_lists` came back `[]`, and the pack was
+    built from the legacy leg and reported as a success.
+
+    ➡️ *The scope of a degrade is a claim about the fault's SUBJECT, and the
+    subject is not readable from the type — it is readable from the outcome.*
+    A skip is only per-run if some other run succeeded."""
+
+    def test_every_run_failing_raises_rather_than_yielding_an_empty_leg(self):
+        """RED on `3dc7e53`: returned `[]` and the caller shipped a legacy-only
+        pack as complete."""
+        client = _flaky_items_client(None, RuntimeError("400 invalid fields"))
+        # `fail_on=None` never matches a run name, so make it match all of them.
+        client.api.experiments.list_items = _raise_400
+        with pytest.raises(CalibrationDataError) as excinfo:
+            collect_experiment_candidates(client, "books_v1", "run-", 8)
+        assert "3/3" in str(excinfo.value)
+
+    def test_one_of_three_failing_still_returns_the_other_two(self):
+        """CONVERSE 1 — the genuinely per-run fault is untouched. Without it
+        the fix is satisfiable by raising on any skip at all, which would undo
+        Codex `r3832494812` one round after it landed."""
+        client = _flaky_items_client("run-b", RuntimeError("connection reset"))
+        runs = collect_experiment_candidates(client, "books_v1", "run-", 8)
+        assert len(runs) == 2
+
+    def test_a_dataset_with_no_matching_runs_is_still_a_legitimate_empty_leg(self):
+        """CONVERSE 2, and it is the row that keeps the build alive until PR2.
+        `attempted == 0` is not "the leg could not be read", it is "there is
+        nothing in it" — the state EVERY dataset is in today, before the writes
+        move. Raising on it would fail every build immediately."""
+        client = _flaky_items_client("run-b", RuntimeError("x"), runs=())
+        assert collect_experiment_candidates(client, "books_v1", "run-", 8) == []
+
+    def test_the_raise_is_not_swallowed_by_the_callers_broad_arm(self):
+        """CONVERSE 3. `CalibrationDataError` is chosen precisely because
+        `collect_candidates` re-raises exactly that class and degrades on
+        everything else — the mistake `CalibrationTruncatedError` was
+        subclassed to avoid. A plain `RuntimeError` here would be caught one
+        level up and the whole finding would be invisible again."""
+        client = _flaky_items_client(None, RuntimeError("x"))
+        client.api.experiments.list_items = _raise_400
+        client.api.datasets.get_runs = _raise
+        with pytest.raises(CalibrationDataError):
+            collect_candidates(client, ["books_v1"], "run-", 8)
 
 
 # --- MYS-914 Codex P1 fixes --------------------------------------------------

@@ -422,7 +422,27 @@ def collect_experiment_candidates(
     matching.sort(key=lambda e: e.start_time, reverse=True)
 
     run_lists: List[Any] = []
+    # 🔴 r4 FL-1 (@el). The skip arm below discriminates on the exception CLASS,
+    # and class cannot see whether a fault is actually per-RUN. A wrong or
+    # narrowed camelCase spelling in `_EXPERIMENT_ITEM_FIELDS` is a 400 on EVERY
+    # request; so is an expired key, a revoked scope, or the endpoint moving.
+    # None of those is transport and none is run-scoped, but each arrives as a
+    # plain exception once per iteration -- so every run was skipped and named
+    # on stdout, `run_lists` came back `[]`, and `collect_candidates` built the
+    # pack from the legacy leg and reported success. The ADR's own argument
+    # against the OLD behaviour ("once the legacy endpoint retires that dataset
+    # would contribute nothing at all") is reached by the NEW behaviour whenever
+    # the fault is systematic.
+    #
+    # ➡️ *The scope of a degrade is a claim about the fault's SUBJECT, and the
+    # subject is not readable from the type.* It IS readable from the outcome:
+    # a skip is only per-run if some other run succeeded. So the property is
+    # checked where it becomes observable -- after the loop -- rather than
+    # guessed at inside it.
+    attempted = 0
+    skipped = 0
     for experiment in matching[:max_runs_per_dataset]:
+        attempted += 1
         # 🔴 Codex `r3832494812` (P2). Until this round a transport failure on
         # ONE experiment -- including on a later page of a run that had already
         # yielded a hundred items -- propagated out of this function, and
@@ -452,6 +472,7 @@ def collect_experiment_candidates(
                 dataset=dataset_name, run_name=run_name, error=str(e),
             )
             print(f"  ! Skipping experiment run {run_name}: {e}")
+            skipped += 1
             continue
         candidates = [
             {
@@ -464,6 +485,24 @@ def collect_experiment_candidates(
             if item.trace_id
         ]
         run_lists.append((experiment.start_time, candidates))
+
+    # 🔴 r4 FL-1 (@el). Every run attempted, every one skipped: whatever the
+    # exception classes said, the leg could not be READ. `CalibrationDataError`
+    # is the right class -- it is the fail-closed signal, and the caller's arm
+    # re-raises exactly it, so this refusal cannot be swallowed as transient by
+    # the broad handler one level up (the mistake `CalibrationTruncatedError`
+    # was subclassed to avoid).
+    #
+    # `attempted == 0` is NOT this case and must keep returning `[]`: a dataset
+    # with no matching experiment runs is a legitimately empty leg, and raising
+    # on it would fail every build until the writes move in PR2.
+    if attempted > 0 and skipped == attempted:
+        raise CalibrationDataError(
+            f"every experiment run for {dataset_name!r} failed to read "
+            f"({skipped}/{attempted}) -- the experiments leg could not be read at "
+            "all, which is a systematic fault wearing a per-run costume, not an "
+            "empty leg"
+        )
     return run_lists
 
 
