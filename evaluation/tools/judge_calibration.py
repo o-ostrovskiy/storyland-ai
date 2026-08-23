@@ -268,6 +268,40 @@ def _experiment_fault_is_systematic(exc: BaseException) -> bool:
     if status in _DEGRADE_DESPITE_4XX:
         return False
     return 400 <= status < 500
+
+
+def _experiment_fault_is_carved_out(exc: BaseException) -> bool:
+    """Did the classifier POSITIVELY identify this fault as retry-able?
+
+    🔴 r7 FL-1 (@el, Codex `r3837185006`). The classifier said *degrade* on a
+    429 and the count below then aborted the build anyway -- in the exact
+    situation the carve-out exists for, because rate limiting does not politely
+    hit one request in three, it persists across consecutive requests. @el's r5
+    words were "a monthly calibration that hits a rate limit must not abort the
+    build"; at `attempted >= 2` it did.
+
+    ➡️ *TWO RULES OVER THE SAME POPULATION, ONE CLASSIFYING AND ONE COUNTING,
+    DO NOT COMPOSE -- the counter re-decides what the classifier already
+    decided, without the evidence the classifier used.* The fix is not to
+    delete the count: the world it was kept for is real (an endpoint genuinely
+    5xx-ing on every request, with the legacy leg empty by construction after
+    2026-11-16, sending a thin pack out green). The fix is to stop the two
+    rules being independent. This predicate is the classifier's own output, and
+    the count now ranges over what the classifier did NOT carve out -- one
+    classification feeding one count over its own result, rather than two
+    verdicts on the same fault.
+
+    Deliberately NOT `not _experiment_fault_is_systematic(exc)`: that is true
+    of a 5xx, of a bare `RuntimeError` and of an `ApiError` with no status --
+    the whole degrade branch, which is precisely the population the count needs
+    to keep. What is carved out is only the narrow, POSITIVELY identified
+    transient: a 4xx the classifier named as retry-able.
+    """
+    return (
+        isinstance(exc, ApiError)
+        and isinstance(exc.status_code, int)
+        and exc.status_code in _DEGRADE_DESPITE_4XX
+    )
 # 🔴 The live probe (Local Runner, 2026-08-20) found `eval_id` in
 # `experiment_item_metadata` ONLY -- not in `metadata`, not in
 # `experiment_metadata`. All three are still read (the value's home is
@@ -505,6 +539,10 @@ def collect_experiment_candidates(
     # an endpoint that is genuinely 5xx-ing on every request.
     attempted = 0
     skipped = 0
+    # r7 FL-1: the count's own population. `skipped` still reports how many runs
+    # were lost (it is in the operator's sentence); `countable_skips` is the
+    # subset the classifier did not name retry-able, and only it can abort.
+    countable_skips = 0
     for experiment in matching[:max_runs_per_dataset]:
         attempted += 1
         # 🔴 Codex `r3832494812` (P2). Until this round a transport failure on
@@ -548,6 +586,8 @@ def collect_experiment_candidates(
             )
             print(f"  ! Skipping experiment run {run_name}: {e}")
             skipped += 1
+            if not _experiment_fault_is_carved_out(e):
+                countable_skips += 1
             continue
         candidates = [
             {
@@ -581,12 +621,24 @@ def collect_experiment_candidates(
     # direction. At `attempted == 1` it is not evidence and must not fire: that
     # is the n=1 false positive this round removes, and gating rather than
     # deleting is what keeps the >= 2 case from being lost with it.
-    if attempted >= 2 and skipped == attempted:
+    # 🔴 r7 FL-1 (@el, Codex `r3837185006`). `countable_skips`, not `skipped`.
+    # Every request returning 429 satisfied `skipped == attempted` and aborted
+    # the build the carve-out was written to protect. The counted population is
+    # now the classifier's own leftovers -- 5xx, no status, non-`ApiError` --
+    # which is exactly the world this backstop was kept for, and it no longer
+    # overrules a verdict the classifier already reached on better evidence.
+    #
+    # A MIXED window (one 429, one 503 over two runs) does NOT abort: the count
+    # requires that EVERY attempted run failed for a countable reason, so a
+    # window containing a known-transient fault is not evidence that the leg is
+    # systematically unreadable. `countable_skips == attempted` implies
+    # `skipped == attempted`, so this is one counter and one condition.
+    if attempted >= 2 and countable_skips == attempted:
         raise CalibrationDataError(
             f"every experiment run for {dataset_name!r} failed to read "
-            f"({skipped}/{attempted}) -- the experiments leg could not be read at "
-            "all, which is a systematic fault wearing a per-run costume, not an "
-            "empty leg"
+            f"({countable_skips}/{attempted}) -- the experiments leg could not be "
+            "read at all, which is a systematic fault wearing a per-run costume, "
+            "not an empty leg"
         )
     return run_lists
 

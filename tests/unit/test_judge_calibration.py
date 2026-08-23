@@ -21,6 +21,7 @@ from evaluation.tools.judge_calibration import (
     _EVAL_ID_GROUP_REQUEST_FIELDS,
     _EXPERIMENT_ITEM_FIELDS,
     collect_candidates,
+    _experiment_fault_is_carved_out,
     _experiment_fault_is_systematic,
     collect_experiment_candidates,
     experiment_item_case_id,
@@ -1027,6 +1028,18 @@ def _raise_400(**_kw):
     raise RuntimeError("400 Bad Request: invalid value for 'fields'")
 
 
+def _raise_status(status):
+    """Every request fails with the SAME real `ApiError`. The r7 FL-1 rows need
+    a fault that persists across consecutive requests, because that is what
+    rate limiting actually does -- `_raise_400`'s bare `RuntimeError` is
+    unclassifiable and would exercise the count without exercising the
+    carve-out."""
+    def _raise(**_kw):
+        raise ApiError(status_code=status, body={"message": "fixture"})
+
+    return _raise
+
+
 def _api_error(status):
     """A REAL `langfuse.api.core.ApiError`, not a look-alike. The classifier
     reads `isinstance` and `.status_code`, so a duck-typed stand-in would make
@@ -1236,6 +1249,73 @@ class TestExperimentFaultClass:
         with pytest.raises(CalibrationDataError) as excinfo:
             collect_experiment_candidates(client, "books_v1", "", 8)
         assert "2/2" in str(excinfo.value)
+
+    # --- 🔴 r7 FL-1 (@el, Codex `r3837185006`) -------------------------------
+    #
+    # The classifier said DEGRADE on a 429 and the count then aborted the build
+    # anyway, in the exact situation the carve-out was written for: rate
+    # limiting persists across consecutive requests, which is why 429 is in the
+    # set at all. Two rules over one population, one classifying and one
+    # counting, do not compose.
+
+    @pytest.mark.parametrize("status", [429, 408])
+    def test_every_run_rate_limited_degrades_and_the_build_continues(self, status):
+        """🔴 RED before this commit: `skipped == attempted` at 2/2 raised
+        `CalibrationDataError` on a leg the classifier had just ruled
+        retry-able. @el's r5 words were "a monthly calibration that hits a rate
+        limit must not abort the build"; at `attempted >= 2` it did."""
+        client = _flaky_items_client(None, _api_error(status), runs=("a", "b"))
+        client.api.experiments.list_items = _raise_status(status)
+        assert collect_experiment_candidates(client, "books_v1", "", 8) == []
+
+    @pytest.mark.parametrize("status", [500, 502, 503])
+    def test_every_run_5xx_still_raises(self, status):
+        """CONVERSE, and the whole reason the count was narrowed rather than
+        deleted: an endpoint genuinely 5xx-ing on every request is the one
+        world classification misses, and after 2026-11-16 the legacy leg is
+        empty by construction, so the pack would otherwise go out thin and
+        green. Narrowing the counted population must not empty it."""
+        client = _flaky_items_client(None, _api_error(status), runs=("a", "b"))
+        client.api.experiments.list_items = _raise_status(status)
+        with pytest.raises(CalibrationDataError) as excinfo:
+            collect_experiment_candidates(client, "books_v1", "", 8)
+        assert "2/2" in str(excinfo.value)
+
+    def test_a_mixed_window_does_not_abort(self):
+        """🔴 The row that states the semantics rather than leaving them to be
+        inferred. One run 429, one run 503, both skipped, the leg unread. It
+        does NOT abort: the count requires that EVERY attempted run failed for
+        a countable reason, so a window containing a fault the classifier
+        positively named retry-able is not evidence that the leg is
+        systematically unreadable. Without this row the choice between
+        `countable == attempted` and `countable >= 1 and skipped == attempted`
+        is invisible, and they differ exactly here."""
+        seq = iter([_api_error(429), _api_error(503)])
+
+        def _raise_next(**kw):
+            raise next(seq)
+
+        client = _flaky_items_client(None, RuntimeError("unused"), runs=("a", "b"))
+        client.api.experiments.list_items = _raise_next
+        assert collect_experiment_candidates(client, "books_v1", "", 8) == []
+
+    def test_the_carve_out_is_narrow_a_bare_exception_still_counts(self):
+        """🔴 The row that refuses the OTHER fix. Writing the carve-out as
+        `not _experiment_fault_is_systematic(e)` reads plausibly and empties the
+        counter: a bare `RuntimeError`, a 5xx and a status-less `ApiError` are
+        all non-systematic, so nothing would ever be counted and the backstop
+        would be deleted while looking narrowed. Only a POSITIVELY identified
+        transient is carved out."""
+        assert _experiment_fault_is_carved_out(_api_error(429)) is True
+        assert _experiment_fault_is_carved_out(_api_error(408)) is True
+        assert _experiment_fault_is_carved_out(_api_error(503)) is False
+        assert _experiment_fault_is_carved_out(RuntimeError("x")) is False
+        assert _experiment_fault_is_carved_out(ApiError(body={"m": "no status"})) is False
+        # ...and the two predicates agree about the carve-out, which is the
+        # relationship that makes the count the classifier's own leftovers.
+        for st in (429, 408):
+            assert _experiment_fault_is_systematic(_api_error(st)) is False
+            assert _experiment_fault_is_carved_out(_api_error(st)) is True
 
     def test_one_of_three_transport_failures_still_returns_two(self):
         """CONVERSE — carried from r4 and re-asserted here, because the change
