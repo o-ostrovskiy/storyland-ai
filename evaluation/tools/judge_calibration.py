@@ -30,13 +30,19 @@ import json
 import sys
 import time
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from dotenv import load_dotenv
+# Imported at module level, not lazily like the `Langfuse` client below: this is
+# a pure class import with no credentials or network in it, and the classifier
+# that reads it must not be able to fall back to "unclassifiable" because an
+# import was deferred -- that fallback DEGRADES, so a silent import failure
+# would quietly restore the fault this round exists to raise on.
+from langfuse.api.core import ApiError
 
 from common.logging import get_logger
 from evaluation.tools.llm_scorer import SCORING_CRITERIA
@@ -181,6 +187,462 @@ def make_langfuse_client():
     return Langfuse(secret_key=secret_key, public_key=public_key, host=host), host
 
 
+# --- the Experiments leg of the union read (MYS-909 PR1) ---------------------
+#
+# The legacy `datasets.get_runs`/`get_run` path below is untouched. Every run is
+# either legacy-written or experiment-written and never both, so reading BOTH is
+# total at every moment of the migration -- before any write moves, during, and
+# after -- which is what lets the read side land ahead of the writes.
+#
+# ⚠️ `from_start_time` is REQUIRED by `experiments.list` and `list_items`
+# (no default, verified against the pinned langfuse 4.14.0, not mocked).
+#
+# 🔴 The card asks that it be derived from "the same window
+# collect_candidates already applies to the legacy path". THERE IS NO SUCH
+# WINDOW: the legacy path selects by COUNT -- the newest `max_runs_per_dataset`
+# matching runs -- and applies no time floor at all. A floor derived from the
+# oldest kept legacy run is only safe while that leg is SATURATED; the moment it
+# keeps fewer runs than the cap (a new dataset, or any point after the writes
+# move) a genuinely newer experiment run can sit below it and be dropped
+# silently. That is trap 2's own failure mode arriving through the derivation
+# instead of through a constant.
+#
+# So the floor is deliberately WIDE and is not the selector: both endpoints
+# return time-descending, and the same newest-N count is applied after the
+# union. A floor that is never later than anything cannot filter a candidate.
+_EXPERIMENTS_FLOOR = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+# All three metadata groups, because which one carries the root span's own
+# metadata is NOT documented -- each field's docstring says only "included when
+# `fields=<group>` is requested". Reading all three is not a fallback: the id is
+# still REQUIRED and its absence still raises. It removes a guess about where
+# the value lives from a code path whose whole job is that the value is there.
+_EXPERIMENT_ITEM_FIELDS = "core,metadata,itemMetadata,experimentMetadata"
+_EVAL_ID_GROUPS = ("metadata", "experiment_item_metadata", "experiment_metadata")
+
+# 🔴 r5 (@el) -- 4xx by number, transport-shaped by nature. Rate limiting and a
+# request timeout are the two statuses where the band and the meaning disagree,
+# and both must DEGRADE: a monthly calibration that hits a rate limit must not
+# abort the build. Named rather than inlined so the carve-out is one fact with
+# one row, not a condition re-derived at a call site.
+_DEGRADE_DESPITE_4XX = frozenset({408, 429})
+
+
+def _experiment_fault_is_systematic(exc: BaseException) -> bool:
+    """Is this fault evidence about the REQUEST rather than about the connection?
+
+    🔴 @el's r4 FL-1 asked for an OUTCOME rule -- "a skip is only per-run if some
+    other run succeeded" -- and his r5 ruling withdrew it, because at
+    `attempted == 1` there is no other run, so `skipped == attempted` is
+    satisfied by any single failure and carries **zero bits** about
+    systematicity. `storyland_eval` with a monthly prefix routinely matches
+    exactly one experiment, so n=1 is the middle of this distribution, not its
+    tail, and the counting rule turned an ordinary transient failure into a
+    build abort on the common case. Worse, it could not fire at n=1 on the very
+    fault it was written for: a narrowed camelCase spelling in
+    `_EXPERIMENT_ITEM_FIELDS` is a 400 on every request.
+
+    ➡️ *An outcome-based discriminator inherits its population's SIZE as a hard
+    bound on what it can distinguish.* So the primary rule classifies the
+    exception, which works at every n including n=1.
+
+    A 4xx is the server stating that the REQUEST is wrong -- a bad `fields`
+    spelling (400), an expired key (401), a revoked scope (403), the endpoint
+    moving (404/405). None of those gets better on the next run, and every one
+    of them is a data-contract violation that must be loud. A 5xx, a timeout, a
+    dropped connection or anything with no status at all is a fact about this
+    attempt, and degrades.
+
+    Classification is by `ApiError` alone. Everything else -- `httpx.HTTPError`,
+    a parse error, a bare `Exception` -- degrades, which is the branch that does
+    not stop the build; the gated count below is the backstop for the world this
+    misses. Note `ApiError.status_code` is `Optional[int]` in the pinned SDK, so
+    an ApiError with no status degrades too, and `TestExperimentFaultClass`
+    asserts that shape against the SDK rather than against a double.
+    """
+    if not isinstance(exc, ApiError):
+        return False
+    status = exc.status_code
+    if not isinstance(status, int):
+        return False
+    if status in _DEGRADE_DESPITE_4XX:
+        return False
+    return 400 <= status < 500
+
+
+def _experiment_fault_is_carved_out(exc: BaseException) -> bool:
+    """Did the classifier POSITIVELY identify this fault as retry-able?
+
+    🔴 r7 FL-1 (@el, Codex `r3837185006`). The classifier said *degrade* on a
+    429 and the count below then aborted the build anyway -- in the exact
+    situation the carve-out exists for, because rate limiting does not politely
+    hit one request in three, it persists across consecutive requests. @el's r5
+    words were "a monthly calibration that hits a rate limit must not abort the
+    build"; at `attempted >= 2` it did.
+
+    ➡️ *TWO RULES OVER THE SAME POPULATION, ONE CLASSIFYING AND ONE COUNTING,
+    DO NOT COMPOSE -- the counter re-decides what the classifier already
+    decided, without the evidence the classifier used.* The fix is not to
+    delete the count: the world it was kept for is real (an endpoint genuinely
+    5xx-ing on every request, with the legacy leg empty by construction after
+    2026-11-16, sending a thin pack out green). The fix is to stop the two
+    rules being independent. This predicate is the classifier's own output, and
+    the count now ranges over what the classifier did NOT carve out -- one
+    classification feeding one count over its own result, rather than two
+    verdicts on the same fault.
+
+    Deliberately NOT `not _experiment_fault_is_systematic(exc)`: that is true
+    of a 5xx, of a bare `RuntimeError` and of an `ApiError` with no status --
+    the whole degrade branch, which is precisely the population the count needs
+    to keep. What is carved out is only the narrow, POSITIVELY identified
+    transient: a 4xx the classifier named as retry-able.
+    """
+    return (
+        isinstance(exc, ApiError)
+        and isinstance(exc.status_code, int)
+        and exc.status_code in _DEGRADE_DESPITE_4XX
+    )
+# 🔴 The live probe (Local Runner, 2026-08-20) found `eval_id` in
+# `experiment_item_metadata` ONLY -- not in `metadata`, not in
+# `experiment_metadata`. All three are still read (the value's home is
+# undocumented and may move), but a future narrowing of
+# `_EXPERIMENT_ITEM_FIELDS` must keep `experiment_item_metadata`: it is the
+# one group observed to carry the id, and `TestExperimentItemCaseId`
+# parametrises all three as equally live, so those rows would stay green
+# while the only group that matters was dropped.
+_EVAL_ID_GROUP_OBSERVED = "experiment_item_metadata"
+# ⚠️ @el r3 FL-2 -- the note above was a comment, and a comment is a claim
+# about intent, not a guard. What it has to protect spans TWO vocabularies:
+# the response object exposes snake_case attributes
+# (`experiment_item_metadata`), while `fields=` takes a camelCase enum
+# (`itemMetadata`). The mapping is NOT mechanical, so it cannot be derived --
+# it is established at source: the Local Runner's 2026-08-21 probe sent the
+# snake_case spelling and the API answered 400 with the valid values listed.
+# Naming it here gives `TestEvalIdGroupsAreStillRequested` something to assert
+# in both spellings; without it, narrowing `_EXPERIMENT_ITEM_FIELDS` drops the
+# one group observed to carry `eval_id` with every parametrised row green.
+_EVAL_ID_GROUP_REQUEST_FIELDS = {
+    "metadata": "metadata",
+    "experiment_item_metadata": "itemMetadata",
+    "experiment_metadata": "experimentMetadata",
+}
+
+# Page bound for `experiments.list_items` (100 per page). Eval runs are ~30
+# items, so this is four orders of magnitude of headroom -- it exists to
+# guarantee termination against a misbehaving cursor, not to trim a real run.
+_ITEM_PAGE_BOUND = 20
+
+
+class CalibrationDataError(LookupError):
+    """A data-contract violation in the experiments leg: the wrong dataset, or
+    a run whose write side never put `eval_id` on the root span.
+
+    🔴 Its own class, not a bare `LookupError` (@el review r2, FL-A). The two
+    raises this signal covers are ours, but the leg they sit in is a
+    third-party SDK call chain -- `experiments.list`, `list_items`, and
+    langfuse's response deserialization -- and `LookupError` is the BASE class
+    of `KeyError` and `IndexError`. A caller re-raising `LookupError` to keep
+    our fail-closed guards loud therefore also aborts the whole calibration
+    build on any incidental container miss anywhere beneath it: a fail-open
+    traded for a fail-closed that cannot survive an ordinary SDK hiccup.
+
+    ➡️ A guard stated over a base class inherits every meaning that class
+    already had. `LookupError` means "our data-integrity signal" only in this
+    file; to Python it means "a container lookup missed".
+
+    Subclasses `LookupError` so existing callers and rows keep working.
+    """
+
+
+class CalibrationTruncatedError(CalibrationDataError):
+    """A paged read hit its page bound with the cursor still outstanding.
+
+    Separate from a plain data error because it is the one case where we hold
+    a well-formed but INCOMPLETE answer -- see `collect_experiment_candidates`.
+    """
+
+# Leg-rank tie-break for the cross-leg recency merge in collect_candidates:
+# at equal timestamps the legacy leg sorts first, matching the trace-identity
+# dedupe's own contract that a trace described by both APIs keeps its legacy
+# description.
+_LEG_RANK_EXPERIMENT = 0
+_LEG_RANK_LEGACY = 1
+
+
+def _normalize_ts(value: Any) -> Any:
+    """UTC-normalize a naive datetime; pass everything else through unchanged.
+
+    Legacy `run.created_at` and experiment `run.start_time` are both
+    timezone-aware `datetime`s against the pinned langfuse 4.14.0 client, but
+    a naive/aware mix raises `TypeError` at comparison time -- so only a
+    naive `datetime` gets a UTC tzinfo attached here, explicitly, rather than
+    papered over with a `try`. An already-aware datetime, or any non-datetime
+    sort key a test double supplies, is returned unchanged.
+    """
+    if isinstance(value, datetime) and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def resolve_dataset_id(langfuse: Any, dataset_name: str) -> str:
+    """The dataset's ID, which `experiments.list` needs instead of its name.
+
+    Raises on a miss rather than returning None. A name that resolved to
+    nothing would make "this dataset has no experiment runs" and "I looked up
+    the wrong dataset" the same answer, and the union would serve the second
+    one as a slightly shorter green.
+    """
+    dataset = langfuse.api.datasets.get(dataset_name)
+    dataset_id = getattr(dataset, "id", None)
+    if not dataset_id:
+        raise CalibrationDataError(
+            f"dataset {dataset_name!r} did not resolve to an id -- refusing to "
+            f"read experiments for an unidentified dataset"
+        )
+    return dataset_id
+
+
+def experiment_item_case_id(item: Any) -> str:
+    """The DATASET-ITEM id of an experiment item, off the root span's metadata.
+
+    🔴 `ExperimentItem` exposes no dataset-item id of its own. Its
+    `experiment_item_id` is run-scoped by Langfuse's data model -- one per
+    dataset item PER EXPERIMENT -- so using it would give the same evalset case
+    a different id in every run, and `select_candidates`' per-case cap
+    (`(dataset, item_id)`) would silently stop capping: same key name, same
+    type, no error, a pack quietly crowded by one case.
+
+    The four eval writers put the dataset-item id on the root span as
+    `eval_id`, so a missing one means the write side is wrong.
+
+    🔴 This docstring used to justify the raise with "`GET /experiments`
+    returns ZERO runs today, so raising here can only ever be raising on a
+    bug." **That premise is false and the correction is the point.** The Local
+    Runner probed live on 2026-08-20 and found TEN pre-existing experiment
+    runs. The argument was one about an empty population; the population is
+    not empty, and since the raise now PROPAGATES (FL-1) it aborts the whole
+    build rather than shortening one leg.
+
+    What is actually known today: the runs the probe read do carry `eval_id`;
+    nobody has asserted it over all ten. So the honest sentence is that the
+    pre-existing runs are **unverified**, and what makes that survivable is
+    that the failure is loud -- a build that stops is recoverable, a green
+    pack quietly missing a leg is not. A probe over all ten is queued
+    (`handoffs/staff-engineer/`, zero spend, no model, not an eval); until it
+    reports, this raise is safe by LOUDNESS, not by an empty population.
+
+    ➡️ Do not restore the old sentence. A comment arguing from a population
+    nobody re-measured is worse than no comment: the next reader inherits the
+    conclusion without the check.
+    """
+    for group in _EVAL_ID_GROUPS:
+        value = (getattr(item, group, None) or {}).get("eval_id")
+        if value:
+            return value
+    raise CalibrationDataError(
+        f"experiment item {getattr(item, 'id', '?')!r} carries no eval_id in "
+        f"{'/'.join(_EVAL_ID_GROUPS)} -- its dataset case cannot be named, and "
+        f"experiment_item_id is run-scoped so it is not a substitute"
+    )
+
+
+def _experiment_items(langfuse: Any, experiment: Any) -> List[Any]:
+    """Every item of one experiment run, paged to exhaustion.
+
+    Split out of `collect_experiment_candidates` so a transport failure on
+    ONE run can be caught at the loop that owns the run, and the runs already
+    fetched survive it (Codex `r3832494812`). The refusal below is deliberately
+    INSIDE this function rather than at the call site: it is a statement about
+    this run's completeness, and the caller re-raises it unchanged.
+    """
+    items: List[Any] = []
+    cursor = None
+    # 🔴 The bound RAISES when it is reached with a cursor still
+    # outstanding (Codex `r3832093213`), rather than returning what it
+    # has. The first version of this loop stopped at `range(20)`
+    # unconditionally, and a row -- `test_item_paging_stops_at_its_bound`
+    # -- asserted that truncation as the expected behaviour, so the
+    # suite pinned it.
+    #
+    # ➡️ The bound was copied from `_find_root_observation` together with
+    # its shape but not with its MEANING. There, exhausting the pages
+    # returns `None` and the caller drops one candidate: a defined,
+    # local degrade. Here, exhausting them returns a run that LOOKS
+    # complete and is short -- which is precisely the silent-shortfall
+    # this whole card exists to remove, reintroduced by the fix for it.
+    # A bound is a promise about termination; it is not permission to
+    # answer a different question than the one asked.
+    for _ in range(_ITEM_PAGE_BOUND):  # 2000 items; eval runs are ~30
+        items_page = langfuse.api.experiments.list_items(
+            from_start_time=_EXPERIMENTS_FLOOR,
+            experiment_id=experiment.id,
+            fields=_EXPERIMENT_ITEM_FIELDS,
+            limit=100,
+            cursor=cursor,
+        )
+        items.extend(items_page.data)
+        cursor = getattr(getattr(items_page, "meta", None), "cursor", None)
+        if not cursor:
+            break
+    else:
+        raise CalibrationTruncatedError(
+            f"experiment {getattr(experiment, 'name', '?')!r} still had "
+            f"more items after {_ITEM_PAGE_BOUND} pages of 100 -- refusing "
+            f"to treat a truncated run as a complete one"
+        )
+    return items
+
+
+def collect_experiment_candidates(
+    langfuse: Any,
+    dataset_name: str,
+    run_prefix: str,
+    max_runs_per_dataset: int,
+) -> List[Any]:
+    """(start_time, candidates) pairs for `dataset_name`'s experiment-written
+    runs, newest first. The timestamp travels with each run so
+    `collect_candidates` can merge it against the legacy leg by actual
+    recency rather than by which leg it came from."""
+    dataset_id = resolve_dataset_id(langfuse, dataset_name)
+    page = langfuse.api.experiments.list(
+        from_start_time=_EXPERIMENTS_FLOOR, dataset_id=dataset_id, limit=50
+    )
+    matching = [e for e in page.data if e.name.startswith(run_prefix)]
+    matching.sort(key=lambda e: e.start_time, reverse=True)
+
+    run_lists: List[Any] = []
+    # 🔴 r4 FL-1 (@el). The skip arm below discriminates on the exception CLASS,
+    # and class cannot see whether a fault is actually per-RUN. A wrong or
+    # narrowed camelCase spelling in `_EXPERIMENT_ITEM_FIELDS` is a 400 on EVERY
+    # request; so is an expired key, a revoked scope, or the endpoint moving.
+    # None of those is transport and none is run-scoped, but each arrives as a
+    # plain exception once per iteration -- so every run was skipped and named
+    # on stdout, `run_lists` came back `[]`, and `collect_candidates` built the
+    # pack from the legacy leg and reported success. The ADR's own argument
+    # against the OLD behaviour ("once the legacy endpoint retires that dataset
+    # would contribute nothing at all") is reached by the NEW behaviour whenever
+    # the fault is systematic.
+    #
+    # ➡️ *The scope of a degrade is a claim about the fault's SUBJECT, and the
+    # subject is not readable from the type.*
+    #
+    # 🔴 r5 (@el) RULED against the answer this comment used to give. It said
+    # the subject IS readable from the OUTCOME -- "a skip is only per-run if
+    # some other run succeeded" -- and checked that after the loop. True as a
+    # sentence, and unable to be expressed by the predicate it asked for: at
+    # `attempted == 1` there is no other run, so the test carries zero bits,
+    # and a monthly prefix routinely matches exactly one experiment. The rule
+    # could not fire at n=1 on the 400 it was justified with, and it DID fire
+    # on an ordinary transient failure there. The classification below reads
+    # the fault's own evidence instead and works at every n; the count survives
+    # only where it is evidence at all (`attempted >= 2`), as the backstop for
+    # an endpoint that is genuinely 5xx-ing on every request.
+    attempted = 0
+    skipped = 0
+    # r7 FL-1: the count's own population. `skipped` still reports how many runs
+    # were lost (it is in the operator's sentence); `countable_skips` is the
+    # subset the classifier did not name retry-able, and only it can abort.
+    countable_skips = 0
+    for experiment in matching[:max_runs_per_dataset]:
+        attempted += 1
+        # 🔴 Codex `r3832494812` (P2). Until this round a transport failure on
+        # ONE experiment -- including on a later page of a run that had already
+        # yielded a hundred items -- propagated out of this function, and
+        # `collect_candidates`'s `except Exception` arm replaced the ENTIRE
+        # experiments leg with `[]`. So one flaky read discarded every run that
+        # had been fetched successfully; once the legacy endpoint retires, that
+        # dataset contributes nothing at all. The legacy per-run loop in
+        # `collect_candidates` has always skipped the individual run and kept
+        # the rest, and the rule did not travel to this second site when the
+        # experiments leg was added.
+        #
+        # ➡️ `CalibrationDataError` is re-raised UNCHANGED and that is the whole
+        # care in this arm: it is the fail-closed signal (a dataset that does
+        # not resolve, an item with no `eval_id`), and `CalibrationTruncatedError`
+        # subclasses it precisely so a truncated read cannot be re-read as
+        # "transient" by a broad `except`. A bare `except Exception: continue`
+        # here would restore the silent degrade this card exists to remove --
+        # which is why the rows below drive both directions.
+        try:
+            items = _experiment_items(langfuse, experiment)
+        except CalibrationDataError:
+            raise
+        except Exception as e:
+            run_name = getattr(experiment, "name", "?")
+            # 🔴 r5 -- PRIMARY rule, and it fires at every n including n=1. A
+            # 4xx (bar the two carve-outs) is the server telling us the request
+            # is wrong, which no retry and no other run can make right.
+            if _experiment_fault_is_systematic(e):
+                raise CalibrationDataError(
+                    f"experiment run {run_name!r} for {dataset_name!r} failed with "
+                    f"a request-shaped fault ({e}) -- a 4xx is evidence about the "
+                    "request, not about this attempt, so every run will fail the "
+                    "same way; skipping them would return an empty leg that reads "
+                    "as an empty dataset"
+                ) from e
+            logger.warning(
+                "experiment_items_fetch_failed",
+                dataset=dataset_name, run_name=run_name, error=str(e),
+            )
+            print(f"  ! Skipping experiment run {run_name}: {e}")
+            skipped += 1
+            if not _experiment_fault_is_carved_out(e):
+                countable_skips += 1
+            continue
+        candidates = [
+            {
+                "dataset": dataset_name,
+                "item_id": experiment_item_case_id(item),
+                "run_name": experiment.name,
+                "trace_id": item.trace_id,
+            }
+            for item in items
+            if item.trace_id
+        ]
+        run_lists.append((experiment.start_time, candidates))
+
+    # 🔴 r4 FL-1 (@el). Every run attempted, every one skipped: whatever the
+    # exception classes said, the leg could not be READ. `CalibrationDataError`
+    # is the right class -- it is the fail-closed signal, and the caller's arm
+    # re-raises exactly it, so this refusal cannot be swallowed as transient by
+    # the broad handler one level up (the mistake `CalibrationTruncatedError`
+    # was subclassed to avoid).
+    #
+    # `attempted == 0` is NOT this case and must keep returning `[]`: a dataset
+    # with no matching experiment runs is a legitimately empty leg, and raising
+    # on it would fail every build until the writes move in PR2.
+    #
+    # 🔴 r5 (@el) -- SECONDARY, and gated at `attempted >= 2`. It is kept for the
+    # one world classification misses: an endpoint that is genuinely down
+    # answers 5xx on every request, every run degrades correctly, and post
+    # 2026-11-16 the legacy leg is empty by construction -- so the pack goes out
+    # thin and green. At `attempted >= 2` all-skipped is weak evidence, and weak
+    # evidence should still push a calibration pack in the fail-closed
+    # direction. At `attempted == 1` it is not evidence and must not fire: that
+    # is the n=1 false positive this round removes, and gating rather than
+    # deleting is what keeps the >= 2 case from being lost with it.
+    # 🔴 r7 FL-1 (@el, Codex `r3837185006`). `countable_skips`, not `skipped`.
+    # Every request returning 429 satisfied `skipped == attempted` and aborted
+    # the build the carve-out was written to protect. The counted population is
+    # now the classifier's own leftovers -- 5xx, no status, non-`ApiError` --
+    # which is exactly the world this backstop was kept for, and it no longer
+    # overrules a verdict the classifier already reached on better evidence.
+    #
+    # A MIXED window (one 429, one 503 over two runs) does NOT abort: the count
+    # requires that EVERY attempted run failed for a countable reason, so a
+    # window containing a known-transient fault is not evidence that the leg is
+    # systematically unreadable. `countable_skips == attempted` implies
+    # `skipped == attempted`, so this is one counter and one condition.
+    if attempted >= 2 and countable_skips == attempted:
+        raise CalibrationDataError(
+            f"every experiment run for {dataset_name!r} failed to read "
+            f"({countable_skips}/{attempted}) -- the experiments leg could not be "
+            "read at all, which is a systematic fault wearing a per-run costume, "
+            "not an empty leg"
+        )
+    return run_lists
+
+
 def collect_candidates(
     langfuse: Any,
     datasets: List[str],
@@ -194,18 +656,23 @@ def collect_candidates(
     per_dataset_runs: Dict[str, List[List[Dict[str, Any]]]] = {}
 
     for dataset_name in datasets:
+        legacy_runs: List[Any] = []
+        matching: List[Any] = []
         try:
             runs_page = langfuse.api.datasets.get_runs(dataset_name, limit=50)
         except Exception as e:
             logger.warning("dataset_runs_fetch_failed", dataset=dataset_name, error=str(e))
-            print(f"  ! Skipping dataset {dataset_name}: {e}")
-            continue
+            print(f"  ! Legacy runs unavailable for {dataset_name}: {e}")
+        else:
+            matching = [r for r in runs_page.data if r.name.startswith(run_prefix)]
+            matching.sort(key=lambda r: r.created_at, reverse=True)
+            matching = matching[:max_runs_per_dataset]
 
-        matching = [r for r in runs_page.data if r.name.startswith(run_prefix)]
-        matching.sort(key=lambda r: r.created_at, reverse=True)
-        matching = matching[:max_runs_per_dataset]
-
-        run_lists: List[List[Dict[str, Any]]] = []
+        # 🔴 A legacy-leg failure above no longer `continue`s past the
+        # experiments leg below it (MYS-914 Codex P1, discussion_r3825860886):
+        # once `datasets.get_runs` is retired every dataset would hit this
+        # branch, and skipping the whole loop body here would have zeroed the
+        # union out at precisely the moment it exists to carry the load.
         for run in matching:
             try:
                 run_details = langfuse.api.datasets.get_run(dataset_name, run.name)
@@ -216,7 +683,7 @@ def collect_candidates(
                 )
                 print(f"  ! Skipping run {run.name}: {e}")
                 continue
-            run_lists.append([
+            candidates = [
                 {
                     "dataset": dataset_name,
                     "item_id": item.dataset_item_id,
@@ -225,9 +692,134 @@ def collect_candidates(
                 }
                 for item in run_details.dataset_run_items
                 if item.trace_id
-            ])
-        per_dataset_runs[dataset_name] = run_lists
-        print(f"  {dataset_name}: {len(matching)} matching runs")
+            ]
+            legacy_runs.append((run.created_at, candidates))
+
+        try:
+            experiment_runs = collect_experiment_candidates(
+                langfuse, dataset_name, run_prefix, max_runs_per_dataset
+            )
+        except CalibrationDataError:
+            # 🔴 MYS-914 Codex P1 (discussion_r3827349867): this is the
+            # fail-closed signal from `resolve_dataset_id` and
+            # `experiment_item_case_id` -- a malformed write or a dataset
+            # name that does not resolve. Swallowing it here restores exactly
+            # the silent-degrade behaviour those raises exist to prevent:
+            # once the legacy leg retires, `legacy_runs` is empty by
+            # construction, so one malformed item would collapse the whole
+            # union to `[]` behind a warning log instead of surfacing.
+            raise
+        except Exception as e:
+            # 🔴 @el r6 FL-1 (Codex `r3836481943`). THE CLASSIFIER BELONGS AT THE
+            # LEG'S CHOKE POINT, not only inside the per-run loop.
+            #
+            # `collect_experiment_candidates()` opens with two un-`try`'d
+            # external calls -- `resolve_dataset_id()` (`datasets.get`) and
+            # `experiments.list` -- so neither reaches the in-loop check. An
+            # `ApiError` from either is not a `CalibrationDataError`, so it
+            # landed here and collapsed the whole experiments leg to `[]`
+            # behind a warning.
+            #
+            # 🔴 And it collapsed it on exactly the faults the classifier's own
+            # docstring names. An expired key (401), a revoked scope (403), the
+            # endpoint moving (404/405) do NOT arrive at `list_items` -- they
+            # arrive at the FIRST call, which is `experiments.list`, and on an
+            # expired key at `datasets.get` before even that. So the primary
+            # rule was absent from precisely the path its motivating examples
+            # take and present only on the path they never reach. Post
+            # 2026-11-16, with the legacy leg empty by construction, that is a
+            # green build and an empty pack -- this card's own failure, one
+            # call site above the fix for it.
+            #
+            # ➡️ *A rule installed at the site where the fault was OBSERVED does
+            # not cover the site where the fault ENTERS.* Fourth turn of this
+            # shape on this PR, so per the second-occurrence rule the fix has to
+            # make the class unreachable rather than patch today's member: this
+            # one handler is the single funnel for `resolve_dataset_id`,
+            # `experiments.list`, the per-run loop AND the call site nobody has
+            # written yet. Two `try` blocks would not be -- the fifth call would
+            # be added without one.
+            #
+            # The in-loop check STAYS. It does a different job: it scopes a
+            # degrade to ONE run instead of to the leg, and it feeds the
+            # `attempted >= 2` count rule. This one decides whether the leg
+            # exists at all.
+            if _experiment_fault_is_systematic(e):
+                raise CalibrationDataError(
+                    f"the experiments leg for {dataset_name!r} failed with a "
+                    f"request-shaped fault ({e}) -- a 4xx is evidence about the "
+                    "request, not about this attempt, so every call will fail "
+                    "the same way; degrading here would return an empty leg "
+                    "that reads as a dataset with no runs"
+                ) from e
+            logger.warning(
+                "experiment_runs_fetch_failed", dataset=dataset_name, error=str(e)
+            )
+            print(f"  ! Skipping {dataset_name} experiment runs: {e}")
+            experiment_runs = []
+
+        # 🔴 Merge BOTH legs by actual recency, then cap ONCE (MYS-914 Codex
+        # P1, discussion_r3825860891) -- capping each leg to
+        # max_runs_per_dataset and concatenating gave an effective 2x cap,
+        # ordered by PROVENANCE rather than time: up to max_runs_per_dataset
+        # older legacy runs sat ahead of every newer experiment run. The
+        # per-leg pre-cap above stays: it bounds API work, and each leg
+        # returns time-descending. ⚠️ That pre-cap was an EXACT superset while
+        # the cap counted runs; it is not any more (@el r2, nit 1). Since a
+        # run contributing no fresh trace now consumes no slot, filling N
+        # slots can need to reach further back than N runs per leg, so the
+        # pack can UNDER-fill. It still cannot mis-order: everything kept is
+        # newer than everything dropped. Bounded and one-directional, but no
+        # longer unconditional -- only the ORDER and the CAP move after the merge.
+        # Ties keep the legacy description via `_LEG_RANK_LEGACY`, matching
+        # the trace-identity dedupe below.
+        merged = (
+            [(_normalize_ts(ts), _LEG_RANK_LEGACY, cands) for ts, cands in legacy_runs]
+            + [(_normalize_ts(ts), _LEG_RANK_EXPERIMENT, cands) for ts, cands in experiment_runs]
+        )
+        merged.sort(key=lambda item: (item[0], item[1]), reverse=True)
+
+        # 🔴 De-duplicate by TRACE, and by trace ONLY, WHILE walking the
+        # recency-sorted merge -- not after capping it (MYS-914 Codex P2,
+        # discussion_r3827349872). The two APIs partition RUNS, not TRACES:
+        # during the cutover the same trace can be described by both legs, so
+        # capping on run-count first and dedeuping after let one overlapping
+        # trace consume a cap slot and then empty it, under-filling the pack
+        # and losing run diversity silently. A run that contributes NO
+        # surviving trace consumes no slot; only runs with at least one fresh
+        # trace count toward `max_runs_per_dataset`.
+        #
+        # The card asks for run identity rather than run name; the two APIs
+        # have disjoint id spaces (that is the same partition that makes this
+        # read total), so a name is the only cross-API handle a RUN has --
+        # and it is the wrong one. The real identity lives a level down: a
+        # generation is ONE trace whichever endpoint described it.
+        #
+        # A run-name net was written here first and then removed, because a
+        # mutation that deleted it left every row green: the trace net already
+        # subsumes it. Worse than redundant -- it drops a whole experiment run
+        # on a name collision, so two genuinely different runs that happen to
+        # share a name would lose one of them silently, which is the failure
+        # this de-dup exists to prevent, inverted.
+        seen: set = set()
+        kept_runs: List[List[Dict[str, Any]]] = []
+        for _ts, _leg, cands in merged:
+            kept = [c for c in cands if c["trace_id"] not in seen]
+            if not kept:
+                continue
+            seen.update(c["trace_id"] for c in kept)
+            kept_runs.append(kept)
+            if len(kept_runs) >= max_runs_per_dataset:
+                break
+        per_dataset_runs[dataset_name] = kept_runs
+        # ⚠️ Post-cap, post-dedupe (@el r2, nit 2). This used to print
+        # `len(legacy_runs)` and `len(experiment_runs)` -- both PRE-cap and
+        # PRE-dedupe -- so on a PR about not claiming more than you observed,
+        # the operator's one line named runs the code had just discarded.
+        print(
+            f"  {dataset_name}: {len(kept_runs)} runs kept "
+            f"(from {len(legacy_runs)} legacy + {len(experiment_runs)} experiment)"
+        )
 
     return interleave_by_run(per_dataset_runs)
 
