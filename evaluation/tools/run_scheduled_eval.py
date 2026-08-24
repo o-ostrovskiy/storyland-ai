@@ -671,6 +671,7 @@ async def run_evaluation_on_dataset(
                         run_name=run_name,
                         run_metadata=run_metadata,
                         dataset_id=getattr(dataset, "id", None),
+                        dataset_name=dataset_name,
                         dataset_item_id=item.id,
                     )
 

@@ -61,22 +61,74 @@ class TestAttributeKeysMatchTheSdk:
         assert er.EXPERIMENT_ENVIRONMENT == LANGFUSE_SDK_EXPERIMENT_ENVIRONMENT
 
 
+def _eid(run_name, dataset_id="dataset-abc", dataset_name="itinerary_v1"):
+    return er.experiment_id_for_run(
+        run_name, dataset_id=dataset_id, dataset_name=dataset_name
+    )
+
+
 class TestExperimentIdentity:
+    """The id is minted here, so every property the backend used to give us for
+    free is now a row. Two of them pull in opposite directions -- stability
+    across a retry, separation across datasets -- and the second was missing
+    from the first version of this module (Codex, r1)."""
+
     def test_id_is_stable_for_one_run_name(self):
         # Two calls in two processes must agree, or a resumed run splits into
         # two half-populated experiments -- neither of them visibly wrong.
-        assert er.experiment_id_for_run("eval_run_1") == er.experiment_id_for_run(
-            "eval_run_1"
-        )
+        assert _eid("eval_run_1") == _eid("eval_run_1")
 
     def test_id_differs_between_runs(self):
-        assert er.experiment_id_for_run("eval_run_1") != er.experiment_id_for_run(
-            "eval_run_2"
-        )
+        assert _eid("eval_run_1") != _eid("eval_run_2")
 
     def test_id_has_the_shape_langfuse_documents(self):
         # "16 lowercase hexadecimal characters" -- SDK, _create_observation_id.
-        assert re.fullmatch(r"[0-9a-f]{16}", er.experiment_id_for_run("eval_run_1"))
+        assert re.fullmatch(r"[0-9a-f]{16}", _eid("eval_run_1"))
+
+    def test_two_datasets_in_the_same_second_are_two_experiments(self):
+        # 🔴 The row for the defect. `run_evaluation_on_dataset` is called once
+        # per dataset in a loop and builds `eval_run_{...second...}_{version}`
+        # with no dataset in it, so this collision is reachable rather than
+        # theoretical -- and the merged experiment would carry two dataset ids
+        # while looking like one healthy run.
+        same_name = "eval_run_20260824_010203_v3"
+        assert _eid(same_name, dataset_id="dataset-A") != _eid(
+            same_name, dataset_id="dataset-B"
+        )
+
+    def test_the_dataset_name_separates_runs_when_the_id_is_absent(self):
+        # `dataset_id` comes from `getattr(dataset, "id", None)`, so it can be
+        # None. Without this the fix would hold only while the SDK object
+        # happened to expose an id -- the degradation being silent, as usual.
+        same_name = "eval_run_20260824_010203_v3"
+        assert _eid(same_name, dataset_id=None, dataset_name="itinerary_v1") != _eid(
+            same_name, dataset_id=None, dataset_name="place_to_book_v1"
+        )
+
+    def test_the_scope_join_is_unambiguous(self):
+        # 🔴 The boundary control. Concatenating without a separator makes
+        # ("ab", "c") and ("a", "bc") the same bytes; this pair reds the moment
+        # `_SCOPE_SEP` is dropped and passes for no other reason.
+        assert er.experiment_id_for_run(
+            "run", dataset_id="ab", dataset_name="c"
+        ) != er.experiment_id_for_run("run", dataset_id="a", dataset_name="bc")
+
+    def test_the_formula_does_not_branch_on_a_missing_scope(self):
+        # Both absent is a legal call, not a crash -- and it must still be
+        # stable, because a tool that cannot name its dataset still has to keep
+        # its own items together.
+        bare = er.experiment_id_for_run("r", dataset_id=None, dataset_name=None)
+        assert re.fullmatch(r"[0-9a-f]{16}", bare)
+        assert bare == er.experiment_id_for_run("r", dataset_id=None, dataset_name=None)
+
+    def test_the_dataset_scope_cannot_be_omitted_by_a_future_caller(self):
+        # 🔴 The anti-regression control, and the reason both parameters are
+        # required rather than defaulted: with defaults, a new call site that
+        # forgot them would silently get the name-only identity back -- the
+        # defect returning through the door marked convenience, green all the
+        # way. This row is what makes that a TypeError instead.
+        with pytest.raises(TypeError):
+            er.experiment_id_for_run("eval_run_1")
 
 
 def _regroup(attributes: dict) -> dict:
@@ -121,6 +173,7 @@ class TestTheWriteIsWhatPr1Reads:
             run_name="eval_run_20260824_010203_v3",
             run_metadata={"dataset_name": "itinerary_v1", "prompt_version": "v3"},
             dataset_id="dataset-abc",
+            dataset_name="itinerary_v1",
             dataset_item_id="dataset-item-42",
             root_observation_id="0123456789abcdef",
         )
@@ -148,7 +201,9 @@ class TestTheWriteIsWhatPr1Reads:
         attrs = self._attrs()
         assert attrs[er.EXPERIMENT_NAME] == "eval_run_20260824_010203_v3"
         assert attrs[er.EXPERIMENT_ID] == er.experiment_id_for_run(
-            "eval_run_20260824_010203_v3"
+            "eval_run_20260824_010203_v3",
+            dataset_id="dataset-abc",
+            dataset_name="itinerary_v1",
         )
         assert attrs[er.EXPERIMENT_DATASET_ID] == "dataset-abc"
         assert attrs[er.EXPERIMENT_ITEM_ID] == "dataset-item-42"
@@ -184,10 +239,56 @@ class TestLinkExperimentItem:
             run_name="la_eval_1",
             run_metadata={"evaluation_type": "local_atmosphere"},
             dataset_id="d1",
+            dataset_name="local_atmosphere_v1",
             dataset_item_id="i1",
         )
         assert span._otel_span.attributes == returned
         assert returned[er.EXPERIMENT_ITEM_ROOT_OBSERVATION_ID] == span.id
+
+
+def _link_call_keywords(source: str):
+    """Every `link_experiment_item(...)` call in `source`, as keyword-name sets."""
+    calls = []
+    for node in ast.walk(ast.parse(source)):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "link_experiment_item"
+        ):
+            calls.append({kw.arg for kw in node.keywords if kw.arg})
+    return calls
+
+
+class TestEveryCallSitePassesTheDatasetScope:
+    """🔴 The required keyword is only enforced where the call RUNS.
+
+    `experiment_id_for_run`'s mandatory arguments raise a TypeError -- but the
+    four call sites sit inside `finally:` blocks in async loops that no unit
+    test executes, so the first machine to notice a forgotten `dataset_name=`
+    would be the runner, mid-eval, with spend already committed. The signature
+    is the rule; this is the row that reads the call sites without running them.
+
+    ➡️ *A required argument is checked at the call, and a call nobody executes
+    is not checked at all.*
+    """
+
+    def test_the_reader_is_not_vacuous(self):
+        seen = sum(
+            len(_link_call_keywords((TOOLS / name).read_text()))
+            for name in EVAL_WRITERS
+        )
+        assert seen >= len(EVAL_WRITERS), f"found {seen} link_experiment_item calls"
+
+    @pytest.mark.parametrize("name", EVAL_WRITERS)
+    def test_the_writer_names_its_dataset(self, name):
+        for keywords in _link_call_keywords((TOOLS / name).read_text()):
+            assert "dataset_id" in keywords, name
+            assert "dataset_name" in keywords, name
+
+    def test_the_reader_sees_a_missing_keyword(self):
+        # The negative control: the same reader over a call that omits it.
+        offender = "link_experiment_item(span, run_name=n, dataset_id=d)"
+        assert _link_call_keywords(offender) == [{"run_name", "dataset_id"}]
 
 
 def _references_retired_write(source: str) -> bool:

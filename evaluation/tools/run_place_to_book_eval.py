@@ -184,6 +184,7 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
                     run_name=run_name,
                     run_metadata=run_metadata,
                     dataset_id=getattr(dataset, "id", None),
+                    dataset_name=DATASET_NAME,
                     dataset_item_id=item.id,
                 )
 

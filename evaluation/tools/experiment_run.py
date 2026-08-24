@@ -73,19 +73,61 @@ EXPERIMENT_ENVIRONMENT = "sdk-experiment"
 # so a minted one has to match or the backend has every right to refuse it.
 _ID_HEX_CHARS = 16
 
+# 🔴 The scope separator, and it is not decoration. Hashing concatenated
+# identifiers without one is ambiguous at the boundary: ``("ab", "c")`` and
+# ``("a", "bc")`` produce the same bytes and therefore the same id. ``\x1f``
+# (ASCII unit separator) cannot occur in a Langfuse id, a dataset name or a
+# run name, so the join is injective. ``test_the_scope_join_is_unambiguous``
+# drives exactly that pair.
+_SCOPE_SEP = "\x1f"
 
-def experiment_id_for_run(run_name: str) -> str:
-    """A stable 16-hex experiment id for one run, derived from its name.
 
-    Derived rather than random for one reason: every item of a run must land on
-    the SAME experiment, and the four tools build their items in loops that can
-    be retried. A random id would be minted per process, so a resumed run would
-    silently split into two experiments -- two half-populations, neither wrong
-    on its face, which is the failure this fleet keeps meeting under other
-    names. The run names already carry a timestamp, so deriving from the name
-    is unique per run without being unique per attempt.
+def experiment_id_for_run(
+    run_name: str,
+    *,
+    dataset_id: Optional[str],
+    dataset_name: Optional[str],
+) -> str:
+    """A stable 16-hex experiment id for one run OF ONE DATASET.
+
+    **Derived rather than random**, for one reason: every item of a run must
+    land on the SAME experiment, and the four tools build their items in loops
+    that can be retried. A random id would be minted per process, so a resumed
+    run would silently split into two experiments -- two half-populations,
+    neither wrong on its face, which is the failure this fleet keeps meeting
+    under other names.
+
+    🔴 **Scoped to the dataset, and that is a correction to the first version
+    of this module.** The run name alone is not an identity: the scheduled
+    workflow calls ``run_evaluation_on_dataset`` once per dataset in a loop,
+    and each call builds its own ``eval_run_{YYYYmmdd_HHMMSS}_{version}`` --
+    second resolution, no dataset in the string. Two datasets whose evaluation
+    starts inside the same second therefore share a run name, and a
+    name-derived id would have grouped their items into ONE experiment
+    carrying two dataset ids. The legacy write did not have this problem
+    because it never minted an identity: ``dataset_run_items.create`` passed
+    ``dataset_item_id``, so the backend scoped the run to that item's dataset.
+    Minting the id ourselves is what put the dataset back on us to carry.
+    ➡️ *An id whose uniqueness rests on wall-clock resolution is a claim about
+    timing, not about identity.*
+
+    ⚠️ **What this deliberately does NOT do: add a per-execution nonce.** Two
+    concurrent invocations with the same run name AND the same dataset still
+    converge on one experiment. That is not an oversight and it is not a
+    regression -- the legacy write behaved identically, both processes landing
+    in one dataset run -- and a nonce cannot fix it here: a retry and a
+    concurrent twin present this function with byte-identical inputs, so no
+    derivation can separate them. Separating them means making the RUN NAME
+    unique, which is a naming change across four tools and a string humans read
+    in Langfuse. Out of scope for this card; see the PR discussion.
+
+    Both scope arguments are **required** (though either value may be None).
+    Giving them defaults would let a future call site fall back to the
+    name-only identity silently -- which is the defect this docstring exists to
+    record, re-entering by the door marked convenience.
     """
-    return hashlib.sha256(run_name.encode("utf-8")).hexdigest()[:_ID_HEX_CHARS]
+    scope = _SCOPE_SEP.join((dataset_id or "", dataset_name or "", run_name))
+    return hashlib.sha256(scope.encode("utf-8")).hexdigest()[:_ID_HEX_CHARS]
 
 
 def _flatten(prefix: str, values: Optional[Mapping[str, Any]]) -> dict:
@@ -113,6 +155,7 @@ def experiment_item_attributes(
     run_name: str,
     run_metadata: Optional[Mapping[str, Any]],
     dataset_id: Optional[str],
+    dataset_name: Optional[str],
     dataset_item_id: str,
     root_observation_id: str,
     item_metadata: Optional[Mapping[str, Any]] = None,
@@ -132,7 +175,9 @@ def experiment_item_attributes(
     """
     attributes = {
         ENVIRONMENT: EXPERIMENT_ENVIRONMENT,
-        EXPERIMENT_ID: experiment_id_for_run(run_name),
+        EXPERIMENT_ID: experiment_id_for_run(
+            run_name, dataset_id=dataset_id, dataset_name=dataset_name
+        ),
         EXPERIMENT_NAME: run_name,
         EXPERIMENT_ITEM_ID: dataset_item_id,
         EXPERIMENT_ITEM_ROOT_OBSERVATION_ID: root_observation_id,
@@ -155,6 +200,7 @@ def link_experiment_item(
     run_name: str,
     run_metadata: Optional[Mapping[str, Any]],
     dataset_id: Optional[str],
+    dataset_name: Optional[str],
     dataset_item_id: str,
     item_metadata: Optional[Mapping[str, Any]] = None,
 ) -> dict:
@@ -169,6 +215,7 @@ def link_experiment_item(
         run_name=run_name,
         run_metadata=run_metadata,
         dataset_id=dataset_id,
+        dataset_name=dataset_name,
         dataset_item_id=dataset_item_id,
         root_observation_id=span.id,
         item_metadata=item_metadata,
