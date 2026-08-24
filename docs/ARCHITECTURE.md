@@ -1167,6 +1167,40 @@ Two decisions from review, both about what the leg does when the data is not wha
 
 The read is additive, flagless and revertible, and it is correct before, during and after the write migration (PR2) and after the legacy leg is removed (PR3). The cost is that calibration now depends on a metadata key rather than a first-class API field, and that dependence is enforced by a raise rather than a degradation — a missing `eval_id` stops the pack instead of quietly skewing it.
 
+## 28. Eval Dataset Runs Are Written as EXPERIMENTS, via OTel Span Attributes (2026-08-24)
+
+### Context
+
+ADR #27 migrated the calibration READ to a union of the legacy runs API and the Experiments API. The write half never moved: all four eval tools recorded a run with `langfuse.api.dataset_run_items.create(...)`, the deprecated `POST /dataset-run-items`, retired **2026-11-16** — six days after launch. `GET /experiments` returned zero runs created that way, so the experiments leg of #27's union had never been exercised against data this repo produced: *a union over an empty leg reads exactly like a union that works.*
+
+### Decision
+
+Each eval tool marks its per-item root span as an experiment item by setting Langfuse's OTel attributes directly, through one shared helper (`evaluation/tools/experiment_run.py`). The legacy write is gone from this repo.
+
+**Why not `dataset.run_experiment(...)`, the obvious replacement.** At the pinned `langfuse==4.14.0` the SDK's own experiment runner reaches `self.api.dataset_run_items.create` for every dataset-backed item — as `asyncio.to_thread(that_method, …)`, so it is invoked while never appearing in call position. Adopting it would have moved the retired write one layer down, out of this repo and out of the guard's reach, and the acceptance criterion ("no remaining references") would have gone green over a codebase that still wrote through the endpoint being retired. ➡️ *A guard over our own source is a claim about our source, not about the call.* The third option, `propagate_attributes()`, has no experiment parameter in its public signature.
+
+**The identity is minted here, and that is the load-bearing change.** In the SDK the experiment id IS the legacy write's return value (`experiment_id = dataset_run_id or fallback`). Without that call we derive a stable 16-hex id from the run name — derived, not random, because every item of a run must land on the same experiment and a retried run would otherwise split into two half-populations, neither visibly wrong.
+
+**`eval_id` goes in the ITEM metadata specifically.** ADR #27's reader recovers the dataset-item id from `experiment_item_metadata` (the group the 2026-08-20 live probe observed) and *raises* when it is absent. The tools' existing `metadata=` lands in TRACE metadata — a different group — so a write that looked correct would abort every calibration build. A row drives our attributes through the real reader.
+
+### Files Affected
+
+- `evaluation/tools/experiment_run.py` (new) — the attribute keys, the run-id derivation, `link_experiment_item()`.
+- `evaluation/tools/run_scheduled_eval.py`, `run_local_atmosphere_eval.py`, `run_place_to_book_eval.py`, `run_expansion_eval.py` — the `finally:` block, unchanged in position: a case that raised is a case that RAN, and dropping it would make a failing evalset look smaller rather than worse.
+- `tests/unit/test_experiment_run.py` — key/SDK pinning, the read-side round trip, and the class guard.
+
+### Trade-offs
+
+- The attribute keys are our literals, so an SDK rename would stop linking silently. Paid for by rows asserting every key against the installed SDK — chosen over importing `langfuse._client.attributes`, whose reorganisation would crash an eval mid-run with spend already committed.
+- Eval traces move into the `sdk-experiment` environment (the SDK forces it wherever the root-observation attribute is present). Any saved Langfuse view filtered on the old environment stops showing eval runs.
+- The class guard parses rather than greps, and matches the ATTRIBUTE rather than the call: prose naming the retired endpoint (this ADR, the module docstring) is not a reference, while `to_thread(method, …)` is. ➡️ *A function can be invoked without ever being the callee.*
+
+### Consequences
+
+🔴 **Not verified end-to-end.** Whether a self-minted experiment id joins its dataset in `GET /experiments`, and whether #27's union then finds those runs, needs a live scheduled-eval run and a calibration dry-run — real LLM spend, so a founder G4 gate. The code is written so one minimal run settles it; until then this ADR records a design, not a confirmed behaviour. The legacy READ leg stays deliberately in place, which is what makes that survivable.
+
+---
+
 ---
 
 ## Summary: Key Architectural Patterns
