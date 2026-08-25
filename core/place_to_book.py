@@ -203,6 +203,9 @@ class PlaceToBookResolver:
         cache: Optional[TTLCache] = None,
         ttl_seconds: int = _DEFAULT_TTL_SECONDS,
         max_entries: int = _DEFAULT_MAX_ENTRIES,
+        langfuse_secret_key: Optional[str] = None,
+        langfuse_public_key: Optional[str] = None,
+        langfuse_host: Optional[str] = None,
     ) -> None:
         self._model = model
         self._session_service = session_service or create_session_service(
@@ -211,13 +214,21 @@ class PlaceToBookResolver:
         self._cache = cache or TTLCache(
             ttl_seconds=ttl_seconds, max_entries=max_entries
         )
+        # Optional: direct construction (tests / EVAL / a future BE call, per
+        # the class docstring) works with no Langfuse credentials at all —
+        # LangfusePlugin(secret_key=None, ...) is the same credential-less,
+        # enabled=False plugin this resolver always built before real tracing
+        # was wired in.
+        self._langfuse_secret_key = langfuse_secret_key
+        self._langfuse_public_key = langfuse_public_key
+        self._langfuse_host = langfuse_host
 
     def _build_runner(self, workflow) -> Runner:
         """Build a Runner for one pipeline run.
 
-        Mirrors ``WorkflowExecutor._build_runner`` — references the
-        module-level ``Runner`` name so tests keep monkeypatching
-        ``core.place_to_book.Runner`` as the single fake seam.
+        Mirrors ``WorkflowExecutor._build_runner`` / ``_create_langfuse_plugin``
+        — references the module-level ``Runner`` name so tests keep
+        monkeypatching ``core.place_to_book.Runner`` as the single fake seam.
         """
         # MYS-815 r2: the reverse-discovery researcher is configured with
         # google_search, so it belongs in the "did researchers actually
@@ -225,12 +236,18 @@ class PlaceToBookResolver:
         # emitted neither search_grounding_captured nor _absent, silently
         # excluding every /place-to-book cache miss from the numbers.
         #
-        # Constructed WITHOUT credentials on purpose: this adds the receipts
-        # and nothing else. LangfusePlugin with no keys sets enabled=False and
-        # opens no client, while _log_search_grounding runs BEFORE that gate
-        # (see its docstring) -- so this changes what we can measure, not what
-        # this path sends anywhere.
-        observer = LangfusePlugin()
+        # This endpoint now gets the same real tracing as
+        # discover/compose/local-atmosphere (get_place_to_book_resolver wires
+        # in the app's Langfuse config). Search-receipt logging does not
+        # depend on that: _log_search_grounding runs BEFORE the `enabled`
+        # gate (see its docstring), so a caller that constructs this resolver
+        # with no credentials (tests/EVAL) still gets the receipts, just no
+        # trace upload.
+        observer = LangfusePlugin(
+            secret_key=self._langfuse_secret_key,
+            public_key=self._langfuse_public_key,
+            host=self._langfuse_host,
+        )
         observer.root_name = getattr(workflow, "name", None)
         return Runner(
             node=workflow,

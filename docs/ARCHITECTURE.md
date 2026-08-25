@@ -1110,7 +1110,7 @@ Researcher agents are configured with Gemini's built-in `google_search` and thei
 ### Files Affected
 
 - `common/search_grounding.py` (new), `common/logging.py` (Sentry allowlist; query strings deliberately never forwarded — they embed the user-supplied book title)
-- `plugins/langfuse_plugin.py` (the ledger), `core/place_to_book.py` (registers a credential-less `LangfusePlugin` so its researcher is not invisible to the ledger)
+- `plugins/langfuse_plugin.py` (the ledger), `core/place_to_book.py` (registers a `LangfusePlugin` so its researcher is not invisible to the ledger; see the 2026-08-24 update below for how it's credentialed)
 - `core/session_state.py` (`unverified_discovery`, `all_discovery_unverified`, `discovery_verification_ran`), `core/extraction.py` (`evidence_disqualified`), `core/executor.py` (verdict write + cache replay; cache key `v2` → `v3`)
 - `evaluation/tools/run_scheduled_eval.py`
 
@@ -1119,6 +1119,33 @@ Researcher agents are configured with Gemini's built-in `google_search` and thei
 **Benefits:** a claim the product cannot support is demoted rather than shipped at full confidence; the skip rate is measurable per researcher instead of invisible; the guard's blind spot at its own maximum is closed; a broken observation seam is now loud rather than indistinguishable from a clean run.
 
 **Costs:** a user-visible downgrade — stops that would previously have read `literal`/`historical` now read `vibe` with no source whenever their supporting researcher skipped, which at today's 46% rate is a substantial fraction of stops; **a wholesale instrumentation fault (an ADK callback rename, or an agent renamed without `RESEARCHER_PAYLOAD_KEYS` following) now demotes every strong claim on every itinerary rather than silently passing unverified ones** — a deliberate choice of direction, since the alternative is asserting `literal` with a `grounding_source` for places nobody checked, with `discovery_search_ledger_empty` and `test_payload_map_covers_every_researcher` as the compensating controls; one bounded cold-cache window for the `v3` key bump; `search_grounding_absent` fires for every tool-less formatter (roughly half of all model calls) and is INFO-level noise a Sentry health pass must learn to ignore; the Sentry allowlist widening is per-key across the whole codebase, so generic keys (`kind`, `total`, `agent`) now forward from anywhere — namespacing them is deferred to its own card. This does **not** fix the skipping; MYS-846 owns the cause.
+
+### Update (2026-08-24) — real Langfuse credentials on `/place-to-book`
+
+This decision's original scope was narrower than "never trace this path": the
+goal was the search-grounding receipts above, and building `LangfusePlugin`
+with no credentials was the cheapest way to get `_log_search_grounding`
+(which runs before the `enabled` gate) without also standing up full tracing,
+which nobody had asked for at the time. `/place-to-book` was consequently the
+only production endpoint with no real Langfuse trace, unlike
+discover/compose/local-atmosphere (`WorkflowExecutor._create_langfuse_plugin`).
+
+`PlaceToBookResolver` now takes the same `langfuse_secret_key` /
+`langfuse_public_key` / `langfuse_host` triple `WorkflowExecutor` gets from
+`Config`, threaded in by `api/dependencies.py`'s `get_place_to_book_resolver`,
+and builds its `LangfusePlugin` with them in `_build_runner`. Direct
+construction (tests / EVAL / a future BE call, per the resolver's own
+docstring) still defaults to no credentials — the same credential-less,
+`enabled=False` plugin this resolver always built — so nothing outside the
+FastAPI app's own wiring changes behavior. The search-receipt invariant this
+decision rests on (`_log_search_grounding` runs before the `enabled` gate) is
+unaffected either way and stays pinned by
+`test_the_observer_still_records_receipts_while_disabled` in
+`tests/unit/test_place_to_book.py`.
+
+Observability only — no LLM calls were added, so the production traffic-cost
+delta is expected to be negligible, but flagged explicitly for whoever reviews
+the PR rather than assumed.
 
 ---
 

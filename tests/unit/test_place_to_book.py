@@ -472,6 +472,9 @@ class TestSearchReceiptsAreRegistered:
                 captured.update(kwargs)
 
         monkeypatch.setattr(p2b, "Runner", _CapturingRunner)
+        # No credentials passed: this is the direct-construction path (tests
+        # / EVAL / a future BE call, per the class docstring), which must
+        # keep working with no Langfuse config at all.
         resolver = PlaceToBookResolver(
             model=object(), session_service=create_session_service(use_database=False)
         )
@@ -482,10 +485,55 @@ class TestSearchReceiptsAreRegistered:
         assert LangfusePlugin in kinds, "no observer means no search receipts on this path"
 
         observer = next(p for p in captured["plugins"] if isinstance(p, LangfusePlugin))
-        # Credential-less: this adds measurement, not tracing or spend.
+        # No credentials configured -> disabled, same as WorkflowExecutor's
+        # own LangfusePlugin(secret_key=None, ...) would be.
         assert observer.enabled is False
         assert observer.client is None
         assert observer.root_name == "place_to_book_workflow"
+
+    def test_runner_threads_real_credentials_into_the_observer(self, monkeypatch):
+        """The app's Langfuse config now reaches this endpoint's observer.
+
+        Mirrors ``WorkflowExecutor._create_langfuse_plugin``: when the caller
+        (``get_place_to_book_resolver``) supplies real credentials, the
+        runner's ``LangfusePlugin`` is built WITH them, not the permanently
+        credential-less plugin this resolver used to construct.
+        """
+        import core.place_to_book as p2b
+        from google.adk.plugins.logging_plugin import LoggingPlugin
+        from services.session_service import create_session_service
+
+        captured_runner = {}
+        captured_plugin_kwargs = {}
+        real_langfuse_plugin = p2b.LangfusePlugin
+
+        class _CapturingLangfusePlugin(real_langfuse_plugin):
+            def __init__(self, **kwargs):
+                captured_plugin_kwargs.update(kwargs)
+                super().__init__(**kwargs)
+
+        class _CapturingRunner:
+            def __init__(self, **kwargs):
+                captured_runner.update(kwargs)
+
+        monkeypatch.setattr(p2b, "Runner", _CapturingRunner)
+        monkeypatch.setattr(p2b, "LangfusePlugin", _CapturingLangfusePlugin)
+        resolver = PlaceToBookResolver(
+            model=object(),
+            session_service=create_session_service(use_database=False),
+            langfuse_secret_key="sk-test",
+            langfuse_public_key="pk-test",
+            langfuse_host="https://langfuse.example.com",
+        )
+        resolver._build_runner(SimpleNamespace(name="place_to_book_workflow"))
+
+        assert captured_plugin_kwargs == {
+            "secret_key": "sk-test",
+            "public_key": "pk-test",
+            "host": "https://langfuse.example.com",
+        }
+        kinds = [type(plugin) for plugin in captured_runner["plugins"]]
+        assert LoggingPlugin in kinds, "the existing logging plugin must survive"
 
     def test_the_observer_still_records_receipts_while_disabled(self):
         """The property the fix rests on, asserted rather than assumed.
