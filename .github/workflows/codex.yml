@@ -72,7 +72,13 @@ jobs:
           echo "USE_DATABASE=false" >> .env
           echo "SESSION_MAX_EVENTS=20" >> .env
           echo "MAX_CONTEXT_TOKENS=30000" >> .env
-          echo "MODEL_NAME=gemini-2.5-flash-lite" >> .env
+          # MYS-666: the whole gemini-2.5 line 404s "no longer available" on
+          # this key (observed 2026-08-09, MYS-825) and Google retires it
+          # 2026-10-16. Keep this in the same family as
+          # `common/config.py::DEFAULT_MODEL_NAME`, which is what the service
+          # falls back to when MODEL_NAME is unset; `test_eval_shapes.py`
+          # asserts every CI injection does.
+          echo "MODEL_NAME=gemini-3.1-flash-lite" >> .env
           echo "WORKFLOW_TIMEOUT=300" >> .env
           echo "AGENT_TIMEOUT=60" >> .env
           echo "LOG_LEVEL=INFO" >> .env

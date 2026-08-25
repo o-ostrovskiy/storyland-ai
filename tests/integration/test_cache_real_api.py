@@ -24,6 +24,7 @@ import os
 import pytest
 import google.adk.models.google_llm as google_llm
 
+from common.config import DEFAULT_MODEL_NAME
 from core.events import RegionsReady, WorkflowComplete, WorkflowError
 from core.executor import WorkflowExecutor
 from core.types import ExecutorConfig
@@ -75,7 +76,10 @@ async def test_second_discover_is_cache_hit_with_zero_new_gemini_tokens(
     meter = _install_gemini_meter(monkeypatch)
 
     config = ExecutorConfig(
-        model_name=os.getenv("MODEL_NAME", "gemini-2.5-flash"),
+        # MYS-666: was a hardcoded `gemini-2.5-flash` fallback — a retired
+        # model reached only when CI forgets to inject MODEL_NAME, i.e. exactly
+        # when nobody is looking. One source instead.
+        model_name=os.getenv("MODEL_NAME") or DEFAULT_MODEL_NAME,
         google_api_key=real_api_key,
         use_database=False,
         langfuse_secret_key=os.getenv("LANGFUSE_SECRET_KEY"),

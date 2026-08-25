@@ -166,7 +166,7 @@ flowchart TB
 |------|-------|----------------|
 | All agent workflows — discovery, composition, local-atmosphere, expansion, book recommendations, place→book | `gemini-3.1-flash-lite` (default) | `MODEL_NAME` env var; code default `DEFAULT_MODEL_NAME` in `common/config.py`. One shared model — every workflow runs on the executor's single `Gemini` instance. |
 | Eval system-under-test (CI eval runs) | `gemini-3.1-flash-lite` | `.github/workflows/scheduled-eval.yml` `.env` step; the runners stamp the effective value as `model_under_test` in run metadata and results JSON. |
-| Eval LLM-as-judge | `gemini-2.5-flash-lite` (fixed) | Default in `evaluation/tools/llm_scorer.py::score_itinerary`, passed explicitly by `run_scheduled_eval.py`. Intentionally decoupled from `MODEL_NAME`: keeping the judge fixed keeps scores comparable across system-model lifts. |
+| Eval LLM-as-judge | `_DEFAULT_JUDGE_MODEL` in `evaluation/tools/llm_scorer.py` (pinned, currently `gemini-3.1-pro-preview`) | Read the constant, never this table — it was `gemini-2.5-flash-lite` until 2026-08-09, when the whole 2.5 line began 404ing (MYS-825). Intentionally decoupled from `MODEL_NAME`: a fixed judge keeps scores comparable across system-model lifts, and it is deliberately a *different family* from the generator so the model does not grade its own work. |
 
 > Production note: the deployed box reads `MODEL_NAME` from its own `.env.prod`, which deploys never overwrite — the value there can drift from the repo default (see ADR #23 outcome note in `docs/ARCHITECTURE.md`).
 

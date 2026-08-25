@@ -187,6 +187,86 @@ class TestJudgeModel:
                 assert "gemini-2.5" not in line, f"{name}: {stripped}"
 
 
+class TestCiModelPin:
+    """The twin the judge fix never reached (MYS-666).
+
+    MYS-397 moved the PROD-serving model off the retiring `gemini-2.5` line and
+    MYS-825 moved the eval JUDGE off it. Neither reached the third place a model
+    string is spelled: the `MODEL_NAME` a CI workflow injects into `.env`, and
+    the fallback a live integration test uses when CI forgets to inject one.
+    ➡️ *Does this control have a twin, and did the twin get it?* The class above
+    reads `evaluation/tools/` only, so it was green throughout.
+
+    🔴 These rows deliberately do NOT ban the string "gemini-2.5". A ban on a
+    spelling is green the day a fourth generation is retired under a different
+    name. They assert the RELATIONSHIP instead: whatever CI injects must be in
+    the same family as `common/config.py::DEFAULT_MODEL_NAME`, the value the
+    service falls back to when `MODEL_NAME` is unset. A drifted generation reds;
+    an alias of the current pin (`…-preview`) does not, because whether prod
+    should serve the alias or the stable id is MYS-397's open question and not
+    something a test row should settle silently.
+    """
+
+    def _workflow_injections(self):
+        """Every `MODEL_NAME=<value>` a workflow writes, as (file, value)."""
+        import re
+        from pathlib import Path
+
+        found = []
+        for path in sorted(Path(".github/workflows").glob("*.yml")):
+            for line in path.read_text().splitlines():
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    continue
+                match = re.search(r"MODEL_NAME=([A-Za-z0-9._-]+)", stripped)
+                if match:
+                    found.append((path.name, match.group(1)))
+        return found
+
+    def test_every_ci_model_injection_is_the_current_family(self):
+        from common.config import DEFAULT_MODEL_NAME
+
+        injections = self._workflow_injections()
+        # Vacuity control: this row is about a set that must not be empty. If a
+        # refactor stops spelling MODEL_NAME in CI entirely the row would pass
+        # while asserting nothing, and the next hardcoded string would land
+        # unwatched.
+        assert len(injections) >= 3, f"expected CI to inject MODEL_NAME; found {injections}"
+        for name, value in injections:
+            assert value.startswith(DEFAULT_MODEL_NAME), (
+                f"{name} injects MODEL_NAME={value}, which is not "
+                f"{DEFAULT_MODEL_NAME} or an alias of it — CI would exercise a "
+                "different model generation from the one the service defaults to"
+            )
+
+    def test_no_live_test_falls_back_to_a_model_it_names_itself(self):
+        """The fallback only fires when CI forgets to inject — i.e. exactly when
+        nobody is watching, which is how a retired model survived here for a
+        month after both its twins were fixed.
+
+        Scoped to `tests/integration/`, the only tests that reach a real API.
+        Unit tests naming `gemini-2.5` are fakes with a dummy key, and the
+        Langfuse pricing table keeps its 2.5 rows on purpose — they price
+        historical traces.
+        """
+        import re
+        from pathlib import Path
+
+        offenders = []
+        for path in sorted(Path("tests/integration").glob("*.py")):
+            for line in path.read_text().splitlines():
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    continue
+                # A getenv with a literal default is the shape that hides a pin.
+                if re.search(r'getenv\(\s*["\']MODEL_NAME["\']\s*,\s*["\']', stripped):
+                    offenders.append(f"{path.name}: {stripped}")
+        assert not offenders, (
+            "a live test names its own model as a getenv default; read "
+            "common.config.DEFAULT_MODEL_NAME instead: " + "; ".join(offenders)
+        )
+
+
 class TestDatasetFailureReason:
     """A run that measured nothing must not report success (MYS-825).
 
