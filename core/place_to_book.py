@@ -41,7 +41,7 @@ from services.session_service import create_session_service
 
 from .cache import TTLCache
 from .extraction import grounding_token_set, is_title_grounded
-from .run_harness import RunCapture, pump_events
+from .run_harness import RunCapture, collect_token_usage, pump_events
 from .session_state import SessionStateAccessor
 
 logger = get_logger("storyland.core.place_to_book")
@@ -223,37 +223,44 @@ class PlaceToBookResolver:
         self._langfuse_public_key = langfuse_public_key
         self._langfuse_host = langfuse_host
 
-    def _build_runner(self, workflow) -> Runner:
+    def _create_langfuse_plugin(self) -> LangfusePlugin:
+        """Fresh observer per pipeline run. Mirrors
+        ``WorkflowExecutor._create_langfuse_plugin`` — split out from
+        ``_build_runner`` so the caller can hold a reference and flush it
+        after the run, instead of it becoming unreachable the moment
+        ``_build_runner`` returns.
+
+        Credential-less (``enabled=False``, no client) when this resolver was
+        constructed with no Langfuse config — the direct-construction path
+        (tests / EVAL / a future BE call, per the class docstring). Search-
+        receipt logging does not depend on credentials either way:
+        ``_log_search_grounding`` runs BEFORE the ``enabled`` gate (see its
+        docstring), so receipts are captured regardless.
+        """
+        return LangfusePlugin(
+            secret_key=self._langfuse_secret_key,
+            public_key=self._langfuse_public_key,
+            host=self._langfuse_host,
+        )
+
+    def _build_runner(self, workflow, langfuse_plugin: LangfusePlugin) -> Runner:
         """Build a Runner for one pipeline run.
 
-        Mirrors ``WorkflowExecutor._build_runner`` / ``_create_langfuse_plugin``
-        — references the module-level ``Runner`` name so tests keep
-        monkeypatching ``core.place_to_book.Runner`` as the single fake seam.
+        Mirrors ``WorkflowExecutor._build_runner`` — references the
+        module-level ``Runner`` name so tests keep monkeypatching
+        ``core.place_to_book.Runner`` as the single fake seam.
         """
         # MYS-815 r2: the reverse-discovery researcher is configured with
         # google_search, so it belongs in the "did researchers actually
         # search?" measurement -- and with only LoggingPlugin registered it
         # emitted neither search_grounding_captured nor _absent, silently
         # excluding every /place-to-book cache miss from the numbers.
-        #
-        # This endpoint now gets the same real tracing as
-        # discover/compose/local-atmosphere (get_place_to_book_resolver wires
-        # in the app's Langfuse config). Search-receipt logging does not
-        # depend on that: _log_search_grounding runs BEFORE the `enabled`
-        # gate (see its docstring), so a caller that constructs this resolver
-        # with no credentials (tests/EVAL) still gets the receipts, just no
-        # trace upload.
-        observer = LangfusePlugin(
-            secret_key=self._langfuse_secret_key,
-            public_key=self._langfuse_public_key,
-            host=self._langfuse_host,
-        )
-        observer.root_name = getattr(workflow, "name", None)
+        langfuse_plugin.root_name = getattr(workflow, "name", None)
         return Runner(
             node=workflow,
             app_name=APP_NAME,
             session_service=self._session_service,
-            plugins=[LoggingPlugin(), observer],
+            plugins=[LoggingPlugin(), langfuse_plugin],
         )
 
     async def resolve(self, place: str) -> PlaceToBookResult:
@@ -313,7 +320,8 @@ class PlaceToBookResolver:
         workflow = create_place_to_book_workflow(
             self._model, google_search, place=place
         )
-        runner = self._build_runner(workflow)
+        langfuse_plugin = self._create_langfuse_plugin()
+        runner = self._build_runner(workflow, langfuse_plugin)
 
         prompt = f"What should I read before travelling to {place}?"
         message = types.Content(role="user", parts=[types.Part(text=prompt)])
@@ -321,16 +329,25 @@ class PlaceToBookResolver:
         # Drain via the shared harness pump; no agent_steps means no progress
         # events are produced — we only capture the grounded researcher text.
         capture = RunCapture()
-        async for _ in pump_events(
-            runner,
-            user_id=user_id,
-            session_id=job_id,
-            message=message,
-            agent_steps={},
-            capture=capture,
-            capture_authors=("place_to_book_researcher",),
-        ):
-            pass
+        try:
+            async for _ in pump_events(
+                runner,
+                user_id=user_id,
+                session_id=job_id,
+                message=message,
+                agent_steps={},
+                capture=capture,
+                capture_authors=("place_to_book_researcher",),
+            ):
+                pass
+        finally:
+            # Codex review, PR #285: langfuse_plugin used to go unreachable
+            # the moment this method returned, so a credentialed run's
+            # buffered trace was never flushed and could be lost. Flush
+            # unconditionally in the finally -- collect_token_usage() is
+            # itself a no-op when the plugin is disabled (no credentials
+            # configured), and this must still run if the pump raises.
+            await collect_token_usage(langfuse_plugin)
 
         refreshed = await self._session_service.get_session(
             app_name=APP_NAME, user_id=user_id, session_id=job_id
