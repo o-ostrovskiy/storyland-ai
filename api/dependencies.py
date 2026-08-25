@@ -155,11 +155,21 @@ def get_place_to_book_resolver() -> PlaceToBookResolver:
     Gemini client, and keeps the resolver's in-process cache warm across
     requests. The resolver keeps its own (in-memory) session service, isolated
     from the discovery/compose session lifecycle.
+
+    Threads the app's Langfuse credentials through so this endpoint gets the
+    same real tracing as discover/compose/local-atmosphere (WorkflowExecutor's
+    ``_create_langfuse_plugin``), instead of the credential-less observer this
+    resolver used to build.
     """
     global _place_to_book_resolver
     if _place_to_book_resolver is None:
         app_state = get_app_state()
-        _place_to_book_resolver = PlaceToBookResolver(model=app_state.executor.model)
+        _place_to_book_resolver = PlaceToBookResolver(
+            model=app_state.executor.model,
+            langfuse_secret_key=app_state.config.langfuse_secret_key,
+            langfuse_public_key=app_state.config.langfuse_public_key,
+            langfuse_host=app_state.config.langfuse_host,
+        )
     return _place_to_book_resolver
 
 
