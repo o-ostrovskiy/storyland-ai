@@ -187,6 +187,16 @@ class TestJudgeModel:
                 assert "gemini-2.5" not in line, f"{name}: {stripped}"
 
 
+def _is_current_family(value: str, default: str) -> bool:
+    """Is `value` the pinned model or a suffix alias of it?
+
+    Exact equality, or the pin followed by a `-` separator (`…-preview`). A bare
+    `startswith` is not enough: it accepts `gemini-3.1-flash-lite2`, a typo that
+    names a model that does not exist while reading as "the current family".
+    """
+    return value == default or value.startswith(default + "-")
+
+
 class TestCiModelPin:
     """The twin the judge fix never reached (MYS-666).
 
@@ -205,6 +215,12 @@ class TestCiModelPin:
     an alias of the current pin (`…-preview`) does not, because whether prod
     should serve the alias or the stable id is MYS-397's open question and not
     something a test row should settle silently.
+
+    🔴 "Same family" is a claim about *identifier structure*, not about a shared
+    prefix of characters: `gemini-3.1-flash-lite2` shares every character of the
+    pin and is a different model that 404s. The relationship is therefore tested
+    through `_is_current_family`, which requires the pin to end at a `-`
+    boundary, and that boundary has its own row below.
     """
 
     def _workflow_injections(self):
@@ -233,11 +249,28 @@ class TestCiModelPin:
         # unwatched.
         assert len(injections) >= 3, f"expected CI to inject MODEL_NAME; found {injections}"
         for name, value in injections:
-            assert value.startswith(DEFAULT_MODEL_NAME), (
+            assert _is_current_family(value, DEFAULT_MODEL_NAME), (
                 f"{name} injects MODEL_NAME={value}, which is not "
-                f"{DEFAULT_MODEL_NAME} or an alias of it — CI would exercise a "
-                "different model generation from the one the service defaults to"
+                f"{DEFAULT_MODEL_NAME} or a `-`-separated alias of it — CI would "
+                "exercise a different model generation from the one the service "
+                "defaults to"
             )
+
+    def test_family_check_requires_a_separator_after_the_pin(self):
+        """The boundary the row above rests on, asserted directly.
+
+        Without this row the family check is a substring test wearing a
+        relationship's name, and it stays green for every neighbour of the pin
+        that is not the pin.
+        """
+        pin = "gemini-3.1-flash-lite"
+        assert _is_current_family(pin, pin)
+        assert _is_current_family(pin + "-preview", pin)
+        assert not _is_current_family(pin + "2", pin), (
+            "a suffix with no separator is a different model id, not an alias"
+        )
+        assert not _is_current_family("gemini-2.5-flash-lite", pin)
+        assert not _is_current_family("", pin)
 
     def test_no_live_test_falls_back_to_a_model_it_names_itself(self):
         """The fallback only fires when CI forgets to inject — i.e. exactly when
