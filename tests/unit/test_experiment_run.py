@@ -53,6 +53,7 @@ class TestAttributeKeysMatchTheSdk:
             er.EXPERIMENT_ITEM_ROOT_OBSERVATION_ID
             == A.EXPERIMENT_ITEM_ROOT_OBSERVATION_ID
         )
+        assert er.EXPERIMENT_DESCRIPTION == A.EXPERIMENT_DESCRIPTION
         assert er.ENVIRONMENT == A.ENVIRONMENT
 
     def test_the_experiment_environment_is_the_sdks_own(self):
@@ -245,6 +246,169 @@ class TestLinkExperimentItem:
         assert span._otel_span.attributes == returned
         assert returned[er.EXPERIMENT_ITEM_ROOT_OBSERVATION_ID] == span.id
 
+    def test_the_description_is_set_when_the_caller_has_one(self):
+        span = _FakeSpan()
+        returned = er.link_experiment_item(
+            span,
+            run_name="la_eval_1",
+            run_metadata=None,
+            dataset_id="d1",
+            dataset_name="local_atmosphere_v1",
+            dataset_item_id="i1",
+            run_description="local-atmosphere eval of local_atmosphere_v1",
+        )
+        assert returned[er.EXPERIMENT_DESCRIPTION] == (
+            "local-atmosphere eval of local_atmosphere_v1"
+        )
+
+    def test_the_key_is_absent_rather_than_empty_when_it_is_not(self):
+        # An OTel attribute set to "" is a value, and a dashboard renders it as
+        # a blank label rather than as no label. Omission is the honest shape.
+        span = _FakeSpan()
+        returned = er.link_experiment_item(
+            span,
+            run_name="la_eval_1",
+            run_metadata=None,
+            dataset_id="d1",
+            dataset_name="local_atmosphere_v1",
+            dataset_item_id="i1",
+        )
+        assert er.EXPERIMENT_DESCRIPTION not in returned
+
+
+@pytest.fixture(scope="module")
+def sdk_span():
+    """One REAL `LangfuseSpan` from the installed SDK, exported in-memory.
+
+    No network: the client is handed an `InMemorySpanExporter`, so nothing is
+    sent anywhere and the exported span is readable in-process.
+    """
+    from langfuse import Langfuse
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    exporter = InMemorySpanExporter()
+    client = Langfuse(
+        public_key="pk-lf-mys951-accessor-row",
+        secret_key="sk-lf-mys951-accessor-row",
+        host="http://127.0.0.1:1",
+        span_exporter=exporter,
+        flush_at=1,
+        flush_interval=0.1,
+    )
+    yield client, exporter
+
+
+class TestTheAccessorIsPinnedToTheInstalledSdk:
+    """🔴 FL-1 (@el, r1) — the doctrine that protects the KEYS now covers the
+    ACCESSOR, which is the line that actually writes.
+
+    `link_experiment_item` ends at `span._otel_span.set_attributes(...)`: a
+    private SDK attribute. The keys are pinned by importing the private module
+    *from the test*, so a rename reds in CI. `_otel_span` had none of that --
+    `_FakeSpan` below defines its own, so every row above passes on a shape
+    nobody had checked against the installed SDK. The suite was modelling the
+    coupling instead of pinning it.
+
+    `langfuse` is pinned at 4.14.0, so this cannot break on its own; it breaks
+    on a deliberate bump, a bump runs CI, and CI had nothing that would see it.
+    The first machine to notice would have been the runner, mid-eval, with spend
+    committed -- the exact sentence the module docstring is written against.
+
+    ➡️ *A test that defines the shape it depends on cannot report that the shape
+    changed. Only the installed thing can testify about the installed thing.*
+    """
+
+    def test_a_real_sdk_span_exposes_the_accessor(self, sdk_span):
+        client, _ = sdk_span
+        span = client.start_observation(name="mys951-probe", as_type="span")
+        try:
+            assert hasattr(span, "_otel_span"), (
+                "the installed langfuse span no longer exposes `_otel_span`; "
+                "link_experiment_item's only write would raise at eval time"
+            )
+            assert callable(getattr(span._otel_span, "set_attributes", None))
+        finally:
+            span.end()
+
+    def test_the_write_reaches_the_exported_span(self, sdk_span):
+        """The end-to-end half: not just that the accessor exists, but that
+        writing through it lands on the span the exporter actually ships."""
+        client, exporter = sdk_span
+        exporter.clear()
+        span = client.start_observation(name="mys951-roundtrip", as_type="span")
+        written = er.link_experiment_item(
+            span,
+            run_name="scheduled_eval_20260826",
+            run_metadata={"evaluation_type": "scheduled"},
+            dataset_id="dataset-abc",
+            dataset_name="itinerary_v1",
+            dataset_item_id="item-7",
+            run_description="Scheduled evaluation of itinerary_v1",
+        )
+        span.end()
+        client.flush()
+
+        finished = exporter.get_finished_spans()
+        assert len(finished) == 1, f"expected one exported span, got {len(finished)}"
+        exported = dict(finished[0].attributes or {})
+
+        # Vacuity control FIRST: `written` is the loop's own population, so a
+        # helper that returned {} would make every assertion below true while
+        # writing nothing at all. Name the keys that must be there.
+        required = {
+            er.ENVIRONMENT,
+            er.EXPERIMENT_ID,
+            er.EXPERIMENT_NAME,
+            er.EXPERIMENT_DATASET_ID,
+            er.EXPERIMENT_ITEM_ID,
+            er.EXPERIMENT_ITEM_ROOT_OBSERVATION_ID,
+            er.EXPERIMENT_DESCRIPTION,
+        }
+        assert required <= set(written), sorted(required - set(written))
+
+        missing = sorted(k for k in written if k not in exported)
+        assert not missing, f"written but never exported: {missing}"
+        for key, value in written.items():
+            assert exported[key] == value, key
+
+    def test_the_class_alone_would_be_a_vacuous_check(self):
+        """The negative control, and the reason the rows above build an instance.
+
+        `_otel_span` is assigned in `__init__` (`self._otel_span = otel_span`),
+        not declared on the class -- so `hasattr(LangfuseSpan, "_otel_span")` is
+        False *today*, while the coupling is perfectly intact. A class-level row
+        would have failed for the wrong reason, and the obvious repair for a red
+        row of that shape is to delete it.
+        """
+        from langfuse._client.span import LangfuseSpan
+
+        assert not hasattr(LangfuseSpan, "_otel_span")
+
+    def test_the_public_surface_still_drops_a_raw_attribute(self, sdk_span):
+        """@el asked: if a supported public route exists, prefer it. It does not
+        -- and the way it does not is the dangerous kind.
+
+        `LangfuseObservationWrapper.update(**kwargs)` accepts arbitrary keywords
+        and its own docstring says they are ignored. So the public call is not
+        merely unavailable: it SUCCEEDS and writes nothing. A future SDK that
+        starts honouring it reds this row, and the choice gets revisited on
+        purpose rather than by drift -- the `TestWhyNotRunExperiment` shape.
+        """
+        client, exporter = sdk_span
+        exporter.clear()
+        span = client.start_observation(name="mys951-public-route", as_type="span")
+        span.update(**{er.EXPERIMENT_ID: "0123456789abcdef"})
+        span.end()
+        client.flush()
+
+        exported = dict((exporter.get_finished_spans()[0].attributes) or {})
+        assert exported.get(er.EXPERIMENT_ID) != "0123456789abcdef", (
+            "langfuse.update() now honours raw attribute keywords -- prefer the "
+            "public route over span._otel_span and update ADR #28"
+        )
+
 
 def _link_call_keywords(source: str):
     """Every `link_experiment_item(...)` call in `source`, as keyword-name sets."""
@@ -284,6 +448,19 @@ class TestEveryCallSitePassesTheDatasetScope:
         for keywords in _link_call_keywords((TOOLS / name).read_text()):
             assert "dataset_id" in keywords, name
             assert "dataset_name" in keywords, name
+
+    @pytest.mark.parametrize("name", EVAL_WRITERS)
+    def test_the_writer_names_its_run_description(self, name):
+        """The label each tool used to pass to the retired write.
+
+        `run_description` is optional in the signature (a caller with nothing to
+        say is legitimate), so nothing at the call would catch a writer that
+        quietly stopped sending one -- which is exactly how it went missing in
+        r1: the parameter disappeared with the endpoint, and a dropped label is
+        invisible in a diff and only visible in a dashboard.
+        """
+        for keywords in _link_call_keywords((TOOLS / name).read_text()):
+            assert "run_description" in keywords, name
 
     def test_the_reader_sees_a_missing_keyword(self):
         # The negative control: the same reader over a call that omits it.

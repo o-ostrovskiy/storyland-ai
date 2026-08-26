@@ -186,6 +186,7 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
                     dataset_id=getattr(dataset, "id", None),
                     dataset_name=DATASET_NAME,
                     dataset_item_id=item.id,
+                    run_description=f"place→book grounding eval of {DATASET_NAME}",
                 )
 
     langfuse.flush()

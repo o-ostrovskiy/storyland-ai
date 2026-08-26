@@ -58,6 +58,7 @@ EXPERIMENT_DATASET_ID = "langfuse.experiment.dataset.id"
 EXPERIMENT_ITEM_ID = "langfuse.experiment.item.id"
 EXPERIMENT_ITEM_METADATA = "langfuse.experiment.item.metadata"
 EXPERIMENT_ITEM_ROOT_OBSERVATION_ID = "langfuse.experiment.item.root_observation_id"
+EXPERIMENT_DESCRIPTION = "langfuse.experiment.description"
 ENVIRONMENT = "langfuse.environment"
 
 # The SDK sets this environment on every experiment item, and its propagation
@@ -159,6 +160,7 @@ def experiment_item_attributes(
     dataset_item_id: str,
     root_observation_id: str,
     item_metadata: Optional[Mapping[str, Any]] = None,
+    run_description: Optional[str] = None,
 ) -> dict:
     """The full attribute set that makes one root span an experiment item.
 
@@ -172,6 +174,16 @@ def experiment_item_attributes(
     ordinary `metadata=` -- where the tools put it today -- lands it in TRACE
     metadata, a different group, and PR1's experiments leg would abort on every
     item this PR writes.
+
+    ⚠️ `run_description` is OPTIONAL where the dataset scope is REQUIRED, and the
+    asymmetry is deliberate. A missing scope component is *invisibly* wrong -- two
+    datasets silently merge into one experiment -- so the signature has to refuse
+    the call. A missing description is *visibly* absent: the experiment shows up
+    in Langfuse with no label. Making it required would buy nothing the eye does
+    not already catch, at the cost of a signature that a legitimate caller with
+    nothing to say cannot satisfy. What does close the drop-class is the AST row
+    that reads the four writers and requires each to name it -- the same reader
+    that enforces the scope, extended one keyword.
     """
     attributes = {
         ENVIRONMENT: EXPERIMENT_ENVIRONMENT,
@@ -184,6 +196,8 @@ def experiment_item_attributes(
     }
     if dataset_id:
         attributes[EXPERIMENT_DATASET_ID] = dataset_id
+    if run_description:
+        attributes[EXPERIMENT_DESCRIPTION] = run_description
     attributes.update(_flatten(EXPERIMENT_METADATA, run_metadata))
     attributes.update(
         _flatten(
@@ -203,6 +217,7 @@ def link_experiment_item(
     dataset_name: Optional[str],
     dataset_item_id: str,
     item_metadata: Optional[Mapping[str, Any]] = None,
+    run_description: Optional[str] = None,
 ) -> dict:
     """Mark `span` as one item of the `run_name` experiment. Returns what it set.
 
@@ -219,6 +234,7 @@ def link_experiment_item(
         dataset_item_id=dataset_item_id,
         root_observation_id=span.id,
         item_metadata=item_metadata,
+        run_description=run_description,
     )
     span._otel_span.set_attributes(attributes)
     return attributes

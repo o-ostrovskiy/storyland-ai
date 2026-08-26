@@ -673,6 +673,7 @@ async def run_evaluation_on_dataset(
                         dataset_id=getattr(dataset, "id", None),
                         dataset_name=dataset_name,
                         dataset_item_id=item.id,
+                        run_description=f"Scheduled evaluation of {dataset_name}",
                     )
 
             case_result = {
