@@ -172,7 +172,7 @@ Two models participate in every judged eval run — keep them straight when read
 | Role | Model | Where it's set |
 |------|-------|----------------|
 | **System under test** — the agent workflows being evaluated (discovery, composition, local-atmosphere, expansion, place→book) | `MODEL_NAME` env var (repo default `gemini-3.1-flash-lite`, `common/config.py`; the CI eval workflow sets the same) | Stamped as `model_under_test` in each dedicated runner's Langfuse run metadata and results JSON — baselines are model-bound, and a model lift must read as a re-baseline, not a regression. |
-| **LLM-as-judge** — scores the outputs | `gemini-2.5-flash-lite`, fixed | Default in `llm_scorer.score_itinerary`, passed explicitly by `run_scheduled_eval.py`. Deliberately decoupled from `MODEL_NAME`: a fixed judge keeps scores comparable across system-model lifts (changing both at once would confound every delta). |
+| **LLM-as-judge** — scores the outputs | `_DEFAULT_JUDGE_MODEL` in `llm_scorer.py` (pinned; `gemini-3.1-pro-preview` as of 2026-08-09) | 🔴 Read the constant, not this cell. It was `gemini-2.5-flash-lite` until 2026-08-09, when the 2.5 line started returning 404 "no longer available" and every case silently recorded `scores: None` while the run exited 0 (MYS-825). Deliberately decoupled from `MODEL_NAME`: a fixed judge keeps scores comparable across system-model lifts (changing both at once would confound every delta), and it is a different family from the generator so the model does not grade its own work. |
 
 Production reads `MODEL_NAME` from `.env.prod` on the box (deploys never overwrite it), so the prod value can drift from the repo default — check recent `production`-env generations in Langfuse for the authoritative answer (the plugin records the configured model string per generation).
 
@@ -422,7 +422,7 @@ eval_run_YYYYMMDD_v2  (dataset run root — from start_as_current_observation)
 ├── book_to_place_composition_invocation  (plugin root span)
 │   └── ...
 └── llm_score_itinerary  (generation — from @observe in llm_scorer.py)
-    model: gemini-2.5-flash-lite, input/output tokens, scores as output
+    model: <_DEFAULT_JUDGE_MODEL>, input/output tokens, scores as output
 ```
 
 **Two tracing mechanisms used:**

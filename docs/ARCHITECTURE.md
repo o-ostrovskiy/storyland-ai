@@ -1010,7 +1010,7 @@ Migrate in stages, eval-gated against a two-run pre-migration baseline (storylan
 2. **PR 2 — this lift**: `google-adk[db]>=2.4.0,<3` on the still-supported `SequentialAgent`/`ParallelAgent` template workflows (deprecated in 2.x but functional), so the dependency jump and the orchestration rewrite are separately bisectable. Model stays pinned to `gemini-2.5-flash-lite` so eval deltas are attributable to ADK alone. Gate result: PASS (storyland_eval 4.33 — dead-on baseline; books_v1 3.20 — above baseline; per-generation usage audit: 216/216 generations on both sides with non-zero recorded usage).
 3. **PR 3 — graph rewrite** (follow-up): re-express the workflows on `google.adk.workflow` (`Workflow`/`Node`/`Edge`), keeping the two-endpoint HTTP contract. Native HITL pause/resume is deliberately deferred — the discover→select→compose split stays as-is.
 4. **PR 4 — model upgrade** (follow-up): single `gemini-3-flash` + cassette re-record.
-   **Outcome (2026-07, PR #228):** shipped as **`gemini-3.1-flash-lite`** ($0.25/$1.50 per 1M tok), not `gemini-3-flash` — the like-for-like modern replacement for the deprecated 2.x lite tier, chosen over the pricier 3-flash/3.5-flash tiers; eval-gated with the both-shapes gating (see `DEFAULT_MODEL_NAME` in `common/config.py`). The eval **judge** deliberately stays on `gemini-2.5-flash-lite` (`evaluation/tools/llm_scorer.py`) so scores remain comparable across system-model lifts. *Prod drift note (observed 2026-07-20 via Langfuse, `production` env):* the deployed box's `.env.prod` pins `MODEL_NAME=gemini-3.1-flash-lite-preview` — the preview alias, presumably set before the stable alias existed. Deploys never rewrite `.env.prod`, so aligning prod to the stable `gemini-3.1-flash-lite` requires editing that file on the box. (Cost tracking is unaffected: the pricing lookup matches by substring, so the `-preview` alias bills at 3.1-flash-lite rates.)
+   **Outcome (2026-07, PR #228):** shipped as **`gemini-3.1-flash-lite`** ($0.25/$1.50 per 1M tok), not `gemini-3-flash` — the like-for-like modern replacement for the deprecated 2.x lite tier, chosen over the pricier 3-flash/3.5-flash tiers; eval-gated with the both-shapes gating (see `DEFAULT_MODEL_NAME` in `common/config.py`). The eval **judge** deliberately stayed on `gemini-2.5-flash-lite` (`evaluation/tools/llm_scorer.py`) so scores remained comparable across system-model lifts. **Superseded 2026-08-09 (MYS-825):** the 2.5 line began returning 404 "no longer available" on this key, so the judge is now the pinned `_DEFAULT_JUDGE_MODEL` in that file — comparability across the re-pin is bounded by the calibration run recorded in `evaluation/calibration/`, not assumed. **2026-08-25 (MYS-666):** the CI `MODEL_NAME` injections were the third place the retired generation was spelled and were not covered by either fix; they now sit in the same family as `DEFAULT_MODEL_NAME`, asserted by `tests/unit/test_eval_shapes.py`. *Prod drift note (observed 2026-07-20 via Langfuse, `production` env):* the deployed box's `.env.prod` pins `MODEL_NAME=gemini-3.1-flash-lite-preview` — the preview alias, presumably set before the stable alias existed. Deploys never rewrite `.env.prod`, so aligning prod to the stable `gemini-3.1-flash-lite` requires editing that file on the box. (Cost tracking is unaffected: the pricing lookup matches by substring, so the `-preview` alias bills at 3.1-flash-lite rates.)
 
 **Key 2.x facts this migration verified against the real package** (spike, `google-adk==2.4.0`/`2.5.0`):
 - `tools` + `output_schema` may now coexist on one `LlmAgent` — ADR #2's researcher→formatter split is no longer *forced* by the framework. Collapsing pairs is a separate, eval-gated experiment; the anti-hallucination rationale stands until disproven per-pipeline.
@@ -1110,7 +1110,7 @@ Researcher agents are configured with Gemini's built-in `google_search` and thei
 ### Files Affected
 
 - `common/search_grounding.py` (new), `common/logging.py` (Sentry allowlist; query strings deliberately never forwarded — they embed the user-supplied book title)
-- `plugins/langfuse_plugin.py` (the ledger), `core/place_to_book.py` (registers a credential-less `LangfusePlugin` so its researcher is not invisible to the ledger)
+- `plugins/langfuse_plugin.py` (the ledger), `core/place_to_book.py` (registers a `LangfusePlugin` so its researcher is not invisible to the ledger; see the 2026-08-24 update below for how it's credentialed)
 - `core/session_state.py` (`unverified_discovery`, `all_discovery_unverified`, `discovery_verification_ran`), `core/extraction.py` (`evidence_disqualified`), `core/executor.py` (verdict write + cache replay; cache key `v2` → `v3`)
 - `evaluation/tools/run_scheduled_eval.py`
 
@@ -1119,6 +1119,33 @@ Researcher agents are configured with Gemini's built-in `google_search` and thei
 **Benefits:** a claim the product cannot support is demoted rather than shipped at full confidence; the skip rate is measurable per researcher instead of invisible; the guard's blind spot at its own maximum is closed; a broken observation seam is now loud rather than indistinguishable from a clean run.
 
 **Costs:** a user-visible downgrade — stops that would previously have read `literal`/`historical` now read `vibe` with no source whenever their supporting researcher skipped, which at today's 46% rate is a substantial fraction of stops; **a wholesale instrumentation fault (an ADK callback rename, or an agent renamed without `RESEARCHER_PAYLOAD_KEYS` following) now demotes every strong claim on every itinerary rather than silently passing unverified ones** — a deliberate choice of direction, since the alternative is asserting `literal` with a `grounding_source` for places nobody checked, with `discovery_search_ledger_empty` and `test_payload_map_covers_every_researcher` as the compensating controls; one bounded cold-cache window for the `v3` key bump; `search_grounding_absent` fires for every tool-less formatter (roughly half of all model calls) and is INFO-level noise a Sentry health pass must learn to ignore; the Sentry allowlist widening is per-key across the whole codebase, so generic keys (`kind`, `total`, `agent`) now forward from anywhere — namespacing them is deferred to its own card. This does **not** fix the skipping; MYS-846 owns the cause.
+
+### Update (2026-08-24) — real Langfuse credentials on `/place-to-book`
+
+This decision's original scope was narrower than "never trace this path": the
+goal was the search-grounding receipts above, and building `LangfusePlugin`
+with no credentials was the cheapest way to get `_log_search_grounding`
+(which runs before the `enabled` gate) without also standing up full tracing,
+which nobody had asked for at the time. `/place-to-book` was consequently the
+only production endpoint with no real Langfuse trace, unlike
+discover/compose/local-atmosphere (`WorkflowExecutor._create_langfuse_plugin`).
+
+`PlaceToBookResolver` now takes the same `langfuse_secret_key` /
+`langfuse_public_key` / `langfuse_host` triple `WorkflowExecutor` gets from
+`Config`, threaded in by `api/dependencies.py`'s `get_place_to_book_resolver`,
+and builds its `LangfusePlugin` with them in `_build_runner`. Direct
+construction (tests / EVAL / a future BE call, per the resolver's own
+docstring) still defaults to no credentials — the same credential-less,
+`enabled=False` plugin this resolver always built — so nothing outside the
+FastAPI app's own wiring changes behavior. The search-receipt invariant this
+decision rests on (`_log_search_grounding` runs before the `enabled` gate) is
+unaffected either way and stays pinned by
+`test_the_observer_still_records_receipts_while_disabled` in
+`tests/unit/test_place_to_book.py`.
+
+Observability only — no LLM calls were added, so the production traffic-cost
+delta is expected to be negligible, but flagged explicitly for whoever reviews
+the PR rather than assumed.
 
 ---
 

@@ -472,20 +472,70 @@ class TestSearchReceiptsAreRegistered:
                 captured.update(kwargs)
 
         monkeypatch.setattr(p2b, "Runner", _CapturingRunner)
+        # No credentials passed: this is the direct-construction path (tests
+        # / EVAL / a future BE call, per the class docstring), which must
+        # keep working with no Langfuse config at all.
         resolver = PlaceToBookResolver(
             model=object(), session_service=create_session_service(use_database=False)
         )
-        resolver._build_runner(SimpleNamespace(name="place_to_book_workflow"))
+        created_plugin = resolver._create_langfuse_plugin()
+        resolver._build_runner(SimpleNamespace(name="place_to_book_workflow"), created_plugin)
 
         kinds = [type(plugin) for plugin in captured["plugins"]]
         assert LoggingPlugin in kinds, "the existing logging plugin must survive"
         assert LangfusePlugin in kinds, "no observer means no search receipts on this path"
 
         observer = next(p for p in captured["plugins"] if isinstance(p, LangfusePlugin))
-        # Credential-less: this adds measurement, not tracing or spend.
+        # No credentials configured -> disabled, same as WorkflowExecutor's
+        # own LangfusePlugin(secret_key=None, ...) would be.
         assert observer.enabled is False
         assert observer.client is None
         assert observer.root_name == "place_to_book_workflow"
+
+    def test_runner_threads_real_credentials_into_the_observer(self, monkeypatch):
+        """The app's Langfuse config now reaches this endpoint's observer.
+
+        Mirrors ``WorkflowExecutor._create_langfuse_plugin``: when the caller
+        (``get_place_to_book_resolver``) supplies real credentials, the
+        runner's ``LangfusePlugin`` is built WITH them, not the permanently
+        credential-less plugin this resolver used to construct.
+        """
+        import core.place_to_book as p2b
+        from google.adk.plugins.logging_plugin import LoggingPlugin
+        from services.session_service import create_session_service
+
+        captured_runner = {}
+        captured_plugin_kwargs = {}
+        real_langfuse_plugin = p2b.LangfusePlugin
+
+        class _CapturingLangfusePlugin(real_langfuse_plugin):
+            def __init__(self, **kwargs):
+                captured_plugin_kwargs.update(kwargs)
+                super().__init__(**kwargs)
+
+        class _CapturingRunner:
+            def __init__(self, **kwargs):
+                captured_runner.update(kwargs)
+
+        monkeypatch.setattr(p2b, "Runner", _CapturingRunner)
+        monkeypatch.setattr(p2b, "LangfusePlugin", _CapturingLangfusePlugin)
+        resolver = PlaceToBookResolver(
+            model=object(),
+            session_service=create_session_service(use_database=False),
+            langfuse_secret_key="sk-test",
+            langfuse_public_key="pk-test",
+            langfuse_host="https://langfuse.example.com",
+        )
+        created_plugin = resolver._create_langfuse_plugin()
+        resolver._build_runner(SimpleNamespace(name="place_to_book_workflow"), created_plugin)
+
+        assert captured_plugin_kwargs == {
+            "secret_key": "sk-test",
+            "public_key": "pk-test",
+            "host": "https://langfuse.example.com",
+        }
+        kinds = [type(plugin) for plugin in captured_runner["plugins"]]
+        assert LoggingPlugin in kinds, "the existing logging plugin must survive"
 
     def test_the_observer_still_records_receipts_while_disabled(self):
         """The property the fix rests on, asserted rather than assumed.
@@ -512,3 +562,92 @@ class TestSearchReceiptsAreRegistered:
         )
         assert plugin.unsearched_agents({"place_to_book_researcher": "x"}) == frozenset()
         assert "place_to_book_researcher" in plugin._agents_searched
+
+
+class TestObserverIsFlushed:
+    """Codex review, PR #285: a credentialed observer that outlives the
+    ``_build_runner`` call must be flushed, or its buffered trace can be
+    lost — the runner and its plugin become unreachable the moment
+    ``_run_pipeline`` returns, and nothing downstream can flush them later.
+    """
+
+    async def test_a_completed_run_flushes_the_observer(self, monkeypatch):
+        import core.place_to_book as p2b
+
+        flushed = []
+
+        class _FakeEnabledLangfusePlugin:
+            def __init__(self, **kwargs):
+                self.enabled = True
+                self.root_name = None
+
+            def get_session_stats(self):
+                return {"total_tokens": 0}
+
+            async def flush(self):
+                flushed.append(True)
+
+        monkeypatch.setattr(p2b, "LangfusePlugin", _FakeEnabledLangfusePlugin)
+        resolver = _make_resolver(
+            monkeypatch,
+            researcher_text="Books set in Lisbon include The Book of Disquiet (Baixa, Lisbon).",
+            formatter_candidates=[
+                {
+                    "title": "The Book of Disquiet",
+                    "author": "Fernando Pessoa",
+                    "match_type": "literal",
+                    "maps_to": "Baixa, Lisbon",
+                    "confidence": "high",
+                }
+            ],
+        )
+
+        await resolver.resolve("Lisbon")
+
+        assert flushed == [True], "the observer's buffered trace was never flushed"
+
+    async def test_flush_still_happens_when_the_pump_raises(self, monkeypatch):
+        """The finally block must not be conditioned on a clean run."""
+        import core.place_to_book as p2b
+
+        flushed = []
+
+        class _FakeEnabledLangfusePlugin:
+            def __init__(self, **kwargs):
+                self.enabled = True
+                self.root_name = None
+
+            def get_session_stats(self):
+                return {"total_tokens": 0}
+
+            async def flush(self):
+                flushed.append(True)
+
+        class _ExplodingRunner:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def run_async(self, user_id, session_id, new_message):
+                raise RuntimeError("simulated pipeline failure")
+                yield  # pragma: no cover - makes this an async generator
+
+        monkeypatch.setattr(p2b, "create_place_to_book_workflow", lambda *a, **k: object())
+        monkeypatch.setattr(p2b, "Runner", _ExplodingRunner)
+        monkeypatch.setattr(p2b, "LangfusePlugin", _FakeEnabledLangfusePlugin)
+
+        from services.session_service import create_session_service
+
+        resolver = PlaceToBookResolver(
+            model=object(), session_service=create_session_service(use_database=False)
+        )
+
+        with pytest.raises(RuntimeError, match="simulated pipeline failure"):
+            await resolver._run_pipeline("Lisbon")
+
+        assert flushed == [True], "flush must run even when the pump raises"
