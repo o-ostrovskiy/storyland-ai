@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from common.logging import get_logger
 from evaluation.tools.llm_scorer import _DEFAULT_JUDGE_MODEL
+from evaluation.tools.experiment_run import link_experiment_item
 from models.itinerary import ComposerEnvelope
 
 try:
@@ -447,13 +448,16 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
                     radius_check=checks["radius_check"], judge_ok=judge_ok,
                 )
             finally:
-                langfuse.api.dataset_run_items.create(
+                # MYS-951 — experiment attributes, not the retired
+                # POST /dataset-run-items. See experiment_run.py.
+                link_experiment_item(
+                    root_span,
                     run_name=run_name,
-                    run_description=f"local-atmosphere eval of {DATASET_NAME}",
-                    metadata=run_metadata,
+                    run_metadata=run_metadata,
+                    dataset_id=getattr(dataset, "id", None),
+                    dataset_name=DATASET_NAME,
                     dataset_item_id=item.id,
-                    trace_id=root_span.trace_id,
-                    observation_id=root_span.id,
+                    run_description=f"local-atmosphere eval of {DATASET_NAME}",
                 )
 
     langfuse.flush()

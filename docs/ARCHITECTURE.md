@@ -1194,6 +1194,47 @@ Two decisions from review, both about what the leg does when the data is not wha
 
 The read is additive, flagless and revertible, and it is correct before, during and after the write migration (PR2) and after the legacy leg is removed (PR3). The cost is that calibration now depends on a metadata key rather than a first-class API field, and that dependence is enforced by a raise rather than a degradation — a missing `eval_id` stops the pack instead of quietly skewing it.
 
+## 28. Eval Dataset Runs Are Written as EXPERIMENTS, via OTel Span Attributes (2026-08-24)
+
+### Context
+
+ADR #27 migrated the calibration READ to a union of the legacy runs API and the Experiments API. The write half never moved: all four eval tools recorded a run with `langfuse.api.dataset_run_items.create(...)`, the deprecated `POST /dataset-run-items`, retired **2026-11-16** — six days after launch. `GET /experiments` returned zero runs created that way, so the experiments leg of #27's union had never been exercised against data this repo produced: *a union over an empty leg reads exactly like a union that works.*
+
+### Decision
+
+Each eval tool marks its per-item root span as an experiment item by setting Langfuse's OTel attributes directly, through one shared helper (`evaluation/tools/experiment_run.py`). The legacy write is gone from this repo.
+
+**Why not `dataset.run_experiment(...)`, the obvious replacement.** At the pinned `langfuse==4.14.0` the SDK's own experiment runner reaches `self.api.dataset_run_items.create` for every dataset-backed item — as `asyncio.to_thread(that_method, …)`, so it is invoked while never appearing in call position. Adopting it would have moved the retired write one layer down, out of this repo and out of the guard's reach, and the acceptance criterion ("no remaining references") would have gone green over a codebase that still wrote through the endpoint being retired. ➡️ *A guard over our own source is a claim about our source, not about the call.* The third option, `propagate_attributes()`, has no experiment parameter in its public signature.
+
+**The identity is minted here, and that is the load-bearing change.** In the SDK the experiment id IS the legacy write's return value (`experiment_id = dataset_run_id or fallback`). Without that call we derive a stable 16-hex id ourselves — derived, not random, because every item of a run must land on the same experiment and a retried run would otherwise split into two half-populations, neither visibly wrong.
+
+🔴 **The derivation is scoped to `(dataset_id, dataset_name, run_name)`, not to the run name alone** — a correction to the first version of this module, found in review. `run_evaluation_on_dataset` is called once per dataset in a loop and builds `eval_run_{YYYYmmdd_HHMMSS}_{version}`: second resolution, no dataset in the string. Two datasets whose evaluation starts inside the same second share a run name, and a name-derived id would have grouped their items into one experiment carrying two dataset ids — a merge that looks like one healthy run. The legacy write never had this exposure because it never minted an identity: `dataset_run_items.create` passed `dataset_item_id`, so the backend scoped the run to that item's dataset. ➡️ *An id whose uniqueness rests on wall-clock resolution is a claim about timing, not about identity.* The components are joined with `\x1f` so the hash is injective at the boundary, and both scope arguments are required rather than defaulted so a future call site cannot fall back to the name-only identity silently.
+
+⚠️ **Deliberately not fixed: a per-execution nonce.** Two concurrent invocations sharing a run name *and* a dataset still converge on one experiment. That is not a regression — the legacy write behaved the same way — and no derivation can fix it, because a retry and a concurrent twin present identical inputs. Separating them means making the run *name* unique across the four tools; a naming change, on its own ticket.
+
+**`eval_id` goes in the ITEM metadata specifically.** ADR #27's reader recovers the dataset-item id from `experiment_item_metadata` (the group the 2026-08-20 live probe observed) and *raises* when it is absent. The tools' existing `metadata=` lands in TRACE metadata — a different group — so a write that looked correct would abort every calibration build. A row drives our attributes through the real reader.
+
+### Files Affected
+
+- `evaluation/tools/experiment_run.py` (new) — the attribute keys, the dataset-scoped run-id derivation, `link_experiment_item()`.
+- `evaluation/tools/run_scheduled_eval.py`, `run_local_atmosphere_eval.py`, `run_place_to_book_eval.py`, `run_expansion_eval.py` — the `finally:` block, unchanged in position: a case that raised is a case that RAN, and dropping it would make a failing evalset look smaller rather than worse.
+- `tests/unit/test_experiment_run.py` — key/SDK pinning, the identity properties (stability, dataset separation, join injectivity), the read-side round trip, the live-SDK accessor rows (a real span, exported in memory), and two class guards: no file in the tree calls the retired endpoint, and every call site names its dataset and its run description.
+
+### Trade-offs
+
+- The attribute keys are our literals, so an SDK rename would stop linking silently. Paid for by rows asserting every key against the installed SDK — chosen over importing `langfuse._client.attributes`, whose reorganisation would crash an eval mid-run with spend already committed.
+- Eval traces move into the `sdk-experiment` environment (the SDK forces it wherever the root-observation attribute is present). Any saved Langfuse view filtered on the old environment stops showing eval runs.
+- The dataset scope is enforced twice, because once is not enough: the signature makes it a `TypeError`, but the four call sites live in `finally:` blocks inside async loops that no unit test executes, so the first machine to notice a forgotten argument would be the runner, mid-eval, with spend committed. An AST row reads the call sites without running them. ➡️ *A required argument is checked at the call, and a call nobody executes is not checked at all.*
+- The class guard parses rather than greps, and matches the ATTRIBUTE rather than the call: prose naming the retired endpoint (this ADR, the module docstring) is not a reference, while `to_thread(method, …)` is. ➡️ *A function can be invoked without ever being the callee.*
+- **The write goes through `span._otel_span`, a PRIVATE SDK attribute, and there is no public alternative** — a decision, not an omission. `LangfuseObservationWrapper.update()` carries no parameter for raw attributes, and its `**kwargs` are documented as ignored, so the public call *succeeds and writes nothing*: the failure mode of preferring it is silence, not an error. The accessor gets the same protection the keys get — rows that build a REAL span from the installed SDK, export it to an in-memory exporter, and assert the attributes land on the exported span. Verified by renaming `_otel_span` inside the installed package: those rows red, and every fake-backed row in the file stays green. ➡️ *A test that defines the shape it depends on cannot report that the shape changed.*
+- **`run_description` survives the endpoint that used to carry it.** All four tools passed a human-readable description to `dataset_run_items.create`; the SDK exposes `langfuse.experiment.description`, so it is set rather than dropped. It is optional where the dataset scope is required: a missing scope merges two datasets invisibly, a missing description is a blank label anyone can see. The drop-class is closed by the AST reader instead — extended one keyword, so a writer that stops sending one reds in CI. ➡️ *A parameter deleted alongside the call it fed disappears from the diff and reappears as a blank field in a dashboard.*
+
+### Consequences
+
+🔴 **Not verified end-to-end.** Whether a self-minted experiment id joins its dataset in `GET /experiments`, and whether #27's union then finds those runs, needs a live scheduled-eval run and a calibration dry-run — real LLM spend, so a founder G4 gate. The code is written so one minimal run settles it; until then this ADR records a design, not a confirmed behaviour. The legacy READ leg stays deliberately in place, which is what makes that survivable.
+
+---
+
 ---
 
 ## Summary: Key Architectural Patterns
