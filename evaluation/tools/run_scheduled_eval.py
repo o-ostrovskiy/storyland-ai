@@ -39,6 +39,7 @@ import uuid
 
 # LLM-as-judge scorer (Issue #96)
 from evaluation.tools.llm_scorer import score_itinerary, score_criteria_coverage
+from evaluation.tools.experiment_run import link_experiment_item
 
 try:
     from langfuse import Langfuse
@@ -659,13 +660,20 @@ async def run_evaluation_on_dataset(
                             note="Workflow execution not implemented (see issue #95)",
                         )
                 finally:
-                    langfuse.api.dataset_run_items.create(
+                    # MYS-951: the run is recorded as an EXPERIMENT (OTel
+                    # attributes) instead of through the deprecated
+                    # POST /dataset-run-items, retired 2026-11-16. Still in
+                    # `finally:` for the reason the old call was: a case that
+                    # raised is a case that RAN, and dropping it would make a
+                    # failing evalset look smaller rather than worse.
+                    link_experiment_item(
+                        root_span,
                         run_name=run_name,
-                        run_description=f"Scheduled evaluation of {dataset_name}",
-                        metadata=run_metadata,
+                        run_metadata=run_metadata,
+                        dataset_id=getattr(dataset, "id", None),
+                        dataset_name=dataset_name,
                         dataset_item_id=item.id,
-                        trace_id=root_span.trace_id,
-                        observation_id=root_span.id,
+                        run_description=f"Scheduled evaluation of {dataset_name}",
                     )
 
             case_result = {

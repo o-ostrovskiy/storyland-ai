@@ -885,10 +885,12 @@ def hydrate_candidate(
     under burst reads, and a dropped candidate here silently shrinks the
     labeling pack.
 
-    This is the read-side slice only. The remaining deprecated calls in this
-    tree — ``dataset_run_items.create`` writes in the four eval tools and the
-    ``datasets.get_runs``/``get_run`` reads in ``collect_candidates`` — must
-    migrate together before the same 2026-11-16 cutoff; that work is MYS-909.
+    This is the read-side slice only. The four eval tools' WRITES migrated in
+    MYS-951 (they now mark their root span as an experiment item; see
+    ``evaluation/tools/experiment_run.py``), so what is left deprecated in this
+    tree is the ``datasets.get_runs``/``get_run`` legacy READ leg in
+    ``collect_candidates`` — kept deliberately, because a union over both APIs
+    is what makes the cutoff survivable, and it must go before 2026-11-16.
     """
     root = None
     scores_page = None
