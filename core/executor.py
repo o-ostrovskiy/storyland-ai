@@ -43,6 +43,7 @@ from google.adk.models.google_llm import Gemini
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
 
+from agents.composer_truncation import COMPOSER_ATTEMPTS, find_composer_truncation
 from agents.orchestrator import (
     create_book_recommendation_workflow,
     create_book_to_place_discovery_workflow,
@@ -994,18 +995,37 @@ class WorkflowExecutor:
                 role="user", parts=[types.Part(text=prompt)]
             )
 
-            capture = RunCapture()
-            async for ev in pump_events(
-                runner,
-                user_id=user_id,
-                session_id=job_id,
-                message=message,
-                phase=Phase.COMPOSITION,
-                agent_steps={},
-                capture=capture,
-                track_final_response=True,
-            ):
-                yield ev
+            # ai-private#33: a truncated envelope raises at the model boundary
+            # (agents/composer_truncation.py) and gets exactly one retry. A
+            # second truncation re-raises into run_guarded, whose mapper turns
+            # it into the client-safe transient DiscoveryComposeError -- never
+            # a half-recovered itinerary.
+            for attempt in range(1, COMPOSER_ATTEMPTS + 1):
+                capture = RunCapture()
+                try:
+                    async for ev in pump_events(
+                        runner,
+                        user_id=user_id,
+                        session_id=job_id,
+                        message=message,
+                        phase=Phase.COMPOSITION,
+                        agent_steps={},
+                        capture=capture,
+                        track_final_response=True,
+                    ):
+                        yield ev
+                    break
+                except Exception as exc:
+                    truncated = find_composer_truncation(exc)
+                    if truncated is None or attempt == COMPOSER_ATTEMPTS:
+                        raise
+                    logger.warning(
+                        "composer_truncation_retry",
+                        job_id=job_id,
+                        attempt=attempt,
+                        finish_reason=truncated.finish_reason,
+                        output_length=truncated.output_length,
+                    )
 
             # Re-fetch session to get output_key data
             refreshed = await self._session_service.get_session(
