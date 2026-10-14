@@ -1245,7 +1245,7 @@ The trip composer intermittently emitted a `ComposerEnvelope` whose JSON stopped
 ### Decision
 - `agents/composer_truncation.py::detect_composer_truncation` is the composer's `after_model_callback`. A `MAX_TOKENS` finish, or a final text that is not a valid envelope, logs `composer_envelope_truncated` (with the output length) and raises `ComposerEnvelopeTruncated`. It does this **before** ADK writes `output_key`, so the envelope never reaches state or the slicer.
 - `WorkflowExecutor.compose()` retries the composer **exactly once** (`COMPOSER_ATTEMPTS = 2`). A second truncation re-raises into `run_guarded`, whose mapper returns the existing client-safe `DiscoveryComposeError(kind="transient")`. A partial itinerary is never shipped.
-- The ceiling is explicit: `common/config.py::COMPOSER_MAX_OUTPUT_TOKENS = 65_535`, which is gemini-3.1-flash-lite's documented maximum and default, so there is no cost or behaviour change.
+- The ceiling is explicit: `common/config.py::COMPOSER_MAX_OUTPUT_TOKENS = 65_536`, which is gemini-3.1-flash-lite's documented output token limit (65,536 on the model page), so there is no cost or behaviour change.
 - The scheduled eval records a case that hits it as `defect: composer_envelope_truncated`, and the report prints the count on its own `DEFECTS` line, so it is counted, not absorbed into variance.
 
 ### Trade-offs

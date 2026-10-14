@@ -66,6 +66,12 @@ _SENTRY_SAFE_LOG_ATTR_KEYS = frozenset(
         "total",
         "kind",
         "captured_chars",
+        # Composer truncation diagnostics (ai-private#33, ADR #29): an SDK
+        # finish-reason enum name, the generated text's length and the retry
+        # attempt number. Never user content.
+        "finish_reason",
+        "output_length",
+        "attempt",
     }
 )
 
