@@ -93,6 +93,13 @@ class TestDetector:
         assert find_composer_truncation(group) is inner
         assert find_composer_truncation(RuntimeError("other")) is None
 
+    def test_plain_exception_without_group_builtins(self, monkeypatch):
+        # Python 3.10 (still in requires-python) has no BaseExceptionGroup builtin.
+        monkeypatch.setattr("core.discovery_errors._BASE_EXCEPTION_GROUP", ())
+        assert find_composer_truncation(ValueError()) is None
+        inner = ComposerEnvelopeTruncated("MAX_TOKENS", 10)
+        assert find_composer_truncation(inner) is inner
+
 
 def test_composer_agent_carries_the_explicit_ceiling_and_the_detector():
     agent = create_trip_composer_agent(model="gemini-test")

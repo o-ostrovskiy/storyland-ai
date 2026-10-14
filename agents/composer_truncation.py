@@ -97,11 +97,10 @@ def detect_composer_truncation(callback_context, llm_response):
 
 def find_composer_truncation(exc: BaseException) -> Optional[ComposerEnvelopeTruncated]:
     """The truncation inside ``exc``, which may arrive wrapped in a TaskGroup group."""
-    if isinstance(exc, ComposerEnvelopeTruncated):
-        return exc
-    if isinstance(exc, BaseExceptionGroup):
-        for sub in exc.exceptions:
-            found = find_composer_truncation(sub)
-            if found is not None:
-                return found
+    # Local import: ``core/__init__`` pulls in the executor, which imports this module.
+    from core.discovery_errors import _iter_leaves
+
+    for leaf in _iter_leaves(exc):
+        if isinstance(leaf, ComposerEnvelopeTruncated):
+            return leaf
     return None
