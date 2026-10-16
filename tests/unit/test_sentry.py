@@ -379,3 +379,53 @@ class TestSearchGroundingAllowlist:
         assert attrs["agents"] == "city_researcher"
         assert "book_title" not in attrs
         assert attrs["redacted_keys"] == "book_title"
+
+
+class TestComposerTruncationAllowlist:
+    """ai-private#33 r1 (Codex P2): ADR #29 says operators read finish_reason
+    and output_length off ``composer_envelope_truncated``, and the retry log
+    carries ``attempt``. Unlisted, the scrubber dropped all three in prod.
+    Each is an SDK enum name or an int, never user content.
+    """
+
+    def test_truncation_diagnostics_survive_the_scrubber(self):
+        from unittest.mock import patch
+
+        from common.logging import _sentry_error_processor
+
+        with patch("sentry_sdk.logger.warning") as mock_log:
+            _sentry_error_processor(
+                None,
+                "warning",
+                {
+                    "event": "composer_envelope_truncated",
+                    "finish_reason": "MAX_TOKENS",
+                    "output_length": 48211,
+                    "agent": "trip_composer",
+                },
+            )
+        attrs = mock_log.call_args.kwargs["attributes"]
+        assert attrs["finish_reason"] == "MAX_TOKENS"
+        assert attrs["output_length"] == 48211
+        assert "redacted_keys" not in attrs
+
+    def test_retry_attempt_survives_the_scrubber(self):
+        from unittest.mock import patch
+
+        from common.logging import _sentry_error_processor
+
+        with patch("sentry_sdk.logger.warning") as mock_log:
+            _sentry_error_processor(
+                None,
+                "warning",
+                {
+                    "event": "composer_truncation_retry",
+                    "job_id": "j1",
+                    "attempt": 1,
+                    "finish_reason": "MAX_TOKENS",
+                    "output_length": 48211,
+                },
+            )
+        attrs = mock_log.call_args.kwargs["attributes"]
+        assert attrs["attempt"] == 1
+        assert "redacted_keys" not in attrs

@@ -734,6 +734,45 @@ class LangfusePlugin(BasePlugin):
                 self._propagation_cm.__exit__(None, None, None)
                 self._propagation_cm = None
 
+    async def on_run_error_callback(
+        self, *, invocation_context: InvocationContext, error: Exception
+    ) -> None:
+        """Finalize the trace when the run raises.
+
+        ADK runs after_run_callback only when the run succeeded; on an
+        unhandled error it calls this hook instead (runners._notify_run_error).
+        Without it the failed invocation's root span was never ended and its
+        propagate_attributes context never exited, and the composer truncation
+        retry (core/executor.py compose()) reuses this plugin, so the retry's
+        on_user_message_callback overwrote both. Records the error TYPE only:
+        exception messages can carry user text.
+        """
+        if not self.enabled or not self.client or not self._current_trace:
+            return
+
+        error_type = type(error).__name__
+        try:
+            self._current_trace.update(
+                output={"status": "error", "error_type": error_type},
+                level="ERROR",
+                status_message=error_type,
+                metadata={
+                    "total_input_tokens": self._token_usage.input_tokens,
+                    "total_output_tokens": self._token_usage.output_tokens,
+                    "total_cost_usd": self._total_cost_usd,
+                },
+            )
+            self._current_trace.set_trace_io(output={"status": "error", "error_type": error_type})
+            self._current_trace.end()
+        except Exception as e:
+            logger.warning("langfuse_finalize_error", error=str(e), error_type=type(e).__name__)
+        finally:
+            self._current_trace = None
+            self._final_response_text = None
+            if self._propagation_cm:
+                self._propagation_cm.__exit__(None, None, None)
+                self._propagation_cm = None
+
     def get_session_stats(self) -> dict[str, Any]:
         """
         Get current session token usage statistics.

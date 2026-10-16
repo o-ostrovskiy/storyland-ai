@@ -5,6 +5,9 @@ Synthesizes all discovery results into a complete, cohesive travel itinerary.
 """
 
 from google.adk.agents import LlmAgent
+from google.genai import types
+from common.config import COMPOSER_MAX_OUTPUT_TOKENS
+from agents.composer_truncation import detect_composer_truncation
 from models.itinerary import ComposerEnvelope
 from agents.prompts import AgentPrompts, load_prompts
 
@@ -28,4 +31,10 @@ def create_trip_composer_agent(model, prompts: AgentPrompts | None = None):
         output_schema=ComposerEnvelope,
         output_key="composer_envelope",
         instruction=prompts.trip_composer,
+        # ai-private#33: an explicit ceiling, and a truncated envelope raises
+        # before ADK writes output_key, so it never reaches the text fallback.
+        generate_content_config=types.GenerateContentConfig(
+            max_output_tokens=COMPOSER_MAX_OUTPUT_TOKENS
+        ),
+        after_model_callback=detect_composer_truncation,
     )

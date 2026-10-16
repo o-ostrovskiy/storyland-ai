@@ -14,6 +14,16 @@ from typing import Optional
 # fixes the old boot-crash footgun where a deploy missing MODEL_NAME died
 # at startup even though README implied a default existed.
 DEFAULT_MODEL_NAME = "gemini-3.1-flash-lite"
+
+# Output-token ceiling for the trip composer (ai-private#33). 65,536 is
+# gemini-3.1-flash-lite's documented output token limit
+# (ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite), so making it
+# explicit changes neither behaviour nor cost: output is billed per token
+# generated, and a ceiling the model already had is never reached sooner.
+# It exists so the ceiling is a reviewed number rather than an SDK default,
+# and so a length finish against it is detected (agents/composer_truncation.py).
+# Do not raise it past the model's maximum: the API rejects that request.
+COMPOSER_MAX_OUTPUT_TOKENS = 65_536
 from dataclasses import dataclass
 from dotenv import load_dotenv
 

@@ -30,6 +30,7 @@ from agents.orchestrator import (
     create_book_to_place_composition_workflow,
 )
 from agents.prompts import load_prompts, CURRENT_PROMPT_VERSION, AgentPrompts
+from agents.composer_truncation import TRUNCATION_EVENT, find_composer_truncation
 from google.adk.models.google_llm import Gemini
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
@@ -247,6 +248,28 @@ def aggregate_search_grounding(
         # instrumentation failure to chase, not a model that ignored its prompt.
         "unobserved_by_agent": by_frequency(unobserved_counts),
     }
+
+
+def case_defect(exc: BaseException) -> Optional[str]:
+    """The named production defect a failed case hit, or None (ai-private#33).
+
+    A truncated composer envelope used to read as score variance ("eval noise")
+    for weeks. It is a production failure mode, so a case that hits it records
+    the defect by name and the report counts it on its own line.
+    """
+    if find_composer_truncation(exc) is not None:
+        return TRUNCATION_EVENT
+    return None
+
+
+def count_defects(case_results: List[Dict[str, Any]]) -> Dict[str, int]:
+    """Defect occurrences by name across a dataset's cases."""
+    counts: Dict[str, int] = {}
+    for case in case_results:
+        defect = case.get("defect")
+        if defect:
+            counts[defect] = counts.get(defect, 0) + 1
+    return counts
 
 
 def count_scored_cases(result: Dict[str, Any]) -> int:
@@ -718,11 +741,15 @@ async def run_evaluation_on_dataset(
                 error=str(e),
             )
             failed_cases += 1
-            case_results.append({
+            failed_case = {
                 "item_id": item.id if hasattr(item, 'id') else 'unknown',
                 "status": "failed",
                 "error": str(e),
-            })
+            }
+            defect = case_defect(e)
+            if defect:
+                failed_case["defect"] = defect
+            case_results.append(failed_case)
 
     langfuse.flush()
 
@@ -746,6 +773,9 @@ async def run_evaluation_on_dataset(
         # case reached discovery, so an all-zero block never reads as "nothing
         # was grounded". No pass rule yet — see summarize_search_grounding.
         "search_grounding": aggregate_search_grounding(case_results),
+        # Production defect occurrences (ai-private#33), counted, never folded
+        # into score variance.
+        "defects": count_defects(case_results),
     }
 
     logger.info(
@@ -1546,6 +1576,11 @@ def main():
             unscored = evaluated - count_scored_cases(result)
             if unscored > 0:
                 print(f"WARNING: {unscored} of {evaluated} case(s) evaluated but unscored")
+
+        defects = result.get("defects") or {}
+        if defects:
+            listed = ", ".join(f"{name}×{n}" for name, n in defects.items())
+            print(f"DEFECTS [counted, not score variance]: {listed}")
 
         # Deterministic (not judged): did the researchers actually search?
         grounding = result.get("search_grounding")

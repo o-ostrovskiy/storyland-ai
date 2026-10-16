@@ -1237,6 +1237,21 @@ Each eval tool marks its per-item root span as an experiment item by setting Lan
 
 ---
 
+## 29. A Truncated Composer Envelope Fails at the Model Boundary, With One Retry (2026-10-13)
+
+### Context
+The trip composer intermittently emitted a `ComposerEnvelope` whose JSON stopped mid-string (ai-private#33). The eval explained it as score noise for weeks. Nothing read the finish reason or set an explicit output ceiling, and the text fallback's `{ … rfind('}')` slicer (`core/extraction.py`) can parse a smaller, different object out of a cut-off envelope.
+
+### Decision
+- `agents/composer_truncation.py::detect_composer_truncation` is the composer's `after_model_callback`. A `MAX_TOKENS` finish, or a final text that is not a valid envelope, logs `composer_envelope_truncated` (with the output length) and raises `ComposerEnvelopeTruncated`. It does this **before** ADK writes `output_key`, so the envelope never reaches state or the slicer.
+- `WorkflowExecutor.compose()` retries the composer **exactly once** (`COMPOSER_ATTEMPTS = 2`). A second truncation re-raises into `run_guarded`, whose mapper returns the existing client-safe `DiscoveryComposeError(kind="transient")`. A partial itinerary is never shipped.
+- The ceiling is explicit: `common/config.py::COMPOSER_MAX_OUTPUT_TOKENS = 65_536`, which is gemini-3.1-flash-lite's documented output token limit (65,536 on the model page), so there is no cost or behaviour change.
+- The retry reuses the run's `LangfusePlugin`, and ADK runs `after_run_callback` only when a run succeeds (on an error it calls `on_run_error_callback`). The plugin's `on_run_error_callback` therefore ends the failed attempt's root span at level `ERROR` with the error type only (never the message, which can carry user text) and exits its `propagate_attributes` context, so the retry starts a clean trace. This also closes the same leak on every non-retry error path.
+- The scheduled eval records a case that hits it as `defect: composer_envelope_truncated`, and the report prints the count on its own `DEFECTS` line, so it is counted, not absorbed into variance.
+
+### Trade-offs
+The module lives in `agents/`, not `core/`, because `core/__init__` imports the executor, which imports the composer agent (a cycle). The local-atmosphere composer (`agents/local_atmosphere_agent.py`, same `output_key`) is not covered yet. Defect 2 (bimodal "crater" itineraries) is characterised separately and is not assumed to share this root.
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -1266,5 +1281,6 @@ Each eval tool marks its per-item root span as an experiment item by setting Lan
 | **Per-session lock + merge re-validation (ADR #25)** | No double-billed Gemini calls on overlapping requests, incl. delayed chip replay; a degraded merge never reaches `/status`; lock registry now bounded | Word-boundary city match is a capitalization heuristic, not a gazetteer |
 | **Search-grounding receipts + fail-closed discovery (ADR #26)** | A claim the product cannot support is demoted rather than shipped at full confidence; skip rate measurable per researcher; enforcement and the metric give one answer on an unobserved receipt | User-visible downgrade at today's 46% skip rate; a wholesale instrumentation fault demotes everything (loud, by design); one cold-cache window at the `v3` bump |
 | **Union eval reads + `eval_id` case key (ADR #27)** | Read side migrates alone and stays total at every step of the Nov 16 cutoff; a run-scoped id can never silently disable the per-case cap; an incomplete read refuses rather than answering short | Calibration depends on a metadata key, not an API field; a missing `eval_id` or a truncated run stops the build rather than degrading it |
+| **Composer truncation at the model boundary (ADR #29)** | A cut-off envelope is retried once, then a clean transient error; never half-recovered; counted as an eval defect | Local-atmosphere composer not yet covered; a retry costs one more composer call on that rare path |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.

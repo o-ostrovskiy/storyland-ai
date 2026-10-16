@@ -206,3 +206,94 @@ class TestStateHygiene:
         await plugin.after_run_callback(invocation_context=_invocation_context())
 
         assert root.trace_io == []
+
+
+class FakePropagation:
+    """propagate_attributes() stand-in that records enter/exit."""
+
+    def __init__(self):
+        self.entered = False
+        self.exited = False
+
+    def __enter__(self):
+        self.entered = True
+        return self
+
+    def __exit__(self, *exc):
+        self.exited = True
+        return False
+
+
+class SequencedClient:
+    """Hands out a fresh root span per invocation, like the real client."""
+
+    def __init__(self):
+        self.roots = []
+
+    def start_observation(self, **kwargs):
+        root = FakeRootSpan()
+        self.roots.append(root)
+        return root
+
+
+class TestRunErrorFinalizes:
+    """ADK runs after_run_callback only when the run succeeded; on an unhandled
+    error it calls on_run_error_callback instead (runners._notify_run_error).
+    Without this hook the failed invocation's root span was never ended and its
+    propagate_attributes context never exited -- and the composer truncation
+    retry (core/executor.py compose()) reuses the same plugin, so attempt 2's
+    on_user_message_callback overwrote both (PR #287, review r3)."""
+
+    @pytest.fixture
+    def plugin(self, monkeypatch):
+        cms = []
+
+        def _propagate(**kwargs):
+            cm = FakePropagation()
+            cms.append(cm)
+            return cm
+
+        monkeypatch.setattr("plugins.langfuse_plugin.propagate_attributes", _propagate)
+        plugin = LangfusePlugin(secret_key=None, public_key=None, host=None)
+        plugin.enabled = True
+        plugin.client = SequencedClient()
+        plugin.root_name = "book_to_place_discovery"
+        plugin.cms = cms
+        return plugin
+
+    async def test_retry_after_error_does_not_leak_the_first_attempt(self, plugin):
+        ctx = _invocation_context()
+        await plugin.on_user_message_callback(invocation_context=ctx, user_message="attempt 1")
+        await plugin.on_run_error_callback(invocation_context=ctx, error=RuntimeError("boom"))
+        await plugin.on_user_message_callback(invocation_context=ctx, user_message="attempt 2")
+
+        first_root, second_root = plugin.client.roots
+        first_cm, second_cm = plugin.cms
+        assert first_root.ended is True
+        assert first_cm.exited is True
+        assert plugin._current_trace is second_root
+        assert plugin._propagation_cm is second_cm
+        assert second_cm.exited is False
+
+    async def test_error_marks_the_span_without_message_text(self, plugin):
+        ctx = _invocation_context()
+        await plugin.on_user_message_callback(invocation_context=ctx, user_message="q")
+        await plugin.on_run_error_callback(
+            invocation_context=ctx, error=ValueError("user text must not leak")
+        )
+
+        (root,) = plugin.client.roots
+        assert root.updates[-1]["level"] == "ERROR"
+        assert root.updates[-1]["status_message"] == "ValueError"
+        assert "user text" not in str(root.updates) + str(root.trace_io)
+        assert root.trace_io[-1]["output"] == {"status": "error", "error_type": "ValueError"}
+        assert plugin._current_trace is None
+        assert plugin._propagation_cm is None
+        assert plugin._final_response_text is None
+
+    async def test_no_open_trace_is_a_no_op(self, plugin):
+        await plugin.on_run_error_callback(
+            invocation_context=_invocation_context(), error=RuntimeError("x")
+        )
+
+        assert plugin.client.roots == []
