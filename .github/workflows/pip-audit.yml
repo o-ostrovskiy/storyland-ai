@@ -30,7 +30,17 @@ jobs:
         run: |
           pip install pip-audit==2.10.1
           pip-audit --strict --require-hashes -r requirements.lock \
-            --ignore-vuln PYSEC-2026-2447
+            --ignore-vuln PYSEC-2026-2447 \
+            --ignore-vuln CVE-2026-114603
+            # CVE-2026-114603 (opentelemetry-api 1.41.1, GHSA-xcq7-p3pf-p88h):
+            # O(N^2) regex in TraceState.from_header, reached only when a server
+            # extracts an inbound W3C tracestate header. We never do: no
+            # propagate.extract / ASGI instrumentation in our code, and ADK's
+            # only extract() (telemetry/_agent_engine.py) runs under ADK's own
+            # get_fast_api_app, which we don't use, and passes traceparent only.
+            # Fix 1.45.1 is above every google-adk release's otel cap (<=1.44).
+            # Accepted risk, tracked on storyland-ai-private#59; remove when
+            # google-adk allows opentelemetry-api>=1.45.1.
             # diskcache 5.6.3 pickle deserialization (CVE-2025-69872 class):
             # exploitable only with WRITE access to the cache directory on
             # the box — an attacker with that access has already won. NO
