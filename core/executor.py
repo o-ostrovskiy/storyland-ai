@@ -9,7 +9,7 @@ Usage (Python SDK — direct import from backend):
     from core import WorkflowExecutor, ExecutorConfig
     from core.events import MetadataReady, RegionsReady, ItineraryReady
 
-    config = ExecutorConfig(model_name="gemini-2.0-flash", google_api_key="...")
+    config = ExecutorConfig(model_name="gemini-3.1-flash-lite", google_api_key="...")
     executor = WorkflowExecutor(config)
 
     async for event in executor.discover(book_title="1984"):
