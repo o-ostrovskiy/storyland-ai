@@ -67,9 +67,13 @@ lock:
 	uv pip compile pyproject.toml --universal --extra dev --generate-hashes --output-file requirements-dev.lock
 
 # Audit the shipped (prod) lock for known vulnerabilities (same gate CI runs).
+# CVE-2026-114603 (opentelemetry-api tracestate ReDoS): accepted risk, reasoning
+# in .github/workflows/pip-audit.yml. Tracked on storyland-ai-private#59; remove
+# when google-adk allows opentelemetry-api>=1.45.1.
 audit:
 	pip-audit --strict --require-hashes -r requirements.lock \
-		--ignore-vuln PYSEC-2026-2447
+		--ignore-vuln PYSEC-2026-2447 \
+		--ignore-vuln CVE-2026-114603
 
 # =============================================================================
 # Testing
