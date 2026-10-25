@@ -9,9 +9,9 @@ would keep being served.
 To make that impossible, every cache key is namespaced by a **version hash**
 derived from the inputs that determine the recommendation output:
 
-* the active model name, and
+* the active model name,
 * the source text of the prompt modules that build the discovery request and
-  the agent instructions.
+  the agent instructions, and
 * the content of the active agent-prompt JSON (``agents/prompts/vN.json``).
 
 Any change to the model or those prompts changes the hash, so all prior entries

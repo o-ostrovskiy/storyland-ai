@@ -23,6 +23,9 @@ from agents.prompts import CURRENT_PROMPT_VERSION, prompt_content_hash
 
 logger = get_logger(__name__)
 
+# The prompt JSON can't change under a running process: hash it once, not per trace.
+_PROMPT_HASH = prompt_content_hash()
+
 try:
     from langfuse import Langfuse, propagate_attributes
     LANGFUSE_AVAILABLE = True
@@ -267,7 +270,7 @@ class LangfusePlugin(BasePlugin):
                 version=CURRENT_PROMPT_VERSION,
                 metadata={
                     "prompt_version": CURRENT_PROMPT_VERSION,
-                    "prompt_hash": prompt_content_hash(),
+                    "prompt_hash": _PROMPT_HASH,
                 },
             )
             self._propagation_cm.__enter__()

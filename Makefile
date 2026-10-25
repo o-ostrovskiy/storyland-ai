@@ -32,6 +32,7 @@ help:
 	@echo "  make eval-expansion          Run the expansion (suggestion-chip) eval"
 	@echo "  make eval-report   Generate evaluation trend report"
 	@echo "  make prompts-sync  Mirror current agent prompts to Langfuse (git stays source of truth)"
+	@echo "  make prompts-sync-dry  Show which prompts a sync would create, without writing"
 	@echo "  make eval-summary  Show evaluation summary"
 	@echo ""
 	@echo "Running:"
