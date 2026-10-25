@@ -219,22 +219,6 @@ def family_preferences_dict() -> Dict[str, Any]:
     }
 
 
-# Mock Responses
-
-@pytest.fixture
-def mock_tool_context(sample_preferences_dict):
-    context = MagicMock()
-    context.state = {"user:preferences": sample_preferences_dict}
-    return context
-
-
-@pytest.fixture
-def mock_tool_context_no_preferences():
-    context = MagicMock()
-    context.state = {}
-    return context
-
-
 # Session State Fixtures
 
 @pytest.fixture
