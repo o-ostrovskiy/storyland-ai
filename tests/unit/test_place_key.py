@@ -674,9 +674,9 @@ class TestCacheNamespaceFlush:
 
     def test_the_prompt_version_bump_also_moves_the_fingerprint(self):
         # agents/prompts.py carries CURRENT_PROMPT_VERSION in its SOURCE, which is
-        # hashed. (The v3.json CONTENT is not — data, not source: MYS-462. That is
-        # exactly why the bump lives in the .py and why models.discovery is in the
-        # module list: neither flush depends on the JSON being seen.)
+        # hashed. (Since MYS-462 the v3.json CONTENT is hashed too, but this flush
+        # never depended on that: the bump lives in the .py and models.discovery
+        # is in the module list.)
         import inspect
         import agents.prompts as prompts_module
 

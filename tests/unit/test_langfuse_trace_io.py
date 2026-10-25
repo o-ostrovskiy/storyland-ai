@@ -297,3 +297,32 @@ class TestRunErrorFinalizes:
         )
 
         assert plugin.client.roots == []
+
+
+class TestTracePromptIdentity:
+    """Every production trace names the prompt set that produced it, so
+    Langfuse can filter/compare traces by prompt while prompts stay in git."""
+
+    async def test_prompt_version_and_hash_ride_the_trace_attributes(self, monkeypatch):
+        from agents.prompts import CURRENT_PROMPT_VERSION, prompt_content_hash
+
+        captured = {}
+
+        def _propagate(**kwargs):
+            captured.update(kwargs)
+            return FakePropagation()
+
+        plugin, _ = _make_plugin()
+        monkeypatch.setattr("plugins.langfuse_plugin.propagate_attributes", _propagate)
+        plugin.root_name = "book_to_place_discovery"
+
+        await plugin.on_user_message_callback(
+            invocation_context=_invocation_context(), user_message="Where is 1984 set?"
+        )
+
+        assert captured["version"] == CURRENT_PROMPT_VERSION
+        assert captured["metadata"] == {
+            "prompt_version": CURRENT_PROMPT_VERSION,
+            "prompt_hash": prompt_content_hash(),
+        }
+        assert len(captured["metadata"]["prompt_hash"]) == 12
