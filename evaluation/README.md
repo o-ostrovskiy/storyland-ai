@@ -325,7 +325,13 @@ Manual trigger: Go to Actions tab → Evaluation (manual dispatch) → Run workf
 
 Use `--prompt-version <label>` to tag a run in Langfuse before merging a prompt change. Compare against previous runs by filtering on `prompt_version` in the Langfuse Runs view. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](PROMPT_CHANGELOG.md).
 
-Production traces carry the prompt identity too: `LangfusePlugin` sets the trace `version` to `CURRENT_PROMPT_VERSION` and adds `prompt_version` + `prompt_hash` (a 12-char hash of the active `agents/prompts/vN.json` content, which tells an in-place edit apart from the published version) to trace metadata. Filter on those in the Langfuse Traces view to compare production behaviour across prompt changes. Prompts themselves stay in git; Langfuse prompt management is not used.
+Production traces carry the prompt identity too: `LangfusePlugin` sets the trace `version` to `CURRENT_PROMPT_VERSION` and adds `prompt_version` + `prompt_hash` (a 12-char hash of the active `agents/prompts/vN.json` content, which tells an in-place edit apart from the published version) to trace metadata. Filter on those in the Langfuse Traces view to compare production behaviour across prompt changes. Prompts themselves stay in git; the app never reads prompts from Langfuse.
+
+**Langfuse mirror (playground only).** `evaluation/tools/sync_prompts_to_langfuse.py` pushes each agent's *effective* instruction (tone guardrail included) for the current version to Langfuse as a text prompt named `storyland-ai/<agent>`, labelled `vN` (never `production`), tagged `git-synced`, with `prompt_version` / `prompt_hash` / `git_sha` / `variables` in its config. Python `{field}` placeholders become Langfuse `{{field}}` variables so they're fillable in the playground. Unchanged prompts are skipped, so re-runs create no new versions.
+
+- `make prompts-sync-dry` — show what would change; `make prompts-sync` — write (needs `LANGFUSE_*` in `.env`).
+- `.github/workflows/prompt-sync.yml` runs it on every push to `main` that touches `agents/prompts/**`, `agents/prompts.py` or `core/guardrails/**` (plus manual dispatch).
+- Edits made in the Langfuse UI are **not** synced back — to change a prompt, edit `vN.json` (or add `vN+1`) in a PR. The next sync makes the git text the `vN` version again.
 
 ## Token & Cost Tracking (Langfuse Plugin)
 
