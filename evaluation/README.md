@@ -325,6 +325,8 @@ Manual trigger: Go to Actions tab → Evaluation (manual dispatch) → Run workf
 
 Use `--prompt-version <label>` to tag a run in Langfuse before merging a prompt change. Compare against previous runs by filtering on `prompt_version` in the Langfuse Runs view. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](PROMPT_CHANGELOG.md).
 
+Production traces carry the prompt identity too: `LangfusePlugin` sets the trace `version` to `CURRENT_PROMPT_VERSION` and adds `prompt_version` + `prompt_hash` (a 12-char hash of the active `agents/prompts/vN.json` content, which tells an in-place edit apart from the published version) to trace metadata. Filter on those in the Langfuse Traces view to compare production behaviour across prompt changes. Prompts themselves stay in git; Langfuse prompt management is not used.
+
 ## Token & Cost Tracking (Langfuse Plugin)
 
 ### Features
@@ -386,8 +388,9 @@ The plugin uses Google ADK's callback system to hook into the agent lifecycle. I
 ```
 ADK Runner (runner.run_async)
     ↓
-on_user_message_callback    → opens root span, sets user_id/session_id via
-                              propagate_attributes() (Langfuse v4 OTel context)
+on_user_message_callback    → opens root span, sets user_id/session_id + prompt
+                              version/hash via propagate_attributes() (Langfuse v4
+                              OTel context)
 before_agent_callback       → opens child span per agent
 before_model_callback       → opens generation span (LLM call)
 after_model_callback        → records token counts + cost via usage_details/cost_details
