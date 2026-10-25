@@ -13,6 +13,7 @@ the regression or (deliberately, with a frontend ticket) update the snapshot.
 
 from google.adk.events import Event
 from google.adk.events.event_actions import EventActions
+from google.adk.workflow import Workflow
 
 from api.streaming import domain_event_to_sse
 from core.events import JobStarted
@@ -84,8 +85,8 @@ def _make_executor(monkeypatch):
     from core.executor import WorkflowExecutor
     from services.session_service import create_session_service
 
-    monkeypatch.setattr(ex, "create_book_to_place_discovery_workflow", lambda *a, **k: object())
-    monkeypatch.setattr(ex, "create_book_to_place_composition_workflow", lambda *a, **k: object())
+    monkeypatch.setattr(ex, "create_book_to_place_discovery_workflow", lambda *a, **k: Workflow(name="stub_workflow"))
+    monkeypatch.setattr(ex, "create_book_to_place_composition_workflow", lambda *a, **k: Workflow(name="stub_workflow"))
 
     config = ExecutorConfig(
         model_name="gemini-2.0-flash",
@@ -300,10 +301,10 @@ class TestComposerExplicitGrounding:
         from services.session_service import create_session_service
 
         monkeypatch.setattr(
-            ex, "create_book_to_place_discovery_workflow", lambda *a, **k: object()
+            ex, "create_book_to_place_discovery_workflow", lambda *a, **k: Workflow(name="stub_workflow")
         )
         monkeypatch.setattr(
-            ex, "create_book_to_place_composition_workflow", lambda *a, **k: object()
+            ex, "create_book_to_place_composition_workflow", lambda *a, **k: Workflow(name="stub_workflow")
         )
         config = ExecutorConfig(
             model_name="gemini-2.0-flash",
