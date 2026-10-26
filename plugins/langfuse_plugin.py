@@ -29,8 +29,11 @@ except ImportError:
     LANGFUSE_AVAILABLE = False
 
 
-# Gemini standard (non-batch) pricing per 1M tokens (as of Jul 2026).
-# Source: https://ai.google.dev/gemini-api/docs/pricing
+# Gemini standard (non-batch) text-input pricing per 1M tokens.
+# Source: https://ai.google.dev/gemini-api/docs/pricing (3.1 and 2.5 rows
+# re-read 2026-10-22). The page lists stable ids only, so a `-preview` id
+# (prod serves gemini-3.1-flash-lite-preview) takes its stable row's rate
+# through the substring match below. The 2.x/1.5 rows price historical traces.
 _GEMINI_PRICING: dict[str, tuple[float, float]] = {
     # (input_per_1m, output_per_1m)
     "gemini-3.1-flash-lite": (0.25, 1.50),
@@ -40,13 +43,17 @@ _GEMINI_PRICING: dict[str, tuple[float, float]] = {
     "gemini-1.5-flash": (0.075, 0.30),
     "gemini-1.5-pro": (1.25, 5.00),
 }
-_GEMINI_DEFAULT_PRICING = (0.30, 2.50)  # fall back to gemini-2.5-flash rates
 
 
-def _pricing_for(model_name: str) -> tuple[float, float]:
-    """Return (input_per_1m, output_per_1m) for the given model name."""
+def _pricing_for(model_name: str) -> Optional[tuple[float, float]]:
+    """Return (input_per_1m, output_per_1m) for the given model name.
+
+    None when no row matches: an unpriced model's cost is unknown, never
+    another model's rate (ai-private#37: the old 2.5-flash fallback priced
+    prod at the wrong rate and rendered exactly like a real number).
+    """
     if not model_name:
-        return _GEMINI_DEFAULT_PRICING
+        return None
     lower = model_name.lower()
     # MYS-398 follow-up: match longest key first. `_GEMINI_PRICING` is
     # keyed by substring ("key in lower"), and "gemini-2.5-flash" is
@@ -58,12 +65,15 @@ def _pricing_for(model_name: str) -> tuple[float, float]:
     for key in sorted(_GEMINI_PRICING, key=len, reverse=True):
         if key in lower:
             return _GEMINI_PRICING[key]
-    return _GEMINI_DEFAULT_PRICING
+    return None
 
 
-def _calculate_cost(input_tokens: int, output_tokens: int, model_name: str) -> float:
-    """Calculate cost in USD given token counts and model name."""
-    input_rate, output_rate = _pricing_for(model_name)
+def _calculate_cost(input_tokens: int, output_tokens: int, model_name: str) -> Optional[float]:
+    """Calculate cost in USD given token counts and model name; None if unpriced."""
+    pricing = _pricing_for(model_name)
+    if pricing is None:
+        return None
+    input_rate, output_rate = pricing
     return (input_tokens / 1_000_000) * input_rate + (output_tokens / 1_000_000) * output_rate
 
 
@@ -132,6 +142,9 @@ class LangfusePlugin(BasePlugin):
         self.client: Optional[Langfuse] = None
         self._token_usage = TokenUsage()
         self._total_cost_usd: float = 0.0
+        # True once any call in the run hit an unpriced model, so the total
+        # above is a lower bound rather than the run's cost.
+        self._cost_unknown = False
         self._current_trace = None
         # MYS-398: discovery's parallel_discovery ParallelAgent runs three
         # sub-agent branches (city/landmark/author pipelines) concurrently
@@ -423,9 +436,17 @@ class LangfusePlugin(BasePlugin):
                 self._token_usage.output_tokens += usage.output_tokens
                 self._token_usage.total_tokens += usage.total_tokens
 
+                pricing = _pricing_for(model_name)
                 cost = _calculate_cost(usage.input_tokens, usage.output_tokens, model_name)
-                self._total_cost_usd += cost
-                input_rate, output_rate = _pricing_for(model_name)
+                cost_fields: dict[str, Any] = {}
+                if cost is None:
+                    # Every use, not once: a missing row is a fix-the-table
+                    # signal, and Langfuse shows no cost rather than a guess.
+                    self._cost_unknown = True
+                    logger.warning("langfuse_model_unpriced", model=model_name, branch=key)
+                else:
+                    self._total_cost_usd += cost
+                    cost_fields["cost_details"] = {"total_cost": cost}
                 generation.update(
                     output=str(llm_response),
                     usage_details={
@@ -433,14 +454,14 @@ class LangfusePlugin(BasePlugin):
                         "output": usage.output_tokens,
                         "total": usage.total_tokens,
                     },
-                    cost_details={
-                        "total_cost": cost,
-                    },
+                    **cost_fields,
                     metadata={
-                        "model_pricing": {
-                            "input_per_1m": input_rate,
-                            "output_per_1m": output_rate,
-                        },
+                        "model_pricing": (
+                            {"input_per_1m": pricing[0], "output_per_1m": pricing[1]}
+                            if pricing is not None
+                            else None
+                        ),
+                        "cost_unknown": cost is None,
                         **search_metadata,
                     },
                 )
@@ -711,6 +732,7 @@ class LangfusePlugin(BasePlugin):
                     "total_input_tokens": self._token_usage.input_tokens,
                     "total_output_tokens": self._token_usage.output_tokens,
                     "total_cost_usd": self._total_cost_usd,
+                    "cost_unknown": self._cost_unknown,
                 },
             )
             # Trace-level output, for the same reason as the input above. Falls
@@ -764,6 +786,7 @@ class LangfusePlugin(BasePlugin):
                     "total_input_tokens": self._token_usage.input_tokens,
                     "total_output_tokens": self._token_usage.output_tokens,
                     "total_cost_usd": self._total_cost_usd,
+                    "cost_unknown": self._cost_unknown,
                 },
             )
             self._current_trace.set_trace_io(output={"status": "error", "error_type": error_type})
@@ -789,12 +812,14 @@ class LangfusePlugin(BasePlugin):
             "output_tokens": self._token_usage.output_tokens,
             "total_tokens": self._token_usage.total_tokens,
             "cost_usd": self._total_cost_usd,
+            "cost_unknown": self._cost_unknown,
         }
 
     def reset_stats(self) -> None:
         """Reset token usage statistics."""
         self._token_usage = TokenUsage()
         self._total_cost_usd = 0.0
+        self._cost_unknown = False
         self._final_response_text = None
 
     async def flush(self) -> None:
