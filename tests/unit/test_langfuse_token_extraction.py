@@ -13,6 +13,7 @@ is ``None`` (never a zero-token success), and the warning path owns it.
 from types import SimpleNamespace
 
 from plugins.langfuse_plugin import LangfusePlugin
+from google.adk.workflow import Workflow
 
 
 def _plugin() -> LangfusePlugin:
@@ -126,6 +127,6 @@ class TestResolveRootName:
             model=object(),
         )
         plugin = LangfusePlugin()
-        workflow = SimpleNamespace(name="book_to_place_composition")
+        workflow = Workflow(name="book_to_place_composition")
         executor._build_runner(workflow, plugin)
         assert plugin.root_name == "book_to_place_composition"

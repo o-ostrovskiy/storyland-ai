@@ -28,6 +28,7 @@ import re
 import uuid
 from typing import List, Optional, Tuple
 
+from google.adk.apps import App
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
 from google.adk.tools import google_search
@@ -257,10 +258,12 @@ class PlaceToBookResolver:
         # excluding every /place-to-book cache miss from the numbers.
         langfuse_plugin.root_name = getattr(workflow, "name", None)
         return Runner(
-            node=workflow,
-            app_name=APP_NAME,
+            app=App(
+                name=APP_NAME,
+                root_agent=workflow,
+                plugins=[LoggingPlugin(), langfuse_plugin],
+            ),
             session_service=self._session_service,
-            plugins=[LoggingPlugin(), langfuse_plugin],
         )
 
     async def resolve(self, place: str) -> PlaceToBookResult:

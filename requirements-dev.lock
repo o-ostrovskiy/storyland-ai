@@ -404,6 +404,7 @@ cryptography==50.0.0 \
     --hash=sha256:fd9192b7b70c573d7f214eb1ae35e00d359f6f5e4b27c7e21e30de1fc6204645
     # via
     #   authlib
+    #   google-adk
     #   google-auth
     #   joserfc
 diskcache==5.6.3 \
@@ -420,9 +421,9 @@ fastapi==0.139.2 \
     # via
     #   storyland-ai (pyproject.toml)
     #   google-adk
-google-adk==2.5.0 \
-    --hash=sha256:55b88cac9d5072d511fd3224e5f334e57fb2b0ae567507e531e03fdfb60c82c2 \
-    --hash=sha256:d247ca3639921a54a86feb797a88d08c1d2c9a60c3f5ff2805e49beb29a9cb8d
+google-adk==2.12.0 \
+    --hash=sha256:79f89ea94ccd87e4ac8c893e81c44ed2ce5568d05406a95c1d10bcef0ce0ff5d \
+    --hash=sha256:93dfb7ff5e27d18f96520f59939faa8a7b6c21c7908161022702a3c208a37b25
     # via storyland-ai (pyproject.toml)
 google-api-core==2.32.0 \
     --hash=sha256:2b33aad226b19272458c46abfe5c5a38d9531ece0c44502129a1463ce83674ac \
@@ -453,9 +454,9 @@ google-cloud-spanner==3.69.0 \
     --hash=sha256:5efc8bc346fa4958135f43cd68c78cfcfa2c13aaa6bf162fa8b56943ca288ae8 \
     --hash=sha256:e274dd63957db3c453bda20d25d9dc42662f2e58f53957bc3706811b3d539484
     # via sqlalchemy-spanner
-google-genai==2.11.0 \
-    --hash=sha256:4c5e524d24b145c96be327f9a7f8f04b0fe4efee0533877795e9848afed01749 \
-    --hash=sha256:5bc8186100e1d34d691fbe0cba392b7e04e98d286ca952323a6672d054accf95
+google-genai==2.33.0 \
+    --hash=sha256:f3f8ab696b35caf95c222e05268740c1ccd6934257890506be73b126150d3b14 \
+    --hash=sha256:fced7f746da45264b34bcf6044a6fcdb91ebad1825e95c324ee48addb6e557ae
     # via google-adk
 googleapis-common-protos==1.75.0 \
     --hash=sha256:53a062ff3c32552fbd62c11fe23768b78e4ddf0494d5e5fd97d3f4689c75fbbd \
@@ -1574,14 +1575,6 @@ typing-inspection==0.4.2 \
     #   fastapi
     #   pydantic
     #   pydantic-settings
-tzdata==2026.3 ; sys_platform == 'win32' \
-    --hash=sha256:4a1518b8993086a7982523e071643f3c0e5f213e75b21318e78bcabfff9d1415 \
-    --hash=sha256:dc096730c87af6cab1b171c9d532be840741ff5d459015e7f6947bd7d7e54931
-    # via tzlocal
-tzlocal==5.4.4 \
-    --hash=sha256:8dbb8660838688a7b6ba4fed31d18dedf842afb4d47ca050d6d891c2c15f3be4 \
-    --hash=sha256:aae09f0126a8a86fa736be266eb4a471380d26a0de3bc14844e7821fee3e2a15
-    # via google-adk
 urllib3==2.8.0 \
     --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3 \
     --hash=sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63

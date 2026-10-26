@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 license = {text = "MIT"}
 
 dependencies = [
-    "google-adk[db]>=2.4.0,<3",  # tested 2.x line; <3 prevents a non-reproducible jump to a future major. "[db]" restores DatabaseSessionService deps (sqlalchemy is no longer a core dep on 2.x); "[eval]" dropped — nothing imports google.adk.evaluation.
+    "google-adk[db]>=2.12.0,<2.13",  # tested 2.x line. <2.13 HOLD (storyland-ai-private#60): 2.13 drops the call_llm span that Ops Watch's langfuse_health.py reads — lift once that script reads the OTel GenAI v2 names. "[db]" restores DatabaseSessionService deps (sqlalchemy is no longer a core dep on 2.x); "[eval]" dropped — nothing imports google.adk.evaluation.
     "greenlet>=3.0",  # required by sqlalchemy's async engine (DatabaseSessionService); not pulled in transitively on 2.x
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",

@@ -13,7 +13,9 @@ import pytest
 
 from google.adk.agents import LlmAgent
 from google.adk.events import Event
+from google.adk.plugins.base_plugin import BasePlugin
 from google.adk.tools import FunctionTool
+from google.adk.workflow import Workflow
 from google.genai import types
 
 from agents import (
@@ -247,7 +249,7 @@ def _make_resolver(monkeypatch, researcher_text, formatter_candidates, run_count
     import core.place_to_book as p2b
     from services.session_service import create_session_service
 
-    monkeypatch.setattr(p2b, "create_place_to_book_workflow", lambda *a, **k: object())
+    monkeypatch.setattr(p2b, "create_place_to_book_workflow", lambda *a, **k: Workflow(name="stub_workflow"))
 
     class _FakeRunner:
         def __init__(self, *args, **kwargs):
@@ -479,13 +481,13 @@ class TestSearchReceiptsAreRegistered:
             model=object(), session_service=create_session_service(use_database=False)
         )
         created_plugin = resolver._create_langfuse_plugin()
-        resolver._build_runner(SimpleNamespace(name="place_to_book_workflow"), created_plugin)
+        resolver._build_runner(Workflow(name="place_to_book_workflow"), created_plugin)
 
-        kinds = [type(plugin) for plugin in captured["plugins"]]
+        kinds = [type(plugin) for plugin in captured["app"].plugins]
         assert LoggingPlugin in kinds, "the existing logging plugin must survive"
         assert LangfusePlugin in kinds, "no observer means no search receipts on this path"
 
-        observer = next(p for p in captured["plugins"] if isinstance(p, LangfusePlugin))
+        observer = next(p for p in captured["app"].plugins if isinstance(p, LangfusePlugin))
         # No credentials configured -> disabled, same as WorkflowExecutor's
         # own LangfusePlugin(secret_key=None, ...) would be.
         assert observer.enabled is False
@@ -527,14 +529,14 @@ class TestSearchReceiptsAreRegistered:
             langfuse_host="https://langfuse.example.com",
         )
         created_plugin = resolver._create_langfuse_plugin()
-        resolver._build_runner(SimpleNamespace(name="place_to_book_workflow"), created_plugin)
+        resolver._build_runner(Workflow(name="place_to_book_workflow"), created_plugin)
 
         assert captured_plugin_kwargs == {
             "secret_key": "sk-test",
             "public_key": "pk-test",
             "host": "https://langfuse.example.com",
         }
-        kinds = [type(plugin) for plugin in captured_runner["plugins"]]
+        kinds = [type(plugin) for plugin in captured_runner["app"].plugins]
         assert LoggingPlugin in kinds, "the existing logging plugin must survive"
 
     def test_the_observer_still_records_receipts_while_disabled(self):
@@ -576,8 +578,9 @@ class TestObserverIsFlushed:
 
         flushed = []
 
-        class _FakeEnabledLangfusePlugin:
+        class _FakeEnabledLangfusePlugin(BasePlugin):
             def __init__(self, **kwargs):
+                super().__init__(name="fake_langfuse")
                 self.enabled = True
                 self.root_name = None
 
@@ -612,8 +615,9 @@ class TestObserverIsFlushed:
 
         flushed = []
 
-        class _FakeEnabledLangfusePlugin:
+        class _FakeEnabledLangfusePlugin(BasePlugin):
             def __init__(self, **kwargs):
+                super().__init__(name="fake_langfuse")
                 self.enabled = True
                 self.root_name = None
 
@@ -637,7 +641,7 @@ class TestObserverIsFlushed:
                 raise RuntimeError("simulated pipeline failure")
                 yield  # pragma: no cover - makes this an async generator
 
-        monkeypatch.setattr(p2b, "create_place_to_book_workflow", lambda *a, **k: object())
+        monkeypatch.setattr(p2b, "create_place_to_book_workflow", lambda *a, **k: Workflow(name="stub_workflow"))
         monkeypatch.setattr(p2b, "Runner", _ExplodingRunner)
         monkeypatch.setattr(p2b, "LangfusePlugin", _FakeEnabledLangfusePlugin)
 

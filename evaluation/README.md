@@ -363,9 +363,14 @@ langfuse_plugin = LangfusePlugin(
     host=config.langfuse_host,
 )
 
+# Plugins ride on the App (ADK 2.12+: Runner(plugins=...) is deprecated)
 runner = Runner(
-    agent=my_agent,
-    plugins=[LoggingPlugin(), langfuse_plugin],
+    app=App(
+        name="storyland",
+        root_agent=my_workflow,
+        plugins=[LoggingPlugin(), langfuse_plugin],
+    ),
+    session_service=session_service,
 )
 ```
 
@@ -431,9 +436,12 @@ eval_run_YYYYMMDD_v2  (dataset run root — from start_as_current_observation)
 
 ### Disabling the Plugin
 
-**Option 1:** Omit from Runner plugins:
+**Option 1:** Omit it from the App's plugins:
 ```python
-runner = Runner(agent=my_agent, plugins=[LoggingPlugin()])
+runner = Runner(
+    app=App(name="storyland", root_agent=my_workflow, plugins=[LoggingPlugin()]),
+    session_service=session_service,
+)
 ```
 
 **Option 2:** Remove credentials from `.env`.

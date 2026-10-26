@@ -104,8 +104,12 @@ class LangfusePlugin(BasePlugin):
         )
 
         runner = Runner(
-            agent=my_agent,
-            plugins=[LoggingPlugin(), langfuse_plugin],
+            app=App(
+                name="storyland",
+                root_agent=my_workflow,
+                plugins=[LoggingPlugin(), langfuse_plugin],
+            ),
+            session_service=session_service,
         )
     """
 
