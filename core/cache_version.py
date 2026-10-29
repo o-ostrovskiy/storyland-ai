@@ -9,9 +9,10 @@ would keep being served.
 To make that impossible, every cache key is namespaced by a **version hash**
 derived from the inputs that determine the recommendation output:
 
-* the active model name, and
+* the active model name,
 * the source text of the prompt modules that build the discovery request and
-  the agent instructions.
+  the agent instructions, and
+* the content of the active agent-prompt JSON (``agents/prompts/vN.json``).
 
 Any change to the model or those prompts changes the hash, so all prior entries
 simply stop matching (they are ignored and eventually TTL-evicted) and fresh
@@ -41,8 +42,10 @@ import inspect
 # keyless regions forever, hardest on the popular repeated titles the combined
 # readaway is for. Hashing the schema module makes that self-invalidating instead
 # of a thing someone has to remember. ``agents.prompts`` also carries
-# CURRENT_PROMPT_VERSION, so a prompt-version bump changes this hash too — but the
-# v2/v3 JSON *content* does not (it is data, not source: that gap is MYS-462).
+# CURRENT_PROMPT_VERSION, so a prompt-version bump changes this hash too. The
+# vN.json *content* is data, not source, so inspect.getsource() can't see it —
+# compute_cache_version() hashes it separately via prompt_content_hash() (MYS-462),
+# so an in-place JSON edit flushes the cache like any other prompt change.
 #
 # ``models.place_key`` and ``core.regions`` are in this list for the same reason,
 # one seam deeper (MYS-460 review round 7). The cached payload doesn't just have
@@ -77,14 +80,29 @@ def _module_source(module_name: str) -> str:
         return ""
 
 
-def compute_cache_version(model_name: str, prompt_modules=_PROMPT_MODULES) -> str:
-    """A short, stable hash over the model name + prompt module sources.
+def _prompt_data_hash() -> str:
+    """Hash of the active prompt JSON's content, or '' if it can't be read."""
+    try:
+        from agents.prompts import prompt_content_hash
 
-    Deterministic for a given (model, prompt-source) pair and 12 hex chars long
-    so it stays readable in logs and keys. Changing the model name or editing
-    any prompt module changes the result.
+        return prompt_content_hash()
+    except Exception:
+        return ""
+
+
+def compute_cache_version(
+    model_name: str, prompt_modules=_PROMPT_MODULES, prompt_data: str | None = None
+) -> str:
+    """A short, stable hash over the model name + prompt module sources + the
+    active prompt JSON content.
+
+    Deterministic for a given (model, prompt-source, prompt-data) triple and 12
+    hex chars long so it stays readable in logs and keys. Changing the model
+    name, editing any prompt module, or editing the active vN.json changes the
+    result. ``prompt_data`` overrides the JSON content hash (tests).
     """
     parts = [model_name or ""]
     parts.extend(_module_source(name) for name in prompt_modules)
+    parts.append(_prompt_data_hash() if prompt_data is None else prompt_data)
     digest = hashlib.sha1("\x00".join(parts).encode("utf-8")).hexdigest()
     return digest[:12]
