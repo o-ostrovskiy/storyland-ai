@@ -335,8 +335,6 @@ storyland-ai/
 │   ├── place_to_book.py # PlaceBookCandidate/PlaceToBookCandidates/Result (reverse discovery)
 │   └── preferences.py   # TravelPreferences
 │
-├── tools/               # ADK tool integrations
-│   └── preferences.py   # Session state preferences tool
 │
 ├── agents/              # AI agent definitions
 │   ├── book_context_agent.py     # Book setting research
@@ -396,14 +394,6 @@ def create_my_agent(model):
     return LlmAgent(name="my_agent", model=model, instruction="...")
 ```
 
-**Adding a new tool** — create in `tools/`:
-```python
-from google.adk.tools import FunctionTool
-def my_function(query: str) -> str:
-    return result
-my_tool = FunctionTool(my_function)
-```
-
 **Adding a new model** — create in `models/`:
 ```python
 from pydantic import BaseModel, Field
@@ -459,7 +449,7 @@ The unit suite (`tests/unit/`) by area — per-module counts rot with every PR, 
 
 | Area | Modules |
 |------|---------|
-| Models & agents | `test_models.py`, `test_agents.py`, `test_tools.py` |
+| Models & agents | `test_models.py`, `test_agents.py` |
 | Core workflow | `test_core.py`, `test_discovery_errors.py`, `test_empty_discovery_guard.py`, `test_retry_backoff.py` |
 | API layer | `test_api.py`, `test_gateway_auth.py`, `test_ratelimit.py`, `test_request_input_limits.py`, `test_dependencies.py` |
 | Caching | `test_cache.py`, `test_disk_cache.py`, `test_cache_version.py` |

@@ -469,8 +469,7 @@ evaluation/
 │   ├── eval_dashboard.py          # Dashboard and reporting
 │   ├── langfuse_eval.py           # Dataset creation pipeline
 │   ├── llm_scorer.py              # LLM-as-judge quality scoring
-│   ├── judge_calibration.py       # Human-label queue + judge-vs-human agreement
-│   └── setup_langfuse_eval.sh     # Setup script
+│   └── judge_calibration.py       # Human-label queue + judge-vs-human agreement
 ├── storyland_eval.evalset.json    # Dataset (10 diverse books, incl. 2 fictional-world)
 ├── books_v1.evalset.json          # Dataset (10 books with expected output + criteria)
 ├── place_to_book_v1.evalset.json  # Dataset (11 place→book reverse-routing grounding cases)
