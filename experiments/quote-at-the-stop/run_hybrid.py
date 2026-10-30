@@ -1,10 +1,35 @@
-"""Arm D: hybrid RAG. The same chunks and embeddings as run_rag.py, plus BM25 keyword scoring;
-the two rankings are merged with reciprocal rank fusion and the top K go into the prompt.
+"""Arm D: hybrid RAG. The same chunks and embeddings as run_rag.py, plus keyword scores; the two rankings are
+merged, and the top chunks go into the prompt.
 
-Variants, chosen with POC_VARIANT (results land in results/hybrid_<variant>.jsonl):
-  c100 / c500  — chunks of ~100 / ~500 words instead of 250 (needs `POC_CHUNK_WORDS=100 prep.py` first)
-  k3 / k10     — 3 or 10 chunks in the prompt instead of 5
-  rerank       — the fused top 20 are re-ranked by the model itself, then the top 5 go into the prompt
+Why two kinds of search. Embeddings find meaning: "a tower by the sea" will find the Martello tower even
+if the word "tower" never appears in the chunk. Keyword search finds exact words: "Glasnevin" is in the
+chunk or it is not. Each is blind where the other sees, and the place names in this experiment are the
+worst case for embeddings (run_rag.py missed three of them) and the best case for keywords. A hybrid runs
+both and merges the lists, so a chunk that ranks high on either gets in.
+
+    BM25   the keyword score, the one Elasticsearch and Lucene use by default: a chunk scores higher the
+           more often it contains the query words, the rarer those words are across all chunks, and the
+           shorter the chunk is. Computed locally in `BM25`, no API, no index file.
+    RRF    reciprocal rank fusion, the simplest way to merge two rankings: each chunk gets
+           1/(60 + its rank) from every list it appears in, and the sums are sorted. No weights to tune.
+
+Variants, chosen with POC_VARIANT (results land in results/hybrid_<variant>.jsonl). Each turns one of the
+knobs every RAG system has, to see whether it matters here:
+
+    c100 / c500   chunks of ~100 / ~500 words instead of 250 (run `POC_CHUNK_WORDS=100 prep.py` first).
+                  Smaller chunks are more precise and cheaper to send; bigger ones keep more context.
+    k3 / k10      3 or 10 chunks in the prompt instead of 5. More chunks, more chances to find it, more
+                  noise and tokens.
+    rerank        a RERANKER: retrieval takes the 20 best chunks, then a second model call reads them all
+                  with the question and reorders them; the top 5 of that order go in. Cheap on 20 chunks,
+                  impossible on 5,000, which is why it sits after retrieval, not instead of it. Here the
+                  same Gemini model is the reranker (a dedicated cross-encoder would be the usual choice).
+
+What the results showed: hybrid fixed all three false "not mentioned" answers; the name was in the
+retrieved chunks for all 68 questions, at every chunk size and every K. The knobs moved the bill 3–6×
+(the reranker 4×) and the accuracy not at all: 66–67 of 68 in every variant, and the remaining miss was
+always the same shape, the right chunk in the prompt and the neighbouring sentence quoted. That is a
+prompting problem, not a retrieval one.
 """
 import json
 import math
@@ -23,8 +48,8 @@ ARM = "hybrid" + (f"_{VARIANT}" if VARIANT else "")
 CHUNK_SUFFIX = {"c100": "100", "c500": "500"}.get(VARIANT, "")
 TOP_K = {"k3": 3, "k10": 10}.get(VARIANT, 5)
 RERANK = VARIANT == "rerank"
-RERANK_POOL = 20
-RRF_K = 60
+RERANK_POOL = 20   # how many fused candidates the reranker reads
+RRF_K = 60         # the usual constant in reciprocal rank fusion; damps the advantage of rank 1 over rank 2
 
 
 def tokens(s):
@@ -32,16 +57,18 @@ def tokens(s):
 
 
 class BM25:
+    """Keyword scoring over the chunks of one book. Built once per book, in memory, in a fraction of a second."""
+
     def __init__(self, docs, k1=1.5, b=0.75):
-        self.k1, self.b = k1, b
-        self.tf = [Counter(tokens(d)) for d in docs]
+        self.k1, self.b = k1, b                       # standard BM25 constants: term-frequency saturation, length normalisation
+        self.tf = [Counter(tokens(d)) for d in docs]  # term counts per chunk
         self.len = np.array([sum(c.values()) for c in self.tf], dtype=np.float32)
         self.avg = float(self.len.mean())
-        df = Counter()
+        df = Counter()                                # in how many chunks each term appears
         for c in self.tf:
             df.update(c.keys())
         n = len(docs)
-        self.idf = {t: math.log(1 + (n - f + 0.5) / (f + 0.5)) for t, f in df.items()}
+        self.idf = {t: math.log(1 + (n - f + 0.5) / (f + 0.5)) for t, f in df.items()}  # rare terms weigh more
 
     def scores(self, query):
         out = np.zeros(len(self.tf), dtype=np.float32)
@@ -57,6 +84,7 @@ class BM25:
 
 
 def rrf(*rankings):
+    """Merge rankings (lists of chunk ids, best first) with reciprocal rank fusion."""
     score = Counter()
     for r in rankings:
         for rank, i in enumerate(r):
@@ -65,7 +93,8 @@ def rrf(*rankings):
 
 
 def rerank(c, q, book, chunks, pool):
-    """Ask the model to order the pool by how likely each passage names the place. Returns (ids, usage)."""
+    """Ask the model to order the pool by how likely each passage names the place. Returns (ids, usage).
+    The tokens this call costs are added to the question's total, so the cost column stays honest."""
     listing = "\n\n".join(f"[{i}] {chunks[i]['text'][:1200]}" for i in pool)
     prompt = (f"Below are {len(pool)} passages from {book['title']}. Rank them by how useful each is for quoting a sentence "
               f"that names the place \"{q['place']}\". Return only the passage numbers in square brackets, best first, "
@@ -73,7 +102,7 @@ def rerank(c, q, book, chunks, pool):
     resp = with_retry(lambda: c.models.generate_content(model=MODEL, contents=prompt, config=gen_config()))
     order = [int(x) for x in re.findall(r"\[(\d+)\]", resp.text or "")]
     seen, ranked = set(), []
-    for i in order + list(pool):
+    for i in order + list(pool):   # whatever the model forgot keeps its original order at the end
         if i in pool and i not in seen:
             seen.add(i); ranked.append(i)
     return ranked, usage(resp)
@@ -88,10 +117,11 @@ def main():
             continue
         book = load_book(q["book"])
         if q["book"] not in idx:
-            idx[q["book"]] = index_for(c, q["book"], CHUNK_SUFFIX)
-            bm[q["book"]] = BM25([ch["text"] for ch in idx[q["book"]][0]])
+            idx[q["book"]] = index_for(c, q["book"], CHUNK_SUFFIX)       # embeddings, shared with run_rag.py
+            bm[q["book"]] = BM25([ch["text"] for ch in idx[q["book"]][0]])  # keywords, built here
         chunks, vecs = idx[q["book"]]
         t0 = time.time()
+        # Two rankings: by meaning (the question sentence) and by words (just the place name, the exact thing we need).
         query = f"the place {q['place']} in {book['title']}"
         qv = embed(c, [query], "RETRIEVAL_QUERY")[0]
         dense = np.argsort(-(vecs @ qv))[:20]

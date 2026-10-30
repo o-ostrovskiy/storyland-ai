@@ -1,10 +1,25 @@
-"""Turn Gutenberg texts into the experiment corpus.
+"""Turn the Gutenberg texts into the experiment's corpus.
 
-Usage: python -I prep.py <books_dir> <out_dir>
+    python -I prep.py books corpus            # 250-word chunks (the baseline)
+    POC_CHUNK_WORDS=100 python -I prep.py books corpus   # also 100- and 500-word chunks, for the variants
 
-Writes, per book, <out_dir>/<key>.json with the paragraphs (id, chapter, text),
-<out_dir>/<key>.txt (the stripped full text) and <out_dir>/<key>.chunks.json
-(paragraphs merged into ~250-word chunks for the RAG arm).
+For every book it writes three files into corpus/:
+
+    <key>.txt          the plain text with the Gutenberg header and footer removed, and a
+                       "[Title, Chapter N]" line wherever a chapter starts. run_full.py sends this whole
+                       file as the prompt; grade.py uses it as the ground truth.
+    <key>.json         the same text as a list of paragraphs, each with an id and its chapter.
+                       run_agent.py searches and reads these paragraphs.
+    <key>.chunks.json  paragraphs merged into chunks of about 250 words. The two RAG arms embed these.
+
+Why chunks at all. RAG does not search whole books; it searches pieces, and the model only sees the pieces
+that were found. How you cut the text is the first of the three choices every RAG system makes (the other
+two: which embedding model, and how retrieval is configured). Cutting on paragraph boundaries keeps
+sentences whole, and 250 words is roughly a paragraph or two: small enough that a chunk is about one thing,
+big enough to keep some surrounding context. The variants (100 and 500 words) test whether that choice
+matters here. There is no overlap between chunks in this experiment.
+
+Chapter labels only exist so the model can answer "which chapter"; they take no part in retrieval.
 """
 import json
 import os
@@ -12,10 +27,11 @@ import re
 import sys
 from pathlib import Path
 
-# Each book lists its heading patterns: (kind, label, regex with the number in group 1), kind "part" or "chapter".
-# Headings are accepted as sequential runs (1, 2, 3 …); when a pattern has several runs (a contents page lists every
-# chapter before the text does) the run that spans the most lines is the real one. A "part" heading lets the
-# chapter numbers restart.
+# Each book lists its heading patterns: (kind, label, regex with the number in group 1), kind "part" or
+# "chapter". Headings are accepted as sequential runs (1, 2, 3, ...). When a pattern has several runs, the
+# run that spans the most lines is the real one: Frankenstein and The Enchanted April list every chapter on
+# a contents page before the text begins, and the first version of this script put the whole novel into
+# the last chapter because of it. A "part" heading lets the chapter numbers restart (Madame Bovary).
 BOOKS = {
     "hound": dict(file="pg2852.txt", title="The Hound of the Baskervilles", author="Arthur Conan Doyle",
                   headings=[("chapter", "Chapter", r"^Chapter (\d+)\.$")]),
@@ -32,22 +48,27 @@ BOOKS = {
     "april": dict(file="pg16389.txt", title="The Enchanted April", author="Elizabeth von Arnim",
                   headings=[("chapter", "Chapter", r"^Chapter (\d+)$")]),
     "sleepy": dict(file="pg41.txt", title="The Legend of Sleepy Hollow", author="Washington Irving",
-                   headings=[]),
+                   headings=[]),  # no chapters: a 12,000-word story
     "odyssey": dict(file="pg1727.txt", title="The Odyssey", author="Homer (Samuel Butler's translation)",
                     headings=[("chapter", "Book", r"^BOOK ([IVXL]+)$")]),
     "grandet": dict(file="pg1715.txt", title="Eugénie Grandet", author="Honoré de Balzac",
                     headings=[("chapter", "Chapter", r"^([IVXL]+)$")]),
 }
+
+# Gutenberg wraps every text in a licence header and footer between these two markers.
 START = re.compile(r"^\*\*\* START OF THE PROJECT GUTENBERG EBOOK")
 END = re.compile(r"^\*\*\* END OF THE PROJECT GUTENBERG EBOOK")
+
 CHUNK_WORDS = int(os.environ.get("POC_CHUNK_WORDS", "250"))
-CHUNK_SUFFIX = "" if CHUNK_WORDS == 250 else f"{CHUNK_WORDS}"
+CHUNK_SUFFIX = "" if CHUNK_WORDS == 250 else f"{CHUNK_WORDS}"   # corpus/<key>.chunks100.json etc.
+
 ROMAN = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100}
 WORDS = {w: i + 1 for i, w in enumerate(
     "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty".split())}
 
 
 def to_int(s):
+    """Chapter numbers come as digits (Chapter 7), roman numerals (CHAPTER XII) or words (Chapter Nine)."""
     if s.isdigit():
         return int(s)
     if s.lower() in WORDS:
@@ -63,6 +84,7 @@ def to_int(s):
 
 
 def strip_gutenberg(lines):
+    """Keep only the lines between the START and END markers."""
     out, inside = [], False
     for line in lines:
         if not inside:
@@ -80,15 +102,12 @@ def accepted_headings(lines, headings):
     pats = [(kind, label, re.compile(rx)) for kind, label, rx in headings]
     has_parts = any(kind == "part" for kind, _, _ in headings)
     found = {i: [] for i in range(len(pats))}
-    part_lines = set()
     for ln, line in enumerate(lines):
         s = line.strip()
         for i, (kind, label, rx) in enumerate(pats):
             m = rx.match(s)
             if m and to_int(m.group(1)) > 0:
                 found[i].append((ln, to_int(m.group(1))))
-                if kind == "part":
-                    part_lines.add(ln)
                 break
     out = {}
     for i, (kind, label, rx) in enumerate(pats):
@@ -105,13 +124,14 @@ def accepted_headings(lines, headings):
             runs.append(run)
         if not runs:
             continue
-        best = max(runs, key=lambda r: r[-1][0] - r[0][0])
+        best = max(runs, key=lambda r: r[-1][0] - r[0][0])   # the run that spans the most lines
         for ln, n in best:
             out[ln] = (kind, label, n)
     return out
 
 
 def paragraphs(lines, headings):
+    """Split the text into paragraphs (blank-line separated) and label each with its chapter."""
     marks = accepted_headings(lines, headings)
     paras, buf = [], []
     part, chapter = "", "front matter"
@@ -142,6 +162,8 @@ def paragraphs(lines, headings):
 
 
 def chunks(paras):
+    """Merge consecutive paragraphs into chunks of up to CHUNK_WORDS words, never splitting a paragraph.
+    A single paragraph longer than the limit becomes a chunk on its own."""
     out, cur, words = [], [], 0
     for p in paras:
         n = len(p["text"].split())
