@@ -383,6 +383,9 @@ storyland-ai/
 │   ├── unit/            # Unit tests (no API calls)
 │   └── integration/     # Integration tests (VCR cassettes)
 │
+├── experiments/         # Measured experiments behind product ideas; not imported by the service
+│   └── quote-at-the-stop/  # whole novel vs RAG vs hybrid vs agent, 10 Gutenberg novels, 68 questions (2026-10-30)
+│
 ├── pyproject.toml       # Dependencies & pytest config
 └── .env.example         # Environment template
 ```
