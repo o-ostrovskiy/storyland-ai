@@ -242,6 +242,16 @@ guarantee, so it is logged. Four events, all INFO:
 Read them together: `search_grounding_absent agent=city_researcher` means that
 researcher answered from model memory.
 
+### Reader waits (latency report)
+
+`python scripts/latency_report.py [--days 7] [--env production]` prints p50/p95 per
+UTC day, with the sample size, for the two waits a reader feels: discover → first
+region (`book_to_place_discovery_invocation`) and compose → done
+(`book_to_place_composition_invocation`), plus the whole window pooled. Read-only
+(`GET /v2/metrics` with the `LANGFUSE_*` keys, no Gemini). Fewer than 20 runs →
+"too few"; no runs → "no data"; an API error or a malformed answer exits 2 with
+`latency unverified`. Targets and baseline: `docs/ARCHITECTURE.md` #30.
+
 **Measured rate (2026-08-10, `gemini-3.1-flash-lite`):** roughly one to two of
 the four researchers skip on most runs, on realist and fictional books alike.
 Which one varies run to run — all four have been observed skipping, and a
@@ -379,6 +389,9 @@ storyland-ai/
 ├── plugins/             # ADK runner plugins
 │   └── langfuse_plugin.py  # Langfuse observability & token tracking
 │
+├── scripts/             # Read-only operator scripts
+│   └── latency_report.py   # Reader waits (first region, full journey) p50/p95 per day from Langfuse
+│
 ├── tests/               # Test suite
 │   ├── unit/            # Unit tests (no API calls)
 │   └── integration/     # Integration tests (VCR cassettes)
@@ -466,7 +479,7 @@ The unit suite (`tests/unit/`) by area — per-module counts rot with every PR, 
 | Place features | `test_place_key.py`, `test_place_to_book.py`, `test_place_to_book_eval.py` |
 | Quality & guardrails | `test_llm_scorer.py`, `test_tone_guardrail.py`, `test_recommendation_floor.py`, `test_judge_calibration.py`, `test_spot_check.py` |
 | Eval harnesses | `test_local_atmosphere_eval.py`, `test_expansion_eval.py`, `test_eval_dataset_routing.py` |
-| Observability | `test_sentry.py`, `test_langfuse_plugin_concurrency.py`, `test_langfuse_pricing.py`, `test_langfuse_unpriced_model.py`, `test_search_grounding.py`, `test_langfuse_search_grounding.py`, `test_discovery_grounding_audit.py`, `test_unverified_discovery_downgrade.py` |
+| Observability | `test_sentry.py`, `test_langfuse_plugin_concurrency.py`, `test_langfuse_pricing.py`, `test_langfuse_unpriced_model.py`, `test_search_grounding.py`, `test_langfuse_search_grounding.py`, `test_discovery_grounding_audit.py`, `test_unverified_discovery_downgrade.py`, `test_latency_report.py` |
 | Sessions & ops | `test_services.py`, `test_session_retention.py` |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).

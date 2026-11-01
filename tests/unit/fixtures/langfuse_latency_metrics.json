@@ -1,0 +1,108 @@
+{
+ "book_to_place_discovery_invocation": {
+  "daily": [
+   {
+    "time_dimension": "2026-10-25",
+    "count_count": 1,
+    "p50_latency": 14679,
+    "p95_latency": 14679
+   },
+   {
+    "time_dimension": "2026-10-26",
+    "count_count": 2,
+    "p50_latency": 7431.5,
+    "p95_latency": 13959.65
+   },
+   {
+    "time_dimension": "2026-10-27",
+    "count_count": 3,
+    "p50_latency": 15641,
+    "p95_latency": 16713.8
+   },
+   {
+    "time_dimension": "2026-10-28",
+    "count_count": 4,
+    "p50_latency": 15589,
+    "p95_latency": 16374.9
+   },
+   {
+    "time_dimension": "2026-10-29",
+    "count_count": 1,
+    "p50_latency": 14353,
+    "p95_latency": 14353
+   },
+   {
+    "time_dimension": "2026-10-30",
+    "count_count": 1,
+    "p50_latency": 14920,
+    "p95_latency": 14920
+   },
+   {
+    "time_dimension": "2026-10-31",
+    "count_count": 0,
+    "p50_latency": null,
+    "p95_latency": null
+   }
+  ],
+  "pooled": [
+   {
+    "count_count": 12,
+    "p50_latency": 15044,
+    "p95_latency": 16621.8
+   }
+  ]
+ },
+ "book_to_place_composition_invocation": {
+  "daily": [
+   {
+    "time_dimension": "2026-10-25",
+    "count_count": 1,
+    "p50_latency": 3914,
+    "p95_latency": 3914
+   },
+   {
+    "time_dimension": "2026-10-26",
+    "count_count": 0,
+    "p50_latency": null,
+    "p95_latency": null
+   },
+   {
+    "time_dimension": "2026-10-27",
+    "count_count": 2,
+    "p50_latency": 4147.5,
+    "p95_latency": 4581.75
+   },
+   {
+    "time_dimension": "2026-10-28",
+    "count_count": 5,
+    "p50_latency": 5049,
+    "p95_latency": 5596.2
+   },
+   {
+    "time_dimension": "2026-10-29",
+    "count_count": 1,
+    "p50_latency": 7080,
+    "p95_latency": 7080
+   },
+   {
+    "time_dimension": "2026-10-30",
+    "count_count": 1,
+    "p50_latency": 4222,
+    "p95_latency": 4222
+   },
+   {
+    "time_dimension": "2026-10-31",
+    "count_count": 0,
+    "p50_latency": null,
+    "p95_latency": null
+   }
+  ],
+  "pooled": [
+   {
+    "count_count": 10,
+    "p50_latency": 4917.5,
+    "p95_latency": 6454.049999999998
+   }
+  ]
+ }
+}
