@@ -14,6 +14,7 @@ import pytest
 from langfuse.api.core import ApiError
 
 from evaluation.tools.judge_calibration import (
+    DEFAULT_RUN_PREFIX,
     _normalize_ts,
     CalibrationDataError,
     CalibrationTruncatedError,
@@ -1312,6 +1313,14 @@ def _raise(*_a, **_kw):
 
 
 class TestRetiredRunsApiIsNeverCalled:
+    def test_the_default_prefix_matches_any_run_date(self):
+        """A dated default stops matching as soon as the old runs are gone."""
+        client = _client(experiments={
+            "eval_run_20261025_200751_v3": [_experiment_item("case-1", "t1")],
+        })
+        got = collect_candidates(client, ["books_v1"], DEFAULT_RUN_PREFIX)
+        assert [c["trace_id"] for c in got] == ["t1"]
+
     def test_only_the_experiments_api_is_read(self):
         client = _client(experiments={"run-a": [_experiment_item("case-1", "t1")]})
         client.api.datasets.get_runs = _raise

@@ -56,7 +56,7 @@ CALIBRATION_DIR = Path("evaluation/calibration")
 DEFAULT_MANIFEST = CALIBRATION_DIR / "queue_manifest_2026-07.json"
 DEFAULT_QUEUE_NAME = "judge-calibration-2026-07"
 DEFAULT_DATASETS = ["storyland_eval", "books_v1"]
-DEFAULT_RUN_PREFIX = "eval_run_202607"
+DEFAULT_RUN_PREFIX = "eval_run_"
 
 
 # Pure selection / analysis logic (unit-tested without a Langfuse client)
