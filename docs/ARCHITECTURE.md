@@ -1252,6 +1252,25 @@ The trip composer intermittently emitted a `ComposerEnvelope` whose JSON stopped
 ### Trade-offs
 The module lives in `agents/`, not `core/`, because `core/__init__` imports the executor, which imports the composer agent (a cycle). The local-atmosphere composer (`agents/local_atmosphere_agent.py`, same `output_key`) is not covered yet. Defect 2 (bimodal "crater" itineraries) is characterised separately and is not assumed to share this root.
 
+## 30. Place→Book Answers Live on Disk, and "Couldn't Check" Is Never Stored (2026-11-05)
+
+### Context
+
+Place→book results sat in an in-process `TTLCache`, so every deploy or restart wiped them and the same place paid for a fresh AI run. The in-process store also hid two things a persistent one can't: a restart used to wash out answers from an older prompt, and an empty or malformed pipeline answer was cached as "not found" for the full TTL.
+
+### Decision
+
+- The resolver's cache follows `CACHE_BACKEND`. On disk it is its own store at `<CACHE_DIR>/place2book`, on the same volume as Discovery but with its own LRU budget (`build_place_to_book_cache`).
+- Keys are `place2book:v1:<CURRENT_PROMPT_VERSION>:<place>`, so a prompt bump invalidates them.
+- `found` is kept 6h and `not_found` 1h (matching the gateway), through a per-entry `ttl_seconds` on both cache backends.
+- A model error raises before any write. No formatter output, a malformed one, or no researcher text with nothing to show is "couldn't check": the caller gets the same not-found envelope, unwritten.
+- Entries are plain dicts validated on read. An unreadable entry or a failed read is a miss; a failed write still answers.
+
+### Trade-offs
+
+- An in-place edit to a prompt's JSON doesn't change the key (storyland-ai-private#40); the stale window is bounded by the 6h TTL.
+- The gateway can't tell a "couldn't check" from a real `found: false`, so it still remembers that answer for its own 1h. The envelope is unchanged here on purpose.
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -1282,5 +1301,6 @@ The module lives in `agents/`, not `core/`, because `core/__init__` imports the 
 | **Search-grounding receipts + fail-closed discovery (ADR #26)** | A claim the product cannot support is demoted rather than shipped at full confidence; skip rate measurable per researcher; enforcement and the metric give one answer on an unobserved receipt | User-visible downgrade at today's 46% skip rate; a wholesale instrumentation fault demotes everything (loud, by design); one cold-cache window at the `v3` bump |
 | **Union eval reads + `eval_id` case key (ADR #27)** | Read side migrates alone and stays total at every step of the Nov 16 cutoff; a run-scoped id can never silently disable the per-case cap; an incomplete read refuses rather than answering short | Calibration depends on a metadata key, not an API field; a missing `eval_id` or a truncated run stops the build rather than degrading it |
 | **Composer truncation at the model boundary (ADR #29)** | A cut-off envelope is retried once, then a clean transient error; never half-recovered; counted as an eval defect | Local-atmosphere composer not yet covered; a retry costs one more composer call on that rare path |
+| **Persistent place→book cache (ADR #30)** | A restart costs no repeat AI runs; a failed check is never remembered as "no books here" | In-place prompt edits wait out the 6h TTL; the gateway still holds a failed check for 1h |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.
