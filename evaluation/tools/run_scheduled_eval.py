@@ -32,6 +32,7 @@ from agents.orchestrator import (
 from agents.prompts import load_prompts, CURRENT_PROMPT_VERSION, AgentPrompts
 from agents.composer_truncation import TRUNCATION_EVENT, find_composer_truncation
 from google.adk.models.google_llm import Gemini
+from google.adk.apps import App
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
 from plugins.langfuse_plugin import LangfusePlugin
@@ -928,10 +929,12 @@ async def _run_evaluation_case(
             )
             langfuse_plugin.root_name = discovery_workflow.name
             discovery_runner = Runner(
-                node=discovery_workflow,
-                app_name="storyland",
+                app=App(
+                    name="storyland",
+                    root_agent=discovery_workflow,
+                    plugins=[LoggingPlugin(), langfuse_plugin],
+                ),
                 session_service=session_service,
-                plugins=[LoggingPlugin(), langfuse_plugin],
             )
 
             discovery_prompt = f"""Discover travel locations for "{exact_title}" by {exact_author}.
@@ -1024,10 +1027,12 @@ Find cities, landmarks, and author-related sites, then group them into practical
             composition_workflow = create_book_to_place_composition_workflow(model, prompts=prompts)
             langfuse_plugin.root_name = composition_workflow.name
             composition_runner = Runner(
-                node=composition_workflow,
-                app_name="storyland",
+                app=App(
+                    name="storyland",
+                    root_agent=composition_workflow,
+                    plugins=[LoggingPlugin(), langfuse_plugin],
+                ),
                 session_service=session_service,
-                plugins=[LoggingPlugin(), langfuse_plugin],
             )
 
             # Same prompt path as production (core.prompts.build_composition_prompt)

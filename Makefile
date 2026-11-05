@@ -112,10 +112,10 @@ test-integration:
 	.venv/bin/pytest tests/integration/ -v -m "integration and not real_api"
 
 test-integration-vcr-record:
-	.venv/bin/pytest tests/integration/ -v --vcr-record=all
+	STORYLAND_TEST_LANGFUSE_EXPORT=1 .venv/bin/pytest tests/integration/ -v --vcr-record=all
 
 test-integration-live:
-	.venv/bin/pytest tests/integration/ -v -m "integration and real_api"
+	STORYLAND_TEST_LANGFUSE_EXPORT=1 .venv/bin/pytest tests/integration/ -v -m "integration and real_api"
 
 test-all:
 	.venv/bin/pytest tests/ -v

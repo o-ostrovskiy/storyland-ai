@@ -9,7 +9,7 @@ Usage (Python SDK — direct import from backend):
     from core import WorkflowExecutor, ExecutorConfig
     from core.events import MetadataReady, RegionsReady, ItineraryReady
 
-    config = ExecutorConfig(model_name="gemini-2.0-flash", google_api_key="...")
+    config = ExecutorConfig(model_name="gemini-3.1-flash-lite", google_api_key="...")
     executor = WorkflowExecutor(config)
 
     async for event in executor.discover(book_title="1984"):
@@ -40,6 +40,7 @@ from core.retry import build_retry_options
 from google.adk.events import Event
 from google.adk.events.event_actions import EventActions
 from google.adk.models.google_llm import Gemini
+from google.adk.apps import App
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
 
@@ -462,10 +463,8 @@ class WorkflowExecutor:
             langfuse_plugin.root_name = getattr(workflow, "name", None)
             plugins.append(langfuse_plugin)
         return Runner(
-            node=workflow,
-            app_name=APP_NAME,
+            app=App(name=APP_NAME, root_agent=workflow, plugins=plugins),
             session_service=self._session_service,
-            plugins=plugins,
         )
 
     async def _emit_cached_discovery(

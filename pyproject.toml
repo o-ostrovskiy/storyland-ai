@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 license = {text = "MIT"}
 
 dependencies = [
-    "google-adk[db]>=2.4.0,<3",  # tested 2.x line; <3 prevents a non-reproducible jump to a future major. "[db]" restores DatabaseSessionService deps (sqlalchemy is no longer a core dep on 2.x); "[eval]" dropped — nothing imports google.adk.evaluation.
+    "google-adk[db]>=2.12.0,<2.13",  # tested 2.x line. <2.13 HOLD (storyland-ai-private#60): 2.13 drops the call_llm span that Ops Watch's langfuse_health.py reads — lift once that script reads the OTel GenAI v2 names. "[db]" restores DatabaseSessionService deps (sqlalchemy is no longer a core dep on 2.x); "[eval]" dropped — nothing imports google.adk.evaluation.
     "greenlet>=3.0",  # required by sqlalchemy's async engine (DatabaseSessionService); not pulled in transitively on 2.x
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
@@ -30,7 +30,10 @@ dependencies = [
     "sse-starlette>=2.0.0",
     "diskcache>=5.6.0",  # persistent SQLite-backed Discovery result cache (survives restart/redeploy)
     "sentry-sdk>=2.35.0,<3",  # error tracking; init is env-gated (SENTRY_DSN) in api/sentry.py
+    "authlib>=1.9.1",  # transitive via google-adk (allows >=1.6.6,<2); floor lifts the lock off 1.7.2 (CVE-2026-96760 JWS verification bypass + 6 more, all fixed by 1.9.1). Drop this pin when google-adk floors it itself.
     "sqlparse>=0.6.0",  # transitive via google-cloud-spanner (google-adk[db]), which allows >=0.4.4; floor lifts the lock off 0.5.5 (PYSEC-2026-3696/3697/3698/3699, all fixed in 0.6.0). Drop this pin when spanner floors it itself.
+    "joserfc>=1.7.6",  # transitive via authlib (1.9.1 allows >=1.6.8); floor lifts the lock off 1.7.3 (CVE-2026-119283, fixed in 1.7.5; CVE-2026-119284, fixed in 1.7.6). Drop this pin when authlib floors it itself.
+    "pyasn1>=0.6.5",  # transitive via pyasn1-modules (google-auth); floor lifts the lock off 0.6.4 (CVE-2026-119194/119195/119196/119197, all fixed in 0.6.5). Drop this pin when pyasn1-modules floors it itself.
 ]
 
 [project.optional-dependencies]

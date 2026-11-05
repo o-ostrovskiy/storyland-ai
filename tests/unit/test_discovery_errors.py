@@ -17,6 +17,7 @@ import pytest
 
 from google.adk.events import Event
 from google.adk.events.event_actions import EventActions
+from google.adk.workflow import Workflow
 
 from core.discovery_errors import (
     DiscoveryComposeError,
@@ -150,7 +151,7 @@ def _make_executor(monkeypatch, raise_exc):
     from core.executor import WorkflowExecutor
     from services.session_service import create_session_service
 
-    monkeypatch.setattr(ex, "create_book_to_place_discovery_workflow", lambda *a, **k: object())
+    monkeypatch.setattr(ex, "create_book_to_place_discovery_workflow", lambda *a, **k: Workflow(name="stub_workflow"))
 
     class _RaisingRunner:
         def __init__(self, *args, **kwargs):

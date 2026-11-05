@@ -6,7 +6,15 @@ Unit tests exercise the API directly without going through the gateway,
 so no X-Internal-Secret or X-User-ID headers are present.
 """
 
+import os
+
 import pytest
+
+if os.environ.get("STORYLAND_TEST_LANGFUSE_EXPORT") == "1":
+    raise pytest.UsageError(
+        "STORYLAND_TEST_LANGFUSE_EXPORT=1 would send unit test spans to Langfuse. "
+        "It is for tests/integration only; run that directory on its own."
+    )
 
 
 @pytest.fixture(autouse=True)

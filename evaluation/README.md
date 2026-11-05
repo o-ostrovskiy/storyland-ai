@@ -345,7 +345,7 @@ Production traces carry the prompt identity too: `LangfusePlugin` sets the trace
 
 ### Current Gemini Pricing
 
-Pricing is model-aware (as of Jul 2026, standard non-batch rates):
+Pricing is model-aware (standard non-batch text rates; 3.1 and 2.5 rows re-read from the pricing page 2026-10-22):
 
 | Model | Input / 1M | Output / 1M |
 |---|---|---|
@@ -356,7 +356,7 @@ Pricing is model-aware (as of Jul 2026, standard non-batch rates):
 | gemini-1.5-flash | $0.075 | $0.30 |
 | gemini-1.5-pro | $1.25 | $5.00 |
 
-Matching is by substring with longest-key-first (so a `-preview` alias bills at its base model's rates). Unknown models fall back to gemini-2.5-flash rates. Source: [Google AI Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing).
+Matching is by substring with longest-key-first (so a `-preview` alias bills at its base model's rates). An unknown model is **unpriced**, not given another model's rate: its generation carries no `cost_details`, metadata says `model_pricing: null, cost_unknown: true`, a `langfuse_model_unpriced` warning logs on every call, and `get_session_stats()` returns `cost_unknown: true` (so `cost_usd` is then a lower bound). `tests/unit/test_langfuse_pricing.py` fails CI when a model the service can be configured with has no row. Source: [Google AI Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing).
 
 ### Enabling the Plugin
 
@@ -371,9 +371,14 @@ langfuse_plugin = LangfusePlugin(
     host=config.langfuse_host,
 )
 
+# Plugins ride on the App (ADK 2.12+: Runner(plugins=...) is deprecated)
 runner = Runner(
-    agent=my_agent,
-    plugins=[LoggingPlugin(), langfuse_plugin],
+    app=App(
+        name="storyland",
+        root_agent=my_workflow,
+        plugins=[LoggingPlugin(), langfuse_plugin],
+    ),
+    session_service=session_service,
 )
 ```
 
@@ -382,7 +387,7 @@ runner = Runner(
 ```python
 stats = langfuse_plugin.get_session_stats()
 print(f"Total tokens: {stats['total_tokens']}")
-print(f"Cost: ${stats['cost_usd']:.6f}")
+print(f"Cost: ${stats['cost_usd']:.6f}")  # lower bound if stats['cost_unknown']
 
 await langfuse_plugin.flush()
 ```
@@ -440,9 +445,12 @@ eval_run_YYYYMMDD_v2  (dataset run root — from start_as_current_observation)
 
 ### Disabling the Plugin
 
-**Option 1:** Omit from Runner plugins:
+**Option 1:** Omit it from the App's plugins:
 ```python
-runner = Runner(agent=my_agent, plugins=[LoggingPlugin()])
+runner = Runner(
+    app=App(name="storyland", root_agent=my_workflow, plugins=[LoggingPlugin()]),
+    session_service=session_service,
+)
 ```
 
 **Option 2:** Remove credentials from `.env`.
@@ -508,7 +516,7 @@ make eval-setup
 - Verify installation: `pip list | grep langfuse`
 
 ### Zero cost displayed
-Token usage is tracked, but cost may show $0.000000 for very small usage. Verify pricing constants in `plugins/langfuse_plugin.py`.
+Token usage is tracked, but cost may show $0.000000 for very small usage. If the generation has no cost at all and metadata says `cost_unknown: true`, the model has no row in `_GEMINI_PRICING` (`plugins/langfuse_plugin.py`): add one from the pricing page.
 
 ## Resources
 

@@ -85,9 +85,10 @@ class DiskTTLCache:
         """Return the cached value for ``key`` or ``None`` on miss/expiry."""
         return await asyncio.to_thread(self._cache.get, key)
 
-    async def set(self, key: str, value: Any) -> None:
-        """Store ``value`` under ``key`` with the configured TTL."""
-        await asyncio.to_thread(self._cache.set, key, value, self._ttl)
+    async def set(self, key: str, value: Any, ttl_seconds: Optional[int] = None) -> None:
+        """Store ``value`` under ``key``, for ``ttl_seconds`` or the configured TTL."""
+        ttl = self._ttl if ttl_seconds is None else ttl_seconds
+        await asyncio.to_thread(self._cache.set, key, value, ttl)
 
     async def clear(self) -> None:
         """Drop all entries (used by tests and the rollback path)."""

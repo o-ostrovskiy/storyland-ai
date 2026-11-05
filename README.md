@@ -455,6 +455,8 @@ make test-all              # Both
 make test-cov              # With coverage
 ```
 
+Tests never reach Langfuse by default, even with real keys in `.env`: `tests/conftest.py` blanks them and turns tracing off. `make test-integration-live` and `make test-integration-vcr-record` opt back in with `STORYLAND_TEST_LANGFUSE_EXPORT=1`; a run that includes `tests/unit/` refuses that flag.
+
 The unit suite (`tests/unit/`) by area — per-module counts rot with every PR, so they are not tracked here:
 
 | Area | Modules |
@@ -466,7 +468,7 @@ The unit suite (`tests/unit/`) by area — per-module counts rot with every PR, 
 | Place features | `test_place_key.py`, `test_place_to_book.py`, `test_place_to_book_eval.py` |
 | Quality & guardrails | `test_llm_scorer.py`, `test_tone_guardrail.py`, `test_recommendation_floor.py`, `test_judge_calibration.py`, `test_spot_check.py` |
 | Eval harnesses | `test_local_atmosphere_eval.py`, `test_expansion_eval.py`, `test_eval_dataset_routing.py` |
-| Observability | `test_sentry.py`, `test_langfuse_plugin_concurrency.py`, `test_langfuse_pricing.py`, `test_search_grounding.py`, `test_langfuse_search_grounding.py`, `test_discovery_grounding_audit.py`, `test_unverified_discovery_downgrade.py` |
+| Observability | `test_sentry.py`, `test_langfuse_plugin_concurrency.py`, `test_langfuse_export_guard.py`, `test_langfuse_pricing.py`, `test_langfuse_unpriced_model.py`, `test_search_grounding.py`, `test_langfuse_search_grounding.py`, `test_discovery_grounding_audit.py`, `test_unverified_discovery_downgrade.py` |
 | Sessions & ops | `test_services.py`, `test_session_retention.py` |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).
