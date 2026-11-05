@@ -900,7 +900,7 @@ Make "done" mechanical (per team engineering-standards): reproducible dependenci
 - **Hash-locked deps:** `requirements.lock` / `requirements-dev.lock` from `uv pip compile --universal --generate-hashes`; the unit workflow (`codex.yml`) installs `--require-hashes` and fails if `make lock` would change the committed lock. `integration-tests.yml` installs from the same dev lock as of the ADK 2 lift (the previously documented live-resolution gap bit exactly as predicted: a fresh resolve drifted httpx/vcrpy and broke VCR replay with a method-case mismatch the locked env couldn't reproduce).
 - **Coverage ratchet:** `fail_under = 74` in `pyproject.toml` (76% baseline; bare `--cov` honoring `[tool.coverage.run]`). Ratchet, not target — raise, never lower.
 - **Audit gate:** `pip-audit --strict --require-hashes` on the prod lock; ignores are inline with justification + ticket.
-- **ADK pin:** `google-adk[db]>=2.4.0,<3` in `pyproject.toml` + a CI guard asserting the **locked** resolution stays 2.x (prevents a non-reproducible jump to the next major). Historical: this was `google-adk[eval]>=1.33.0,<2` guarded at 1.x until the ADK 2 lift (ADR #23), which moved the pin one major and swapped the extra — `[db]` restores the `DatabaseSessionService` deps that are no longer core on 2.x, and nothing imports `google.adk.evaluation`. The mechanism is unchanged: the guard tracks the tested major, it does not forbid a particular one.
+- **ADK pin:** `google-adk[db]>=2.12.0,<2.13` in `pyproject.toml` (2026-10, storyland-ai-private#60: lifted from `>=2.4.0,<3` on 2.5.0; the `<2.13` hold is because 2.13 switches telemetry to the OTel GenAI v2 schema and drops the `call_llm` span that Ops Watch's `langfuse_health.py` reads — lift it once that script moves, or set `ADK_TELEMETRY_SCHEMA_VERSION_OPT_IN=otel_semconv_1_36`) + a CI guard asserting the **locked** resolution stays 2.x (prevents a non-reproducible jump to the next major). Historical: this was `google-adk[eval]>=1.33.0,<2` guarded at 1.x until the ADK 2 lift (ADR #23), which moved the pin one major and swapped the extra — `[db]` restores the `DatabaseSessionService` deps that are no longer core on 2.x, and nothing imports `google.adk.evaluation`. The mechanism is unchanged: the guard tracks the tested major, it does not forbid a particular one.
 
 ### Rationale
 The agent (and everyone else) is only as autonomous as the definition of "done" is mechanical; a green build must mean tests passed, coverage didn't regress, deps are exactly what was reviewed, and no known-vulnerable package ships.
@@ -1252,6 +1252,25 @@ The trip composer intermittently emitted a `ComposerEnvelope` whose JSON stopped
 ### Trade-offs
 The module lives in `agents/`, not `core/`, because `core/__init__` imports the executor, which imports the composer agent (a cycle). The local-atmosphere composer (`agents/local_atmosphere_agent.py`, same `output_key`) is not covered yet. Defect 2 (bimodal "crater" itineraries) is characterised separately and is not assumed to share this root.
 
+## 30. Place→Book Answers Live on Disk, and "Couldn't Check" Is Never Stored (2026-11-05)
+
+### Context
+
+Place→book results sat in an in-process `TTLCache`, so every deploy or restart wiped them and the same place paid for a fresh AI run. The in-process store also hid two things a persistent one can't: a restart used to wash out answers from an older prompt, and an empty or malformed pipeline answer was cached as "not found" for the full TTL.
+
+### Decision
+
+- The resolver's cache follows `CACHE_BACKEND`. On disk it is its own store at `<CACHE_DIR>/place2book`, on the same volume as Discovery but with its own LRU budget (`build_place_to_book_cache`).
+- Keys are `place2book:v1:<CURRENT_PROMPT_VERSION>:<place>`, so a prompt bump invalidates them.
+- `found` is kept 6h and `not_found` 1h (matching the gateway), through a per-entry `ttl_seconds` on both cache backends.
+- A model error raises before any write. No formatter output, a malformed one, or no researcher text with nothing to show is "couldn't check": the caller gets the same not-found envelope, unwritten.
+- Entries are plain dicts validated on read. An unreadable entry or a failed read is a miss; a failed write still answers.
+
+### Trade-offs
+
+- An in-place edit to a prompt's JSON doesn't change the key (storyland-ai-private#40); the stale window is bounded by the 6h TTL.
+- The gateway can't tell a "couldn't check" from a real `found: false`, so it still remembers that answer for its own 1h. The envelope is unchanged here on purpose.
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -1282,5 +1301,6 @@ The module lives in `agents/`, not `core/`, because `core/__init__` imports the 
 | **Search-grounding receipts + fail-closed discovery (ADR #26)** | A claim the product cannot support is demoted rather than shipped at full confidence; skip rate measurable per researcher; enforcement and the metric give one answer on an unobserved receipt | User-visible downgrade at today's 46% skip rate; a wholesale instrumentation fault demotes everything (loud, by design); one cold-cache window at the `v3` bump |
 | **Union eval reads + `eval_id` case key (ADR #27)** | Read side migrates alone and stays total at every step of the Nov 16 cutoff; a run-scoped id can never silently disable the per-case cap; an incomplete read refuses rather than answering short | Calibration depends on a metadata key, not an API field; a missing `eval_id` or a truncated run stops the build rather than degrading it |
 | **Composer truncation at the model boundary (ADR #29)** | A cut-off envelope is retried once, then a clean transient error; never half-recovered; counted as an eval defect | Local-atmosphere composer not yet covered; a retry costs one more composer call on that rare path |
+| **Persistent place→book cache (ADR #30)** | A restart costs no repeat AI runs; a failed check is never remembered as "no books here" | In-place prompt edits wait out the 6h TTL; the gateway still holds a failed check for 1h |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.

@@ -3,8 +3,14 @@ Place→book reverse-routing capability (AI layer).
 
 Resolves a destination to grounded, literal/vibe-labelled book candidates by
 running the place_to_book pipeline, then applying an output-side grounding
-filter and label invariants. Results are cached in-process under the key
-``place2book:v1:<normalized place>``, mirroring the discovery result cache.
+filter and label invariants. Results are cached under the key
+``place2book:v1:<prompt version>:<normalized place>``, on disk in the deployed
+app (see ``build_place_to_book_cache``), so they survive a restart.
+
+What gets cached (engineering-standards §2): a ``found`` answer for 6h, a
+``not_found`` answer for 1h, and never a "couldn't check". A model error raises
+before any write; an empty or malformed pipeline answer returns the not-found
+envelope unwritten, because it says nothing about the place.
 
 HTTP surface: exposed as the internal ``POST /place-to-book`` endpoint
 (``api/routes.py``, gateway secret enforced). The storyland-services gateway
@@ -26,20 +32,23 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
+from google.adk.apps import App
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
 from google.adk.tools import google_search
 from google.genai import types
 
 from agents.orchestrator import create_place_to_book_workflow
+from agents.prompts import CURRENT_PROMPT_VERSION
 from common.logging import get_logger
 from models.place_to_book import PlaceBookCandidate, PlaceToBookCandidates, PlaceToBookResult
 from plugins.langfuse_plugin import LangfusePlugin
 from services.session_service import create_session_service
 
 from .cache import TTLCache
+from .disk_cache import DiskTTLCache
 from .extraction import grounding_token_set, is_title_grounded
 from .run_harness import RunCapture, collect_token_usage, pump_events
 from .session_state import SessionStateAccessor
@@ -50,12 +59,16 @@ logger = get_logger("storyland.core.place_to_book")
 APP_NAME = "storyland"
 
 # Cache key version; bump when the candidate shape or grounding rules change.
+# The key also carries CURRENT_PROMPT_VERSION: a persistent store has no restart
+# to wash out answers an older prompt gave.
 _CACHE_KEY_PREFIX = "place2book:v1:"
 
 # Cache sizing: place→book lookups are cheap to keep and repeat often for the
 # seeded/landing destinations. 6h TTL mirrors the BE place→book hit TTL.
-_DEFAULT_TTL_SECONDS = 6 * 60 * 60
-_DEFAULT_MAX_ENTRIES = 500
+PLACE_TO_BOOK_TTL_SECONDS = 6 * 60 * 60
+# Mirrors the BE not-found TTL: a miss is worth re-checking sooner.
+_NOT_FOUND_TTL_SECONDS = 60 * 60
+PLACE_TO_BOOK_MAX_ENTRIES = 500
 
 _COUNTRY_SUFFIXES = (
     "usa",
@@ -98,7 +111,7 @@ def normalize_place(place: object) -> str:
 
 def cache_key(place: str) -> str:
     """Return the versioned cache key for a (raw) place string."""
-    return f"{_CACHE_KEY_PREFIX}{normalize_place(place)}"
+    return f"{_CACHE_KEY_PREFIX}{CURRENT_PROMPT_VERSION}:{normalize_place(place)}"
 
 
 # The grounding-match primitive (grounding_token_set / is_title_grounded) is
@@ -200,9 +213,9 @@ class PlaceToBookResolver:
         self,
         model,
         session_service=None,
-        cache: Optional[TTLCache] = None,
-        ttl_seconds: int = _DEFAULT_TTL_SECONDS,
-        max_entries: int = _DEFAULT_MAX_ENTRIES,
+        cache: Optional[TTLCache | DiskTTLCache] = None,
+        ttl_seconds: int = PLACE_TO_BOOK_TTL_SECONDS,
+        max_entries: int = PLACE_TO_BOOK_MAX_ENTRIES,
         langfuse_secret_key: Optional[str] = None,
         langfuse_public_key: Optional[str] = None,
         langfuse_host: Optional[str] = None,
@@ -211,7 +224,8 @@ class PlaceToBookResolver:
         self._session_service = session_service or create_session_service(
             use_database=False
         )
-        self._cache = cache or TTLCache(
+        # `is None`, not `or`: an empty cache has len 0 and is falsy.
+        self._cache = cache if cache is not None else TTLCache(
             ttl_seconds=ttl_seconds, max_entries=max_entries
         )
         # Optional: direct construction (tests / EVAL / a future BE call, per
@@ -222,6 +236,10 @@ class PlaceToBookResolver:
         self._langfuse_secret_key = langfuse_secret_key
         self._langfuse_public_key = langfuse_public_key
         self._langfuse_host = langfuse_host
+
+    def close(self) -> None:
+        """Release the cache's handle (the disk backend holds a SQLite one)."""
+        self._cache.close()
 
     def _create_langfuse_plugin(self) -> LangfusePlugin:
         """Fresh observer per pipeline run. Mirrors
@@ -257,10 +275,12 @@ class PlaceToBookResolver:
         # excluding every /place-to-book cache miss from the numbers.
         langfuse_plugin.root_name = getattr(workflow, "name", None)
         return Runner(
-            node=workflow,
-            app_name=APP_NAME,
+            app=App(
+                name=APP_NAME,
+                root_agent=workflow,
+                plugins=[LoggingPlugin(), langfuse_plugin],
+            ),
             session_service=self._session_service,
-            plugins=[LoggingPlugin(), langfuse_plugin],
         )
 
     async def resolve(self, place: str) -> PlaceToBookResult:
@@ -269,15 +289,20 @@ class PlaceToBookResolver:
         if not normalized:
             return self._not_found(place, normalized)
 
-        key = f"{_CACHE_KEY_PREFIX}{normalized}"
-        cached = await self._cache.get(key)
+        key = cache_key(place)
+        cached = await self._read_cache(key, normalized)
         if cached is not None:
-            logger.info("place_to_book_cache_hit", place=normalized)
+            backend = "disk" if isinstance(self._cache, DiskTTLCache) else "memory"
+            logger.info(f"place2book cache hit ({backend})", place=normalized)
             return cached
 
         raw_candidates, researcher_text = await self._run_pipeline(place)
         grounded = filter_grounded_candidates(raw_candidates, researcher_text)
         cleaned = enforce_label_invariants(grounded)
+
+        if not cleaned and (raw_candidates is None or not researcher_text.strip()):
+            logger.warning("place_to_book_couldnt_check", place=normalized)
+            return self._not_found(place, normalized)
 
         if cleaned:
             result = PlaceToBookResult(
@@ -290,7 +315,8 @@ class PlaceToBookResolver:
         else:
             result = self._not_found(place, normalized)
 
-        await self._cache.set(key, result)
+        ttl = PLACE_TO_BOOK_TTL_SECONDS if result.found else _NOT_FOUND_TTL_SECONDS
+        await self._write_cache(key, result, ttl)
         logger.info(
             "place_to_book_resolved",
             place=normalized,
@@ -298,6 +324,24 @@ class PlaceToBookResolver:
             count=len(result.candidates),
         )
         return result
+
+    async def _read_cache(self, key: str, normalized: str) -> Optional[PlaceToBookResult]:
+        """The cached answer, or None. An entry that can't be read is a miss:
+        the store outlives the code that wrote it."""
+        try:
+            cached: Any = await self._cache.get(key)
+            return None if cached is None else PlaceToBookResult.model_validate(cached)
+        except Exception as exc:  # noqa: BLE001 - a bad entry must never fail the request
+            logger.warning("place_to_book_cache_unreadable", place=normalized, error=str(exc))
+            return None
+
+    async def _write_cache(self, key: str, result: PlaceToBookResult, ttl_seconds: int) -> None:
+        """Store plain data, not a pickled model, so a model change can't break
+        reading it back. A failed write only costs the next caller a fresh run."""
+        try:
+            await self._cache.set(key, result.model_dump(), ttl_seconds=ttl_seconds)
+        except Exception as exc:  # noqa: BLE001 - the reader still gets this answer
+            logger.warning("place_to_book_cache_write_failed", place=result.query, error=str(exc))
 
     def _not_found(self, place: str, normalized: str) -> PlaceToBookResult:
         return PlaceToBookResult(
@@ -308,8 +352,9 @@ class PlaceToBookResolver:
             candidates=[],
         )
 
-    async def _run_pipeline(self, place: str) -> Tuple[List[dict], str]:
-        """Run the pipeline once; return (candidate dicts, researcher text)."""
+    async def _run_pipeline(self, place: str) -> Tuple[Optional[List[dict]], str]:
+        """Run the pipeline once; return (candidate dicts, researcher text).
+        Candidates are None when the formatter's answer is missing or malformed."""
         job_id = str(uuid.uuid4())
         user_id = "place2book"
 
@@ -352,9 +397,9 @@ class PlaceToBookResolver:
         refreshed = await self._session_service.get_session(
             app_name=APP_NAME, user_id=user_id, session_id=job_id
         )
-        candidates: List[dict] = []
+        candidates: Optional[List[dict]] = None
         if refreshed is not None:
             run_state = SessionStateAccessor(refreshed.state)
-            candidates = extract_place_to_book_from_state(run_state) or []
+            candidates = extract_place_to_book_from_state(run_state)
 
         return candidates, capture.text_for("place_to_book_researcher")

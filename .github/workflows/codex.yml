@@ -41,7 +41,7 @@ jobs:
       - name: Assert google-adk pinned to the tested 2.x line
         # Now validates the LOCKED resolution (strictly stronger than a live resolve).
         run: |
-          python -c "import importlib.metadata as m, sys; v = m.version('google-adk'); print('resolved google-adk', v); sys.exit(0 if v.split('.')[0] == '2' else 'ERROR: google-adk resolved to %s; expected the pinned 2.x major (>=2.4.0,<3)' % v)"
+          python -c "import importlib.metadata as m, sys; v = m.version('google-adk'); print('resolved google-adk', v); sys.exit(0 if v.split('.')[0] == '2' else 'ERROR: google-adk resolved to %s; expected the pinned 2.x major (>=2.12.0,<2.13)' % v)"
 
       - name: Verify lockfiles are up to date
         # A pyproject dependency/cap edit without a regenerated lock is silent drift.
