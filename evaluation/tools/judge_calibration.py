@@ -56,7 +56,7 @@ CALIBRATION_DIR = Path("evaluation/calibration")
 DEFAULT_MANIFEST = CALIBRATION_DIR / "queue_manifest_2026-07.json"
 DEFAULT_QUEUE_NAME = "judge-calibration-2026-07"
 DEFAULT_DATASETS = ["storyland_eval", "books_v1"]
-DEFAULT_RUN_PREFIX = "eval_run_202607"
+DEFAULT_RUN_PREFIX = "eval_run_"
 
 
 # Pure selection / analysis logic (unit-tested without a Langfuse client)
@@ -187,29 +187,16 @@ def make_langfuse_client():
     return Langfuse(secret_key=secret_key, public_key=public_key, host=host), host
 
 
-# --- the Experiments leg of the union read (MYS-909 PR1) ---------------------
+# --- the Experiments read ------------------------------------------------------
 #
-# The legacy `datasets.get_runs`/`get_run` path below is untouched. Every run is
-# either legacy-written or experiment-written and never both, so reading BOTH is
-# total at every moment of the migration -- before any write moves, during, and
-# after -- which is what lets the read side land ahead of the writes.
+# Experiments are the only run source: `datasets.get_runs`/`get_run` are retired
+# on 2026-11-16 and runs from before the writes moved (2026-10-11) cannot be read
+# through this API.
 #
 # ⚠️ `from_start_time` is REQUIRED by `experiments.list` and `list_items`
-# (no default, verified against the pinned langfuse 4.14.0, not mocked).
-#
-# 🔴 The card asks that it be derived from "the same window
-# collect_candidates already applies to the legacy path". THERE IS NO SUCH
-# WINDOW: the legacy path selects by COUNT -- the newest `max_runs_per_dataset`
-# matching runs -- and applies no time floor at all. A floor derived from the
-# oldest kept legacy run is only safe while that leg is SATURATED; the moment it
-# keeps fewer runs than the cap (a new dataset, or any point after the writes
-# move) a genuinely newer experiment run can sit below it and be dropped
-# silently. That is trap 2's own failure mode arriving through the derivation
-# instead of through a constant.
-#
-# So the floor is deliberately WIDE and is not the selector: both endpoints
-# return time-descending, and the same newest-N count is applied after the
-# union. A floor that is never later than anything cannot filter a candidate.
+# (no default). The floor is deliberately WIDE and is not the selector: the
+# newest-N count in `collect_candidates` is. A floor that is never later than
+# anything cannot filter a candidate.
 _EXPERIMENTS_FLOOR = datetime(2020, 1, 1, tzinfo=timezone.utc)
 
 # All three metadata groups, because which one carries the root span's own
@@ -284,8 +271,8 @@ def _experiment_fault_is_carved_out(exc: BaseException) -> bool:
     DO NOT COMPOSE -- the counter re-decides what the classifier already
     decided, without the evidence the classifier used.* The fix is not to
     delete the count: the world it was kept for is real (an endpoint genuinely
-    5xx-ing on every request, with the legacy leg empty by construction after
-    2026-11-16, sending a thin pack out green). The fix is to stop the two
+    5xx-ing on every request, with experiments the only run source, sending a
+    thin pack out green). The fix is to stop the two
     rules being independent. This predicate is the classifier's own output, and
     the count now ranges over what the classifier did NOT carve out -- one
     classification feeding one count over its own result, rather than two
@@ -361,20 +348,11 @@ class CalibrationTruncatedError(CalibrationDataError):
     a well-formed but INCOMPLETE answer -- see `collect_experiment_candidates`.
     """
 
-# Leg-rank tie-break for the cross-leg recency merge in collect_candidates:
-# at equal timestamps the legacy leg sorts first, matching the trace-identity
-# dedupe's own contract that a trace described by both APIs keeps its legacy
-# description.
-_LEG_RANK_EXPERIMENT = 0
-_LEG_RANK_LEGACY = 1
-
-
 def _normalize_ts(value: Any) -> Any:
     """UTC-normalize a naive datetime; pass everything else through unchanged.
 
-    Legacy `run.created_at` and experiment `run.start_time` are both
-    timezone-aware `datetime`s against the pinned langfuse 4.14.0 client, but
-    a naive/aware mix raises `TypeError` at comparison time -- so only a
+    Experiment `run.start_time` is a timezone-aware `datetime` against the
+    pinned langfuse client, but a naive/aware mix raises `TypeError` at comparison time -- so only a
     naive `datetime` gets a UTC tzinfo attached here, explicitly, rather than
     papered over with a `try`. An already-aware datetime, or any non-datetime
     sort key a test double supplies, is returned unchanged.
@@ -389,7 +367,7 @@ def resolve_dataset_id(langfuse: Any, dataset_name: str) -> str:
 
     Raises on a miss rather than returning None. A name that resolved to
     nothing would make "this dataset has no experiment runs" and "I looked up
-    the wrong dataset" the same answer, and the union would serve the second
+    the wrong dataset" the same answer, and the pack would serve the second
     one as a slightly shorter green.
     """
     dataset = langfuse.api.datasets.get(dataset_name)
@@ -501,8 +479,7 @@ def collect_experiment_candidates(
 ) -> List[Any]:
     """(start_time, candidates) pairs for `dataset_name`'s experiment-written
     runs, newest first. The timestamp travels with each run so
-    `collect_candidates` can merge it against the legacy leg by actual
-    recency rather than by which leg it came from."""
+    `collect_candidates` can order runs by actual recency."""
     dataset_id = resolve_dataset_id(langfuse, dataset_name)
     page = langfuse.api.experiments.list(
         from_start_time=_EXPERIMENTS_FLOOR, dataset_id=dataset_id, limit=50
@@ -517,11 +494,8 @@ def collect_experiment_candidates(
     # request; so is an expired key, a revoked scope, or the endpoint moving.
     # None of those is transport and none is run-scoped, but each arrives as a
     # plain exception once per iteration -- so every run was skipped and named
-    # on stdout, `run_lists` came back `[]`, and `collect_candidates` built the
-    # pack from the legacy leg and reported success. The ADR's own argument
-    # against the OLD behaviour ("once the legacy endpoint retires that dataset
-    # would contribute nothing at all") is reached by the NEW behaviour whenever
-    # the fault is systematic.
+    # on stdout, `run_lists` came back `[]`, and the dataset contributed nothing
+    # while the build reported success.
     #
     # ➡️ *The scope of a degrade is a claim about the fault's SUBJECT, and the
     # subject is not readable from the type.*
@@ -550,11 +524,8 @@ def collect_experiment_candidates(
         # yielded a hundred items -- propagated out of this function, and
         # `collect_candidates`'s `except Exception` arm replaced the ENTIRE
         # experiments leg with `[]`. So one flaky read discarded every run that
-        # had been fetched successfully; once the legacy endpoint retires, that
-        # dataset contributes nothing at all. The legacy per-run loop in
-        # `collect_candidates` has always skipped the individual run and kept
-        # the rest, and the rule did not travel to this second site when the
-        # experiments leg was added.
+        # had been fetched successfully, and the dataset contributed nothing
+        # at all. Skip the individual run and keep the rest.
         #
         # ➡️ `CalibrationDataError` is re-raised UNCHANGED and that is the whole
         # care in this arm: it is the fail-closed signal (a dataset that does
@@ -614,9 +585,8 @@ def collect_experiment_candidates(
     #
     # 🔴 r5 (@el) -- SECONDARY, and gated at `attempted >= 2`. It is kept for the
     # one world classification misses: an endpoint that is genuinely down
-    # answers 5xx on every request, every run degrades correctly, and post
-    # 2026-11-16 the legacy leg is empty by construction -- so the pack goes out
-    # thin and green. At `attempted >= 2` all-skipped is weak evidence, and weak
+    # answers 5xx on every request, every run degrades correctly, and no other
+    # source exists -- so the pack goes out thin and green. At `attempted >= 2` all-skipped is weak evidence, and weak
     # evidence should still push a calibration pack in the fail-closed
     # direction. At `attempted == 1` it is not evidence and must not fire: that
     # is the n=1 false positive this round removes, and gating rather than
@@ -656,58 +626,15 @@ def collect_candidates(
     per_dataset_runs: Dict[str, List[List[Dict[str, Any]]]] = {}
 
     for dataset_name in datasets:
-        legacy_runs: List[Any] = []
-        matching: List[Any] = []
-        try:
-            runs_page = langfuse.api.datasets.get_runs(dataset_name, limit=50)
-        except Exception as e:
-            logger.warning("dataset_runs_fetch_failed", dataset=dataset_name, error=str(e))
-            print(f"  ! Legacy runs unavailable for {dataset_name}: {e}")
-        else:
-            matching = [r for r in runs_page.data if r.name.startswith(run_prefix)]
-            matching.sort(key=lambda r: r.created_at, reverse=True)
-            matching = matching[:max_runs_per_dataset]
-
-        # 🔴 A legacy-leg failure above no longer `continue`s past the
-        # experiments leg below it (MYS-914 Codex P1, discussion_r3825860886):
-        # once `datasets.get_runs` is retired every dataset would hit this
-        # branch, and skipping the whole loop body here would have zeroed the
-        # union out at precisely the moment it exists to carry the load.
-        for run in matching:
-            try:
-                run_details = langfuse.api.datasets.get_run(dataset_name, run.name)
-            except Exception as e:
-                logger.warning(
-                    "dataset_run_fetch_failed",
-                    dataset=dataset_name, run_name=run.name, error=str(e),
-                )
-                print(f"  ! Skipping run {run.name}: {e}")
-                continue
-            candidates = [
-                {
-                    "dataset": dataset_name,
-                    "item_id": item.dataset_item_id,
-                    "run_name": run.name,
-                    "trace_id": item.trace_id,
-                }
-                for item in run_details.dataset_run_items
-                if item.trace_id
-            ]
-            legacy_runs.append((run.created_at, candidates))
-
         try:
             experiment_runs = collect_experiment_candidates(
                 langfuse, dataset_name, run_prefix, max_runs_per_dataset
             )
         except CalibrationDataError:
-            # 🔴 MYS-914 Codex P1 (discussion_r3827349867): this is the
-            # fail-closed signal from `resolve_dataset_id` and
-            # `experiment_item_case_id` -- a malformed write or a dataset
-            # name that does not resolve. Swallowing it here restores exactly
-            # the silent-degrade behaviour those raises exist to prevent:
-            # once the legacy leg retires, `legacy_runs` is empty by
-            # construction, so one malformed item would collapse the whole
-            # union to `[]` behind a warning log instead of surfacing.
+            # 🔴 The fail-closed signal from `resolve_dataset_id` and
+            # `experiment_item_case_id` -- a malformed write or a dataset name
+            # that does not resolve. Swallowing it here would collapse the
+            # dataset to `[]` behind a warning log instead of surfacing.
             raise
         except Exception as e:
             # 🔴 @el r6 FL-1 (Codex `r3836481943`). THE CLASSIFIER BELONGS AT THE
@@ -726,9 +653,9 @@ def collect_candidates(
             # arrive at the FIRST call, which is `experiments.list`, and on an
             # expired key at `datasets.get` before even that. So the primary
             # rule was absent from precisely the path its motivating examples
-            # take and present only on the path they never reach. Post
-            # 2026-11-16, with the legacy leg empty by construction, that is a
-            # green build and an empty pack -- this card's own failure, one
+            # take and present only on the path they never reach.
+            # With experiments the only source, that is a green build and an
+            # empty pack -- this card's own failure, one
             # call site above the fix for it.
             #
             # ➡️ *A rule installed at the site where the fault was OBSERVED does
@@ -758,52 +685,18 @@ def collect_candidates(
             print(f"  ! Skipping {dataset_name} experiment runs: {e}")
             experiment_runs = []
 
-        # 🔴 Merge BOTH legs by actual recency, then cap ONCE (MYS-914 Codex
-        # P1, discussion_r3825860891) -- capping each leg to
-        # max_runs_per_dataset and concatenating gave an effective 2x cap,
-        # ordered by PROVENANCE rather than time: up to max_runs_per_dataset
-        # older legacy runs sat ahead of every newer experiment run. The
-        # per-leg pre-cap above stays: it bounds API work, and each leg
-        # returns time-descending. ⚠️ That pre-cap was an EXACT superset while
-        # the cap counted runs; it is not any more (@el r2, nit 1). Since a
-        # run contributing no fresh trace now consumes no slot, filling N
-        # slots can need to reach further back than N runs per leg, so the
-        # pack can UNDER-fill. It still cannot mis-order: everything kept is
-        # newer than everything dropped. Bounded and one-directional, but no
-        # longer unconditional -- only the ORDER and the CAP move after the merge.
-        # Ties keep the legacy description via `_LEG_RANK_LEGACY`, matching
-        # the trace-identity dedupe below.
-        merged = (
-            [(_normalize_ts(ts), _LEG_RANK_LEGACY, cands) for ts, cands in legacy_runs]
-            + [(_normalize_ts(ts), _LEG_RANK_EXPERIMENT, cands) for ts, cands in experiment_runs]
+        # Newest first, capped once. De-duplicate by TRACE while walking, not
+        # after capping: a run that contributes no fresh trace consumes no
+        # slot, so an overlapping trace cannot under-fill the pack.
+        merged = sorted(
+            ((_normalize_ts(ts), cands) for ts, cands in experiment_runs),
+            key=lambda item: item[0],
+            reverse=True,
         )
-        merged.sort(key=lambda item: (item[0], item[1]), reverse=True)
 
-        # 🔴 De-duplicate by TRACE, and by trace ONLY, WHILE walking the
-        # recency-sorted merge -- not after capping it (MYS-914 Codex P2,
-        # discussion_r3827349872). The two APIs partition RUNS, not TRACES:
-        # during the cutover the same trace can be described by both legs, so
-        # capping on run-count first and dedeuping after let one overlapping
-        # trace consume a cap slot and then empty it, under-filling the pack
-        # and losing run diversity silently. A run that contributes NO
-        # surviving trace consumes no slot; only runs with at least one fresh
-        # trace count toward `max_runs_per_dataset`.
-        #
-        # The card asks for run identity rather than run name; the two APIs
-        # have disjoint id spaces (that is the same partition that makes this
-        # read total), so a name is the only cross-API handle a RUN has --
-        # and it is the wrong one. The real identity lives a level down: a
-        # generation is ONE trace whichever endpoint described it.
-        #
-        # A run-name net was written here first and then removed, because a
-        # mutation that deleted it left every row green: the trace net already
-        # subsumes it. Worse than redundant -- it drops a whole experiment run
-        # on a name collision, so two genuinely different runs that happen to
-        # share a name would lose one of them silently, which is the failure
-        # this de-dup exists to prevent, inverted.
         seen: set = set()
         kept_runs: List[List[Dict[str, Any]]] = []
-        for _ts, _leg, cands in merged:
+        for _ts, cands in merged:
             kept = [c for c in cands if c["trace_id"] not in seen]
             if not kept:
                 continue
@@ -812,13 +705,9 @@ def collect_candidates(
             if len(kept_runs) >= max_runs_per_dataset:
                 break
         per_dataset_runs[dataset_name] = kept_runs
-        # ⚠️ Post-cap, post-dedupe (@el r2, nit 2). This used to print
-        # `len(legacy_runs)` and `len(experiment_runs)` -- both PRE-cap and
-        # PRE-dedupe -- so on a PR about not claiming more than you observed,
-        # the operator's one line named runs the code had just discarded.
         print(
             f"  {dataset_name}: {len(kept_runs)} runs kept "
-            f"(from {len(legacy_runs)} legacy + {len(experiment_runs)} experiment)"
+            f"(from {len(experiment_runs)} experiment runs)"
         )
 
     return interleave_by_run(per_dataset_runs)
@@ -885,12 +774,8 @@ def hydrate_candidate(
     under burst reads, and a dropped candidate here silently shrinks the
     labeling pack.
 
-    This is the read-side slice only. The four eval tools' WRITES migrated in
-    MYS-951 (they now mark their root span as an experiment item; see
-    ``evaluation/tools/experiment_run.py``), so what is left deprecated in this
-    tree is the ``datasets.get_runs``/``get_run`` legacy READ leg in
-    ``collect_candidates`` — kept deliberately, because a union over both APIs
-    is what makes the cutoff survivable, and it must go before 2026-11-16.
+    The eval tools' writes migrated in MYS-951 (they mark their root span as
+    an experiment item; see ``evaluation/tools/experiment_run.py``).
     """
     root = None
     scores_page = None

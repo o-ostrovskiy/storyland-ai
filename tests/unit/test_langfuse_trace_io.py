@@ -1,20 +1,13 @@
-"""Unit tests pinning trace-level input/output on LangfusePlugin (MYS-788).
+"""Unit tests pinning the run's overall I/O on the root observation (MYS-788).
 
-Langfuse's session view and trace list render the TRACE's input/output, not
-the root span's. The plugin set both on the root span only, so every
-production trace displayed as "This trace has no input or output" even though
-the span tree underneath was complete -- see the session that surfaced it:
-us.cloud.langfuse.com/project/cml1naeqj01adad07nx6cwg0u/sessions/2492a1a4-26b5-45f0-bcde-afb9a76295fc
-
-Python SDK v4 moved trace attributes to propagate_attributes(), but that
-context manager carries only correlating attributes (user_id/session_id/
-tags/metadata) -- set_trace_io() remains the only way to populate the two
-fields those views actually read, which is why the plugin calls a method the
-SDK marks deprecated.
+Langfuse v4 is observations-first: trace-level input/output is gone and the SDK
+setter for it (`set_trace_io`) is removed in Python SDK v5. The plugin therefore
+writes the user message and the final response to its root observation only.
 
 Same fake-based approach as test_langfuse_plugin_concurrency.py: the plugin
 only ever calls methods on self.client / self._current_trace, so neither a
-real Langfuse client nor live credentials are needed.
+real Langfuse client nor live credentials are needed. `FakeRootSpan` has no
+`set_trace_io`, so a reintroduced call raises and the run loses its output.
 """
 
 from types import SimpleNamespace
@@ -26,19 +19,12 @@ from plugins.langfuse_plugin import LangfusePlugin
 
 
 class FakeRootSpan:
-    """Root observation that records set_trace_io/update/end separately."""
+    """Root observation that records update/end."""
 
     def __init__(self):
-        self.trace_io = []       # set_trace_io kwargs, in call order
-        self.updates = []        # update() kwargs (root-span I/O)
+        self.updates = []        # update() kwargs (root I/O)
         self.ended = False
         self.trace_id = "trace-abc"
-
-    def set_trace_io(self, **kwargs):
-        # Mirror the SDK: None-valued fields are dropped, so a later
-        # output-only call can never clear an earlier input.
-        self.trace_io.append({k: v for k, v in kwargs.items() if v is not None})
-        return self
 
     def start_observation(self, **kwargs):
         return FakeRootSpan()
@@ -53,8 +39,10 @@ class FakeRootSpan:
 class FakeClient:
     def __init__(self, root):
         self._root = root
+        self.started = []
 
     def start_observation(self, **kwargs):
+        self.started.append(kwargs)
         return self._root
 
 
@@ -88,8 +76,8 @@ def _event(text, final=True):
     )
 
 
-class TestTraceInput:
-    async def test_user_message_lands_on_the_trace_not_only_the_span(self, monkeypatch):
+class TestRootInput:
+    async def test_user_message_lands_on_the_root_observation(self, monkeypatch):
         plugin, root = _make_plugin()
         monkeypatch.setattr(
             "plugins.langfuse_plugin.propagate_attributes",
@@ -103,12 +91,11 @@ class TestTraceInput:
             invocation_context=_invocation_context(), user_message="Where is 1984 set?"
         )
 
-        assert root.trace_io, "trace-level input was never set -- session view renders blank"
-        assert "1984" in str(root.trace_io[0]["input"])
+        assert "1984" in str(plugin.client.started[0]["input"])
 
 
-class TestTraceOutput:
-    async def test_final_response_becomes_the_trace_output(self):
+class TestRootOutput:
+    async def test_final_response_becomes_the_root_output(self):
         plugin, root = _make_plugin()
 
         await plugin.on_event_callback(
@@ -116,7 +103,7 @@ class TestTraceOutput:
         )
         await plugin.after_run_callback(invocation_context=_invocation_context())
 
-        outputs = [io["output"] for io in root.trace_io if "output" in io]
+        outputs = [u["output"] for u in root.updates if "output" in u]
         assert outputs == ["London, Airstrip One."]
 
     async def test_multipart_final_response_is_joined(self):
@@ -128,7 +115,7 @@ class TestTraceOutput:
         )
         await plugin.after_run_callback(invocation_context=_invocation_context())
 
-        assert root.trace_io[-1]["output"] == "London, Airstrip One."
+        assert root.updates[-1]["output"] == "London, Airstrip One."
 
     async def test_last_final_response_wins(self):
         plugin, root = _make_plugin()
@@ -139,7 +126,7 @@ class TestTraceOutput:
             )
         await plugin.after_run_callback(invocation_context=_invocation_context())
 
-        assert root.trace_io[-1]["output"] == "second pass"
+        assert root.updates[-1]["output"] == "second pass"
 
     async def test_non_final_events_are_ignored(self):
         plugin, root = _make_plugin()
@@ -150,15 +137,15 @@ class TestTraceOutput:
         )
         await plugin.after_run_callback(invocation_context=_invocation_context())
 
-        # No final response -> status blob, never a blank trace.
-        assert root.trace_io[-1]["output"] == {"status": "completed"}
+        # No final response -> status blob, never a blank root.
+        assert root.updates[-1]["output"] == {"status": "completed"}
 
     async def test_error_path_with_no_events_still_sets_an_output(self):
         plugin, root = _make_plugin()
 
         await plugin.after_run_callback(invocation_context=_invocation_context())
 
-        assert root.trace_io[-1]["output"] == {"status": "completed"}
+        assert root.updates[-1]["output"] == {"status": "completed"}
         assert root.ended is True
 
 
@@ -176,7 +163,7 @@ class TestStateHygiene:
         plugin._current_trace = root
         await plugin.after_run_callback(invocation_context=_invocation_context())
 
-        assert root.trace_io[-1]["output"] == {"status": "completed"}
+        assert root.updates[-1]["output"] == {"status": "completed"}
 
     async def test_reset_stats_clears_the_captured_response(self):
         plugin, _ = _make_plugin()
@@ -206,7 +193,7 @@ class TestStateHygiene:
         )
         await plugin.after_run_callback(invocation_context=_invocation_context())
 
-        assert root.trace_io == []
+        assert root.updates == []
 
 
 class FakePropagation:
@@ -286,8 +273,8 @@ class TestRunErrorFinalizes:
         (root,) = plugin.client.roots
         assert root.updates[-1]["level"] == "ERROR"
         assert root.updates[-1]["status_message"] == "ValueError"
-        assert "user text" not in str(root.updates) + str(root.trace_io)
-        assert root.trace_io[-1]["output"] == {"status": "error", "error_type": "ValueError"}
+        assert "user text" not in str(root.updates)
+        assert root.updates[-1]["output"] == {"status": "error", "error_type": "ValueError"}
         assert plugin._current_trace is None
         assert plugin._propagation_cm is None
         assert plugin._final_response_text is None

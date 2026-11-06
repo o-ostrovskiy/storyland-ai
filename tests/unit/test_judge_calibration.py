@@ -14,6 +14,8 @@ import pytest
 from langfuse.api.core import ApiError
 
 from evaluation.tools.judge_calibration import (
+    DEFAULT_RUN_PREFIX,
+    _normalize_ts,
     CalibrationDataError,
     CalibrationTruncatedError,
     _EVAL_ID_GROUPS,
@@ -489,16 +491,6 @@ class _Obj:
         self.__dict__.update(kw)
 
 
-def _legacy_run(name, items):
-    return _Obj(name=name, created_at=name)
-
-
-def _legacy_details(items):
-    return _Obj(dataset_run_items=[
-        _Obj(dataset_item_id=case, trace_id=trace) for case, trace in items
-    ])
-
-
 def _experiment(name, exp_id):
     return _Obj(name=name, id=exp_id, start_time=name)
 
@@ -512,18 +504,15 @@ def _experiment_item(case, trace, group="metadata", item_id="ei-1"):
                 **bag)
 
 
-def _client(legacy=None, experiments=None, dataset_id="ds-1"):
-    """A langfuse double whose api surface is exactly what the code may call."""
-    legacy = legacy or {}
+def _client(experiments=None, dataset_id="ds-1"):
+    """A langfuse double whose api surface is exactly what the code may call.
+
+    It has no `get_runs`/`get_run`: both are retired, so any call raises."""
     experiments = experiments or {}
 
     api = _Obj()
     api.datasets = _Obj(
         get=lambda name: _Obj(id=dataset_id) if dataset_id else _Obj(id=None),
-        get_runs=lambda name, limit=50: _Obj(
-            data=[_legacy_run(n, i) for n, i in legacy.items()]
-        ),
-        get_run=lambda name, run_name: _legacy_details(legacy[run_name]),
     )
     api.experiments = _Obj(
         list=lambda **kw: _Obj(
@@ -737,14 +726,7 @@ class TestExperimentItemCaseId:
             experiment_item_case_id(item)
 
 
-class TestUnionIsTotal:
-    def test_legacy_only(self):
-        """The row that proves this PR ships safely TODAY, before any write moves."""
-        client = _client(legacy={"run-a": [("case-1", "t1"), ("case-2", "t2")]})
-        got = collect_candidates(client, ["books_v1"], "run-")
-        assert [c["trace_id"] for c in got] == ["t1", "t2"]
-        assert [c["item_id"] for c in got] == ["case-1", "case-2"]
-
+class TestCollectCandidates:
     def test_experiment_only(self):
         client = _client(experiments={"run-b": [
             _experiment_item("case-1", "t3"), _experiment_item("case-2", "t4")]})
@@ -752,39 +734,18 @@ class TestUnionIsTotal:
         assert [c["trace_id"] for c in got] == ["t3", "t4"]
         assert [c["item_id"] for c in got] == ["case-1", "case-2"]
 
-    def test_both_sides(self):
-        client = _client(
-            legacy={"run-a": [("case-1", "t1")]},
-            experiments={"run-b": [_experiment_item("case-1", "t3")]},
-        )
-        got = collect_candidates(client, ["books_v1"], "run-")
-        assert sorted(c["trace_id"] for c in got) == ["t1", "t3"]
-
-    def test_same_run_name_on_both_sides_yields_one_candidate(self):
-        """Caught by the trace net, not by a name comparison -- see the sibling
-        row below for why there is no longer a name net to catch it."""
-        client = _client(
-            legacy={"run-a": [("case-1", "t1")]},
-            experiments={"run-a": [_experiment_item("case-1", "t1")]},
-        )
-        got = collect_candidates(client, ["books_v1"], "run-")
-        assert [c["trace_id"] for c in got] == ["t1"]
-
-    def test_same_trace_under_DIFFERENT_run_names_yields_one_candidate(self):
-        """\U0001f534 The row the trace net actually needs, and the one the row
-        above does not carry: with matching names the name net drops the
-        duplicate first, so removing the trace de-dup left the suite green.
-        A generation is ONE trace whichever endpoint described it -- a second
-        copy silently doubles its weight in the calibration pack."""
-        client = _client(
-            legacy={"run-a": [("case-1", "t1")]},
-            experiments={"run-b": [_experiment_item("case-1", "t1")]},
-        )
+    def test_same_trace_in_two_runs_yields_one_candidate(self):
+        """A generation is ONE trace -- a second copy silently doubles its
+        weight in the calibration pack."""
+        client = _client(experiments={
+            "run-a": [_experiment_item("case-1", "t1")],
+            "run-b": [_experiment_item("case-1", "t1")],
+        })
         got = collect_candidates(client, ["books_v1"], "run-")
         assert [c["trace_id"] for c in got] == ["t1"]
 
 
-class TestCapSurvivesTheUnion:
+class TestPerCaseCap:
     """\U0001f534 The row a golden-shape contract row cannot see.
 
     The keys are byte-identical whichever id space fills them; only their
@@ -798,11 +759,6 @@ class TestCapSurvivesTheUnion:
             target=30, max_per_case=2,
         )
 
-    def test_two_legacy_runs_of_one_case_admit_two(self):
-        client = _client(legacy={
-            "run-a": [("case-1", "t1")], "run-b": [("case-1", "t2")]})
-        assert len(self._cap(client)) == 2
-
     def test_three_experiment_runs_of_one_case_admit_two_not_three(self):
         client = _client(experiments={
             "run-a": [_experiment_item("case-1", "t1")],
@@ -811,26 +767,12 @@ class TestCapSurvivesTheUnion:
         })
         assert len(self._cap(client)) == 2
 
-    def test_mixed_legacy_and_experiment_share_one_case_key(self):
-        """The case that matters: a mapping self-consistent WITHIN a leg passes
-        the two rows above and still puts two id spaces in one column."""
-        client = _client(
-            legacy={"run-a": [("case-1", "t1")]},
-            experiments={"run-b": [_experiment_item("case-1", "t2")],
-                         "run-c": [_experiment_item("case-1", "t3")]},
-        )
-        selected = self._cap(client)
-        assert len(selected) == 2
-        assert {(c["dataset"], c["item_id"]) for c in selected} == {
-            ("books_v1", "case-1")
-        }
-
     def test_converse_two_different_cases_both_survive(self):
         """Or the cap rows above are satisfied by a cap that admits nothing."""
-        client = _client(
-            legacy={"run-a": [("case-1", "t1")]},
-            experiments={"run-b": [_experiment_item("case-2", "t2")]},
-        )
+        client = _client(experiments={
+            "run-a": [_experiment_item("case-1", "t1")],
+            "run-b": [_experiment_item("case-2", "t2")],
+        })
         assert len(self._cap(client)) == 2
 
 
@@ -867,24 +809,15 @@ class TestExperimentLegDetails:
         assert floor.year <= 2020, "the floor must never be able to filter a run"
         assert seen["dataset_id"] == "ds-1", "the ID, not the name"
 
-    def test_a_failing_experiment_leg_does_not_lose_the_legacy_leg(self):
-        # 🔴 MYS-914 Codex P1 (discussion_r3827349867): this used to drive the
-        # failure via `dataset_id=None`, i.e. a `LookupError` out of
-        # `resolve_dataset_id` -- but that is now a fail-closed signal that
-        # must PROPAGATE (see TestExperimentLookupErrorsPropagate below), not
-        # a degrade-gracefully case. A TRANSPORT failure is what this row is
-        # actually about: the experiments leg answering with an error the
-        # legacy leg should still survive.
-        client = _client(legacy={"run-a": [("case-1", "t1")]})
+    def test_a_transport_failure_degrades_to_an_empty_dataset(self):
+        client = _client()
         client.api.experiments.list = _raise
-        got = collect_candidates(client, ["books_v1"], "run-")
-        assert [c["trace_id"] for c in got] == ["t1"]
+        assert collect_candidates(client, ["books_v1"], "run-") == []
 
 
 # --- MYS-914 PR1 FIX 1: `list_items` paging (discussion_r3829698246) --------
 # 🔴 One request, no paging: an experiment run with more than 100 linked
-# items silently contributed only its first 100 traces, unlike the legacy
-# leg's `datasets.get_run`, which returns `dataset_run_items` whole. These
+# items silently contributed only its first 100 traces. These
 # rows drive the fix the way `_find_root_observation` already proves its own
 # paging loop -- from a double, not a live run.
 
@@ -958,13 +891,12 @@ class TestExperimentItemPaging:
         """The raise is worthless if `collect_candidates` degrades on it.
         `CalibrationTruncatedError` is a `CalibrationDataError`, so the
         caller's narrow arm re-raises it instead of returning a green,
-        legacy-only pack."""
+        short pack."""
         pages = [
             ([_experiment_item(f"case-{i}", f"t{i}")], "always-more")
             for i in range(100)
         ]
         client, _calls = _paging_client("exp-run-a", pages)
-        client.api.datasets.get_runs = lambda name, limit: _Obj(data=[])
         with pytest.raises(CalibrationTruncatedError):
             collect_candidates(client, ["books_v1"], "run-")
 
@@ -1072,9 +1004,8 @@ class TestOneBadRunDoesNotDiscardTheGoodOnes:
     A transport failure on one experiment propagated out of
     `collect_experiment_candidates`, and `collect_candidates`'s broad arm then
     replaced the WHOLE experiments leg with `[]` — so one flaky read discarded
-    every run already fetched. After the legacy endpoint retires that dataset
-    yields nothing at all. The legacy per-run loop has always skipped the run
-    and kept the rest."""
+    every run already fetched and the dataset yielded nothing at all. Skip the
+    one run and keep the rest."""
 
     def test_a_transient_failure_skips_its_run_and_keeps_the_others(self):
         """RED before the fix: this returned zero runs, because the exception
@@ -1105,7 +1036,7 @@ class TestOneBadRunDoesNotDiscardTheGoodOnes:
     def test_the_skip_names_the_run_it_dropped(self, capsys):
         """A skip that prints nothing is a silent shortfall wearing a
         different hat: a thinner pack would be indistinguishable from a
-        smaller dataset. The legacy loop names its run; so does this one."""
+        smaller dataset, so the skipped run is named."""
         client = _flaky_items_client("run-b", RuntimeError("connection reset"))
         collect_experiment_candidates(client, "books_v1", "run-", 8)
         out = capsys.readouterr().out
@@ -1122,14 +1053,14 @@ class TestEveryRunSkippedIsNotAnEmptyLeg:
     transport, not run-scoped — and so are an expired key, a revoked scope and
     the endpoint moving. Each arrives as a plain exception once per iteration,
     so every run was skipped, `run_lists` came back `[]`, and the pack was
-    built from the legacy leg and reported as a success.
+    built short and reported as a success.
 
     ➡️ *The scope of a degrade is a claim about the fault's SUBJECT, and the
     subject is not readable from the type — it is readable from the outcome.*
     A skip is only per-run if some other run succeeded."""
 
     def test_every_run_failing_raises_rather_than_yielding_an_empty_leg(self):
-        """RED on `3dc7e53`: returned `[]` and the caller shipped a legacy-only
+        """RED on `3dc7e53`: returned `[]` and the caller shipped a short
         pack as complete."""
         client = _flaky_items_client(None, RuntimeError("400 invalid fields"))
         # `fail_on=None` never matches a run name, so make it match all of them.
@@ -1162,7 +1093,6 @@ class TestEveryRunSkippedIsNotAnEmptyLeg:
         level up and the whole finding would be invisible again."""
         client = _flaky_items_client(None, RuntimeError("x"))
         client.api.experiments.list_items = _raise_400
-        client.api.datasets.get_runs = _raise
         with pytest.raises(CalibrationDataError):
             collect_candidates(client, ["books_v1"], "run-", 8)
 
@@ -1198,7 +1128,7 @@ class TestExperimentFaultClass:
         assert collect_experiment_candidates(client, "books_v1", "on", 8) == []
 
     def test_a_400_at_n_of_1_raises(self):
-        """RED on `69379df`: returned `[]` and the pack shipped legacy-only and
+        """RED on `69379df`: returned `[]` and the pack shipped short and
         green. A narrowed camelCase spelling in `_EXPERIMENT_ITEM_FIELDS` is a
         400 on EVERY request — the exact fault r4 FL-1 was written for, on the
         exact n at which the counting rule cannot fire."""
@@ -1242,7 +1172,7 @@ class TestExperimentFaultClass:
         """🔴 The row that pins the count rule SURVIVED at `attempted >= 2`
         rather than being deleted with its n=1 arm. This is the world
         classification misses: an endpoint genuinely 5xx-ing on every request
-        degrades every run correctly, and after 2026-11-16 the legacy leg is
+        degrades every run correctly, and with no other run source the leg is
         empty by construction, so the pack would go out thin and green."""
         client = _flaky_items_client(None, RuntimeError("x"), runs=("a", "b"))
         client.api.experiments.list_items = _raise_400
@@ -1272,7 +1202,7 @@ class TestExperimentFaultClass:
     def test_every_run_5xx_still_raises(self, status):
         """CONVERSE, and the whole reason the count was narrowed rather than
         deleted: an endpoint genuinely 5xx-ing on every request is the one
-        world classification misses, and after 2026-11-16 the legacy leg is
+        world classification misses, and with no other run source the leg is
         empty by construction, so the pack would otherwise go out thin and
         green. Narrowing the counted population must not empty it."""
         client = _flaky_items_client(None, _api_error(status), runs=("a", "b"))
@@ -1382,20 +1312,24 @@ def _raise(*_a, **_kw):
     raise RuntimeError("boom")
 
 
-class TestLegacyFailureDoesNotBlockExperiments:
-    """discussion_r3825860886: the legacy leg's `continue` used to skip the
-    WHOLE dataset, experiments leg included -- exactly the moment
-    `datasets.get_runs` retires and every dataset takes this branch."""
+class TestRetiredRunsApiIsNeverCalled:
+    def test_the_default_prefix_matches_any_run_date(self):
+        """A dated default stops matching as soon as the old runs are gone."""
+        client = _client(experiments={
+            "eval_run_20261025_200751_v3": [_experiment_item("case-1", "t1")],
+        })
+        got = collect_candidates(client, ["books_v1"], DEFAULT_RUN_PREFIX)
+        assert [c["trace_id"] for c in got] == ["t1"]
 
-    def test_legacy_raises_experiments_still_collected(self):
+    def test_only_the_experiments_api_is_read(self):
         client = _client(experiments={"run-a": [_experiment_item("case-1", "t1")]})
         client.api.datasets.get_runs = _raise
+        client.api.datasets.get_run = _raise
         got = collect_candidates(client, ["books_v1"], "run-")
         assert [c["trace_id"] for c in got] == ["t1"]
 
-    def test_both_legs_raising_returns_empty_not_raise(self):
+    def test_an_unreachable_dataset_lookup_returns_empty_not_raise(self):
         client = _client()
-        client.api.datasets.get_runs = _raise
         client.api.datasets.get = _raise
         assert collect_candidates(client, ["books_v1"], "run-") == []
 
@@ -1411,9 +1345,8 @@ class TestExperimentLookupErrorsPropagate:
     degraded to an empty experiment leg behind a warning log, exactly the
     silence those raises exist to prevent."""
 
-    def test_missing_eval_id_aborts_rather_than_falling_back_to_legacy(self):
+    def test_missing_eval_id_aborts(self):
         client = _client(
-            legacy={"run-a": [("case-1", "t-legacy")]},
             experiments={"run-a": [_Obj(
                 id="ei-1", trace_id="t-exp",
                 metadata=None, experiment_item_metadata=None,
@@ -1424,25 +1357,20 @@ class TestExperimentLookupErrorsPropagate:
             collect_candidates(client, ["books_v1"], "run-")
 
     def test_unresolvable_dataset_name_aborts(self):
-        client = _client(
-            legacy={"run-a": [("case-1", "t-legacy")]}, dataset_id=None
-        )
+        client = _client(dataset_id=None)
         with pytest.raises(LookupError, match="did not resolve to an id"):
             collect_candidates(client, ["books_v1"], "run-")
 
     def test_transport_failure_on_experiments_list_still_degrades(self):
         """🔴 The converse, and it is not optional: a plain transport error
         (not a LookupError) must still degrade to an empty experiment leg and
-        return the legacy candidates, rather than raising. Without this row
-        the fix trades a fail-open for a fail-closed that cannot survive a
-        flaky endpoint. Identical in shape to
-        TestLegacyFailureDoesNotBlockExperiments's own row above, asserted
-        here too so this class states its own converse rather than pointing
-        at one two classes away."""
-        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        return an empty dataset, rather than raising. Without this row the fix
+        trades a fail-open for a fail-closed that cannot survive a flaky
+        endpoint."""
+        client = _client()
         client.api.experiments.list = _raise
         got = collect_candidates(client, ["books_v1"], "run-")
-        assert [c["trace_id"] for c in got] == ["t1"]
+        assert got == []
 
     def test_an_incidental_keyerror_in_the_sdk_still_degrades(self):
         """🔴 @el review r2, FL-A. The narrow arm used to catch `LookupError`,
@@ -1456,15 +1384,15 @@ class TestExperimentLookupErrorsPropagate:
         already had. The signal now has its own name.
 
         RED on `2d633ef`: this raised `KeyError` out of `collect_candidates`
-        instead of returning the legacy candidates."""
+        instead of degrading."""
 
         def _key_error(**_kw):
             raise KeyError("data")
 
-        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        client = _client()
         client.api.experiments.list = _key_error
         got = collect_candidates(client, ["books_v1"], "run-")
-        assert [c["trace_id"] for c in got] == ["t1"]
+        assert got == []
 
     def test_an_incidental_indexerror_in_the_sdk_still_degrades(self):
         """Same class, the other member — `IndexError` is what an SDK raises
@@ -1473,16 +1401,16 @@ class TestExperimentLookupErrorsPropagate:
         def _index_error(**_kw):
             raise IndexError("list index out of range")
 
-        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        client = _client()
         client.api.experiments.list = _index_error
         got = collect_candidates(client, ["books_v1"], "run-")
-        assert [c["trace_id"] for c in got] == ["t1"]
+        assert got == []
 
     def test_our_own_signal_is_still_loud(self):
         """The converse of the two rows above: narrowing the arm must not also
         let a genuine data-contract violation degrade. A dataset name that does
         not resolve still aborts the build."""
-        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        client = _client()
         client.api.datasets.get = lambda name: _Obj(id=None)
         with pytest.raises(CalibrationDataError):
             collect_candidates(client, ["books_v1"], "run-")
@@ -1501,8 +1429,8 @@ class TestSystematicFaultAtTheLegsEntryPoint:
     🔴 And the faults the classifier's own docstring names — an expired key
     (401), a revoked scope (403), the endpoint moving (404/405) — do not arrive
     at `list_items`. They arrive HERE, at the first call. So the primary rule
-    was absent from exactly the path its motivating examples take. After
-    2026-11-16 the legacy leg is empty by construction, which makes that a green
+    was absent from exactly the path its motivating examples take.
+    Experiments are the only run source, which makes that a green
     build and an empty pack: this card's own failure, one call site above the
     fix for it.
 
@@ -1511,11 +1439,11 @@ class TestSystematicFaultAtTheLegsEntryPoint:
     than a `try` per call, so the fifth call site added to this leg is covered
     before it is written.
 
-    RED on `4fc05a3`: every raising row below returned the legacy candidates.
+    RED on `4fc05a3`: every raising row below degraded instead.
     """
 
     def test_a_401_from_experiments_list_aborts_rather_than_emptying_the_leg(self):
-        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        client = _client()
         client.api.experiments.list = _raise_api_error(401)
         with pytest.raises(CalibrationDataError, match="request-shaped fault"):
             collect_candidates(client, ["books_v1"], "run-")
@@ -1524,7 +1452,7 @@ class TestSystematicFaultAtTheLegsEntryPoint:
     def test_every_request_shaped_status_aborts_at_the_entry_point(self, status):
         """The rule is the CLASS, not the one status. 400 is the narrowed-field
         spelling, 403 a revoked scope, 404/405 the endpoint moving."""
-        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        client = _client()
         client.api.experiments.list = _raise_api_error(status)
         with pytest.raises(CalibrationDataError):
             collect_candidates(client, ["books_v1"], "run-")
@@ -1534,34 +1462,34 @@ class TestSystematicFaultAtTheLegsEntryPoint:
         expired key it is the call that fails first. A fix wrapping only
         `experiments.list` passes every row above and still loses this one —
         which is the whole reason @el asked for the choke point."""
-        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        client = _client()
         client.api.datasets.get = _raise_api_error(401)
         with pytest.raises(CalibrationDataError, match="request-shaped fault"):
             collect_candidates(client, ["books_v1"], "run-")
 
     @pytest.mark.parametrize("status", [500, 502, 503, 429, 408])
-    def test_the_converse_a_transient_fault_still_degrades_to_the_legacy_leg(self, status):
+    def test_the_converse_a_transient_fault_still_degrades(self, status):
         """🔴 Without this the fix is satisfiable by raising on everything,
         which trades a fail-open for a build that cannot survive a flaky
         endpoint. 429 and 408 are the r5 carve-outs: 4xx by number, transient
         by meaning, and they must still degrade at this site too."""
-        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        client = _client()
         client.api.experiments.list = _raise_api_error(status)
         got = collect_candidates(client, ["books_v1"], "run-")
-        assert [c["trace_id"] for c in got] == ["t1"]
+        assert got == []
 
     def test_an_api_error_with_no_status_still_degrades_here(self):
         """`ApiError.status_code` is `Optional[int]` in the pinned SDK, and the
         entry point must read it the same way the loop does — one predicate,
         two call sites, no second interpretation."""
-        client = _client(legacy={"run-a": [("case-1", "t1")]})
+        client = _client()
 
         def _no_status(**_kw):
             raise ApiError(body={"message": "no status"})
 
         client.api.experiments.list = _no_status
         got = collect_candidates(client, ["books_v1"], "run-")
-        assert [c["trace_id"] for c in got] == ["t1"]
+        assert got == []
 
     def test_the_in_loop_check_survives_it_was_not_replaced(self):
         """The two checks do different jobs: this one decides whether the LEG
@@ -1575,115 +1503,52 @@ class TestSystematicFaultAtTheLegsEntryPoint:
 
 
 class TestDedupeBeforeCap:
-    """discussion_r3827349872: the cap used to count RUN SLOTS before
-    `_dedupe_by_trace` removed overlapping traces, so a run sharing its
-    trace with an earlier one still consumed a slot and then emptied it --
-    the pack under-filled and lost run diversity silently."""
+    """discussion_r3827349872: the cap used to count RUN SLOTS before the
+    trace de-dup, so a run sharing its trace with an earlier one consumed a
+    slot and then emptied it -- the pack under-filled silently."""
 
-    def test_a_duplicated_trace_does_not_evict_a_distinct_run(self):
+    def test_a_duplicated_trace_is_kept_once_and_the_distinct_run_survives(self):
         newer = datetime(2026, 6, 3, tzinfo=timezone.utc)
         dup = datetime(2026, 6, 2, tzinfo=timezone.utc)
         older = datetime(2026, 6, 1, tzinfo=timezone.utc)
-        client = _client(
-            legacy={
-                "run-newest": [("case-1", "t-shared")],
-                "run-third": [("case-3", "t-distinct")],
-            },
-            experiments={"run-dup": [_experiment_item("case-2", "t-shared")]},
-        )
-        client.api.datasets.get_runs = lambda name, limit=50: _Obj(data=[
-            _Obj(name="run-newest", created_at=newer),
-            _Obj(name="run-third", created_at=older),
-        ])
+        client = _client(experiments={
+            "run-newest": [_experiment_item("case-1", "t-shared")],
+            "run-dup": [_experiment_item("case-2", "t-shared")],
+            "run-third": [_experiment_item("case-3", "t-distinct")],
+        })
         client.api.experiments.list = lambda **kw: _Obj(data=[
+            _Obj(name="run-newest", id="exp-run-newest", start_time=newer),
             _Obj(name="run-dup", id="exp-run-dup", start_time=dup),
+            _Obj(name="run-third", id="exp-run-third", start_time=older),
         ])
-        got = collect_candidates(client, ["books_v1"], "run-", max_runs_per_dataset=2)
-        traces = {c["trace_id"] for c in got}
-        assert traces == {"t-shared", "t-distinct"}, (
-            f"a fully-duplicate run must not consume a cap slot and evict a "
-            f"distinct run: got {traces}"
-        )
+        got = collect_candidates(client, ["books_v1"], "run-", max_runs_per_dataset=3)
+        assert sorted(c["trace_id"] for c in got) == ["t-distinct", "t-shared"]
 
     def test_cap_still_caps_when_nothing_overlaps(self):
-        """The converse, already covered by
-        TestCapAppliesOnceAfterMerge::test_eight_plus_eight_survives_as_eight_not_sixteen
-        above -- eight legacy plus eight experiment runs with no overlapping
-        traces still caps to exactly eight. Restated here as its own row so
-        this class's converse is not merely a cross-reference."""
-        legacy = {f"run-l{i}": [(f"case-l{i}", f"t-l{i}")] for i in range(8)}
         experiments = {f"run-e{i}": [_experiment_item(f"case-e{i}", f"t-e{i}")]
-                       for i in range(8)}
-        client = _client(legacy=legacy, experiments=experiments)
+                       for i in range(16)}
+        client = _client(experiments=experiments)
         got = collect_candidates(client, ["books_v1"], "run-", max_runs_per_dataset=8)
         assert len(got) == 8
 
 
-class TestRecencyAcrossLegs:
-    """discussion_r3825860891: legacy always sorted first by PROVENANCE, not
-    by time -- a genuinely newer experiment run could sit behind up to
-    max_runs_per_dataset older legacy runs and be dropped by the cap."""
-
-    def test_a_newer_experiment_run_outranks_an_older_legacy_run(self):
+class TestRecency:
+    def test_the_newest_run_wins_the_cap(self):
         old = datetime(2026, 1, 1, tzinfo=timezone.utc)
         new = datetime(2026, 6, 1, tzinfo=timezone.utc)
-        client = _client(
-            legacy={"run-old": [("case-1", "t-old")]},
-            experiments={"run-new": [_experiment_item("case-1", "t-new")]},
-        )
-        client.api.datasets.get_runs = lambda name, limit=50: _Obj(
-            data=[_Obj(name="run-old", created_at=old)]
-        )
-        client.api.experiments.list = lambda **kw: _Obj(
-            data=[_Obj(name="run-new", id="exp-run-new", start_time=new)]
-        )
+        client = _client(experiments={
+            "run-old": [_experiment_item("case-1", "t-old")],
+            "run-new": [_experiment_item("case-1", "t-new")],
+        })
+        client.api.experiments.list = lambda **kw: _Obj(data=[
+            _Obj(name="run-old", id="exp-run-old", start_time=old),
+            _Obj(name="run-new", id="exp-run-new", start_time=new),
+        ])
         got = collect_candidates(client, ["books_v1"], "run-")
         selected = select_candidates(got, target=30, max_per_case=1)
         assert [c["trace_id"] for c in selected] == ["t-new"]
 
-    def test_naive_and_aware_timestamps_do_not_raise(self):
-        """A naive datetime from one leg must not TypeError against an aware
-        one from the other -- normalize explicitly, per the finding's note,
-        rather than papering over it with a try."""
-        naive_old = datetime(2026, 1, 1)
-        aware_new = datetime(2026, 6, 1, tzinfo=timezone.utc)
-        client = _client(
-            legacy={"run-old": [("case-1", "t-old")]},
-            experiments={"run-new": [_experiment_item("case-1", "t-new")]},
+    def test_normalize_ts_attaches_utc_to_a_naive_datetime(self):
+        assert _normalize_ts(datetime(2026, 1, 1)) == datetime(
+            2026, 1, 1, tzinfo=timezone.utc
         )
-        client.api.datasets.get_runs = lambda name, limit=50: _Obj(
-            data=[_Obj(name="run-old", created_at=naive_old)]
-        )
-        client.api.experiments.list = lambda **kw: _Obj(
-            data=[_Obj(name="run-new", id="exp-run-new", start_time=aware_new)]
-        )
-        got = collect_candidates(client, ["books_v1"], "run-")
-        assert sorted(c["trace_id"] for c in got) == ["t-new", "t-old"]
-
-
-class TestCapAppliesOnceAfterMerge:
-    def test_eight_plus_eight_survives_as_eight_not_sixteen(self):
-        legacy = {f"run-l{i}": [(f"case-l{i}", f"t-l{i}")] for i in range(8)}
-        experiments = {f"run-e{i}": [_experiment_item(f"case-e{i}", f"t-e{i}")]
-                       for i in range(8)}
-        client = _client(legacy=legacy, experiments=experiments)
-        got = collect_candidates(client, ["books_v1"], "run-", max_runs_per_dataset=8)
-        assert len(got) == 8
-
-
-class TestDedupePrecedenceSurvivesTheReSort:
-    def test_a_tied_timestamp_keeps_the_legacy_description(self):
-        tied = datetime(2026, 3, 1, tzinfo=timezone.utc)
-        client = _client(
-            legacy={"run-legacy": [("case-1", "t1")]},
-            experiments={"run-exp": [_experiment_item("case-1", "t1")]},
-        )
-        client.api.datasets.get_runs = lambda name, limit=50: _Obj(
-            data=[_Obj(name="run-legacy", created_at=tied)]
-        )
-        client.api.experiments.list = lambda **kw: _Obj(
-            data=[_Obj(name="run-exp", id="exp-run-exp", start_time=tied)]
-        )
-        got = collect_candidates(client, ["books_v1"], "run-")
-        assert len(got) == 1
-        assert got[0]["run_name"] == "run-legacy"
