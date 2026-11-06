@@ -12,17 +12,17 @@ Usage:
     prompts = load_prompts()              # default (v3)
 """
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
 
 # v3 (MYS-460): region_analyzer additionally emits country_code + primary_locality,
 # the grounded fields the canonical place_key is minted from. Bumped here rather
-# than edited into v2.json in place: a published version is immutable, and — see
-# MYS-462 — an in-place JSON edit would NOT change the discovery cache
-# fingerprint, so the flush would silently not happen. THIS constant's source text
-# is hashed (core/cache_version.py), so the bump is part of what invalidates the
-# stale, keyless entries.
+# than edited into v2.json in place: a published version is immutable. (The
+# discovery cache fingerprint hashes both this constant's source text and the
+# active JSON's content — see prompt_content_hash() and MYS-462 — so either a
+# bump or an in-place edit invalidates stale entries.)
 CURRENT_PROMPT_VERSION = "v3"
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
@@ -108,6 +108,21 @@ def preferences_block(preferences: dict | None) -> str:
         "\n\nREADER PREFERENCES — honor these when choosing places and "
         "pacing:\n" + json.dumps(preferences)
     )
+
+
+def prompt_content_hash(version: str = CURRENT_PROMPT_VERSION) -> str:
+    """Short hash of a prompt version's JSON *content* (MYS-462).
+
+    The version label alone can't distinguish an in-place edit of vN.json from
+    the published vN, so this is what both the discovery cache fingerprint
+    (core/cache_version.py) and the Langfuse trace metadata carry. Best-effort:
+    returns '' if the file can't be read, never raises.
+    """
+    try:
+        data = (_PROMPTS_DIR / f"{version}.json").read_bytes()
+    except OSError:
+        return ""
+    return hashlib.sha1(data).hexdigest()[:12]
 
 
 def load_prompts(version: str = CURRENT_PROMPT_VERSION) -> AgentPrompts:
