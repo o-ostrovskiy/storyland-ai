@@ -1,7 +1,7 @@
 # StoryLand AI - Makefile
 # Common commands for development and demo
 
-.PHONY: help install install-dev lock audit test test-ci test-cov test-agents test-models test-tools test-services test-api test-integration test-integration-live test-integration-vcr-record test-all eval eval-setup eval-setup-one eval-run eval-place-to-book eval-local-atmosphere eval-expansion eval-summary eval-report eval-export run-api db-reset db-show db-users clean check-env
+.PHONY: help install install-dev lock audit test test-ci test-cov test-agents test-models test-tools test-services test-api test-integration test-integration-live test-integration-vcr-record test-all eval eval-setup eval-setup-one eval-run eval-place-to-book eval-local-atmosphere eval-expansion eval-summary eval-report eval-export prompts-sync prompts-sync-dry run-api db-reset db-show db-users clean check-env
 
 # Default target
 help:
@@ -31,6 +31,8 @@ help:
 	@echo "  make eval-local-atmosphere   Run the local-atmosphere (book near me) eval"
 	@echo "  make eval-expansion          Run the expansion (suggestion-chip) eval"
 	@echo "  make eval-report   Generate evaluation trend report"
+	@echo "  make prompts-sync  Mirror current agent prompts to Langfuse (git stays source of truth)"
+	@echo "  make prompts-sync-dry  Show which prompts a sync would create, without writing"
 	@echo "  make eval-summary  Show evaluation summary"
 	@echo ""
 	@echo "Running:"
@@ -152,6 +154,12 @@ eval-report:
 eval-export:
 	.venv/bin/python evaluation/tools/eval_dashboard.py --action export --days 30
 	@echo "✅ Metrics exported to evaluation/metrics.json"
+
+prompts-sync:
+	.venv/bin/python -m evaluation.tools.sync_prompts_to_langfuse
+
+prompts-sync-dry:
+	.venv/bin/python -m evaluation.tools.sync_prompts_to_langfuse --dry-run
 
 # =============================================================================
 # Running
