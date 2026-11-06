@@ -653,7 +653,7 @@ def collect_candidates(
             # arrive at the FIRST call, which is `experiments.list`, and on an
             # expired key at `datasets.get` before even that. So the primary
             # rule was absent from precisely the path its motivating examples
-            # take and present only on the path they never reach. Post
+            # take and present only on the path they never reach.
             # With experiments the only source, that is a green build and an
             # empty pack -- this card's own failure, one
             # call site above the fix for it.
