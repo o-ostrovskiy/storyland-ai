@@ -11,6 +11,7 @@ real Langfuse client nor live credentials are needed. `FakeRootSpan` has no
 """
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -284,3 +285,85 @@ class TestRunErrorFinalizes:
         )
 
         assert plugin.client.roots == []
+
+
+class TestTracePromptIdentity:
+    """Every production trace names the prompt set that produced it, so
+    Langfuse can filter/compare traces by prompt while prompts stay in git."""
+
+    async def test_prompt_version_and_hash_ride_the_trace_attributes(self, monkeypatch):
+        from agents.prompts import CURRENT_PROMPT_VERSION, prompt_content_hash
+
+        captured = {}
+
+        def _propagate(**kwargs):
+            captured.update(kwargs)
+            return FakePropagation()
+
+        plugin, _ = _make_plugin()
+        monkeypatch.setattr("plugins.langfuse_plugin.propagate_attributes", _propagate)
+        plugin.root_name = "book_to_place_discovery"
+
+        await plugin.on_user_message_callback(
+            invocation_context=_invocation_context(), user_message="Where is 1984 set?"
+        )
+
+        assert captured["version"] == CURRENT_PROMPT_VERSION
+        assert captured["metadata"] == {
+            "prompt_version": CURRENT_PROMPT_VERSION,
+            "prompt_hash": prompt_content_hash(),
+        }
+        assert len(captured["metadata"]["prompt_hash"]) == 12
+
+    async def test_a_candidate_prompt_run_is_labelled_with_its_own_version(self, monkeypatch):
+        from agents.prompts import CURRENT_PROMPT_VERSION, prompt_content_hash
+
+        captured = {}
+
+        def _propagate(**kwargs):
+            captured.update(kwargs)
+            return FakePropagation()
+
+        assert CURRENT_PROMPT_VERSION != "v2"
+        plugin = LangfusePlugin(prompt_version="v2")
+        plugin.enabled = True
+        plugin.client = _make_plugin()[0].client
+        monkeypatch.setattr("plugins.langfuse_plugin.propagate_attributes", _propagate)
+        plugin.root_name = "book_to_place_discovery"
+
+        await plugin.on_user_message_callback(
+            invocation_context=_invocation_context(), user_message="Where is 1984 set?"
+        )
+
+        assert captured["version"] == "v2"
+        assert captured["metadata"] == {
+            "prompt_version": "v2",
+            "prompt_hash": prompt_content_hash("v2"),
+        }
+        assert captured["metadata"]["prompt_hash"] != prompt_content_hash()
+
+    async def test_an_eval_case_hands_its_prompt_version_to_the_plugin(self, monkeypatch):
+        from evaluation.tools import run_scheduled_eval as eval_module
+
+        seen = {}
+
+        def _plugin(**kwargs):
+            seen.update(kwargs)
+            raise RuntimeError("stop here: the plugin is all this test needs")
+
+        monkeypatch.setattr(eval_module, "LangfusePlugin", _plugin)
+        monkeypatch.setattr(eval_module, "Gemini", MagicMock())
+        monkeypatch.setattr(eval_module, "build_retry_options", MagicMock())
+        monkeypatch.setattr(eval_module, "create_session_service", MagicMock())
+
+        with pytest.raises(RuntimeError, match="stop here"):
+            await eval_module._run_evaluation_case(
+                input_data={"book_title": "1984", "author": "George Orwell"},
+                expected_output=None,
+                item_metadata={},
+                config=MagicMock(),
+                root_span=MagicMock(),
+                prompt_version="v2",
+            )
+
+        assert seen["prompt_version"] == "v2"

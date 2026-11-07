@@ -335,8 +335,6 @@ storyland-ai/
 │   ├── place_to_book.py # PlaceBookCandidate/PlaceToBookCandidates/Result (reverse discovery)
 │   └── preferences.py   # TravelPreferences
 │
-├── tools/               # ADK tool integrations
-│   └── preferences.py   # Session state preferences tool
 │
 ├── agents/              # AI agent definitions
 │   ├── book_context_agent.py     # Book setting research
@@ -396,14 +394,6 @@ def create_my_agent(model):
     return LlmAgent(name="my_agent", model=model, instruction="...")
 ```
 
-**Adding a new tool** — create in `tools/`:
-```python
-from google.adk.tools import FunctionTool
-def my_function(query: str) -> str:
-    return result
-my_tool = FunctionTool(my_function)
-```
-
 **Adding a new model** — create in `models/`:
 ```python
 from pydantic import BaseModel, Field
@@ -419,7 +409,7 @@ Agent prompts include reliability improvements:
 - **Error handling:** `"If the tool returns an error, report it clearly and explain what went wrong"`
 - **Disambiguation:** Book title and author injected into search queries to avoid confusion with similarly-named books
 
-**Versioned prompts** — all agent instructions live in `agents/prompts/v3.json` (`v1.json`/`v2.json` kept for history). To add a new prompt version, create the next `agents/prompts/vN.json` and pass `--prompt-version vN` to the eval runner. The current version (`v3`) is controlled by `CURRENT_PROMPT_VERSION` in `agents/prompts.py`. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md).
+**Versioned prompts** — all agent instructions live in `agents/prompts/v3.json` (`v1.json`/`v2.json` kept for history). To add a new prompt version, create the next `agents/prompts/vN.json` and pass `--prompt-version vN` to the eval runner. The current version (`v3`) is controlled by `CURRENT_PROMPT_VERSION` in `agents/prompts.py`. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md). Git is the only source of prompts; a read-only mirror is pushed to Langfuse for the playground (`make prompts-sync`, auto on merge to `main` — see [evaluation/README.md](evaluation/README.md#prompt-versioning)).
 
 ## Deployment
 
@@ -455,18 +445,20 @@ make test-all              # Both
 make test-cov              # With coverage
 ```
 
+Tests never reach Langfuse by default, even with real keys in `.env`: `tests/conftest.py` blanks them and turns tracing off. `make test-integration-live` and `make test-integration-vcr-record` opt back in with `STORYLAND_TEST_LANGFUSE_EXPORT=1`; a run that includes `tests/unit/` refuses that flag.
+
 The unit suite (`tests/unit/`) by area — per-module counts rot with every PR, so they are not tracked here:
 
 | Area | Modules |
 |------|---------|
-| Models & agents | `test_models.py`, `test_agents.py`, `test_tools.py` |
+| Models & agents | `test_models.py`, `test_agents.py` |
 | Core workflow | `test_core.py`, `test_discovery_errors.py`, `test_empty_discovery_guard.py`, `test_retry_backoff.py` |
 | API layer | `test_api.py`, `test_gateway_auth.py`, `test_ratelimit.py`, `test_request_input_limits.py`, `test_dependencies.py` |
 | Caching | `test_cache.py`, `test_disk_cache.py`, `test_cache_version.py` |
 | Place features | `test_place_key.py`, `test_place_to_book.py`, `test_place_to_book_eval.py` |
 | Quality & guardrails | `test_llm_scorer.py`, `test_tone_guardrail.py`, `test_recommendation_floor.py`, `test_judge_calibration.py`, `test_spot_check.py` |
 | Eval harnesses | `test_local_atmosphere_eval.py`, `test_expansion_eval.py`, `test_eval_dataset_routing.py` |
-| Observability | `test_sentry.py`, `test_langfuse_plugin_concurrency.py`, `test_langfuse_pricing.py`, `test_langfuse_unpriced_model.py`, `test_search_grounding.py`, `test_langfuse_search_grounding.py`, `test_discovery_grounding_audit.py`, `test_unverified_discovery_downgrade.py` |
+| Observability | `test_sentry.py`, `test_langfuse_plugin_concurrency.py`, `test_langfuse_export_guard.py`, `test_langfuse_pricing.py`, `test_langfuse_unpriced_model.py`, `test_search_grounding.py`, `test_langfuse_search_grounding.py`, `test_discovery_grounding_audit.py`, `test_unverified_discovery_downgrade.py` |
 | Sessions & ops | `test_services.py`, `test_session_retention.py` |
 
 Integration tests use [VCR.py](https://vcrpy.readthedocs.io/) to record/replay HTTP interactions. For quality evaluation, see [evaluation/README.md](evaluation/README.md).

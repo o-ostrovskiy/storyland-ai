@@ -864,7 +864,7 @@ Cache Discovery results in a **persistent, SQLite-backed `diskcache`** store tha
 
 ### Implementation
 - `core/cache.py` + `core/disk_cache.py`; config `CACHE_ENABLED` (default **true** — a missing env var degrades to caching on, never a correctness bug), `CACHE_BACKEND` (`disk` = persistent SQLite on a docker volume, or in-memory), `CACHE_DIR`, `CACHE_TTL_SECONDS`, `CACHE_MAX_ENTRIES`. Effective config logged at boot.
-- `core/cache_version.py` — `compute_cache_version()` hashes the model name plus the **source of the prompt/schema modules** (`_PROMPT_MODULES`, which includes `models.discovery`, `models.place_key`, `core.regions`). A model/prompt/schema change mints a new namespace; stale entries can never be served after a deploy that changed what a cached result means. **Boundary:** the fingerprint covers module *source*, not data — `agents.prompts`' `CURRENT_PROMPT_VERSION` bump changes the hash, but an in-place edit to the `v2`/`v3` prompt JSON *content* does not, since that JSON is data rather than source read by `inspect.getsource()`. That content gap is tracked separately as MYS-462, not closed by this ADR.
+- `core/cache_version.py` — `compute_cache_version()` hashes the model name plus the **source of the prompt/schema modules** (`_PROMPT_MODULES`, which includes `models.discovery`, `models.place_key`, `core.regions`). A model/prompt/schema change mints a new namespace; stale entries can never be served after a deploy that changed what a cached result means. **Prompt data (MYS-462):** the prompt JSON is data, not source, so `inspect.getsource()` can't see it; the fingerprint therefore also mixes in `agents.prompts.prompt_content_hash()` — a hash of the *active* `vN.json` file's content. A `CURRENT_PROMPT_VERSION` bump and an in-place JSON edit both flush the cache; editing an inactive version (e.g. `v1.json`) does not.
 
 ### Rationale
 Discovery is the expensive phase (parallel LLM fan-out + search). Same book → same regions, so recomputing per request wastes tokens and seconds. An earlier `ENABLE_RESULT_CACHE` feature flag was removed — caching is core behavior, not an experiment. Content-fingerprinting removed the post-deploy "cache warmup / manual flush" ritual.
@@ -1018,7 +1018,7 @@ Migrate in stages, eval-gated against a two-run pre-migration baseline (storylan
 - Session storage: **fresh DB at cutover** (default file renamed to `storyland_sessions_v2.db` so 2.x never opens a 1.x file). Jobs are minutes-long and the retention sweeper prunes anyway, so no data migration. The v-current schema keeps `sessions.update_time` and exposes the engine as `db_engine`, so the retention sweeper's raw-SQL prune still works — now proven by `tests/integration/test_session_retention_db.py` (previously the prune was fail-open and untested against a real store).
 - The ADR #11 `append_event(state_delta)` persistence contract holds unchanged on both backends.
 - All eight `LangfusePlugin` hooks survive; `CallbackContext.branch` is now **public**, removing the private `_invocation_context` coupling (kept only as a fallback). Token-usage extraction treats absent/None `usage_metadata` as missing (never a zero-token success) and logs a WARNING so cost tracking can't silently zero.
-- ADK 2.x auto-retries a tool only when its exception propagates; `tools/preferences.py` deliberately stays fail-open (documented in place).
+- ADK 2.x auto-retries a tool only when its exception propagates; `tools/preferences.py` deliberately stayed fail-open. (The `tools/` package was later deleted as dead code: its only consumer, `reader_profile_agent`, was removed in MYS-436.)
 - starlette resolves to >=1.3 → the five PYSEC ignores were removed from `codex.yml` and `Makefile`; the CI pin guard (ADR #17) now asserts a 2.x resolution.
 - `[eval]` extra dropped (nothing imports `google.adk.evaluation`); `[db]` + explicit `greenlet` added.
 
@@ -1256,6 +1256,25 @@ The trip composer intermittently emitted a `ComposerEnvelope` whose JSON stopped
 ### Trade-offs
 The module lives in `agents/`, not `core/`, because `core/__init__` imports the executor, which imports the composer agent (a cycle). The local-atmosphere composer (`agents/local_atmosphere_agent.py`, same `output_key`) is not covered yet. Defect 2 (bimodal "crater" itineraries) is characterised separately and is not assumed to share this root.
 
+## 30. Place→Book Answers Live on Disk, and "Couldn't Check" Is Never Stored (2026-11-05)
+
+### Context
+
+Place→book results sat in an in-process `TTLCache`, so every deploy or restart wiped them and the same place paid for a fresh AI run. The in-process store also hid two things a persistent one can't: a restart used to wash out answers from an older prompt, and an empty or malformed pipeline answer was cached as "not found" for the full TTL.
+
+### Decision
+
+- The resolver's cache follows `CACHE_BACKEND`. On disk it is its own store at `<CACHE_DIR>/place2book`, on the same volume as Discovery but with its own LRU budget (`build_place_to_book_cache`).
+- Keys are `place2book:v1:<CURRENT_PROMPT_VERSION>:<place>`, so a prompt bump invalidates them.
+- `found` is kept 6h and `not_found` 1h (matching the gateway), through a per-entry `ttl_seconds` on both cache backends.
+- A model error raises before any write. No formatter output, a malformed one, or no researcher text with nothing to show is "couldn't check": the caller gets the same not-found envelope, unwritten.
+- Entries are plain dicts validated on read. An unreadable entry or a failed read is a miss; a failed write still answers.
+
+### Trade-offs
+
+- An in-place edit to a prompt's JSON doesn't change the key (storyland-ai-private#40); the stale window is bounded by the 6h TTL.
+- The gateway can't tell a "couldn't check" from a real `found: false`, so it still remembers that answer for its own 1h. The envelope is unchanged here on purpose.
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -1286,5 +1305,6 @@ The module lives in `agents/`, not `core/`, because `core/__init__` imports the 
 | **Search-grounding receipts + fail-closed discovery (ADR #26)** | A claim the product cannot support is demoted rather than shipped at full confidence; skip rate measurable per researcher; enforcement and the metric give one answer on an unobserved receipt | User-visible downgrade at today's 46% skip rate; a wholesale instrumentation fault demotes everything (loud, by design); one cold-cache window at the `v3` bump |
 | **Union eval reads + `eval_id` case key (ADR #27)** | Read side migrates alone and stays total at every step of the Nov 16 cutoff; a run-scoped id can never silently disable the per-case cap; an incomplete read refuses rather than answering short | Calibration depends on a metadata key, not an API field; a missing `eval_id` or a truncated run stops the build rather than degrading it |
 | **Composer truncation at the model boundary (ADR #29)** | A cut-off envelope is retried once, then a clean transient error; never half-recovered; counted as an eval defect | Local-atmosphere composer not yet covered; a retry costs one more composer call on that rare path |
+| **Persistent place→book cache (ADR #30)** | A restart costs no repeat AI runs; a failed check is never remembered as "no books here" | In-place prompt edits wait out the 6h TTL; the gateway still holds a failed check for 1h |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.

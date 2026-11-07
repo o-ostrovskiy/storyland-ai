@@ -19,6 +19,7 @@ from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from common.logging import get_logger
 from common.search_grounding import SearchMetadata, extract_search_metadata
+from agents.prompts import CURRENT_PROMPT_VERSION, prompt_content_hash
 
 logger = get_logger(__name__)
 
@@ -120,6 +121,7 @@ class LangfusePlugin(BasePlugin):
         host: Optional[str] = None,
         enabled: bool = True,
         root_name: Optional[str] = None,
+        prompt_version: str = CURRENT_PROMPT_VERSION,
     ):
         """
         Initialize Langfuse plugin.
@@ -135,9 +137,16 @@ class LangfusePlugin(BasePlugin):
                 plugin cannot recover the root identity from the context —
                 the caller that builds the Runner KNOWS the workflow and
                 injects its name here (see WorkflowExecutor._build_runner).
+            prompt_version: The prompt set this run actually uses, written on
+                every trace. An eval run with --prompt-version passes its own;
+                production uses the default.
         """
         super().__init__(name="langfuse_plugin")
         self.root_name = root_name
+        self._prompt_version = prompt_version
+        # The prompt JSON can't change under a running process: hash it once
+        # per plugin, not per trace.
+        self._prompt_hash = prompt_content_hash(prompt_version)
         self.enabled = enabled and LANGFUSE_AVAILABLE
         self.client: Optional[Langfuse] = None
         self._token_usage = TokenUsage()
@@ -272,10 +281,19 @@ class LangfusePlugin(BasePlugin):
             user_id = invocation_context.user_id
             session_id = invocation_context.session.id if invocation_context.session else None
 
+            # Prompt identity on every production trace, so traces can be
+            # filtered/compared by prompt in Langfuse. The hash distinguishes an
+            # in-place vN.json edit from the published vN (MYS-462); prompts
+            # stay in git, this only labels which set produced the trace.
             self._propagation_cm = propagate_attributes(
                 user_id=user_id,
                 session_id=session_id,
                 trace_name=f"{agent_name}_invocation",
+                version=self._prompt_version,
+                metadata={
+                    "prompt_version": self._prompt_version,
+                    "prompt_hash": self._prompt_hash,
+                },
             )
             self._propagation_cm.__enter__()
 
