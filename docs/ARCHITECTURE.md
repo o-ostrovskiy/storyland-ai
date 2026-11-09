@@ -959,7 +959,7 @@ Five smaller decisions, recorded together:
 - **Bounded session retention** (2026-06-24): a periodic retention sweep (`services/session_retention.py`) bounds the in-memory/SQLite session store — extends ADR #6, which predates it.
 - **Recommendation-tone guardrail** (2026-06-28): rec explanations are fit-only and never grade the reader (`core/guardrails/tone_guardrail.py`).
 - **Langfuse per-branch scoping** (2026-07-17, MYS-398): generation/agent-stack/span state is scoped **per ParallelAgent branch** (`_branch_key()` in `plugins/langfuse_plugin.py`) — per-request plugin instances (ADR #8) were not enough under the ADR #3 parallel fan-out.
-- **Langfuse trace-level I/O written explicitly** (2026-08-05, MYS-788): the plugin sets input/output on the trace as well as on its root span (`set_trace_io()` in `plugins/langfuse_plugin.py`), because Langfuse's session view and trace list render **trace**-level I/O — setting only the root span's made every production trace display as "This trace has no input or output" despite a complete span tree. Python SDK v4 dropped `update_current_trace()` and deprecates trace I/O in favour of the observations-first model, but `propagate_attributes()` carries correlating attributes only (user/session/tags/metadata), so `set_trace_io()` is the sole remaining writer for those two fields; revisit when those views read observations instead. Trace output is the run's final-response text, picked with the same rule as `core/run_harness.py` (last event where `is_final_response()` is true).
+- **Langfuse run I/O lives on the root observation** (2026-11-04, supersedes MYS-788's trace-level write): Langfuse v4 is observations-first and removes trace-level I/O, so the plugin no longer calls the deprecated `set_trace_io()`. `plugins/langfuse_plugin.py` writes the user message and the run's final-response text to its root observation (last event where `is_final_response()` is true, the same rule as `core/run_harness.py`), falling back to `{"status": "completed"}` when the run produced no final text.
 
 ---
 
@@ -1151,6 +1151,8 @@ the PR rather than assumed.
 
 ## 27. Judge-Calibration Reads a UNION of the Legacy Runs API and the Experiments API (2026-08-20)
 
+**Update 2026-11-04:** the legacy leg is removed (the "PR3" below). `collect_candidates` reads the Experiments API only, so runs written before the 2026-10-11 write migration no longer reach calibration. Text below records the decision as made.
+
 ### Context
 
 Langfuse retires the legacy dataset-run endpoints on **2026-11-16**. The obvious sequencing — move the writes and the reads together — was argued for on real evidence: `GET /experiments` returns **zero** runs today, so a reads-only cutover finds nothing and calibration goes dark.
@@ -1230,6 +1232,8 @@ Each eval tool marks its per-item root span as an experiment item by setting Lan
 - **`run_description` survives the endpoint that used to carry it.** All four tools passed a human-readable description to `dataset_run_items.create`; the SDK exposes `langfuse.experiment.description`, so it is set rather than dropped. It is optional where the dataset scope is required: a missing scope merges two datasets invisibly, a missing description is a blank label anyone can see. The drop-class is closed by the AST reader instead — extended one keyword, so a writer that stops sending one reds in CI. ➡️ *A parameter deleted alongside the call it fed disappears from the diff and reappears as a blank field in a dashboard.*
 
 ### Consequences
+
+**Verified 2026-11-04:** a read-only live run of `collect_candidates` found the self-minted experiments joined to `books_v1` and `storyland_eval` (5 runs, 41 candidates) and hydrated a candidate. The paragraph below is the earlier state.
 
 🔴 **Not verified end-to-end.** Whether a self-minted experiment id joins its dataset in `GET /experiments`, and whether #27's union then finds those runs, needs a live scheduled-eval run and a calibration dry-run — real LLM spend, so a founder G4 gate. The code is written so one minimal run settles it; until then this ADR records a design, not a confirmed behaviour. The legacy READ leg stays deliberately in place, which is what makes that survivable.
 
