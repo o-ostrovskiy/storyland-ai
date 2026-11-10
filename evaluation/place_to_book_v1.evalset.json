@@ -13,8 +13,8 @@
       "eval_id": "p2b_lisbon",
       "place": "Lisbon",
       "expect": "found",
-      "expected_literal_examples": ["The Book of Disquiet (Fernando Pessoa)"],
-      "min_literal": 1,
+      "expected_literal_examples": ["The Book of Disquiet (Fernando Pessoa)", "The Year of the Death of Ricardo Reis (José Saramago)"],
+      "min_literal": 3,
       "notes": "Literal anchors should map to real Lisbon locations (e.g. Baixa)."
     },
     {
@@ -22,7 +22,7 @@
       "place": "Paris, France",
       "expect": "found",
       "expected_literal_examples": ["A Moveable Feast (Ernest Hemingway)", "Les Misérables (Victor Hugo)"],
-      "min_literal": 1,
+      "min_literal": 3,
       "notes": "Trailing ', France' must normalize to the same key as 'Paris'."
     },
     {
@@ -58,7 +58,7 @@
       "place": "the Scottish Highlands",
       "expect": "found",
       "expected_literal_examples": ["Outlander (Diana Gabaldon)"],
-      "min_literal": 1
+      "min_literal": 3
     },
     {
       "eval_id": "p2b_new_york",
@@ -76,6 +76,22 @@
       "notes": "Any 'vibe' candidate returned here MUST have maps_to=null and read as atmosphere, not setting."
     },
     {
+      "eval_id": "p2b_kyoto",
+      "place": "Kyoto",
+      "expect": "found",
+      "expected_literal_examples": ["The Old Capital (Yasunari Kawabata)", "The Temple of the Golden Pavilion (Yukio Mishima)"],
+      "min_literal": 3,
+      "notes": "ai-private#71: one of the four anchor places that must return ≥3 grounded literal books."
+    },
+    {
+      "eval_id": "p2b_portugal",
+      "place": "Portugal",
+      "expect": "found",
+      "expected_literal_examples": ["The Year of the Death of Ricardo Reis (José Saramago)", "Night Train to Lisbon (Pascal Mercier)"],
+      "min_literal": 1,
+      "notes": "ai-private#71: a country, not a city — the researcher's queries must cover countries and regions; literal = the story is set in Portugal."
+    },
+    {
       "eval_id": "p2b_notfound_wakanda",
       "place": "Wakanda",
       "expect": "not_found",
@@ -86,6 +102,12 @@
       "place": "Zxqwerty Nonexistent Township",
       "expect": "not_found",
       "notes": "Ungroundable string — clean not-found state."
+    },
+    {
+      "eval_id": "p2b_notfound_macondo",
+      "place": "Macondo",
+      "expect": "not_found",
+      "notes": "ai-private#71: Macondo is García Márquez's invented town. A real book is set there, but no reader can travel there: clean not-found, never a list."
     }
   ]
 }
