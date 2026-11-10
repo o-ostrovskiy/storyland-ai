@@ -4,6 +4,34 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 
 ---
 
+## v4 — 2026-11-10
+
+**Card:** storyland-ai-private#71 (Destinations revisit 2/2). Only `place_to_book_researcher` and `place_to_book_formatter` changed; every other agent is byte-identical to v3 (pinned by `test_v4_is_v3_plus_the_place_to_book_change_only`).
+
+### Changes
+| Agent | Change |
+|---|---|
+| place_to_book_researcher | Step 0: a place that exists only in fiction returns no candidates, never its real-world stand-in; `literal` only when the story is set inside the place typed (the country or region around it is `vibe` at most); each book once; the real author, never a translator/editor; search queries for regions and countries (landscape + main towns) and city + country |
+| place_to_book_formatter | Keep every grounded literal, at most 3 vibe; one entry per book (a literal repeat wins); `literal` only inside the place typed, "when unsure, choose vibe" |
+
+Code guard alongside: `drop_repeated_titles()` in the resolver.
+
+### Eval (`place_to_book_v1`, 14 cases, gemini-3.1-flash-lite, cache off)
+| Metric | v3 (`p2b_eval_20261110_142428`) | v4 (`p2b_eval_20261110_142726`) |
+|---|---|---|
+| case_pass | 0.857 (12/14) | **1.000 (14/14)** |
+| found_classification | 0.857 | **1.000** |
+| grounding_clean | 1.000 | 1.000 |
+| no_duplicate_titles | 1.000 | 1.000 |
+| authors_correct | 1.000 | 1.000 |
+| literal_grounded (mean, all 14) | 4.214 | 2.357 |
+| literal_grounded (mean, 11 found places) | 4.73 | **3.00 ⚠️** |
+| candidates per found place | 6–8 | 3 (5 for Rome, Paris) |
+
+v3 failed Macondo (3 García Márquez "literal" books mapped to Aracataca) and Wakanda (4 Black Panther books). v4 returns both empty. **Open:** v4 is narrower: every found place stops at 3 grounded literal books and almost no vibe books, so the literal-count metric dropped.
+
+---
+
 ## v2-patch — 2026-04-16
 
 **Branch:** #63 (same PR, post-review fixes)

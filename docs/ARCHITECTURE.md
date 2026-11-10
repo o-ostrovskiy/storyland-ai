@@ -1275,6 +1275,12 @@ Place→book results sat in an in-process `TTLCache`, so every deploy or restart
 - An in-place edit to a prompt's JSON doesn't change the key (storyland-ai-private#40); the stale window is bounded by the 6h TTL.
 - The gateway can't tell a "couldn't check" from a real `found: false`, so it still remembers that answer for its own 1h. The envelope is unchanged here on purpose.
 
+### Addendum (2026-11-10, ai-private#71): v4 place→book prompts and a one-entry-per-book guard
+
+- Prompt set `v4` = `v3` with only `place_to_book_researcher` / `place_to_book_formatter` revised: `literal` only when the story is set inside the place typed (a book set in the country around it is `vibe` at most); a place that exists only in fiction returns an empty list rather than its real-world stand-in; each book once; the real author; queries that cover regions and countries.
+- `PlaceToBookResolver.resolve()` also runs `drop_repeated_titles()` after `enforce_label_invariants()`: a repeat (casing, a leading article, punctuation) is dropped, and a `literal` repeat replaces a `vibe` entry in place.
+- The bump moves both the place→book key (`place2book:v1:v4:…`) and the discovery cache namespace (`CURRENT_PROMPT_VERSION` is in the fingerprinted source), so there is one cold-cache window for both.
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
