@@ -14,7 +14,7 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 | place_to_book_researcher | Step 0: a place that exists only in fiction returns no candidates, never its real-world stand-in; `literal` only when the story is set inside the place typed (the country or region around it is `vibe` at most); each book once; the real author, never a translator/editor; search queries for regions and countries (landscape + main towns) and city + country |
 | place_to_book_formatter | Keep every grounded literal, at most 3 vibe; one entry per book (a literal repeat wins); `literal` only inside the place typed, "when unsure, choose vibe" |
 
-Code guard alongside: `drop_repeated_titles()` in the resolver.
+Code guard alongside: `drop_repeated_titles()` in the resolver, keyed on title + author (two different books called "Paris" both stay).
 
 ### Eval (`place_to_book_v1`, 14 cases, gemini-3.1-flash-lite, cache off)
 | Metric | v3 (`p2b_eval_20261110_142428`) | v4 (`p2b_eval_20261110_142726`) |

@@ -854,6 +854,38 @@ class TestDropRepeatedTitles:
         cands = [self._c("Emma"), self._c("Persuasion")]
         assert drop_repeated_titles(cands) == cands
 
+    def test_same_title_by_different_authors_keeps_both(self):
+        """Codex P2 on ai#302: a title is not a book's identity."""
+        from core.place_to_book import drop_repeated_titles
+
+        cands = [
+            {"title": "Paris", "author": "Edward Rutherfurd",
+             "match_type": "literal", "maps_to": "Île de la Cité"},
+            {"title": "Paris", "author": "Julien Green",
+             "match_type": "literal", "maps_to": "Montmartre"},
+        ]
+        assert drop_repeated_titles(cands) == cands
+
+    def test_same_book_with_author_formatting_drift_is_one_book(self):
+        from core.place_to_book import drop_repeated_titles
+
+        out = drop_repeated_titles([
+            {"title": "Paris", "author": "Edward Rutherfurd",
+             "match_type": "literal", "maps_to": "Île de la Cité"},
+            {"title": "paris", "author": "edward rutherfurd.",
+             "match_type": "literal", "maps_to": "Montmartre"},
+        ])
+        assert [c["maps_to"] for c in out] == ["Île de la Cité"]
+
+    def test_missing_author_falls_back_to_title(self):
+        from core.place_to_book import drop_repeated_titles
+
+        out = drop_repeated_titles([
+            {"title": "Paris", "author": None, "match_type": "literal", "maps_to": "Marais"},
+            {"title": "Paris", "author": "", "match_type": "literal", "maps_to": "Bastille"},
+        ])
+        assert [c["maps_to"] for c in out] == ["Marais"]
+
 
 async def test_resolve_drops_a_repeated_title(monkeypatch):
     """Wiring: the resolver's answer carries each book once."""

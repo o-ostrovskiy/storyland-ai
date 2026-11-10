@@ -108,7 +108,7 @@ python evaluation/tools/run_place_to_book_eval.py [--max-cases N] [--no-register
 Each case logs a Langfuse dataset run (`p2b_eval_YYYYMMDD_HHMMSS`) under `place_to_book_v1`
 with scores: `case_pass` (0/1), `found_classification` (0/1), `literal_grounded` (count),
 and `grounding_clean` (0/1 — every `literal` has a `maps_to`, every `vibe` has none).
-Since ai-private#71 it also scores `no_duplicate_titles` (0/1: no book listed twice) and
+Since ai-private#71 it also scores `no_duplicate_titles` (0/1: no book, title + author, listed twice) and
 `authors_correct` (0/1: a returned book the evalset names as an example carries that book's
 real author; other books can't be checked offline and don't count). Either failing fails
 `case_pass`. Lisbon, Paris, Kyoto and the Scottish Highlands need `min_literal: 3`; Macondo

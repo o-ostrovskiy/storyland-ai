@@ -80,6 +80,17 @@ def test_distinct_titles_pass():
     assert scored["pass"] is True
 
 
+def test_same_title_different_authors_are_not_repeats():
+    # Two real books called "Paris": not a duplicate, the case passes.
+    result = _result(True, [
+        _cand("literal", "Île de la Cité", title="Paris", author="Edward Rutherfurd"),
+        _cand("literal", "Montmartre", title="Paris", author="Julien Green"),
+    ])
+    scored = score_case(result, expect="found", min_literal=1)
+    assert scored["n_duplicate_titles"] == 0
+    assert scored["pass"] is True
+
+
 def test_known_book_with_wrong_author_fails():
     result = _result(True, [
         _cand("literal", "Baixa", title="The Book of Disquiet", author="José Saramago"),

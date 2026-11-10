@@ -208,19 +208,36 @@ def _title_key(title: Optional[str]) -> str:
     return re.sub(r"^(the|a|an) ", "", text)
 
 
+def _author_key(author: Optional[str]) -> str:
+    """Casefolded author with every non-word character removed."""
+    return re.sub(r"[^\w]", "", (author or "").casefold())
+
+
+def _book_key(candidate: dict) -> tuple:
+    """A book's identity: normalized title + normalized author.
+
+    Two different books can share a title ("Paris" by Edward Rutherfurd and
+    "Paris" by Julien Green), so the title alone is not an identity. A
+    candidate with no author keys on its title alone (author part empty).
+    """
+    return (_title_key(candidate.get("title")), _author_key(candidate.get("author")))
+
+
 def drop_repeated_titles(candidates: List[dict]) -> List[dict]:
     """Keep each book once (ai-private#71).
 
     The prompts say "each book once", but a model can still list the same
-    title twice (another casing, a leading article, a subtitle punctuation
-    change). The first entry is kept in place; if a later repeat is
-    ``literal`` and the kept one is ``vibe``, the literal one replaces it,
-    because the stronger grounded claim is the one the reader should see.
+    book twice (another casing, a leading article, a subtitle punctuation
+    change). A book is its title + author (``_book_key``), so same-title books
+    by different authors are both kept. The first entry is kept in place; if
+    a later repeat is ``literal`` and the kept one is ``vibe``, the literal one
+    replaces it, because the stronger grounded claim is the one the reader
+    should see.
     """
     kept: List[dict] = []
     index: dict = {}
     for c in candidates:
-        key = _title_key(c.get("title"))
+        key = _book_key(c)
         if key not in index:
             index[key] = len(kept)
             kept.append(c)
@@ -228,7 +245,11 @@ def drop_repeated_titles(candidates: List[dict]) -> List[dict]:
         i = index[key]
         if kept[i].get("match_type") == "vibe" and c.get("match_type") == "literal":
             kept[i] = c
-        logger.info("place_to_book_dropped_repeated_title", title=c.get("title"))
+        logger.info(
+            "place_to_book_dropped_repeated_title",
+            title=c.get("title"),
+            author=c.get("author"),
+        )
     return kept
 
 

@@ -104,9 +104,10 @@ def score_case(
 
     found_classification = float(result.found == (expect == "found"))
 
-    # ai-private#71: never the same book twice in one answer.
-    seen_titles = [_norm_title(c["title"]) for c in candidates]
-    n_duplicate_titles = len(seen_titles) - len(set(seen_titles))
+    # ai-private#71: never the same book twice in one answer. A book is its
+    # title + author: same-title books by different authors are not repeats.
+    seen_books = [(_norm_title(c["title"]), _norm_author(c["author"])) for c in candidates]
+    n_duplicate_titles = len(seen_books) - len(set(seen_books))
     # ai-private#71: when a returned book is one of the evalset's known
     # examples, its author must be that book's real author. Books the evalset
     # doesn't name can't be checked offline and are not counted either way.
