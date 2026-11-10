@@ -14,6 +14,9 @@ class SessionStateKeys:
 
     BOOK_TITLE = "book_title"
     AUTHOR = "author"
+    # Kind of work the journey starts from: "book" | "film" | "series" (ADR #31).
+    # Sessions created before it was written read back as "book".
+    WORK_KIND = "work_kind"
     BOOK_METADATA = "book_metadata"
     BOOK_CONTEXT = "book_context"
     READER_PROFILE = "reader_profile"
@@ -107,6 +110,11 @@ class SessionStateAccessor:
     def author(self) -> str:
         bm = self.book_metadata or {}
         return bm.get("author", "") or self._state.get(SessionStateKeys.AUTHOR, "")
+
+    @property
+    def work_kind(self) -> str:
+        """Kind of work this journey starts from; ``"book"`` when unset."""
+        return self._state.get(SessionStateKeys.WORK_KIND) or "book"
 
     @property
     def composer_envelope(self) -> Optional[dict]:
