@@ -1,0 +1,88 @@
+{
+  "contexts": {
+    "response": {
+      "status_code": 500
+    },
+    "runtime": {
+      "build": "3.12.6 (main, Sep  6 2024, 19:03:47) [Clang 16.0.0 (clang-1600.0.26.3)]",
+      "name": "CPython",
+      "version": "3.12.6"
+    },
+    "trace": {
+      "data": {
+        "http.response.status_code": 500,
+        "thread.id": "8624521088",
+        "thread.name": "MainThread"
+      },
+      "description": null,
+      "op": "http.server",
+      "origin": "auto.http.starlette",
+      "parent_span_id": null,
+      "span_id": "9bb609bf5ec70fc6",
+      "status": "internal_error",
+      "trace_id": "adeb5d092545479db57426efb407781d"
+    }
+  },
+  "environment": "fixture-capture",
+  "event_id": "cc13ae94c6e74ac99e3c4c0affac3c5e",
+  "extra": {
+    "sys.argv": [
+      "scripts/capture_sentry_fixtures.py"
+    ]
+  },
+  "measurements": {},
+  "platform": "python",
+  "release": "fixture",
+  "request": {
+    "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
+      "connection": "keep-alive",
+      "host": "localhost:8080",
+      "user-agent": "python-httpx/0.28.1",
+      "x-internal-secret": "fixture-secret",
+      "x-user-id": "fixture-user"
+    },
+    "method": "GET",
+    "query_string": "book_title=Synthetic+Fixture+Novel",
+    "url": "http://localhost:8080/api/v1/itinerary/synthetic-fixture-job/status"
+  },
+  "sdk": {
+    "integrations": [
+      "argv",
+      "atexit",
+      "dedupe",
+      "excepthook",
+      "fastapi",
+      "google_genai",
+      "httpx",
+      "logging",
+      "modules",
+      "sqlalchemy",
+      "starlette",
+      "stdlib",
+      "threading"
+    ],
+    "name": "sentry.python.fastapi",
+    "packages": [
+      {
+        "name": "pypi:sentry-sdk",
+        "version": "2.66.0"
+      }
+    ],
+    "version": "2.66.0"
+  },
+  "server_name": "fixture-host",
+  "spans": [],
+  "start_timestamp": "2026-11-10T23:26:24.119619Z",
+  "tags": {
+    "asgi.type": "http",
+    "http.status_code": "500"
+  },
+  "timestamp": "2026-11-10T23:26:24.136412Z",
+  "transaction": "/api/v1/itinerary/{job_id}/status",
+  "transaction_info": {
+    "source": "route"
+  },
+  "type": "transaction"
+}
