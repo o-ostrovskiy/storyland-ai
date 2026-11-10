@@ -76,7 +76,7 @@ agent it never observed — so an empty ledger, the one state that means the
 measurement itself broke, reported a clean 4/4. `cases_fully_grounded` reads
 `grounded == total` for the same reason.
 - `books_v1` — 10 cases with expected outputs and book-specific scoring criteria
-- `place_to_book_v1` — 11 cases for the **place→book reverse-routing** grounding gate (literal/vibe labelling + not-found state). Register with `make eval-setup-one EVALSET_FILE=evaluation/place_to_book_v1.evalset.json`.
+- `place_to_book_v1` — 14 cases for the **place→book reverse-routing** grounding gate (literal/vibe labelling, repeats, authors + not-found state, incl. a country and an invented town). Register with `make eval-setup-one EVALSET_FILE=evaluation/place_to_book_v1.evalset.json`.
 - `local_atmosphere_v1` — 8 cases for the **local-atmosphere** ("book near me") flow: mixed preference shapes (4 with / 4 without `user:preferences`), LLM judge + deterministic envelope/radius gate.
 - `expansion_v1` — 5 cases for the **expansion** (suggestion-chip) flow: deterministic two-step gate (compose → expand), no judge.
 
@@ -108,6 +108,12 @@ python evaluation/tools/run_place_to_book_eval.py [--max-cases N] [--no-register
 Each case logs a Langfuse dataset run (`p2b_eval_YYYYMMDD_HHMMSS`) under `place_to_book_v1`
 with scores: `case_pass` (0/1), `found_classification` (0/1), `literal_grounded` (count),
 and `grounding_clean` (0/1 — every `literal` has a `maps_to`, every `vibe` has none).
+Since ai-private#71 it also scores `no_duplicate_titles` (0/1: no book listed twice) and
+`authors_correct` (0/1: a returned book the evalset names as an example carries that book's
+real author; other books can't be checked offline and don't count). Either failing fails
+`case_pass`. Lisbon, Paris, Kyoto and the Scottish Highlands need `min_literal: 3`; Macondo
+(an invented town) and Wakanda must come back empty. The results JSON carries a `metrics`
+block of run-level means, the numbers a prompt PR compares before and after.
 
 > Note: `_extract_input_from_case` stores `{place}` (not `{book_title, author}`) for
 > place→book cases, and carries the grounding expectations (`expect`, `min_literal`,

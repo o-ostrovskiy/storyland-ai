@@ -201,6 +201,37 @@ def enforce_label_invariants(candidates: List[dict]) -> List[dict]:
     return cleaned
 
 
+def _title_key(title: Optional[str]) -> str:
+    """Casefolded title without punctuation or a leading article."""
+    text = re.sub(r"[^\w\s]", " ", (title or "").casefold())
+    text = re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"^(the|a|an) ", "", text)
+
+
+def drop_repeated_titles(candidates: List[dict]) -> List[dict]:
+    """Keep each book once (ai-private#71).
+
+    The prompts say "each book once", but a model can still list the same
+    title twice (another casing, a leading article, a subtitle punctuation
+    change). The first entry is kept in place; if a later repeat is
+    ``literal`` and the kept one is ``vibe``, the literal one replaces it,
+    because the stronger grounded claim is the one the reader should see.
+    """
+    kept: List[dict] = []
+    index: dict = {}
+    for c in candidates:
+        key = _title_key(c.get("title"))
+        if key not in index:
+            index[key] = len(kept)
+            kept.append(c)
+            continue
+        i = index[key]
+        if kept[i].get("match_type") == "vibe" and c.get("match_type") == "literal":
+            kept[i] = c
+        logger.info("place_to_book_dropped_repeated_title", title=c.get("title"))
+    return kept
+
+
 class PlaceToBookResolver:
     """Resolve a destination to grounded place→book candidates.
 
@@ -298,7 +329,7 @@ class PlaceToBookResolver:
 
         raw_candidates, researcher_text = await self._run_pipeline(place)
         grounded = filter_grounded_candidates(raw_candidates, researcher_text)
-        cleaned = enforce_label_invariants(grounded)
+        cleaned = drop_repeated_titles(enforce_label_invariants(grounded))
 
         if not cleaned and (raw_candidates is None or not researcher_text.strip()):
             logger.warning("place_to_book_couldnt_check", place=normalized)

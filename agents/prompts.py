@@ -23,7 +23,11 @@ from pathlib import Path
 # discovery cache fingerprint hashes both this constant's source text and the
 # active JSON's content — see prompt_content_hash() and MYS-462 — so either a
 # bump or an in-place edit invalidates stale entries.)
-CURRENT_PROMPT_VERSION = "v3"
+# v4 (ai-private#71): v3 + the place_to_book researcher/formatter revised (literal
+# only inside the place typed, invented places come back empty, each book once,
+# the real author, queries for regions and countries). Also moves the
+# place2book:v1:<version> cache key, so no v3 answer is served under v4.
+CURRENT_PROMPT_VERSION = "v4"
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _cache: dict[str, "AgentPrompts"] = {}
