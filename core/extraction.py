@@ -737,6 +737,38 @@ def _drop_suggestions_naming_removed_cities(
     return kept
 
 
+# Kinds of work whose journeys may carry CityStop.screen_claim (ADR #31).
+_SCREEN_WORK_KINDS = frozenset({"film", "series"})
+
+
+def clear_screen_claims_unless_screen_work(
+    stops_holder: Optional[dict], work_kind: object, stops_path: str = "itinerary"
+) -> Optional[dict]:
+    """Null every ``screen_claim`` unless the journey is a film or series.
+
+    "Filmed here" and "set here" are a screen work's claims; a book journey
+    must never carry one, whatever the composer emitted (the Movies epic's
+    non-negotiable rule). ``stops_path`` is ``"itinerary"`` for a
+    TripItinerary dict (cities → stops) or ``"expansion"`` for an
+    ExpansionResult dict (places). Mutates and returns the dict.
+    """
+    if not isinstance(stops_holder, dict) or work_kind in _SCREEN_WORK_KINDS:
+        return stops_holder
+    if stops_path == "expansion":
+        stops = stops_holder.get("places") or []
+    else:
+        stops = [
+            stop
+            for city in stops_holder.get("cities") or []
+            if isinstance(city, dict)
+            for stop in city.get("stops") or []
+        ]
+    for stop in stops:
+        if isinstance(stop, dict) and stop.get("screen_claim") is not None:
+            stop["screen_claim"] = None
+    return stops_holder
+
+
 def extract_itinerary_from_response(
     final_response, state_accessor
 ) -> Optional[Tuple[dict, list]]:
@@ -774,6 +806,9 @@ def extract_itinerary_from_response(
                 suggestions, removed_identities, identities_after
             )
         itinerary_dict = sanitize_itinerary_explanations(itinerary_dict)
+        itinerary_dict = clear_screen_claims_unless_screen_work(
+            itinerary_dict, state_accessor.work_kind
+        )
         return itinerary_dict, suggestions
 
     # Primary: composer_envelope from session state (set by output_key="composer_envelope")
@@ -815,8 +850,12 @@ def extract_itinerary_from_response(
 
 def extract_expansion_from_state(state_accessor) -> Optional[dict]:
     """Extract and validate the last expansion result from session state."""
-    return sanitize_expansion_explanations(
-        validate_expansion_result(state_accessor.last_expansion)
+    return clear_screen_claims_unless_screen_work(
+        sanitize_expansion_explanations(
+            validate_expansion_result(state_accessor.last_expansion)
+        ),
+        state_accessor.work_kind,
+        stops_path="expansion",
     )
 
 
