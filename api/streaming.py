@@ -31,6 +31,7 @@ from core.events import (
     WorkflowComplete,
 )
 from core.executor import WorkflowExecutor
+from models.work import WorkRef
 
 
 def _sse(event_type: str, data: str) -> dict:
@@ -61,6 +62,8 @@ def domain_event_to_sse(event: DomainEvent) -> dict:
                     published_date=m.get("published_date"),
                     categories=m.get("categories", []),
                     image_url=m.get("image_url"),
+                    kind=m.get("kind"),
+                    creator=m.get("creator"),
                 ).model_dump_json(),
             )
         case RegionsReady(job_id=j, regions=r, analysis_note=n):
@@ -139,6 +142,7 @@ async def discover_stream(
     executor: WorkflowExecutor,
     vibe: Optional[str] = None,
     taste_context: Optional[dict] = None,
+    work: Optional[WorkRef] = None,
 ) -> AsyncGenerator[dict, None]:
     """Run phases 1-2 via executor and yield SSE events."""
     async for event in executor.discover(
@@ -148,6 +152,7 @@ async def discover_stream(
         vibe=vibe,
         taste_context=taste_context,
         user_id=user_id,
+        work=work,
     ):
         yield domain_event_to_sse(event)
 
@@ -177,6 +182,7 @@ async def local_atmosphere_stream(
     preferences: Optional[dict],
     user_id: str,
     executor: WorkflowExecutor,
+    work: Optional[WorkRef] = None,
 ) -> AsyncGenerator[dict, None]:
     """Run the local-atmosphere flow via executor and yield SSE events."""
     async for event in executor.local_atmosphere(
@@ -188,6 +194,7 @@ async def local_atmosphere_stream(
         radius_km=radius_km,
         preferences=preferences,
         user_id=user_id,
+        work=work,
     ):
         yield domain_event_to_sse(event)
 
