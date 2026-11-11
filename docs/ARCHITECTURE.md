@@ -1280,6 +1280,7 @@ Place→book results sat in an in-process `TTLCache`, so every deploy or restart
 - Prompt set `v4` = `v3` with only `place_to_book_researcher` / `place_to_book_formatter` revised: `literal` only when the story is set inside the place typed (a book set in the country around it is `vibe` at most); a place that exists only in fiction returns an empty list rather than its real-world stand-in; each book once; the real author; queries that cover regions and countries.
 - `PlaceToBookResolver.resolve()` also runs `drop_repeated_titles()` after `enforce_label_invariants()`: a book is its normalized title + author, so a repeat (casing, a leading article, punctuation) is dropped while same-title books by different authors are both kept; a `literal` repeat replaces a `vibe` entry in place.
 - The bump moves both the place→book key (`place2book:v1:v4:…`) and the discovery cache namespace (`CURRENT_PROMPT_VERSION` is in the fingerprinted source), so there is one cold-cache window for both.
+- Count wording (Olga's B, 2026-11-11): for a well-known place the researcher looks for at least 5 books that happen there (6-8 candidates, 2-3 vibe) and searches more when it has fewer. The one approved run, `p2b_eval_20261111_181533`, holds 14/14 with Macondo/Wakanda empty; literal books per found place 4.36 vs v3's 4.73 (table in `evaluation/PROMPT_CHANGELOG.md`).
 
 ## 31. A Work Has a Kind; Book Fields Stay on the Wire for Compatibility (2026-11-10)
 
