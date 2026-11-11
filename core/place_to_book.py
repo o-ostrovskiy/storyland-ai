@@ -31,6 +31,7 @@ Grounding contract:
 from __future__ import annotations
 
 import re
+import unicodedata
 import uuid
 from typing import Any, List, Optional, Tuple
 
@@ -201,16 +202,23 @@ def enforce_label_invariants(candidates: List[dict]) -> List[dict]:
     return cleaned
 
 
+def _fold(text: Optional[str]) -> str:
+    """Casefolded text with accents removed, so "José" and "Jose" (precomposed or
+    combining) compare equal."""
+    decomposed = unicodedata.normalize("NFKD", (text or "").casefold())
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
 def _title_key(title: Optional[str]) -> str:
-    """Casefolded title without punctuation or a leading article."""
-    text = re.sub(r"[^\w\s]", " ", (title or "").casefold())
+    """Casefolded, accent-free title without punctuation or a leading article."""
+    text = re.sub(r"[^\w\s]", " ", _fold(title))
     text = re.sub(r"\s+", " ", text).strip()
     return re.sub(r"^(the|a|an) ", "", text)
 
 
 def _author_key(author: Optional[str]) -> str:
-    """Casefolded author with every non-word character removed."""
-    return re.sub(r"[^\w]", "", (author or "").casefold())
+    """Casefolded, accent-free author with every non-word character removed."""
+    return re.sub(r"[^\w]", "", _fold(author))
 
 
 def _book_key(candidate: dict) -> tuple:
@@ -218,7 +226,9 @@ def _book_key(candidate: dict) -> tuple:
 
     Two different books can share a title ("Paris" by Edward Rutherfurd and
     "Paris" by Julien Green), so the title alone is not an identity. A
-    candidate with no author keys on its title alone (author part empty).
+    candidate with no author gets an empty author part: it matches another
+    author-less entry with the same title, but not a same-title entry that
+    names an author (we can't tell whether they are the same book).
     """
     return (_title_key(candidate.get("title")), _author_key(candidate.get("author")))
 

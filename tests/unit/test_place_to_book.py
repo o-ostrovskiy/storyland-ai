@@ -877,6 +877,22 @@ class TestDropRepeatedTitles:
         ])
         assert [c["maps_to"] for c in out] == ["Île de la Cité"]
 
+    def test_accented_and_plain_author_are_one_book(self):
+        """The same author with and without the accent (NFC, NFD, or none) is one book."""
+        import unicodedata
+
+        from core.place_to_book import drop_repeated_titles
+
+        out = drop_repeated_titles([
+            {"title": "Blindness", "author": "José Saramago",
+             "match_type": "literal", "maps_to": "Chiado"},
+            {"title": "Blindness", "author": unicodedata.normalize("NFD", "José Saramago"),
+             "match_type": "literal", "maps_to": "Baixa"},
+            {"title": "Blindness", "author": "Jose Saramago",
+             "match_type": "literal", "maps_to": "Alfama"},
+        ])
+        assert [c["maps_to"] for c in out] == ["Chiado"]
+
     def test_missing_author_falls_back_to_title(self):
         from core.place_to_book import drop_repeated_titles
 

@@ -22,6 +22,7 @@ import asyncio
 import json
 import re
 import sys
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -45,15 +46,22 @@ DATASET_NAME = "place_to_book_v1"
 EVALSET_FILE = "evaluation/place_to_book_v1.evalset.json"
 
 
+def _fold(text: Optional[str]) -> str:
+    """Casefolded text with accents removed, so "José" and "Jose" (precomposed or
+    combining) compare equal."""
+    decomposed = unicodedata.normalize("NFKD", (text or "").casefold())
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
 def _norm_title(title: Optional[str]) -> str:
-    """Casefolded title without punctuation or a leading article, for comparison."""
-    text = re.sub(r"[^\w\s]", " ", (title or "").casefold())
+    """Casefolded, accent-free title without punctuation or a leading article."""
+    text = re.sub(r"[^\w\s]", " ", _fold(title))
     text = re.sub(r"\s+", " ", text).strip()
     return re.sub(r"^(the|a|an) ", "", text)
 
 
 def _norm_author(author: Optional[str]) -> str:
-    return re.sub(r"[^\w]", "", (author or "").casefold())
+    return re.sub(r"[^\w]", "", _fold(author))
 
 
 def _parse_example(example: str) -> Optional[tuple]:

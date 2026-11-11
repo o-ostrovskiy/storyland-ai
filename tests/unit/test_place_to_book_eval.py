@@ -115,6 +115,33 @@ def test_known_book_with_right_author_passes_despite_formatting():
     assert scored["pass"] is True
 
 
+def test_author_accents_do_not_count_as_a_mismatch():
+    """Codex P2 on #302: "Jose Saramago" is the same author as "José Saramago",
+    whether the accent is precomposed (NFC) or a combining mark (NFD)."""
+    import unicodedata
+
+    nfd = unicodedata.normalize("NFD", "José Saramago")
+    for author in ("Jose Saramago", nfd):
+        result = _result(True, [
+            _cand("literal", "Chiado", title="The Year of the Death of Ricardo Reis", author=author),
+        ])
+        scored = score_case(
+            result, expect="found", min_literal=1,
+            expected_examples=["The Year of the Death of Ricardo Reis (José Saramago)"],
+        )
+        assert scored["n_author_mismatches"] == 0, author
+        assert scored["pass"] is True, author
+
+
+def test_accented_and_plain_author_are_one_book_for_duplicates():
+    result = _result(True, [
+        _cand("literal", "Chiado", title="Blindness", author="José Saramago"),
+        _cand("literal", "Baixa", title="Blindness", author="Jose Saramago"),
+    ])
+    scored = score_case(result, expect="found", min_literal=1)
+    assert scored["n_duplicate_titles"] == 1
+
+
 def test_unknown_books_are_not_author_checked():
     result = _result(True, [_cand("literal", "X", title="Some Other Book", author="Anyone")])
     scored = score_case(
