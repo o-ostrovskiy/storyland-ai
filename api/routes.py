@@ -141,6 +141,7 @@ async def discover(request: DiscoverRequest, user_id: str = Depends(get_gateway_
         taste_context=request.taste_context,
         user_id=user_id,
         executor=app_state.executor,
+        work=request.work,
     )
 
     return EventSourceResponse(generator, media_type="text/event-stream")
@@ -248,6 +249,7 @@ async def local_atmosphere(
         preferences=request.preferences,
         user_id=user_id,
         executor=app_state.executor,
+        work=request.work,
     )
 
     return EventSourceResponse(generator, media_type="text/event-stream")

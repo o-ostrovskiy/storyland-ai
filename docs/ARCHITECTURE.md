@@ -1281,6 +1281,26 @@ Place→book results sat in an in-process `TTLCache`, so every deploy or restart
 - `PlaceToBookResolver.resolve()` also runs `drop_repeated_titles()` after `enforce_label_invariants()`: a book is its normalized title + author, so a repeat (casing, a leading article, punctuation) is dropped while same-title books by different authors are both kept; a `literal` repeat replaces a `vibe` entry in place.
 - The bump moves both the place→book key (`place2book:v1:v4:…`) and the discovery cache namespace (`CURRENT_PROMPT_VERSION` is in the fingerprinted source), so there is one cold-cache window for both.
 
+## 31. A Work Has a Kind; Book Fields Stay on the Wire for Compatibility (2026-11-10)
+
+### Context
+
+Every entry into the service was a book: `DiscoverRequest` / `LocalAtmosphereRequest` take `book_title` + `author`, and the metadata event, the session and the discovery cache key all speak of a book. The Movies epic (storyland-team-os#45) needs films and series as one more *kind* of work, not a second pipeline, and its non-negotiable rule is that "filmed here" and "set here" never blur. fe, be and ios all parse the book fields today, and the persisted discovery cache is keyed on them.
+
+### Decision
+
+- `models/work.py` defines `WorkKind = Literal["book", "film", "series"]` and `WorkRef(kind, title, creator, year?)`; `creator` is the author, director or showrunner. Title and creator have the same bounds as `book_title` / `author`.
+- Both requests take an optional `work`. Absent, `book_title` + `author` mean `kind="book"` and validate exactly as before. Present alone, it fills `book_title` / `author` (so every downstream reader is unchanged); sent with them, both must name the same work or the request is a 422.
+- The metadata SSE event carries `kind` and `creator` **only for a film or series**. A book's event is byte-identical to before (pinned in `tests/unit/test_work_kind.py`); a missing `kind` on the wire means book.
+- `SessionStateKeys.WORK_KIND` holds the kind (missing ⇒ book, for older sessions). The discovery cache key gets `|kind=<kind>` only when it isn't a book, so no book key changes and no persisted entry is lost.
+- `CityStop.screen_claim` (`filmed_here` | `set_here`, default null) sits next to `filming_scene`. Extraction nulls it on every stop of a book journey, whatever the composer emitted.
+- `agents/work_prompts.py:for_kind(kind)` is the prompt seam: every kind returns the book prompt set until the film/series prompts land (Movies story 4). It lives outside the cache fingerprint (`core/cache_version.py`) because it changes no prompt text; story 4 adds it to `_PROMPT_MODULES` when it does.
+
+### Trade-offs
+
+- Two names for one thing on the wire (`book_title` / `author` beside `work.title` / `work.creator`) until every client sends `work`. Removing the book fields is a separate, cross-repo decision.
+- Until story 4, a film request runs the book prompts on the film's title. It is accepted and cached under its own key, but nothing sends one yet (be forwards `work` in services#218).
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -1312,5 +1332,6 @@ Place→book results sat in an in-process `TTLCache`, so every deploy or restart
 | **Union eval reads + `eval_id` case key (ADR #27)** | Read side migrates alone and stays total at every step of the Nov 16 cutoff; a run-scoped id can never silently disable the per-case cap; an incomplete read refuses rather than answering short | Calibration depends on a metadata key, not an API field; a missing `eval_id` or a truncated run stops the build rather than degrading it |
 | **Composer truncation at the model boundary (ADR #29)** | A cut-off envelope is retried once, then a clean transient error; never half-recovered; counted as an eval defect | Local-atmosphere composer not yet covered; a retry costs one more composer call on that rare path |
 | **Persistent place→book cache (ADR #30)** | A restart costs no repeat AI runs; a failed check is never remembered as "no books here" | In-place prompt edits wait out the 6h TTL; the gateway still holds a failed check for 1h |
+| **Work kind on the AI contract (ADR #31)** | Films and series ride the same pipeline; a book request, its metadata event and its cache key are byte-identical | Book fields and `work` coexist on the wire; film prompts are a later story |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.
