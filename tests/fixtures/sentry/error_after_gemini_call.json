@@ -1,0 +1,211 @@
+{
+  "breadcrumbs": {
+    "values": [
+      {
+        "category": "httplib",
+        "data": {
+          "http.fragment": "",
+          "http.method": "GET",
+          "http.query": "book_title=Synthetic+Fixture+Novel",
+          "http.response.status_code": 500,
+          "reason": "Internal Server Error",
+          "thread.id": "8624521088",
+          "thread.name": "MainThread",
+          "url": "http://localhost:8080/api/v1/itinerary/synthetic-fixture-job/status"
+        },
+        "level": "error",
+        "timestamp": "2026-11-10T23:26:24.136926Z",
+        "type": "http"
+      },
+      {
+        "category": "google_genai.models",
+        "data": {
+          "asctime": "2026-11-10 18:26:24"
+        },
+        "level": "info",
+        "message": "AFC is enabled with max remote calls: 10.",
+        "timestamp": "2026-11-10T23:26:24.151414Z",
+        "type": "log"
+      },
+      {
+        "category": "httplib",
+        "data": {
+          "http.fragment": "",
+          "http.method": "POST",
+          "http.query": "alt=sse",
+          "http.response.status_code": 200,
+          "reason": "OK",
+          "thread.id": "8624521088",
+          "thread.name": "MainThread",
+          "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent"
+        },
+        "timestamp": "2026-11-10T23:26:24.162593Z",
+        "type": "http"
+      }
+    ]
+  },
+  "contexts": {
+    "runtime": {
+      "build": "3.12.6 (main, Sep  6 2024, 19:03:47) [Clang 16.0.0 (clang-1600.0.26.3)]",
+      "name": "CPython",
+      "version": "3.12.6"
+    },
+    "structlog": {
+      "level": "error",
+      "phase": "discovery",
+      "timestamp": "2026-11-10 23:26:24"
+    },
+    "trace": {
+      "parent_span_id": null,
+      "span_id": "b032bff9266d7569",
+      "trace_id": "36a80104b2be479eb25650c284e830e5"
+    }
+  },
+  "environment": "fixture-capture",
+  "event_id": "6e20918523924cd38f08cdba98893321",
+  "extra": {
+    "sys.argv": [
+      "scripts/capture_sentry_fixtures.py"
+    ]
+  },
+  "level": "error",
+  "message": "fixture_capture_error",
+  "modules": {
+    "aiosqlite": "0.22.1",
+    "alembic": "1.18.5",
+    "annotated-doc": "0.0.4",
+    "annotated-types": "0.7.0",
+    "anyio": "4.14.2",
+    "async-timeout": "5.0.1",
+    "attrs": "26.1.0",
+    "authlib": "1.9.1",
+    "backoff": "2.2.1",
+    "certifi": "2026.10.19",
+    "cffi": "2.1.0",
+    "charset-normalizer": "3.4.9",
+    "click": "8.4.2",
+    "coverage": "7.15.2",
+    "cryptography": "50.0.0",
+    "diskcache": "5.6.3",
+    "distro": "1.9.0",
+    "fastapi": "0.139.2",
+    "google-adk": "2.12.0",
+    "google-api-core": "2.32.0",
+    "google-auth": "2.56.0",
+    "google-cloud-core": "2.6.0",
+    "google-cloud-monitoring": "2.31.0",
+    "google-cloud-spanner": "3.69.0",
+    "google-genai": "2.33.0",
+    "googleapis-common-protos": "1.75.0",
+    "graphviz": "0.21",
+    "greenlet": "3.5.3",
+    "grpc-google-iam-v1": "0.14.4",
+    "grpc-interceptor": "0.15.4",
+    "grpcio": "1.82.1",
+    "grpcio-status": "1.81.1",
+    "h11": "0.16.0",
+    "httpcore": "1.0.9",
+    "httptools": "0.8.0",
+    "httpx": "0.28.1",
+    "idna": "3.18",
+    "importlib_metadata": "8.7.1",
+    "iniconfig": "2.3.0",
+    "joserfc": "1.7.7",
+    "jsonschema": "4.26.0",
+    "jsonschema-specifications": "2025.9.1",
+    "langfuse": "4.15.6",
+    "mako": "1.3.12",
+    "markupsafe": "3.0.3",
+    "mmh3": "5.2.1",
+    "opentelemetry-api": "1.41.1",
+    "opentelemetry-exporter-otlp-proto-common": "1.41.1",
+    "opentelemetry-exporter-otlp-proto-http": "1.41.1",
+    "opentelemetry-proto": "1.41.1",
+    "opentelemetry-resourcedetector-gcp": "1.12.0a0",
+    "opentelemetry-sdk": "1.41.1",
+    "opentelemetry-semantic-conventions": "0.62b1",
+    "packaging": "26.2",
+    "pip": "24.2",
+    "pip_audit": "2.10.1",
+    "pluggy": "1.6.0",
+    "proto-plus": "1.28.1",
+    "protobuf": "6.33.6",
+    "pyasn1": "0.6.5",
+    "pyasn1_modules": "0.4.2",
+    "pycparser": "3.0",
+    "pydantic": "2.13.4",
+    "pydantic-settings": "2.14.2",
+    "pydantic_core": "2.46.4",
+    "pygments": "2.20.0",
+    "pytest": "9.1.1",
+    "pytest-asyncio": "1.4.0",
+    "pytest-cov": "7.1.0",
+    "pytest-mock": "3.15.1",
+    "pytest-timeout": "2.4.0",
+    "pytest-vcr": "1.0.2",
+    "python-dateutil": "2.9.0.post0",
+    "python-dotenv": "1.2.2",
+    "python-multipart": "0.0.32",
+    "pyyaml": "6.0.3",
+    "referencing": "0.37.0",
+    "requests": "2.34.2",
+    "responses": "0.26.2",
+    "rpds-py": "2026.6.3",
+    "sentry-sdk": "2.66.0",
+    "six": "1.17.0",
+    "sniffio": "1.3.1",
+    "socksio": "1.0.0",
+    "sqlalchemy": "2.0.51",
+    "sqlalchemy-spanner": "1.19.0",
+    "sqlparse": "0.6.0",
+    "sse-starlette": "3.4.5",
+    "starlette": "1.3.1",
+    "storyland-ai": "0.1.0",
+    "structlog": "26.1.0",
+    "tenacity": "9.1.4",
+    "typing-inspection": "0.4.2",
+    "typing_extensions": "4.16.0",
+    "urllib3": "2.8.0",
+    "uvicorn": "0.51.0",
+    "uvloop": "0.22.1",
+    "vcrpy": "8.3.0",
+    "watchdog": "6.0.0",
+    "watchfiles": "1.2.0",
+    "websockets": "15.0.1",
+    "wrapt": "2.2.2",
+    "zipp": "4.1.0"
+  },
+  "platform": "python",
+  "release": "fixture",
+  "sdk": {
+    "integrations": [
+      "argv",
+      "atexit",
+      "dedupe",
+      "excepthook",
+      "fastapi",
+      "google_genai",
+      "httpx",
+      "logging",
+      "modules",
+      "sqlalchemy",
+      "starlette",
+      "stdlib",
+      "threading"
+    ],
+    "name": "sentry.python.fastapi",
+    "packages": [
+      {
+        "name": "pypi:sentry-sdk",
+        "version": "2.66.0"
+      }
+    ],
+    "version": "2.66.0"
+  },
+  "server_name": "fixture-host",
+  "timestamp": "2026-11-10T23:26:24.173817Z",
+  "transaction": "fixture.gemini_stream",
+  "transaction_info": {
+    "source": "custom"
+  }
+}
