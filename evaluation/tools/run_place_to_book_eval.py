@@ -20,7 +20,9 @@ Usage:
 
 import asyncio
 import json
+import re
 import sys
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -44,7 +46,38 @@ DATASET_NAME = "place_to_book_v1"
 EVALSET_FILE = "evaluation/place_to_book_v1.evalset.json"
 
 
-def score_case(result, expect: str, min_literal: Optional[int]) -> Dict[str, Any]:
+def _fold(text: Optional[str]) -> str:
+    """Casefolded text with accents removed, so "José" and "Jose" (precomposed or
+    combining) compare equal."""
+    decomposed = unicodedata.normalize("NFKD", (text or "").casefold())
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
+def _norm_title(title: Optional[str]) -> str:
+    """Casefolded, accent-free title without punctuation or a leading article."""
+    text = re.sub(r"[^\w\s]", " ", _fold(title))
+    text = re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"^(the|a|an) ", "", text)
+
+
+def _norm_author(author: Optional[str]) -> str:
+    return re.sub(r"[^\w]", "", _fold(author))
+
+
+def _parse_example(example: str) -> Optional[tuple]:
+    """``"Title (Author)"`` → (normalized title, normalized author)."""
+    match = re.match(r"^(.*)\(([^()]*)\)\s*$", example or "")
+    if not match:
+        return None
+    return _norm_title(match.group(1)), _norm_author(match.group(2))
+
+
+def score_case(
+    result,
+    expect: str,
+    min_literal: Optional[int],
+    expected_examples: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """Score one resolved place against its grounding expectation.
 
     Returns a dict with the boolean verdict plus the numeric signals logged to
@@ -79,6 +112,22 @@ def score_case(result, expect: str, min_literal: Optional[int]) -> Dict[str, Any
 
     found_classification = float(result.found == (expect == "found"))
 
+    # ai-private#71: never the same book twice in one answer. A book is its
+    # title + author: same-title books by different authors are not repeats.
+    seen_books = [(_norm_title(c["title"]), _norm_author(c["author"])) for c in candidates]
+    n_duplicate_titles = len(seen_books) - len(set(seen_books))
+    # ai-private#71: when a returned book is one of the evalset's known
+    # examples, its author must be that book's real author. Books the evalset
+    # doesn't name can't be checked offline and are not counted either way.
+    known = dict(filter(None, (_parse_example(e) for e in expected_examples or [])))
+    n_author_mismatches = sum(
+        1
+        for c in candidates
+        if _norm_title(c["title"]) in known
+        and _norm_author(c["author"]) != known[_norm_title(c["title"])]
+    )
+    passed = passed and n_duplicate_titles == 0 and n_author_mismatches == 0
+
     return {
         "expect": expect,
         "found": bool(result.found),
@@ -87,8 +136,29 @@ def score_case(result, expect: str, min_literal: Optional[int]) -> Dict[str, Any
         "min_literal": min_literal,
         "grounding_clean": bool(grounding_clean),
         "found_classification": found_classification,
+        "n_duplicate_titles": n_duplicate_titles,
+        "n_author_mismatches": n_author_mismatches,
         "pass": bool(passed),
         "candidates": candidates,
+    }
+
+
+def aggregate_metrics(evaluated: List[Dict[str, Any]]) -> Dict[str, float]:
+    """Run-level means of every per-case signal, for before/after comparison."""
+    n = len(evaluated)
+    if not n:
+        return {}
+
+    def mean(fn) -> float:
+        return round(sum(fn(c) for c in evaluated) / n, 3)
+
+    return {
+        "case_pass": mean(lambda c: float(c["pass"])),
+        "found_classification": mean(lambda c: c["found_classification"]),
+        "grounding_clean": mean(lambda c: float(c["grounding_clean"])),
+        "no_duplicate_titles": mean(lambda c: float(c["n_duplicate_titles"] == 0)),
+        "authors_correct": mean(lambda c: float(c["n_author_mismatches"] == 0)),
+        "literal_grounded_mean": mean(lambda c: float(c["n_literal_grounded"])),
     }
 
 
@@ -137,6 +207,7 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
         meta = item.metadata or {}
         expect = meta.get("expect", "found")
         min_literal = meta.get("min_literal")
+        expected_examples = meta.get("expected_literal_examples") or []
 
         if not place:
             logger.warning("place_to_book_item_missing_place", item_id=item.id)
@@ -148,7 +219,7 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
         ) as root_span:
             try:
                 result = await resolver.resolve(place)
-                scored = score_case(result, expect, min_literal)
+                scored = score_case(result, expect, min_literal, expected_examples)
                 try:
                     root_span.update(input={"place": place}, output=scored)
                 except Exception:  # pragma: no cover - richness only, never fatal
@@ -169,6 +240,14 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
                 root_span.score_trace(
                     name="grounding_clean", value=float(scored["grounding_clean"]),
                     comment="1.0 = every literal has a maps_to and every vibe has none (no fabrication)",
+                )
+                root_span.score_trace(
+                    name="no_duplicate_titles", value=float(scored["n_duplicate_titles"] == 0),
+                    comment="1.0 = no title appears twice in the answer (ai-private#71)",
+                )
+                root_span.score_trace(
+                    name="authors_correct", value=float(scored["n_author_mismatches"] == 0),
+                    comment="1.0 = every returned evalset-known book names its real author",
                 )
                 case_results.append({"item_id": item.id, "place": place, "run_name": run_name, **scored})
                 logger.info(
@@ -201,6 +280,7 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
         "evaluated": len(evaluated),
         "passed": passed,
         "failed": len(evaluated) - passed,
+        "metrics": aggregate_metrics(evaluated),
         "case_results": case_results,
     }
 
@@ -220,6 +300,7 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
             print(f"  [SKIP] {c['item_id']} ({c.get('reason')})")
     print("=" * 60)
     print(f"Result: {passed}/{len(evaluated)} PASS | Langfuse run: {run_name}")
+    print(f"Metrics: {json.dumps(summary['metrics'])}")
     print(f"Results saved to {out_path}")
     return summary
 

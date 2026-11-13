@@ -816,3 +816,129 @@ class TestObserverIsFlushed:
             await resolver._run_pipeline("Lisbon")
 
         assert flushed == [True], "flush must run even when the pump raises"
+
+
+class TestDropRepeatedTitles:
+    """ai-private#71: an answer never lists the same book twice."""
+
+    def _c(self, title, match_type="literal", maps_to="Baixa"):
+        return {"title": title, "author": "A", "match_type": match_type,
+                "maps_to": maps_to if match_type == "literal" else None}
+
+    def test_case_article_and_punctuation_repeats_are_dropped(self):
+        from core.place_to_book import drop_repeated_titles
+
+        out = drop_repeated_titles([
+            self._c("The Book of Disquiet"),
+            self._c("book of disquiet"),
+            self._c("Book of Disquiet!"),
+            self._c("Night Train to Lisbon"),
+        ])
+        assert [c["title"] for c in out] == ["The Book of Disquiet", "Night Train to Lisbon"]
+
+    def test_a_literal_repeat_replaces_a_vibe_entry_in_place(self):
+        from core.place_to_book import drop_repeated_titles
+
+        out = drop_repeated_titles([
+            self._c("Ulysses", match_type="vibe"),
+            self._c("Dubliners"),
+            self._c("Ulysses", maps_to="Eccles Street"),
+        ])
+        assert [(c["title"], c["match_type"]) for c in out] == [
+            ("Ulysses", "literal"), ("Dubliners", "literal"),
+        ]
+
+    def test_distinct_titles_untouched(self):
+        from core.place_to_book import drop_repeated_titles
+
+        cands = [self._c("Emma"), self._c("Persuasion")]
+        assert drop_repeated_titles(cands) == cands
+
+    def test_same_title_by_different_authors_keeps_both(self):
+        """Codex P2 on ai#302: a title is not a book's identity."""
+        from core.place_to_book import drop_repeated_titles
+
+        cands = [
+            {"title": "Paris", "author": "Edward Rutherfurd",
+             "match_type": "literal", "maps_to": "Île de la Cité"},
+            {"title": "Paris", "author": "Julien Green",
+             "match_type": "literal", "maps_to": "Montmartre"},
+        ]
+        assert drop_repeated_titles(cands) == cands
+
+    def test_same_book_with_author_formatting_drift_is_one_book(self):
+        from core.place_to_book import drop_repeated_titles
+
+        out = drop_repeated_titles([
+            {"title": "Paris", "author": "Edward Rutherfurd",
+             "match_type": "literal", "maps_to": "Île de la Cité"},
+            {"title": "paris", "author": "edward rutherfurd.",
+             "match_type": "literal", "maps_to": "Montmartre"},
+        ])
+        assert [c["maps_to"] for c in out] == ["Île de la Cité"]
+
+    def test_accented_and_plain_author_are_one_book(self):
+        """The same author with and without the accent (NFC, NFD, or none) is one book."""
+        import unicodedata
+
+        from core.place_to_book import drop_repeated_titles
+
+        out = drop_repeated_titles([
+            {"title": "Blindness", "author": "José Saramago",
+             "match_type": "literal", "maps_to": "Chiado"},
+            {"title": "Blindness", "author": unicodedata.normalize("NFD", "José Saramago"),
+             "match_type": "literal", "maps_to": "Baixa"},
+            {"title": "Blindness", "author": "Jose Saramago",
+             "match_type": "literal", "maps_to": "Alfama"},
+        ])
+        assert [c["maps_to"] for c in out] == ["Chiado"]
+
+    def test_missing_author_falls_back_to_title(self):
+        from core.place_to_book import drop_repeated_titles
+
+        out = drop_repeated_titles([
+            {"title": "Paris", "author": None, "match_type": "literal", "maps_to": "Marais"},
+            {"title": "Paris", "author": "", "match_type": "literal", "maps_to": "Bastille"},
+        ])
+        assert [c["maps_to"] for c in out] == ["Marais"]
+
+
+async def test_resolve_drops_a_repeated_title(monkeypatch):
+    """Wiring: the resolver's answer carries each book once."""
+    text = "Persuasion by Jane Austen is set in Bath. Northanger Abbey is set in Bath."
+    cands = [
+        {"title": "Persuasion", "author": "Jane Austen", "why_it_fits": "w",
+         "match_type": "literal", "maps_to": "Bath"},
+        {"title": "persuasion", "author": "Jane Austen", "why_it_fits": "w",
+         "match_type": "literal", "maps_to": "Bath"},
+        {"title": "Northanger Abbey", "author": "Jane Austen", "why_it_fits": "w",
+         "match_type": "literal", "maps_to": "Bath"},
+    ]
+    resolver = _make_resolver(monkeypatch, text, cands, cache=_SpyCache())
+    result = await resolver.resolve("Bath")
+    assert [c.title for c in result.candidates] == ["Persuasion", "Northanger Abbey"]
+
+
+class TestPromptV4PlaceToBook:
+    """ai-private#71: the revised researcher/formatter keep their guardrails."""
+
+    def test_researcher_rules(self):
+        from agents.prompts import load_prompts
+
+        text = load_prompts("v4").place_to_book_researcher
+        assert "exists only inside fiction" in text  # invented places → empty
+        assert "Do not substitute the real place" in text
+        assert "AROUND {place}" in text  # literal = inside the place typed
+        assert "List each book ONCE" in text
+        assert "never the translator" in text
+        assert "region or a country" in text  # queries cover regions/countries
+        assert "{place}" in text and text.format(place="Lisbon")
+
+    def test_formatter_rules(self):
+        from agents.prompts import load_prompts
+
+        text = load_prompts("v4").place_to_book_formatter
+        assert "Each book appears ONCE" in text
+        assert '"vibe" at most' in text
+        assert "MUST be null" in text
+        assert text.format(place="Lisbon")
