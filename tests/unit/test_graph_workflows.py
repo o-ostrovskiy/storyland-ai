@@ -25,6 +25,7 @@ from pydantic import BaseModel
 import google.adk.models.google_llm as google_llm
 from google.adk.agents import LlmAgent
 from google.adk.models.llm_response import LlmResponse
+from google.adk.apps import App
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.workflow import JoinNode, START, Workflow
@@ -386,7 +387,8 @@ class TestNodeRootInvocationIdentity:
             app_name=APP, user_id=USER, session_id="ident", state={}
         )
         runner = Runner(
-            node=workflow, app_name=APP, session_service=service, plugins=[_Recorder()]
+            app=App(name=APP, root_agent=workflow, plugins=[_Recorder()]),
+            session_service=service,
         )
         async with runner:
             async for _ in runner.run_async(

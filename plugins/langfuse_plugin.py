@@ -19,6 +19,7 @@ from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from common.logging import get_logger
 from common.search_grounding import SearchMetadata, extract_search_metadata
+from agents.prompts import CURRENT_PROMPT_VERSION, prompt_content_hash
 
 logger = get_logger(__name__)
 
@@ -29,8 +30,11 @@ except ImportError:
     LANGFUSE_AVAILABLE = False
 
 
-# Gemini standard (non-batch) pricing per 1M tokens (as of Jul 2026).
-# Source: https://ai.google.dev/gemini-api/docs/pricing
+# Gemini standard (non-batch) text-input pricing per 1M tokens.
+# Source: https://ai.google.dev/gemini-api/docs/pricing (3.1 and 2.5 rows
+# re-read 2026-10-22). The page lists stable ids only, so a `-preview` id
+# (prod serves gemini-3.1-flash-lite-preview) takes its stable row's rate
+# through the substring match below. The 2.x/1.5 rows price historical traces.
 _GEMINI_PRICING: dict[str, tuple[float, float]] = {
     # (input_per_1m, output_per_1m)
     "gemini-3.1-flash-lite": (0.25, 1.50),
@@ -40,13 +44,17 @@ _GEMINI_PRICING: dict[str, tuple[float, float]] = {
     "gemini-1.5-flash": (0.075, 0.30),
     "gemini-1.5-pro": (1.25, 5.00),
 }
-_GEMINI_DEFAULT_PRICING = (0.30, 2.50)  # fall back to gemini-2.5-flash rates
 
 
-def _pricing_for(model_name: str) -> tuple[float, float]:
-    """Return (input_per_1m, output_per_1m) for the given model name."""
+def _pricing_for(model_name: str) -> Optional[tuple[float, float]]:
+    """Return (input_per_1m, output_per_1m) for the given model name.
+
+    None when no row matches: an unpriced model's cost is unknown, never
+    another model's rate (ai-private#37: the old 2.5-flash fallback priced
+    prod at the wrong rate and rendered exactly like a real number).
+    """
     if not model_name:
-        return _GEMINI_DEFAULT_PRICING
+        return None
     lower = model_name.lower()
     # MYS-398 follow-up: match longest key first. `_GEMINI_PRICING` is
     # keyed by substring ("key in lower"), and "gemini-2.5-flash" is
@@ -58,12 +66,15 @@ def _pricing_for(model_name: str) -> tuple[float, float]:
     for key in sorted(_GEMINI_PRICING, key=len, reverse=True):
         if key in lower:
             return _GEMINI_PRICING[key]
-    return _GEMINI_DEFAULT_PRICING
+    return None
 
 
-def _calculate_cost(input_tokens: int, output_tokens: int, model_name: str) -> float:
-    """Calculate cost in USD given token counts and model name."""
-    input_rate, output_rate = _pricing_for(model_name)
+def _calculate_cost(input_tokens: int, output_tokens: int, model_name: str) -> Optional[float]:
+    """Calculate cost in USD given token counts and model name; None if unpriced."""
+    pricing = _pricing_for(model_name)
+    if pricing is None:
+        return None
+    input_rate, output_rate = pricing
     return (input_tokens / 1_000_000) * input_rate + (output_tokens / 1_000_000) * output_rate
 
 
@@ -94,8 +105,12 @@ class LangfusePlugin(BasePlugin):
         )
 
         runner = Runner(
-            agent=my_agent,
-            plugins=[LoggingPlugin(), langfuse_plugin],
+            app=App(
+                name="storyland",
+                root_agent=my_workflow,
+                plugins=[LoggingPlugin(), langfuse_plugin],
+            ),
+            session_service=session_service,
         )
     """
 
@@ -106,6 +121,7 @@ class LangfusePlugin(BasePlugin):
         host: Optional[str] = None,
         enabled: bool = True,
         root_name: Optional[str] = None,
+        prompt_version: str = CURRENT_PROMPT_VERSION,
     ):
         """
         Initialize Langfuse plugin.
@@ -121,13 +137,23 @@ class LangfusePlugin(BasePlugin):
                 plugin cannot recover the root identity from the context —
                 the caller that builds the Runner KNOWS the workflow and
                 injects its name here (see WorkflowExecutor._build_runner).
+            prompt_version: The prompt set this run actually uses, written on
+                every trace. An eval run with --prompt-version passes its own;
+                production uses the default.
         """
         super().__init__(name="langfuse_plugin")
         self.root_name = root_name
+        self._prompt_version = prompt_version
+        # The prompt JSON can't change under a running process: hash it once
+        # per plugin, not per trace.
+        self._prompt_hash = prompt_content_hash(prompt_version)
         self.enabled = enabled and LANGFUSE_AVAILABLE
         self.client: Optional[Langfuse] = None
         self._token_usage = TokenUsage()
         self._total_cost_usd: float = 0.0
+        # True once any call in the run hit an unpriced model, so the total
+        # above is a lower bound rather than the run's cost.
+        self._cost_unknown = False
         self._current_trace = None
         # MYS-398: discovery's parallel_discovery ParallelAgent runs three
         # sub-agent branches (city/landmark/author pipelines) concurrently
@@ -255,10 +281,19 @@ class LangfusePlugin(BasePlugin):
             user_id = invocation_context.user_id
             session_id = invocation_context.session.id if invocation_context.session else None
 
+            # Prompt identity on every production trace, so traces can be
+            # filtered/compared by prompt in Langfuse. The hash distinguishes an
+            # in-place vN.json edit from the published vN (MYS-462); prompts
+            # stay in git, this only labels which set produced the trace.
             self._propagation_cm = propagate_attributes(
                 user_id=user_id,
                 session_id=session_id,
                 trace_name=f"{agent_name}_invocation",
+                version=self._prompt_version,
+                metadata={
+                    "prompt_version": self._prompt_version,
+                    "prompt_hash": self._prompt_hash,
+                },
             )
             self._propagation_cm.__enter__()
 
@@ -272,15 +307,6 @@ class LangfusePlugin(BasePlugin):
                 },
                 input=str(user_message),
             )
-            # Mirror the root span's input onto the TRACE. Langfuse's session
-            # view and trace list render trace-level I/O, not the root span's,
-            # so without this every production trace displays as "This trace
-            # has no input or output" even though the span tree is complete.
-            # v4's observations-first model deprecates trace I/O in favour of
-            # propagate_attributes(), but propagate_attributes carries only
-            # correlating attributes (user/session/tags) -- set_trace_io is
-            # still the only way to populate the fields those views read.
-            self._current_trace.set_trace_io(input=str(user_message))
             logger.debug("langfuse_trace_created", trace_id=self._current_trace.trace_id, user_id=user_id)
         except Exception as e:
             logger.warning("langfuse_trace_error", error=str(e), error_type=type(e).__name__)
@@ -419,9 +445,17 @@ class LangfusePlugin(BasePlugin):
                 self._token_usage.output_tokens += usage.output_tokens
                 self._token_usage.total_tokens += usage.total_tokens
 
+                pricing = _pricing_for(model_name)
                 cost = _calculate_cost(usage.input_tokens, usage.output_tokens, model_name)
-                self._total_cost_usd += cost
-                input_rate, output_rate = _pricing_for(model_name)
+                cost_fields: dict[str, Any] = {}
+                if cost is None:
+                    # Every use, not once: a missing row is a fix-the-table
+                    # signal, and Langfuse shows no cost rather than a guess.
+                    self._cost_unknown = True
+                    logger.warning("langfuse_model_unpriced", model=model_name, branch=key)
+                else:
+                    self._total_cost_usd += cost
+                    cost_fields["cost_details"] = {"total_cost": cost}
                 generation.update(
                     output=str(llm_response),
                     usage_details={
@@ -429,14 +463,14 @@ class LangfusePlugin(BasePlugin):
                         "output": usage.output_tokens,
                         "total": usage.total_tokens,
                     },
-                    cost_details={
-                        "total_cost": cost,
-                    },
+                    **cost_fields,
                     metadata={
-                        "model_pricing": {
-                            "input_per_1m": input_rate,
-                            "output_per_1m": output_rate,
-                        },
+                        "model_pricing": (
+                            {"input_per_1m": pricing[0], "output_per_1m": pricing[1]}
+                            if pricing is not None
+                            else None
+                        ),
+                        "cost_unknown": cost is None,
                         **search_metadata,
                     },
                 )
@@ -701,22 +735,20 @@ class LangfusePlugin(BasePlugin):
             return
 
         try:
+            # The root observation carries the run's overall I/O: Langfuse v4 is
+            # observations-first and trace-level I/O is gone. Falls back to the
+            # status blob only when the run produced no final-response text, so
+            # the root never renders blank.
             self._current_trace.update(
-                output={"status": "completed"},
+                output=self._final_response_text
+                if self._final_response_text is not None
+                else {"status": "completed"},
                 metadata={
                     "total_input_tokens": self._token_usage.input_tokens,
                     "total_output_tokens": self._token_usage.output_tokens,
                     "total_cost_usd": self._total_cost_usd,
+                    "cost_unknown": self._cost_unknown,
                 },
-            )
-            # Trace-level output, for the same reason as the input above. Falls
-            # back to the status blob only when the run produced no final-
-            # response text (error paths), so the trace never renders blank.
-            # set_trace_io drops None fields, so this cannot clear the input.
-            self._current_trace.set_trace_io(
-                output=self._final_response_text
-                if self._final_response_text is not None
-                else {"status": "completed"}
             )
             self._current_trace.end()
             logger.info(
@@ -760,9 +792,9 @@ class LangfusePlugin(BasePlugin):
                     "total_input_tokens": self._token_usage.input_tokens,
                     "total_output_tokens": self._token_usage.output_tokens,
                     "total_cost_usd": self._total_cost_usd,
+                    "cost_unknown": self._cost_unknown,
                 },
             )
-            self._current_trace.set_trace_io(output={"status": "error", "error_type": error_type})
             self._current_trace.end()
         except Exception as e:
             logger.warning("langfuse_finalize_error", error=str(e), error_type=type(e).__name__)
@@ -785,12 +817,14 @@ class LangfusePlugin(BasePlugin):
             "output_tokens": self._token_usage.output_tokens,
             "total_tokens": self._token_usage.total_tokens,
             "cost_usd": self._total_cost_usd,
+            "cost_unknown": self._cost_unknown,
         }
 
     def reset_stats(self) -> None:
         """Reset token usage statistics."""
         self._token_usage = TokenUsage()
         self._total_cost_usd = 0.0
+        self._cost_unknown = False
         self._final_response_text = None
 
     async def flush(self) -> None:

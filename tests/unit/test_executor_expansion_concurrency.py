@@ -26,6 +26,7 @@ import asyncio
 
 from google.adk.events import Event
 from google.adk.events.event_actions import EventActions
+from google.adk.workflow import Workflow
 
 import agents.orchestrator as orchestrator_module
 from core.events import ExpansionReady, WorkflowComplete, WorkflowError
@@ -166,7 +167,7 @@ def _fake_expansion_runner(state_delta):
 def _make_executor(monkeypatch, real_service, *, wrap_for_race=False):
     import core.executor as ex
 
-    monkeypatch.setattr(ex, "create_expansion_workflow", lambda *a, **k: object())
+    monkeypatch.setattr(ex, "create_expansion_workflow", lambda *a, **k: Workflow(name="stub_workflow"))
 
     config = ExecutorConfig(model_name="gemini-2.0-flash", google_api_key="test-key")
     executor = ex.WorkflowExecutor(

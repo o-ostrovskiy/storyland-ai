@@ -4,6 +4,36 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 
 ---
 
+## v4 — 2026-11-10
+
+**Card:** storyland-ai-private#71 (Destinations revisit 2/2). Only `place_to_book_researcher` and `place_to_book_formatter` changed; every other agent is byte-identical to v3 (pinned by `test_v4_is_v3_plus_the_place_to_book_change_only`).
+
+### Changes
+| Agent | Change |
+|---|---|
+| place_to_book_researcher | Step 0: a place that exists only in fiction returns no candidates, never its real-world stand-in; `literal` only when the story is set inside the place typed (the country or region around it is `vibe` at most); each book once; the real author, never a translator/editor; search queries for regions and countries (landscape + main towns) and city + country; breadth (Olga's A, 2026-11-11): 6-8 candidates for a well-known place, at least 4 literal and 2-3 vibe, and more searches rather than stopping at three; firmer count (Olga's B, 2026-11-11): at least 5 literal ("books that happen there") for a well-known place, more searches when fewer than 5 |
+| place_to_book_formatter | Keep every grounded literal, then 2-3 grounded vibe (never more than 3); one entry per book (a literal repeat wins); `literal` only inside the place typed, "when unsure, choose vibe" |
+
+Code guard alongside: `drop_repeated_titles()` in the resolver, keyed on title + author (two different books called "Paris" both stay), accents folded ("Jose Saramago" = "José Saramago").
+
+### Eval (`place_to_book_v1`, 14 cases, gemini-3.1-flash-lite, cache off)
+| Metric | v3 (`p2b_eval_20261110_142428`) | v4 first cut (`p2b_eval_20261110_142726`) | v4 + breadth (`p2b_eval_20261111_101718`) | v4 + at least 5 (`p2b_eval_20261111_181533`) |
+|---|---|---|---|---|
+| case_pass | 0.857 (12/14) | **1.000 (14/14)** | **1.000 (14/14)** | **1.000 (14/14)** |
+| found_classification | 0.857 | **1.000** | **1.000** | **1.000** |
+| grounding_clean | 1.000 | 1.000 | 1.000 | 1.000 |
+| no_duplicate_titles | 1.000 | 1.000 | 1.000 | 1.000 |
+| authors_correct | 1.000 | 1.000 | 1.000 | 1.000 |
+| literal_grounded (mean, all 14) | 4.214 | 2.357 | 3.214 | 3.429 |
+| literal_grounded (mean, 11 found places) | 4.73 | **3.00 ⚠️** | **4.09 ⚠️** | **4.36 ⚠️** |
+| candidates per found place | 6–8 | 3 (5 for Rome, Paris) | 5–7 (6 places at 5 lit + 2 vibe, 5 at 3 lit + 2 vibe) | 5–8 (Paris, Lisbon, Kyoto, New York 6 lit; St Petersburg 5; Highlands 4; Portugal, Rome, Dublin, Tokyo, vibe check 3) |
+
+v3 failed Macondo (3 García Márquez "literal" books mapped to Aracataca) and Wakanda (4 Black Panther books). v4 returns both empty. The first v4 cut was narrower (every found place stopped at 3 literal books, almost no vibe). The breadth wording brings back 2 vibe books everywhere and 5 literal books in 6 of 11 places, but 5 places (Portugal, Scottish Highlands, Rome, St Petersburg, Paris) still stop at 3. **Open:** literal mean 4.09 is still below v3's 4.73 (whose count included Macondo/Wakanda-style over-claiming).
+
+The firmer count (`p2b_eval_20261111_181533`, at 0fe6bf7) still holds 14/14 with Macondo/Wakanda empty and lifts the mean to 4.36, but does not reach 4.73. Of the five places that stopped at 3, Paris rose to 6, St Petersburg to 5 and the Highlands to 4; Portugal and Rome stayed at 3. Dublin, Tokyo and the vibe check fell from 5 to 3. Each place lands on 3 or on 5–6 and which places do moves between runs, so the gap looks like run-to-run variance in how many searches the researcher runs, not a wording the prompt is missing. **Open:** still below v3's 4.73; no further run (Olga's B approved one).
+
+---
+
 ## v2-patch — 2026-04-16
 
 **Branch:** #63 (same PR, post-review fixes)

@@ -1,0 +1,50 @@
+name: Sync prompts to Langfuse
+
+# One-way mirror of agents/prompts/vN.json into Langfuse prompt management, for
+# the playground and side-by-side comparison. Git stays the source of truth:
+# the app never reads prompts from Langfuse, so this job cannot change
+# production behaviour. push-to-main only (never pull_request), so the Langfuse
+# secrets are never exposed to PR-authored code.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'agents/prompts/**'
+      - 'agents/prompts.py'
+      - 'core/guardrails/**'
+      - 'evaluation/tools/sync_prompts_to_langfuse.py'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Create virtual environment
+        run: |
+          python -m venv .venv
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements-dev.lock
+          pip install -e . --no-deps
+
+      - name: Sync prompts (idempotent — unchanged prompts are skipped)
+        env:
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
+        run: make prompts-sync

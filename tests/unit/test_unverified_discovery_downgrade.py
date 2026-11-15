@@ -27,6 +27,7 @@ from types import SimpleNamespace
 
 from google.adk.events import Event
 from google.adk.events.event_actions import EventActions
+from google.adk.workflow import Workflow
 from google.genai import types
 
 from core.executor import DISCOVERY_RESEARCHER_AUTHORS, RESEARCHER_PAYLOAD_KEYS
@@ -216,7 +217,7 @@ def _runner_with_skip(monkeypatch, skipped_agent):
     class _FakeRunner:
         def __init__(self, *args, **kwargs):
             self._session_service = kwargs.get("session_service")
-            self._plugins = kwargs.get("plugins") or []
+            self._plugins = kwargs["app"].plugins
 
         async def __aenter__(self):
             return self
@@ -269,7 +270,7 @@ def _executor(monkeypatch, cache_enabled):
     from services.session_service import create_session_service
 
     monkeypatch.setattr(
-        ex, "create_book_to_place_discovery_workflow", lambda *a, **k: object()
+        ex, "create_book_to_place_discovery_workflow", lambda *a, **k: Workflow(name="stub_workflow")
     )
     return WorkflowExecutor(
         config=ExecutorConfig(

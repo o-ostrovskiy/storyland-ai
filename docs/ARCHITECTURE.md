@@ -864,7 +864,7 @@ Cache Discovery results in a **persistent, SQLite-backed `diskcache`** store tha
 
 ### Implementation
 - `core/cache.py` + `core/disk_cache.py`; config `CACHE_ENABLED` (default **true** — a missing env var degrades to caching on, never a correctness bug), `CACHE_BACKEND` (`disk` = persistent SQLite on a docker volume, or in-memory), `CACHE_DIR`, `CACHE_TTL_SECONDS`, `CACHE_MAX_ENTRIES`. Effective config logged at boot.
-- `core/cache_version.py` — `compute_cache_version()` hashes the model name plus the **source of the prompt/schema modules** (`_PROMPT_MODULES`, which includes `models.discovery`, `models.place_key`, `core.regions`). A model/prompt/schema change mints a new namespace; stale entries can never be served after a deploy that changed what a cached result means. **Boundary:** the fingerprint covers module *source*, not data — `agents.prompts`' `CURRENT_PROMPT_VERSION` bump changes the hash, but an in-place edit to the `v2`/`v3` prompt JSON *content* does not, since that JSON is data rather than source read by `inspect.getsource()`. That content gap is tracked separately as MYS-462, not closed by this ADR.
+- `core/cache_version.py` — `compute_cache_version()` hashes the model name plus the **source of the prompt/schema modules** (`_PROMPT_MODULES`, which includes `models.discovery`, `models.place_key`, `core.regions`). A model/prompt/schema change mints a new namespace; stale entries can never be served after a deploy that changed what a cached result means. **Prompt data (MYS-462):** the prompt JSON is data, not source, so `inspect.getsource()` can't see it; the fingerprint therefore also mixes in `agents.prompts.prompt_content_hash()` — a hash of the *active* `vN.json` file's content. A `CURRENT_PROMPT_VERSION` bump and an in-place JSON edit both flush the cache; editing an inactive version (e.g. `v1.json`) does not.
 
 ### Rationale
 Discovery is the expensive phase (parallel LLM fan-out + search). Same book → same regions, so recomputing per request wastes tokens and seconds. An earlier `ENABLE_RESULT_CACHE` feature flag was removed — caching is core behavior, not an experiment. Content-fingerprinting removed the post-deploy "cache warmup / manual flush" ritual.
@@ -900,7 +900,7 @@ Make "done" mechanical (per team engineering-standards): reproducible dependenci
 - **Hash-locked deps:** `requirements.lock` / `requirements-dev.lock` from `uv pip compile --universal --generate-hashes`; the unit workflow (`codex.yml`) installs `--require-hashes` and fails if `make lock` would change the committed lock. `integration-tests.yml` installs from the same dev lock as of the ADK 2 lift (the previously documented live-resolution gap bit exactly as predicted: a fresh resolve drifted httpx/vcrpy and broke VCR replay with a method-case mismatch the locked env couldn't reproduce).
 - **Coverage ratchet:** `fail_under = 74` in `pyproject.toml` (76% baseline; bare `--cov` honoring `[tool.coverage.run]`). Ratchet, not target — raise, never lower.
 - **Audit gate:** `pip-audit --strict --require-hashes` on the prod lock; ignores are inline with justification + ticket.
-- **ADK pin:** `google-adk[db]>=2.4.0,<3` in `pyproject.toml` + a CI guard asserting the **locked** resolution stays 2.x (prevents a non-reproducible jump to the next major). Historical: this was `google-adk[eval]>=1.33.0,<2` guarded at 1.x until the ADK 2 lift (ADR #23), which moved the pin one major and swapped the extra — `[db]` restores the `DatabaseSessionService` deps that are no longer core on 2.x, and nothing imports `google.adk.evaluation`. The mechanism is unchanged: the guard tracks the tested major, it does not forbid a particular one.
+- **ADK pin:** `google-adk[db]>=2.12.0,<2.13` in `pyproject.toml` (2026-10, storyland-ai-private#60: lifted from `>=2.4.0,<3` on 2.5.0; the `<2.13` hold is because 2.13 switches telemetry to the OTel GenAI v2 schema and drops the `call_llm` span that Ops Watch's `langfuse_health.py` reads — lift it once that script moves, or set `ADK_TELEMETRY_SCHEMA_VERSION_OPT_IN=otel_semconv_1_36`) + a CI guard asserting the **locked** resolution stays 2.x (prevents a non-reproducible jump to the next major). Historical: this was `google-adk[eval]>=1.33.0,<2` guarded at 1.x until the ADK 2 lift (ADR #23), which moved the pin one major and swapped the extra — `[db]` restores the `DatabaseSessionService` deps that are no longer core on 2.x, and nothing imports `google.adk.evaluation`. The mechanism is unchanged: the guard tracks the tested major, it does not forbid a particular one.
 
 ### Rationale
 The agent (and everyone else) is only as autonomous as the definition of "done" is mechanical; a green build must mean tests passed, coverage didn't regress, deps are exactly what was reviewed, and no known-vulnerable package ships.
@@ -916,6 +916,7 @@ Env-gated Sentry for the API — performance tracing **off** by default, logs an
 - `api/sentry.py`, gated on `SENTRY_DSN`; `common/logging.py` bridges structlog → Sentry (INFO+ as Logs, auto-counted `log.events` metrics) — both default **on** (`SENTRY_ENABLE_LOGS`/`SENTRY_ENABLE_METRICS` default `true`). Release tagging via `SENTRY_RELEASE` (deployed SHA).
 - Performance tracing off by default: `traces_sample_rate` resolves to `None` (not `0.0`) so inbound trace headers that would bypass scrubbers aren't honored.
 - Privacy: `send_default_pii=False`, `max_request_body_size="never"`, `include_local_variables=False` (frame locals hold prompts, taste context, lat/lng), URL query-string scrubbing across events/logs/breadcrumbs/spans, health-probe noise dropped.
+- **Addendum (2026-11-10, ai-private#74): the scrub backstop.** Behind the per-key rules, `tests/unit/test_sentry_scrub_backstop.py` runs events captured from the real SDK + app + google-genai client (`scripts/capture_sentry_fixtures.py`: synthetic local run, Gemini stubbed in-process; re-run after a sentry-sdk or google-genai bump) through the hooks `init_sentry()` wires and walks every string at any depth, failing on anything that looks like a query (`?`/`#` tail or a bare `k=v`). Its first run found HTTPX breadcrumbs carrying `data['http.query']`; breadcrumb data now gets the same record rules as span data (query-named keys dropped).
 
 ### Rationale
 We need to see production exceptions without shipping user data to a third party; Langfuse owns the "what did the agents do" question, Sentry only the "what broke" question.
@@ -959,7 +960,7 @@ Five smaller decisions, recorded together:
 - **Bounded session retention** (2026-06-24): a periodic retention sweep (`services/session_retention.py`) bounds the in-memory/SQLite session store — extends ADR #6, which predates it.
 - **Recommendation-tone guardrail** (2026-06-28): rec explanations are fit-only and never grade the reader (`core/guardrails/tone_guardrail.py`).
 - **Langfuse per-branch scoping** (2026-07-17, MYS-398): generation/agent-stack/span state is scoped **per ParallelAgent branch** (`_branch_key()` in `plugins/langfuse_plugin.py`) — per-request plugin instances (ADR #8) were not enough under the ADR #3 parallel fan-out.
-- **Langfuse trace-level I/O written explicitly** (2026-08-05, MYS-788): the plugin sets input/output on the trace as well as on its root span (`set_trace_io()` in `plugins/langfuse_plugin.py`), because Langfuse's session view and trace list render **trace**-level I/O — setting only the root span's made every production trace display as "This trace has no input or output" despite a complete span tree. Python SDK v4 dropped `update_current_trace()` and deprecates trace I/O in favour of the observations-first model, but `propagate_attributes()` carries correlating attributes only (user/session/tags/metadata), so `set_trace_io()` is the sole remaining writer for those two fields; revisit when those views read observations instead. Trace output is the run's final-response text, picked with the same rule as `core/run_harness.py` (last event where `is_final_response()` is true).
+- **Langfuse run I/O lives on the root observation** (2026-11-04, supersedes MYS-788's trace-level write): Langfuse v4 is observations-first and removes trace-level I/O, so the plugin no longer calls the deprecated `set_trace_io()`. `plugins/langfuse_plugin.py` writes the user message and the run's final-response text to its root observation (last event where `is_final_response()` is true, the same rule as `core/run_harness.py`), falling back to `{"status": "completed"}` when the run produced no final text.
 
 ---
 
@@ -1018,7 +1019,7 @@ Migrate in stages, eval-gated against a two-run pre-migration baseline (storylan
 - Session storage: **fresh DB at cutover** (default file renamed to `storyland_sessions_v2.db` so 2.x never opens a 1.x file). Jobs are minutes-long and the retention sweeper prunes anyway, so no data migration. The v-current schema keeps `sessions.update_time` and exposes the engine as `db_engine`, so the retention sweeper's raw-SQL prune still works — now proven by `tests/integration/test_session_retention_db.py` (previously the prune was fail-open and untested against a real store).
 - The ADR #11 `append_event(state_delta)` persistence contract holds unchanged on both backends.
 - All eight `LangfusePlugin` hooks survive; `CallbackContext.branch` is now **public**, removing the private `_invocation_context` coupling (kept only as a fallback). Token-usage extraction treats absent/None `usage_metadata` as missing (never a zero-token success) and logs a WARNING so cost tracking can't silently zero.
-- ADK 2.x auto-retries a tool only when its exception propagates; `tools/preferences.py` deliberately stays fail-open (documented in place).
+- ADK 2.x auto-retries a tool only when its exception propagates; `tools/preferences.py` deliberately stayed fail-open. (The `tools/` package was later deleted as dead code: its only consumer, `reader_profile_agent`, was removed in MYS-436.)
 - starlette resolves to >=1.3 → the five PYSEC ignores were removed from `codex.yml` and `Makefile`; the CI pin guard (ADR #17) now asserts a 2.x resolution.
 - `[eval]` extra dropped (nothing imports `google.adk.evaluation`); `[db]` + explicit `greenlet` added.
 
@@ -1151,6 +1152,8 @@ the PR rather than assumed.
 
 ## 27. Judge-Calibration Reads a UNION of the Legacy Runs API and the Experiments API (2026-08-20)
 
+**Update 2026-11-04:** the legacy leg is removed (the "PR3" below). `collect_candidates` reads the Experiments API only, so runs written before the 2026-10-11 write migration no longer reach calibration. Text below records the decision as made.
+
 ### Context
 
 Langfuse retires the legacy dataset-run endpoints on **2026-11-16**. The obvious sequencing — move the writes and the reads together — was argued for on real evidence: `GET /experiments` returns **zero** runs today, so a reads-only cutover finds nothing and calibration goes dark.
@@ -1231,6 +1234,8 @@ Each eval tool marks its per-item root span as an experiment item by setting Lan
 
 ### Consequences
 
+**Verified 2026-11-04:** a read-only live run of `collect_candidates` found the self-minted experiments joined to `books_v1` and `storyland_eval` (5 runs, 41 candidates) and hydrated a candidate. The paragraph below is the earlier state.
+
 🔴 **Not verified end-to-end.** Whether a self-minted experiment id joins its dataset in `GET /experiments`, and whether #27's union then finds those runs, needs a live scheduled-eval run and a calibration dry-run — real LLM spend, so a founder G4 gate. The code is written so one minimal run settles it; until then this ADR records a design, not a confirmed behaviour. The legacy READ leg stays deliberately in place, which is what makes that survivable.
 
 ---
@@ -1252,7 +1257,53 @@ The trip composer intermittently emitted a `ComposerEnvelope` whose JSON stopped
 ### Trade-offs
 The module lives in `agents/`, not `core/`, because `core/__init__` imports the executor, which imports the composer agent (a cycle). The local-atmosphere composer (`agents/local_atmosphere_agent.py`, same `output_key`) is not covered yet. Defect 2 (bimodal "crater" itineraries) is characterised separately and is not assumed to share this root.
 
-## 30. Session DB Work Survives a Cancelled Caller (2026-10-22)
+## 30. Place→Book Answers Live on Disk, and "Couldn't Check" Is Never Stored (2026-11-05)
+
+### Context
+
+Place→book results sat in an in-process `TTLCache`, so every deploy or restart wiped them and the same place paid for a fresh AI run. The in-process store also hid two things a persistent one can't: a restart used to wash out answers from an older prompt, and an empty or malformed pipeline answer was cached as "not found" for the full TTL.
+
+### Decision
+
+- The resolver's cache follows `CACHE_BACKEND`. On disk it is its own store at `<CACHE_DIR>/place2book`, on the same volume as Discovery but with its own LRU budget (`build_place_to_book_cache`).
+- Keys are `place2book:v1:<CURRENT_PROMPT_VERSION>:<place>`, so a prompt bump invalidates them.
+- `found` is kept 6h and `not_found` 1h (matching the gateway), through a per-entry `ttl_seconds` on both cache backends.
+- A model error raises before any write. No formatter output, a malformed one, or no researcher text with nothing to show is "couldn't check": the caller gets the same not-found envelope, unwritten.
+- Entries are plain dicts validated on read. An unreadable entry or a failed read is a miss; a failed write still answers.
+
+### Trade-offs
+
+- An in-place edit to a prompt's JSON doesn't change the key (storyland-ai-private#40); the stale window is bounded by the 6h TTL.
+- The gateway can't tell a "couldn't check" from a real `found: false`, so it still remembers that answer for its own 1h. The envelope is unchanged here on purpose.
+
+### Addendum (2026-11-10, ai-private#71): v4 place→book prompts and a one-entry-per-book guard
+
+- Prompt set `v4` = `v3` with only `place_to_book_researcher` / `place_to_book_formatter` revised: `literal` only when the story is set inside the place typed (a book set in the country around it is `vibe` at most); a place that exists only in fiction returns an empty list rather than its real-world stand-in; each book once; the real author; queries that cover regions and countries.
+- `PlaceToBookResolver.resolve()` also runs `drop_repeated_titles()` after `enforce_label_invariants()`: a book is its normalized title + author, so a repeat (casing, a leading article, punctuation) is dropped while same-title books by different authors are both kept; a `literal` repeat replaces a `vibe` entry in place.
+- The bump moves both the place→book key (`place2book:v1:v4:…`) and the discovery cache namespace (`CURRENT_PROMPT_VERSION` is in the fingerprinted source), so there is one cold-cache window for both.
+- Count wording (Olga's B, 2026-11-11): for a well-known place the researcher looks for at least 5 books that happen there (6-8 candidates, 2-3 vibe) and searches more when it has fewer. The one approved run, `p2b_eval_20261111_181533`, holds 14/14 with Macondo/Wakanda empty; literal books per found place 4.36 vs v3's 4.73 (table in `evaluation/PROMPT_CHANGELOG.md`).
+
+## 31. A Work Has a Kind; Book Fields Stay on the Wire for Compatibility (2026-11-10)
+
+### Context
+
+Every entry into the service was a book: `DiscoverRequest` / `LocalAtmosphereRequest` take `book_title` + `author`, and the metadata event, the session and the discovery cache key all speak of a book. The Movies epic (storyland-team-os#45) needs films and series as one more *kind* of work, not a second pipeline, and its non-negotiable rule is that "filmed here" and "set here" never blur. fe, be and ios all parse the book fields today, and the persisted discovery cache is keyed on them.
+
+### Decision
+
+- `models/work.py` defines `WorkKind = Literal["book", "film", "series"]` and `WorkRef(kind, title, creator, year?)`; `creator` is the author, director or showrunner. Title and creator have the same bounds as `book_title` / `author`.
+- Both requests take an optional `work`. Absent, `book_title` + `author` mean `kind="book"` and validate exactly as before. Present alone, it fills `book_title` / `author` (so every downstream reader is unchanged); sent with them, both must name the same work or the request is a 422.
+- The metadata SSE event carries `kind` and `creator` **only for a film or series**. A book's event is byte-identical to before (pinned in `tests/unit/test_work_kind.py`); a missing `kind` on the wire means book.
+- `SessionStateKeys.WORK_KIND` holds the kind (missing ⇒ book, for older sessions). The discovery cache key gets `|kind=<kind>` only when it isn't a book, so no book key changes and no persisted entry is lost.
+- `CityStop.screen_claim` (`filmed_here` | `set_here`, default null) sits next to `filming_scene`. Extraction nulls it on every stop of a book journey, whatever the composer emitted.
+- `agents/work_prompts.py:for_kind(kind)` is the prompt seam: every kind returns the book prompt set until the film/series prompts land (Movies story 4). It lives outside the cache fingerprint (`core/cache_version.py`) because it changes no prompt text; story 4 adds it to `_PROMPT_MODULES` when it does.
+
+### Trade-offs
+
+- Two names for one thing on the wire (`book_title` / `author` beside `work.title` / `work.creator`) until every client sends `work`. Removing the book fields is a separate, cross-repo decision.
+- Until story 4, a film request runs the book prompts on the film's title. It is accepted and cached under its own key, but nothing sends one yet (be forwards `work` in services#218).
+
+## 32. Session DB Work Survives a Cancelled Caller (2026-10-22)
 
 ### Context
 A client that drops the SSE stream mid-generation makes sse_starlette cancel its anyio task group. anyio re-delivers that cancellation at every later `await` in the scope, so ADK's `DatabaseSessionService` unwind (`rollback()`, then the session `close()`) is cancelled too and the pooled aiosqlite connection is never checked back in. That one bug family showed up as three Sentry issues: `OperationalError: no active connection`, the GC "non-checked-in connection" warning, and `Task was destroyed but it is pending!` (ai-private#11). The weekly e2e smoke triggers it for free.
@@ -1296,6 +1347,8 @@ A dropped stream's last DB statement still runs to completion (milliseconds on S
 | **Search-grounding receipts + fail-closed discovery (ADR #26)** | A claim the product cannot support is demoted rather than shipped at full confidence; skip rate measurable per researcher; enforcement and the metric give one answer on an unobserved receipt | User-visible downgrade at today's 46% skip rate; a wholesale instrumentation fault demotes everything (loud, by design); one cold-cache window at the `v3` bump |
 | **Union eval reads + `eval_id` case key (ADR #27)** | Read side migrates alone and stays total at every step of the Nov 16 cutoff; a run-scoped id can never silently disable the per-case cap; an incomplete read refuses rather than answering short | Calibration depends on a metadata key, not an API field; a missing `eval_id` or a truncated run stops the build rather than degrading it |
 | **Composer truncation at the model boundary (ADR #29)** | A cut-off envelope is retried once, then a clean transient error; never half-recovered; counted as an eval defect | Local-atmosphere composer not yet covered; a retry costs one more composer call on that rare path |
-| **Cancellation-safe session DB (ADR #30)** | A dropped SSE stream returns its pooled connection; caller cancellation is unchanged | One wrapper method per ADK DB call to keep in step on upgrades |
+| **Persistent place→book cache (ADR #30)** | A restart costs no repeat AI runs; a failed check is never remembered as "no books here" | In-place prompt edits wait out the 6h TTL; the gateway still holds a failed check for 1h |
+| **Work kind on the AI contract (ADR #31)** | Films and series ride the same pipeline; a book request, its metadata event and its cache key are byte-identical | Book fields and `work` coexist on the wire; film prompts are a later story |
+| **Cancellation-safe session DB (ADR #32)** | A dropped SSE stream returns its pooled connection; caller cancellation is unchanged | One wrapper method per ADK DB call to keep in step on upgrades |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.

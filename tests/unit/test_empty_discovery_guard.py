@@ -10,6 +10,7 @@ compose() NoRegions guard. The guard is always on; rollback = revert the commit.
 
 from google.adk.events import Event
 from google.adk.events.event_actions import EventActions
+from google.adk.workflow import Workflow
 
 from core.events import RegionsReady, WorkflowError, WorkflowComplete
 from core.types import ExecutorConfig
@@ -29,7 +30,7 @@ def _make_executor(monkeypatch, regions):
     from services.session_service import create_session_service
 
     # Stub the workflow builder: never construct/run a real Gemini chain.
-    monkeypatch.setattr(ex, "create_book_to_place_discovery_workflow", lambda *a, **k: object())
+    monkeypatch.setattr(ex, "create_book_to_place_discovery_workflow", lambda *a, **k: Workflow(name="stub_workflow"))
 
     class _FakeRunner:
         def __init__(self, *args, **kwargs):

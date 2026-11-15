@@ -8,6 +8,33 @@ This module provides:
 - Preference fixtures
 """
 
+import os
+
+# Langfuse export guard. This has to stay above every other import: common.config
+# runs load_dotenv() at import time, and that walks up from common/ to the real
+# .env, so a test run in the main checkout or in any worktree under it would get
+# production keys and send its fixture spans to the production project.
+#
+# load_dotenv() never overwrites a variable that is already set, even to "", so
+# blanking here wins over the file. Blank keys alone are not enough: the SDK only
+# disables itself when a key is None, so LANGFUSE_TRACING_ENABLED is what stops a
+# client built with explicit keys.
+#
+# tests/integration opts in with STORYLAND_TEST_LANGFUSE_EXPORT=1, which the
+# Makefile's live and re-record targets set. tests/unit/conftest.py refuses it.
+LANGFUSE_EXPORT_OPT_IN = "STORYLAND_TEST_LANGFUSE_EXPORT"
+LANGFUSE_CONNECTION_VARS = (
+    "LANGFUSE_SECRET_KEY",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_HOST",
+    "LANGFUSE_BASE_URL",
+)
+
+if os.environ.get(LANGFUSE_EXPORT_OPT_IN) != "1":
+    for _var in LANGFUSE_CONNECTION_VARS:
+        os.environ[_var] = ""
+    os.environ["LANGFUSE_TRACING_ENABLED"] = "false"
+
 import json
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
@@ -217,22 +244,6 @@ def family_preferences_dict() -> Dict[str, Any]:
         "accessibility_needs": False,
         "preferred_pace": "relaxed"
     }
-
-
-# Mock Responses
-
-@pytest.fixture
-def mock_tool_context(sample_preferences_dict):
-    context = MagicMock()
-    context.state = {"user:preferences": sample_preferences_dict}
-    return context
-
-
-@pytest.fixture
-def mock_tool_context_no_preferences():
-    context = MagicMock()
-    context.state = {}
-    return context
 
 
 # Session State Fixtures

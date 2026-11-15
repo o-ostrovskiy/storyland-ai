@@ -9,7 +9,7 @@ Usage (Python SDK — direct import from backend):
     from core import WorkflowExecutor, ExecutorConfig
     from core.events import MetadataReady, RegionsReady, ItineraryReady
 
-    config = ExecutorConfig(model_name="gemini-2.0-flash", google_api_key="...")
+    config = ExecutorConfig(model_name="gemini-3.1-flash-lite", google_api_key="...")
     executor = WorkflowExecutor(config)
 
     async for event in executor.discover(book_title="1984"):
@@ -40,6 +40,7 @@ from core.retry import build_retry_options
 from google.adk.events import Event
 from google.adk.events.event_actions import EventActions
 from google.adk.models.google_llm import Gemini
+from google.adk.apps import App
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
 
@@ -54,6 +55,7 @@ from agents.orchestrator import (
 from google.adk.tools import google_search
 from common.logging import get_logger
 from models.book import BookMetadata
+from models.work import DEFAULT_WORK_KIND, WorkRef
 from plugins.langfuse_plugin import LangfusePlugin
 from services.session_service import create_session_service
 
@@ -199,6 +201,29 @@ BOOK_RECOMMENDATION_AGENT_STEPS: dict[str, str] = {
     "book_recommendation_researcher": "Searching for book recommendations",
     "book_recommendation_formatter": "Curating your book picks",
 }
+
+
+def _work_kind(work: Optional[WorkRef]) -> str:
+    """The journey's work kind; no ``work`` means a book (ADR #31)."""
+    return work.kind if work is not None else DEFAULT_WORK_KIND
+
+
+def _metadata_payload(
+    book_title: str, author: str, work: Optional[WorkRef] = None
+) -> dict:
+    """The ``MetadataReady`` payload for a pre-confirmed work.
+
+    A book's payload is exactly ``BookMetadata.model_dump()``, as before
+    ADR #31, so its SSE metadata event stays byte-identical. A film or series
+    adds ``kind`` and ``creator`` next to the kept book fields.
+    """
+    payload = BookMetadata(
+        book_title=book_title, author=author, book_found=True
+    ).model_dump()
+    if _work_kind(work) != DEFAULT_WORK_KIND:
+        payload["kind"] = work.kind
+        payload["creator"] = work.creator
+    return payload
 
 APP_NAME = "storyland"
 
@@ -462,10 +487,8 @@ class WorkflowExecutor:
             langfuse_plugin.root_name = getattr(workflow, "name", None)
             plugins.append(langfuse_plugin)
         return Runner(
-            node=workflow,
-            app_name=APP_NAME,
+            app=App(name=APP_NAME, root_agent=workflow, plugins=plugins),
             session_service=self._session_service,
-            plugins=plugins,
         )
 
     async def _emit_cached_discovery(
@@ -475,6 +498,7 @@ class WorkflowExecutor:
         book_title: str,
         author: str,
         cached: dict,
+        work: Optional[WorkRef] = None,
     ) -> AsyncGenerator[DomainEvent, None]:
         """Replay a cached discovery result without invoking Gemini.
 
@@ -508,7 +532,7 @@ class WorkflowExecutor:
             author=author,
             book_found=True,
         )
-        yield MetadataReady(metadata=book_metadata.model_dump())
+        yield MetadataReady(metadata=_metadata_payload(book_title, author, work))
 
         session = await self._session_service.get_session(
             app_name=APP_NAME, user_id=user_id, session_id=job_id
@@ -567,6 +591,7 @@ class WorkflowExecutor:
         preferences: Optional[dict],
         vibe: Optional[str] = None,
         taste_context: Optional[dict] = None,
+        kind: str = DEFAULT_WORK_KIND,
     ) -> str:
         """Build a normalized, versioned cache key for a discovery request.
 
@@ -608,6 +633,12 @@ class WorkflowExecutor:
                 ).encode("utf-8")
             ).hexdigest()[:12]
             key += f"|taste={taste_sig}"
+        # ADR #31: a film and a book with the same title must never share an
+        # entry, but a book's key must not change (that would cold-start the
+        # whole persisted cache). So the kind is hashed in only when it isn't
+        # a book; tests/unit/test_work_kind.py pins a book's key literally.
+        if kind != DEFAULT_WORK_KIND:
+            key += f"|kind={kind}"
         return key
 
     async def discover(
@@ -618,6 +649,7 @@ class WorkflowExecutor:
         user_id: str = "default",
         vibe: Optional[str] = None,
         taste_context: Optional[dict] = None,
+        work: Optional[WorkRef] = None,
     ) -> AsyncGenerator[DomainEvent, None]:
         """Run phases 1-2: confirm book metadata + location discovery.
 
@@ -629,12 +661,15 @@ class WorkflowExecutor:
             author: Author name (pre-confirmed by caller, required)
             preferences: Optional travel preferences dict
             user_id: User identifier for session isolation
+            work: Optional work (book/film/series); absent means a book, and
+                book_title/author already mirror it (ADR #31)
         """
         job_id = str(uuid.uuid4())
 
         initial_state = {
             SessionStateKeys.BOOK_TITLE: book_title,
             SessionStateKeys.AUTHOR: author,
+            SessionStateKeys.WORK_KIND: _work_kind(work),
         }
         if preferences:
             initial_state[SessionStateKeys.USER_PREFERENCES] = preferences
@@ -664,7 +699,12 @@ class WorkflowExecutor:
         # cannot introduce a new fabrication; staleness is bounded by the TTL.
         cache_key = self._versioned_key(
             self._discovery_cache_key(
-                book_title, author, preferences, vibe, taste_context
+                book_title,
+                author,
+                preferences,
+                vibe,
+                taste_context,
+                kind=_work_kind(work),
             )
         )
         cached_region_analysis = (
@@ -680,6 +720,7 @@ class WorkflowExecutor:
                 book_title=book_title,
                 author=author,
                 cached=cached_region_analysis,
+                work=work,
             ):
                 yield ev
             return
@@ -695,7 +736,9 @@ class WorkflowExecutor:
                 book_found=True,
             )
 
-            yield MetadataReady(metadata=book_metadata.model_dump())
+            yield MetadataReady(
+                metadata=_metadata_payload(exact_title, exact_author, work)
+            )
 
             # Persist book metadata via append_event: in-place mutation of
             # session.state does not survive get_session() (MYS-172) -- the
@@ -1097,6 +1140,7 @@ class WorkflowExecutor:
         radius_km: int = 80,
         preferences: Optional[dict] = None,
         user_id: str = "default",
+        work: Optional[WorkRef] = None,
     ) -> AsyncGenerator[DomainEvent, None]:
         """Run the single-phase local-atmosphere workflow.
 
@@ -1119,6 +1163,7 @@ class WorkflowExecutor:
         initial_state = {
             SessionStateKeys.BOOK_TITLE: book_title,
             SessionStateKeys.AUTHOR: author,
+            SessionStateKeys.WORK_KIND: _work_kind(work),
             SessionStateKeys.USER_LOCATION: {
                 "label": location_label,
                 "lat": lat,
@@ -1154,7 +1199,9 @@ class WorkflowExecutor:
                 author=author,
                 book_found=True,
             )
-            yield MetadataReady(metadata=book_metadata.model_dump())
+            yield MetadataReady(
+                metadata=_metadata_payload(book_title, author, work)
+            )
 
             session = await self._session_service.get_session(
                 app_name=APP_NAME, user_id=user_id, session_id=job_id

@@ -10,7 +10,16 @@ Defines Pydantic models for:
 from enum import Enum
 from typing import Optional, List, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
+
+from models.work import WorkKind, WorkRef
 
 
 # Request Models
@@ -134,6 +143,45 @@ def _bound_taste_context(value):
     return result
 
 
+def _mirror_work_into_book_fields(data):
+    """Let a request name its work with ``work`` instead of the book fields.
+
+    Runs before field validation. When ``work`` is present and ``book_title`` /
+    ``author`` are absent, they are filled from ``work.title`` / ``work.creator``
+    so every downstream reader of the book fields keeps working unchanged (the
+    book fields stay on the wire, ADR #31). When both are sent they must name
+    the same work: a silent pick between two different titles would research
+    the wrong one. Without ``work`` the data passes through untouched, so a
+    book-only request validates exactly as before.
+    """
+    if not isinstance(data, dict):
+        return data
+    work = data.get("work")
+    if work is None:
+        return data
+    if isinstance(work, WorkRef):
+        title, creator = work.title, work.creator
+    elif isinstance(work, dict):
+        title, creator = work.get("title"), work.get("creator")
+    else:
+        return data  # field validation reports the wrong type
+    if not isinstance(title, str) or not isinstance(creator, str):
+        return data  # field validation reports the missing/invalid member
+    data = dict(data)
+    for field_name, value in (("book_title", title), ("author", creator)):
+        sent = data.get(field_name)
+        if sent is None:
+            data[field_name] = value
+        elif (
+            isinstance(sent, str)
+            and sent.strip().casefold() != value.strip().casefold()
+        ):
+            raise ValueError(
+                f"{field_name} and work must name the same work when both are sent"
+            )
+    return data
+
+
 class DiscoverRequest(BaseModel):
     """Request body for POST /api/v1/itinerary/discover."""
 
@@ -159,6 +207,13 @@ class DiscoverRequest(BaseModel):
     author: str = Field(
         min_length=1, max_length=MAX_AUTHOR_LENGTH, description="Author name (required)"
     )
+    work: Optional[WorkRef] = Field(
+        default=None,
+        description=(
+            "Optional work the journey starts from (book, film or series). "
+            "Absent ⇒ book_title + author, kind=book, unchanged behavior."
+        ),
+    )
     preferences: Optional[dict] = Field(
         default=None, description="User travel preferences"
     )
@@ -179,6 +234,19 @@ class DiscoverRequest(BaseModel):
             "Bounded + de-duplicated server-side; absent ⇒ unchanged behavior."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def mirror_work(cls, data):
+        """Fill the book fields from ``work`` when only ``work`` is sent."""
+        return _mirror_work_into_book_fields(data)
+
+    @property
+    def work_ref(self) -> WorkRef:
+        """The request's work; a book-only request is ``kind="book"``."""
+        if self.work is not None:
+            return self.work
+        return WorkRef(kind="book", title=self.book_title, creator=self.author)
 
     @field_validator("book_title")
     @classmethod
@@ -362,6 +430,13 @@ class LocalAtmosphereRequest(BaseModel):
     author: str = Field(
         min_length=1, max_length=MAX_AUTHOR_LENGTH, description="Author name (required)"
     )
+    work: Optional[WorkRef] = Field(
+        default=None,
+        description=(
+            "Optional work the journey starts from (book, film or series). "
+            "Absent ⇒ book_title + author, kind=book, unchanged behavior."
+        ),
+    )
     user_location: UserLocation = Field(description="User's current location")
     radius_km: int = Field(
         default=80,
@@ -372,6 +447,19 @@ class LocalAtmosphereRequest(BaseModel):
     preferences: Optional[dict] = Field(
         default=None, description="User travel preferences"
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def mirror_work(cls, data):
+        """Fill the book fields from ``work`` when only ``work`` is sent."""
+        return _mirror_work_into_book_fields(data)
+
+    @property
+    def work_ref(self) -> WorkRef:
+        """The request's work; a book-only request is ``kind="book"``."""
+        if self.work is not None:
+            return self.work
+        return WorkRef(kind="book", title=self.book_title, creator=self.author)
 
     @field_validator("book_title")
     @classmethod
@@ -421,7 +509,7 @@ class SSEStartedEvent(BaseModel):
 
 
 class SSEMetadataEvent(BaseModel):
-    """Book metadata confirmed from the upstream service."""
+    """Work metadata confirmed from the upstream service (book unless ``kind`` says otherwise)."""
 
     event: Literal["metadata"] = "metadata"
     book_title: str
@@ -430,6 +518,28 @@ class SSEMetadataEvent(BaseModel):
     published_date: Optional[str] = None
     categories: List[str] = Field(default_factory=list)
     image_url: Optional[str] = None
+    kind: Optional[WorkKind] = Field(
+        default=None,
+        description="Kind of work (film/series). Absent on the wire ⇒ book.",
+    )
+    creator: Optional[str] = Field(
+        default=None,
+        description="Director (film) or creator (series). Absent ⇒ book; see author.",
+    )
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_work_fields(self, handler: SerializerFunctionWrapHandler):
+        """Keep a book's metadata event byte-identical to the pre-work contract.
+
+        ``kind`` / ``creator`` are only serialized when set (a film or series);
+        a book event carries exactly the fields it always did, so fe, be and
+        ios parse it unchanged.
+        """
+        data = handler(self)
+        for key in ("kind", "creator"):
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
 
 
 class SSERegionsEvent(BaseModel):

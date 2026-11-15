@@ -201,10 +201,13 @@ def _scrub_breadcrumb(crumb, hint):
             return None
         if "?" in message:
             crumb["message"] = _URL_QUERY_RE.sub("", message)
-    data = crumb.get("data") or {}
-    for key, value in list(data.items()):
-        if isinstance(value, str) and "?" in value:
-            data[key] = _URL_QUERY_RE.sub("", value)
+    # Same record rules as span data (ai-private#74): the HTTPX integration's
+    # breadcrumbs carry data['http.query'] as a bare query the '?'-rule alone
+    # never fires on, and every later error event ships those crumbs. Found by
+    # the scrub backstop test (tests/unit/test_sentry_scrub_backstop.py).
+    data = crumb.get("data")
+    if isinstance(data, dict):
+        _scrub_data_record(data)
     return crumb
 
 

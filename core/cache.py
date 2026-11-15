@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
+from types import SimpleNamespace
 from typing import Any, Optional
 
 from common.logging import get_logger
@@ -75,10 +76,11 @@ class TTLCache:
             self._store.move_to_end(key)
             return value
 
-    async def set(self, key: str, value: Any) -> None:
-        """Store ``value`` under ``key``, evicting the oldest if over capacity."""
+    async def set(self, key: str, value: Any, ttl_seconds: Optional[int] = None) -> None:
+        """Store ``value`` under ``key``, for ``ttl_seconds`` or the configured
+        TTL, evicting the oldest if over capacity."""
         async with self._lock:
-            expires_at = self._clock() + self._ttl
+            expires_at = self._clock() + (self._ttl if ttl_seconds is None else ttl_seconds)
             if key in self._store:
                 self._store.pop(key, None)
             self._store[key] = (expires_at, value)
@@ -152,3 +154,18 @@ def build_discovery_cache(config):
             return TTLCache(ttl_seconds=ttl, max_entries=max_entries)
 
     return TTLCache(ttl_seconds=ttl, max_entries=max_entries)
+
+
+def build_place_to_book_cache(config, ttl_seconds: int, max_entries: int):
+    """Construct the place→book cache: the Discovery cache's backend and fallback,
+    in its own store under ``cache_dir`` so the two never share an LRU budget.
+    """
+    directory = getattr(config, "cache_dir", None)
+    return build_discovery_cache(
+        SimpleNamespace(
+            cache_backend=getattr(config, "cache_backend", "memory"),
+            cache_dir=f"{directory}/place2book" if directory else None,
+            cache_ttl_seconds=ttl_seconds,
+            cache_max_entries=max_entries,
+        )
+    )

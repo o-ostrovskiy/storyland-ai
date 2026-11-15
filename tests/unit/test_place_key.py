@@ -674,14 +674,14 @@ class TestCacheNamespaceFlush:
 
     def test_the_prompt_version_bump_also_moves_the_fingerprint(self):
         # agents/prompts.py carries CURRENT_PROMPT_VERSION in its SOURCE, which is
-        # hashed. (The v3.json CONTENT is not — data, not source: MYS-462. That is
-        # exactly why the bump lives in the .py and why models.discovery is in the
-        # module list: neither flush depends on the JSON being seen.)
+        # hashed. (Since MYS-462 the v3.json CONTENT is hashed too, but this flush
+        # never depended on that: the bump lives in the .py and models.discovery
+        # is in the module list.)
         import inspect
         import agents.prompts as prompts_module
 
-        assert CURRENT_PROMPT_VERSION == "v3"
-        assert 'CURRENT_PROMPT_VERSION = "v3"' in inspect.getsource(prompts_module)
+        assert CURRENT_PROMPT_VERSION == "v4"
+        assert 'CURRENT_PROMPT_VERSION = "v4"' in inspect.getsource(prompts_module)
 
 
 class TestPromptV3:
@@ -704,6 +704,19 @@ class TestPromptV3:
             "change, and an unreviewed prompt edit would ride the same cache flush"
         )
         assert v2["agents"].keys() == v3["agents"].keys()
+
+    def test_v3_is_still_loadable(self):
+        # v4 (ai-private#71) is current; v3 stays pinnable for eval/rollback.
+        assert "country_code" in load_prompts("v3").region_analyzer
+
+    def test_v4_is_v3_plus_the_place_to_book_change_only(self):
+        v3 = json.loads(Path("agents/prompts/v3.json").read_text(encoding="utf-8"))
+        v4 = json.loads(Path("agents/prompts/v4.json").read_text(encoding="utf-8"))
+        changed = [a for a in v3["agents"] if v3["agents"][a] != v4["agents"][a]]
+        assert changed == ["place_to_book_researcher", "place_to_book_formatter"], (
+            "v4 must not quietly re-tune any other agent: it rides a cache flush"
+        )
+        assert v3["agents"].keys() == v4["agents"].keys()
 
     def test_v2_is_still_loadable(self):
         # Published versions are immutable and must stay pinnable (eval/rollback).

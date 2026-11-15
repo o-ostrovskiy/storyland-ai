@@ -12,6 +12,7 @@ These tests verify that:
 import os
 import pytest
 from unittest.mock import patch
+from google.adk.apps import App
 from google.adk.runners import Runner
 from google.adk.agents import LlmAgent, SequentialAgent
 from google.genai import types
@@ -101,10 +102,8 @@ class TestLangfusePluginIntegration:
         )
 
         runner = Runner(
-            agent=simple_agent,
-            app_name="test_app",
+            app=App(name="test_app", root_agent=simple_agent, plugins=[plugin]),
             session_service=session_service,
-            plugins=[plugin],
         )
 
         try:
@@ -155,10 +154,8 @@ class TestLangfusePluginIntegration:
         )
 
         runner = Runner(
-            agent=simple_agent,
-            app_name="test_app",
+            app=App(name="test_app", root_agent=simple_agent, plugins=[plugin]),
             session_service=session_service,
-            plugins=[plugin],
         )
 
         await session_service.create_session(
@@ -205,10 +202,8 @@ class TestLangfuseWithRealWorkflow:
         session_service = create_session_service(use_database=False)
 
         runner = Runner(
-            agent=pipeline,
-            app_name="test_app",
+            app=App(name="test_app", root_agent=pipeline, plugins=[plugin]),
             session_service=session_service,
-            plugins=[plugin],
         )
 
         try:
@@ -278,10 +273,8 @@ class TestLangfuseWithRealWorkflow:
         session_service = create_session_service(use_database=False)
 
         runner = Runner(
-            agent=workflow,
-            app_name="test_app",
+            app=App(name="test_app", root_agent=workflow, plugins=[plugin]),
             session_service=session_service,
-            plugins=[plugin],
         )
 
         try:

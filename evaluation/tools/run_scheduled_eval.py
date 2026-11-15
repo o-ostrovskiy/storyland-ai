@@ -32,6 +32,7 @@ from agents.orchestrator import (
 from agents.prompts import load_prompts, CURRENT_PROMPT_VERSION, AgentPrompts
 from agents.composer_truncation import TRUNCATION_EVENT, find_composer_truncation
 from google.adk.models.google_llm import Gemini
+from google.adk.apps import App
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
 from plugins.langfuse_plugin import LangfusePlugin
@@ -672,6 +673,7 @@ async def run_evaluation_on_dataset(
                         root_span=root_span,
                         region_selection=region_selection,
                         prompts=prompts,
+                        prompt_version=prompt_version,
                     )
 
                     case_status = result.get("status", "unknown")
@@ -800,6 +802,7 @@ async def _run_evaluation_case(
     root_span: Any,
     region_selection: str = "all",
     prompts: AgentPrompts | None = None,
+    prompt_version: str = CURRENT_PROMPT_VERSION,
 ) -> Dict[str, Any]:
     """
     Run evaluation for a single test case.
@@ -816,6 +819,7 @@ async def _run_evaluation_case(
         item_metadata: Metadata from dataset item (contains session_input with preferences)
         config: Application configuration
         root_span: Langfuse root span (from item.run() context manager)
+        prompt_version: Version `prompts` was loaded from, written on the traces
 
     Returns:
         Evaluation result with status "evaluated" on success
@@ -858,6 +862,7 @@ async def _run_evaluation_case(
             secret_key=config.langfuse_secret_key,
             public_key=config.langfuse_public_key,
             host=config.langfuse_host,
+            prompt_version=prompt_version,
         )
 
         session_input = item_metadata.get("session_input", {})
@@ -928,10 +933,12 @@ async def _run_evaluation_case(
             )
             langfuse_plugin.root_name = discovery_workflow.name
             discovery_runner = Runner(
-                node=discovery_workflow,
-                app_name="storyland",
+                app=App(
+                    name="storyland",
+                    root_agent=discovery_workflow,
+                    plugins=[LoggingPlugin(), langfuse_plugin],
+                ),
                 session_service=session_service,
-                plugins=[LoggingPlugin(), langfuse_plugin],
             )
 
             discovery_prompt = f"""Discover travel locations for "{exact_title}" by {exact_author}.
@@ -1024,10 +1031,12 @@ Find cities, landmarks, and author-related sites, then group them into practical
             composition_workflow = create_book_to_place_composition_workflow(model, prompts=prompts)
             langfuse_plugin.root_name = composition_workflow.name
             composition_runner = Runner(
-                node=composition_workflow,
-                app_name="storyland",
+                app=App(
+                    name="storyland",
+                    root_agent=composition_workflow,
+                    plugins=[LoggingPlugin(), langfuse_plugin],
+                ),
                 session_service=session_service,
-                plugins=[LoggingPlugin(), langfuse_plugin],
             )
 
             # Same prompt path as production (core.prompts.build_composition_prompt)

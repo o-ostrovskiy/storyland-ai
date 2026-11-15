@@ -13,7 +13,7 @@ remaining references to ``dataset_run_items.create``"), and it is not the
 obvious one:
 
 🔴 **The SDK's own experiment runner still calls the deprecated endpoint.** At
-the pin this repo installs (``langfuse==4.14.0``) ``Langfuse.run_experiment``
+the pin this repo installs (``langfuse`` 4.15.x) ``Langfuse.run_experiment``
 reaches ``self.api.dataset_run_items.create`` for every dataset-backed item
 (``_client/client.py``) -- and it does so as ``asyncio.to_thread(that_method,
 …)``, so the method is invoked while never appearing in call position.
