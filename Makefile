@@ -69,13 +69,15 @@ lock:
 	uv pip compile pyproject.toml --universal --extra dev --generate-hashes --output-file requirements-dev.lock
 
 # Audit the shipped (prod) lock for known vulnerabilities (same gate CI runs).
-# CVE-2026-114603 (opentelemetry-api tracestate ReDoS): accepted risk, reasoning
-# in .github/workflows/pip-audit.yml. Tracked on storyland-ai-private#59; remove
-# when google-adk allows opentelemetry-api>=1.45.1.
+# CVE-2026-114603 (opentelemetry-api tracestate ReDoS, storyland-ai-private#59)
+# and CVE-2026-126360 (opentelemetry-api traceparent ReDoS, storyland-ai-private#79):
+# accepted risks, reasoning in .github/workflows/pip-audit.yml. Remove both when
+# the lock moves past the google-adk <2.13 hold (2.14.1 admits otel 1.45.2).
 audit:
 	pip-audit --strict --require-hashes -r requirements.lock \
 		--ignore-vuln PYSEC-2026-2447 \
-		--ignore-vuln CVE-2026-114603
+		--ignore-vuln CVE-2026-114603 \
+		--ignore-vuln CVE-2026-126360
 
 # =============================================================================
 # Testing
