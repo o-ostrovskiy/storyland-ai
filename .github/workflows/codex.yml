@@ -59,16 +59,27 @@ jobs:
           pip install pip-audit==2.10.1
           pip-audit --strict --require-hashes -r requirements.lock \
             --ignore-vuln PYSEC-2026-2447 \
-            --ignore-vuln CVE-2026-114603
+            --ignore-vuln CVE-2026-114603 \
+            --ignore-vuln CVE-2026-126360
             # CVE-2026-114603 (opentelemetry-api 1.41.1, GHSA-xcq7-p3pf-p88h):
             # O(N^2) regex in TraceState.from_header, reached only when a server
             # extracts an inbound W3C tracestate header. We never do: no
             # propagate.extract / ASGI instrumentation in our code, and ADK's
             # only extract() (telemetry/_agent_engine.py) runs under ADK's own
             # get_fast_api_app, which we don't use, and passes traceparent only.
-            # Fix 1.45.1 is above every google-adk release's otel cap (<=1.44).
-            # Accepted risk, tracked on storyland-ai-private#59; remove when
-            # google-adk allows opentelemetry-api>=1.45.1.
+            # Accepted risk, tracked on storyland-ai-private#59.
+            # CVE-2026-126360 (opentelemetry-api 1.41.1, GHSA-mf5v-w3w3-f6cg):
+            # ReDoS in TraceContextTextMapPropagator.extract() on a crafted
+            # traceparent. Same reach as above: the only extract() call in the
+            # installed lock is ADK's get_propagated_context, called only from
+            # google/adk/cli/fast_api.py (get_fast_api_app), which we never
+            # import; nothing in our code or in langfuse/sentry_sdk extracts an
+            # inbound traceparent, and the service is internal behind the
+            # gateway. Accepted risk, tracked on storyland-ai-private#79.
+            # Both fixes (1.45.1, 1.45.2) are above the otel cap of the ADK line
+            # we hold (<2.13 caps opentelemetry-api at 1.42.1). google-adk 2.14.1
+            # admits 1.45.2, so remove BOTH ignores with the bump past the <2.13
+            # hold (storyland-ai-private#60: Ops Watch's call_llm span reads).
             # The five starlette 0.52.1 ignores (PYSEC-2026-161/248/249/2280/2281)
             # were removed with the ADK 2.x upgrade: the lock now resolves
             # starlette>=1.3, which carries all the fixes. diskcache 2447: no
