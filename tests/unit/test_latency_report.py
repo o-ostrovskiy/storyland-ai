@@ -116,8 +116,48 @@ def test_enough_runs_without_latency_is_unverified(capsys):
     assert run(FakeAPI(answers), capsys)[0] == 2
 
 
-def test_missing_keys_is_unverified_without_a_call(monkeypatch, capsys):
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"count_count": 25, "p50_latency": 1, "p95_latency": 2},  # no time_dimension
+        {"time_dimension": "yesterday", "count_count": 25, "p50_latency": 1, "p95_latency": 2},
+        {"time_dimension": "2026-09-01", "count_count": 25, "p50_latency": 1, "p95_latency": 2},  # outside the window
+    ],
+    ids=["no-day", "unparseable-day", "day-outside-window"],
+)
+def test_daily_row_with_runs_but_no_usable_day_is_unverified(capsys, row):
+    answers = json.loads(json.dumps(FIXTURE))
+    for name in lr.WAITS.values():
+        answers[name]["daily"].append(row)
+    code, out = run(FakeAPI(answers), capsys)
+    assert code == 2
+    assert out[0].startswith("latency unverified: daily row with runs but no day in the window")
+
+
+def test_daily_row_without_runs_or_day_is_ignored(capsys):
+    answers = json.loads(json.dumps(FIXTURE))
+    for name in lr.WAITS.values():
+        answers[name]["daily"].append({"count_count": 0, "p50_latency": None, "p95_latency": None})
+    assert run(FakeAPI(answers), capsys)[0] == 0
+
+
+def test_keys_are_read_from_dotenv_and_shell_env_wins(monkeypatch, tmp_path):
+    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-shell")
+    monkeypatch.delenv("LANGFUSE_HOST", raising=False)
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("LANGFUSE_PUBLIC_KEY=pk-file\nLANGFUSE_SECRET_KEY=sk-file\nLANGFUSE_HOST=https://us.cloud.langfuse.com\n")
+    monkeypatch.setattr(lr, "DOTENV_PATH", dotenv)
+    api = lr.make_api()
+    wrapper = api._client_wrapper
+    assert wrapper._username == "pk-shell"  # an exported variable beats .env
+    assert wrapper._password == "sk-file"
+    assert wrapper._base_url == "https://us.cloud.langfuse.com"
+
+
+def test_missing_keys_is_unverified_without_a_call(monkeypatch, capsys, tmp_path):
     monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
     monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+    monkeypatch.setattr(lr, "DOTENV_PATH", tmp_path / "missing.env")
     assert lr.main([], today=TODAY) == 2
     assert capsys.readouterr().out.startswith("latency unverified: LANGFUSE_PUBLIC_KEY")

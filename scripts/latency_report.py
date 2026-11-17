@@ -14,11 +14,13 @@ the numbers cover fresh runs only.
 Read-only: one ``GET /api/public/v2/metrics`` per wait and window (the v2 API, not
 the endpoints Langfuse retires on 2026-11-16), through the SDK's bare REST client,
 so no tracer starts and nothing is written. Keys come from the usual
-``LANGFUSE_PUBLIC_KEY`` / ``LANGFUSE_SECRET_KEY`` / ``LANGFUSE_HOST``. No Gemini calls.
+``LANGFUSE_PUBLIC_KEY`` / ``LANGFUSE_SECRET_KEY`` / ``LANGFUSE_HOST``, read from the
+repo's ``.env`` when not exported (an exported variable wins). No Gemini calls.
 
 Fewer than ``MIN_SAMPLES`` runs in a row prints "too few", a day with no runs
 prints "no data" (an empty answer is never 0 s). An API error or a malformed
-body exits 2 with ``latency unverified``.
+body (including a daily row with runs but no day in the window) exits 2 with
+``latency unverified``.
 """
 
 import argparse
@@ -26,12 +28,14 @@ import json
 import os
 import sys
 from datetime import date, datetime, time, timedelta, timezone
+from pathlib import Path
 
 WAITS = {
     "first region": "book_to_place_discovery_invocation",
     "full journey": "book_to_place_composition_invocation",
 }
 MIN_SAMPLES = 20
+DOTENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 
 
 class Unverified(Exception):
@@ -105,9 +109,13 @@ def report(api, days: int, environment: str, today: date) -> list[str]:
         by_day: dict[str, tuple[int, float | None, float | None]] = {}
         for row in fetch(api, metrics_query(name, environment, start, end, daily=True)):
             parsed = parse_row(row)
+            if not parsed[0]:
+                continue
             day = str(row.get("time_dimension") or "")[:10]
-            if day in day_keys and parsed[0]:
-                by_day[day] = parsed
+            if day not in day_keys:
+                # Runs we can't place on a day are an unknown, never "no data".
+                raise Unverified(f"daily row with runs but no day in the window: {str(row)[:120]}")
+            by_day[day] = parsed
         lines.append(f"{wait} ({name}):")
         lines.extend(f"  {day}  {cell(*by_day.get(day, (0, None, None)))}" for day in day_keys)
         pooled = fetch(api, metrics_query(name, environment, start, end, daily=False))
@@ -118,8 +126,10 @@ def report(api, days: int, environment: str, today: date) -> list[str]:
 
 
 def make_api():
+    from dotenv import load_dotenv
     from langfuse.api.client import LangfuseAPI
 
+    load_dotenv(DOTENV_PATH, override=False)
     public, secret = os.getenv("LANGFUSE_PUBLIC_KEY"), os.getenv("LANGFUSE_SECRET_KEY")
     if not (public and secret):
         raise Unverified("LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY not set")

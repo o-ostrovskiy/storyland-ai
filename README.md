@@ -248,9 +248,10 @@ researcher answered from model memory.
 UTC day, with the sample size, for the two waits a reader feels: discover → first
 region (`book_to_place_discovery_invocation`) and compose → done
 (`book_to_place_composition_invocation`), plus the whole window pooled. Read-only
-(`GET /v2/metrics` with the `LANGFUSE_*` keys, no Gemini). Fewer than 20 runs →
-"too few"; no runs → "no data"; an API error or a malformed answer exits 2 with
-`latency unverified`. Targets and baseline: `docs/ARCHITECTURE.md` #33.
+(`GET /v2/metrics` with the `LANGFUSE_*` keys from `.env` or the shell, the shell
+winning; no Gemini). Fewer than 20 runs → "too few"; no runs → "no data"; an API
+error or a malformed answer (a row with runs but no day in the window included)
+exits 2 with `latency unverified`. Targets and baseline: `docs/ARCHITECTURE.md` #33.
 
 **Measured rate (2026-08-10, `gemini-3.1-flash-lite`):** roughly one to two of
 the four researchers skip on most runs, on realist and fictional books alike.
