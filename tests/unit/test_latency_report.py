@@ -3,6 +3,7 @@ recorded /v2/metrics answers, and the three failure shapes (an API error, an
 empty 200, a malformed body)."""
 
 import json
+import os
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -141,18 +142,40 @@ def test_daily_row_without_runs_or_day_is_ignored(capsys):
     assert run(FakeAPI(answers), capsys)[0] == 0
 
 
-def test_keys_are_read_from_dotenv_and_shell_env_wins(monkeypatch, tmp_path):
-    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
-    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-shell")
-    monkeypatch.delenv("LANGFUSE_HOST", raising=False)
+LANGFUSE_VARS = ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST")
+
+
+def _clear_langfuse_env(mp):
+    # load_dotenv() writes straight into os.environ. setenv first so `mp` records
+    # every variable and its undo removes whatever .env added; a bare
+    # delenv(raising=False) on an absent variable records nothing to restore.
+    for var in LANGFUSE_VARS:
+        mp.setenv(var, "placeholder")
+        mp.delenv(var)
+
+
+def _api_from_dotenv(mp, tmp_path):
+    _clear_langfuse_env(mp)
+    mp.setenv("LANGFUSE_PUBLIC_KEY", "pk-shell")
     dotenv = tmp_path / ".env"
     dotenv.write_text("LANGFUSE_PUBLIC_KEY=pk-file\nLANGFUSE_SECRET_KEY=sk-file\nLANGFUSE_HOST=https://us.cloud.langfuse.com\n")
-    monkeypatch.setattr(lr, "DOTENV_PATH", dotenv)
-    api = lr.make_api()
-    wrapper = api._client_wrapper
+    mp.setattr(lr, "DOTENV_PATH", dotenv)
+    return lr.make_api()
+
+
+def test_keys_are_read_from_dotenv_and_shell_env_wins(monkeypatch, tmp_path):
+    wrapper = _api_from_dotenv(monkeypatch, tmp_path)._client_wrapper
     assert wrapper._username == "pk-shell"  # an exported variable beats .env
     assert wrapper._password == "sk-file"
     assert wrapper._base_url == "https://us.cloud.langfuse.com"
+
+
+def test_dotenv_keys_do_not_outlive_the_test(monkeypatch, tmp_path):
+    for var in LANGFUSE_VARS:  # the CI case: nothing exported
+        monkeypatch.delenv(var, raising=False)
+    with pytest.MonkeyPatch.context() as mp:
+        _api_from_dotenv(mp, tmp_path)
+    assert not any(var in os.environ for var in LANGFUSE_VARS)
 
 
 def test_missing_keys_is_unverified_without_a_call(monkeypatch, capsys, tmp_path):

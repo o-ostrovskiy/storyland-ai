@@ -1303,6 +1303,20 @@ Every entry into the service was a book: `DiscoverRequest` / `LocalAtmosphereReq
 - Two names for one thing on the wire (`book_title` / `author` beside `work.title` / `work.creator`) until every client sends `work`. Removing the book fields is a separate, cross-repo decision.
 - Until story 4, a film request runs the book prompts on the film's title. It is accepted and cached under its own key, but nothing sends one yet (be forwards `work` in services#218).
 
+## 32. Session DB Work Survives a Cancelled Caller (2026-10-22)
+
+### Context
+A client that drops the SSE stream mid-generation makes sse_starlette cancel its anyio task group. anyio re-delivers that cancellation at every later `await` in the scope, so ADK's `DatabaseSessionService` unwind (`rollback()`, then the session `close()`) is cancelled too and the pooled aiosqlite connection is never checked back in. That one bug family showed up as three Sentry issues: `OperationalError: no active connection`, the GC "non-checked-in connection" warning, and `Task was destroyed but it is pending!` (ai-private#11). The weekly e2e smoke triggers it for free.
+
+### Decision
+- `services/session_service.py::CancellationSafeDatabaseSessionService` (what `create_session_service(use_database=True)` now returns) runs each `create_session` / `get_session` / `list_sessions` / `delete_session` / `append_event` as its own task under `asyncio.shield`. The caller still gets `CancelledError` at once, and the task, outside the cancelled scope, finishes and returns its connection.
+- In-flight tasks are held by strong reference until done. A failure that lands after the caller has gone is logged as `session_db_op_failed_after_caller_left`, not swallowed by the shield. `close()` drains them before disposing the engine.
+- Pinned by `tests/unit/test_session_service_cancellation.py`, which drops a real `EventSourceResponse` mid-query and asserts the pool's `checkedout() == 0`.
+- The disconnect `CancelledError` itself is expected and is not part of this fix (Sentry-side filtering, MYS-790).
+
+### Trade-offs
+A dropped stream's last DB statement still runs to completion (milliseconds on SQLite), so nothing is cancelled half-written. The wrapper overrides ADK's public method names with pass-through `*args/**kwargs`, so an ADK upgrade that adds a new DB-touching method needs it added here.
+
 ## 33. The Two Reader Waits Have Numbers: a Langfuse Latency Report (2026-11-01)
 
 ### Context
@@ -1360,6 +1374,7 @@ It measures the workflow inside the agent service, not the browser: the be hop, 
 | **Composer truncation at the model boundary (ADR #29)** | A cut-off envelope is retried once, then a clean transient error; never half-recovered; counted as an eval defect | Local-atmosphere composer not yet covered; a retry costs one more composer call on that rare path |
 | **Persistent place→book cache (ADR #30)** | A restart costs no repeat AI runs; a failed check is never remembered as "no books here" | In-place prompt edits wait out the 6h TTL; the gateway still holds a failed check for 1h |
 | **Work kind on the AI contract (ADR #31)** | Films and series ride the same pipeline; a book request, its metadata event and its cache key are byte-identical | Book fields and `work` coexist on the wire; film prompts are a later story |
+| **Cancellation-safe session DB (ADR #32)** | A dropped SSE stream returns its pooled connection; caller cancellation is unchanged | One wrapper method per ADK DB call to keep in step on upgrades |
 | **Reader-wait latency report (ADR #33)** | First-region and full-journey p50/p95 from Langfuse, never a fake 0 s | Fresh runs only, measured inside the agent service (no be hop or SSE delivery) |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.
