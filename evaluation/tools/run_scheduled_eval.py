@@ -673,6 +673,7 @@ async def run_evaluation_on_dataset(
                         root_span=root_span,
                         region_selection=region_selection,
                         prompts=prompts,
+                        prompt_version=prompt_version,
                     )
 
                     case_status = result.get("status", "unknown")
@@ -801,6 +802,7 @@ async def _run_evaluation_case(
     root_span: Any,
     region_selection: str = "all",
     prompts: AgentPrompts | None = None,
+    prompt_version: str = CURRENT_PROMPT_VERSION,
 ) -> Dict[str, Any]:
     """
     Run evaluation for a single test case.
@@ -817,6 +819,7 @@ async def _run_evaluation_case(
         item_metadata: Metadata from dataset item (contains session_input with preferences)
         config: Application configuration
         root_span: Langfuse root span (from item.run() context manager)
+        prompt_version: Version `prompts` was loaded from, written on the traces
 
     Returns:
         Evaluation result with status "evaluated" on success
@@ -859,6 +862,7 @@ async def _run_evaluation_case(
             secret_key=config.langfuse_secret_key,
             public_key=config.langfuse_public_key,
             host=config.langfuse_host,
+            prompt_version=prompt_version,
         )
 
         session_input = item_metadata.get("session_input", {})

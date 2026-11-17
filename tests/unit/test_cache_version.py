@@ -110,3 +110,39 @@ class TestFingerprintCoversTheMintLogicNotJustTheSchema:
 
         assert "models.place_key" in _PROMPT_MODULES
         assert "core.regions" in _PROMPT_MODULES
+
+
+class TestFingerprintCoversThePromptJsonContent:
+    """MYS-462: the agent prompts live in agents/prompts/vN.json, which is data,
+    not source — inspect.getsource() never sees it. Without hashing it, an
+    in-place JSON edit changes what the agents are told while every cached
+    discovery result keeps being served under the old namespace."""
+
+    def test_prompt_json_content_changes_version(self):
+        base = compute_cache_version("m", prompt_data="aaa")
+        other = compute_cache_version("m", prompt_data="bbb")
+        assert base != other
+
+    def test_default_hashes_the_active_prompt_file(self, tmp_path, monkeypatch):
+        import agents.prompts as prompts_module
+
+        name = f"{prompts_module.CURRENT_PROMPT_VERSION}.json"
+        original = (prompts_module._PROMPTS_DIR / name).read_text(encoding="utf-8")
+        monkeypatch.setattr(prompts_module, "_PROMPTS_DIR", tmp_path)
+
+        (tmp_path / name).write_text(original, encoding="utf-8")
+        baseline = compute_cache_version("m")
+        (tmp_path / name).write_text(original + "\n", encoding="utf-8")
+        edited = compute_cache_version("m")
+
+        assert baseline != edited, (
+            "an in-place edit of the active prompt JSON must invalidate the "
+            "discovery cache"
+        )
+
+    def test_missing_prompt_file_degrades_gracefully(self, tmp_path, monkeypatch):
+        import agents.prompts as prompts_module
+
+        monkeypatch.setattr(prompts_module, "_PROMPTS_DIR", tmp_path)
+        assert prompts_module.prompt_content_hash() == ""
+        assert compute_cache_version("m") == compute_cache_version("m", prompt_data="")

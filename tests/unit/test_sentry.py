@@ -236,6 +236,26 @@ class TestHealthProbeLogFilter:
         assert out3["spans"][0]["description"] == "GET http://u/v"
         assert out3["spans"][0]["data"]["url"] == "http://u/v"
 
+    def test_breadcrumb_bare_query_keys_dropped(self):
+        """ai-private#74: HTTPX breadcrumbs carry data['http.query'] with no
+        '?', and every later error event ships them. Found by the scrub
+        backstop test."""
+        crumb = {
+            "type": "http",
+            "category": "httplib",
+            "data": {
+                "url": "https://generativelanguage.googleapis.com/v1beta/models/m:streamGenerateContent",
+                "http.method": "POST",
+                "http.query": "book_title=secret+title",
+                "http.fragment": "",
+                "status_code": 200,
+            },
+        }
+        out = _scrub_breadcrumb(crumb, {})
+        assert "http.query" not in out["data"]
+        assert out["data"]["http.method"] == "POST"
+        assert out["data"]["status_code"] == 200
+
     def test_span_bare_query_keys_dropped(self):
         """MYS-551 (ai twin of the gateway defect): the HTTPX integration
         stores the query WITHOUT a leading '?' in span.data['http.query'] —

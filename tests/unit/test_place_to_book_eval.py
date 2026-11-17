@@ -14,7 +14,9 @@ def _result(found, candidates):
 
 
 def test_found_passes_with_enough_grounded_literals():
-    result = _result(True, [_cand("literal", "Baixa, Lisbon"), _cand("vibe", None)])
+    result = _result(
+        True, [_cand("literal", "Baixa, Lisbon", title="T1"), _cand("vibe", None, title="T2")]
+    )
     scored = score_case(result, expect="found", min_literal=1)
     assert scored["pass"] is True
     assert scored["n_literal_grounded"] == 1
@@ -54,3 +56,108 @@ def test_not_found_fails_when_place_returns_candidates():
     assert scored["pass"] is False
     assert scored["found_classification"] == 0.0
     assert scored["grounding_clean"] is True
+
+
+# ai-private#71: repeated titles and wrong authors fail a case.
+
+def test_repeated_title_fails_the_case():
+    result = _result(True, [
+        _cand("literal", "Baixa", title="The Book of Disquiet", author="Fernando Pessoa"),
+        _cand("literal", "Chiado", title="Book of Disquiet", author="Fernando Pessoa"),
+    ])
+    scored = score_case(result, expect="found", min_literal=1)
+    assert scored["n_duplicate_titles"] == 1
+    assert scored["pass"] is False
+
+
+def test_distinct_titles_pass():
+    result = _result(True, [
+        _cand("literal", "Baixa", title="The Book of Disquiet", author="Fernando Pessoa"),
+        _cand("literal", "Chiado", title="Night Train to Lisbon", author="Pascal Mercier"),
+    ])
+    scored = score_case(result, expect="found", min_literal=1)
+    assert scored["n_duplicate_titles"] == 0
+    assert scored["pass"] is True
+
+
+def test_same_title_different_authors_are_not_repeats():
+    # Two real books called "Paris": not a duplicate, the case passes.
+    result = _result(True, [
+        _cand("literal", "Île de la Cité", title="Paris", author="Edward Rutherfurd"),
+        _cand("literal", "Montmartre", title="Paris", author="Julien Green"),
+    ])
+    scored = score_case(result, expect="found", min_literal=1)
+    assert scored["n_duplicate_titles"] == 0
+    assert scored["pass"] is True
+
+
+def test_known_book_with_wrong_author_fails():
+    result = _result(True, [
+        _cand("literal", "Baixa", title="The Book of Disquiet", author="José Saramago"),
+    ])
+    scored = score_case(
+        result, expect="found", min_literal=1,
+        expected_examples=["The Book of Disquiet (Fernando Pessoa)"],
+    )
+    assert scored["n_author_mismatches"] == 1
+    assert scored["pass"] is False
+
+
+def test_known_book_with_right_author_passes_despite_formatting():
+    result = _result(True, [
+        _cand("literal", "Kyoto", title="the old capital", author="Yasunari  Kawabata"),
+    ])
+    scored = score_case(
+        result, expect="found", min_literal=1,
+        expected_examples=["The Old Capital (Yasunari Kawabata)"],
+    )
+    assert scored["n_author_mismatches"] == 0
+    assert scored["pass"] is True
+
+
+def test_author_accents_do_not_count_as_a_mismatch():
+    """Codex P2 on #302: "Jose Saramago" is the same author as "José Saramago",
+    whether the accent is precomposed (NFC) or a combining mark (NFD)."""
+    import unicodedata
+
+    nfd = unicodedata.normalize("NFD", "José Saramago")
+    for author in ("Jose Saramago", nfd):
+        result = _result(True, [
+            _cand("literal", "Chiado", title="The Year of the Death of Ricardo Reis", author=author),
+        ])
+        scored = score_case(
+            result, expect="found", min_literal=1,
+            expected_examples=["The Year of the Death of Ricardo Reis (José Saramago)"],
+        )
+        assert scored["n_author_mismatches"] == 0, author
+        assert scored["pass"] is True, author
+
+
+def test_accented_and_plain_author_are_one_book_for_duplicates():
+    result = _result(True, [
+        _cand("literal", "Chiado", title="Blindness", author="José Saramago"),
+        _cand("literal", "Baixa", title="Blindness", author="Jose Saramago"),
+    ])
+    scored = score_case(result, expect="found", min_literal=1)
+    assert scored["n_duplicate_titles"] == 1
+
+
+def test_unknown_books_are_not_author_checked():
+    result = _result(True, [_cand("literal", "X", title="Some Other Book", author="Anyone")])
+    scored = score_case(
+        result, expect="found", min_literal=1,
+        expected_examples=["The Old Capital (Yasunari Kawabata)"],
+    )
+    assert scored["n_author_mismatches"] == 0
+
+
+def test_aggregate_metrics_means():
+    from evaluation.tools.run_place_to_book_eval import aggregate_metrics
+
+    good = score_case(_result(True, [_cand("literal", "B", title="A")]), "found", 1)
+    bad = score_case(_result(True, [_cand("vibe", None)]), "found", 1)
+    metrics = aggregate_metrics([good, bad])
+    assert metrics["case_pass"] == 0.5
+    assert metrics["grounding_clean"] == 1.0
+    assert metrics["literal_grounded_mean"] == 0.5
+    assert aggregate_metrics([]) == {}

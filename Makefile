@@ -1,7 +1,7 @@
 # StoryLand AI - Makefile
 # Common commands for development and demo
 
-.PHONY: help install install-dev lock audit test test-ci test-cov test-agents test-models test-tools test-services test-api test-integration test-integration-live test-integration-vcr-record test-all eval eval-setup eval-setup-one eval-run eval-place-to-book eval-local-atmosphere eval-expansion eval-summary eval-report eval-export run-api db-reset db-show db-users clean check-env
+.PHONY: help install install-dev lock audit test test-ci test-cov test-agents test-models test-services test-api test-integration test-integration-live test-integration-vcr-record test-all eval eval-setup eval-setup-one eval-run eval-place-to-book eval-local-atmosphere eval-expansion eval-summary eval-report eval-export prompts-sync prompts-sync-dry run-api db-reset db-show db-users clean check-env
 
 # Default target
 help:
@@ -31,6 +31,8 @@ help:
 	@echo "  make eval-local-atmosphere   Run the local-atmosphere (book near me) eval"
 	@echo "  make eval-expansion          Run the expansion (suggestion-chip) eval"
 	@echo "  make eval-report   Generate evaluation trend report"
+	@echo "  make prompts-sync  Mirror current agent prompts to Langfuse (git stays source of truth)"
+	@echo "  make prompts-sync-dry  Show which prompts a sync would create, without writing"
 	@echo "  make eval-summary  Show evaluation summary"
 	@echo ""
 	@echo "Running:"
@@ -67,13 +69,15 @@ lock:
 	uv pip compile pyproject.toml --universal --extra dev --generate-hashes --output-file requirements-dev.lock
 
 # Audit the shipped (prod) lock for known vulnerabilities (same gate CI runs).
-# CVE-2026-114603 (opentelemetry-api tracestate ReDoS): accepted risk, reasoning
-# in .github/workflows/pip-audit.yml. Tracked on storyland-ai-private#59; remove
-# when google-adk allows opentelemetry-api>=1.45.1.
+# CVE-2026-114603 (opentelemetry-api tracestate ReDoS, storyland-ai-private#59)
+# and CVE-2026-126360 (opentelemetry-api traceparent ReDoS, storyland-ai-private#79):
+# accepted risks, reasoning in .github/workflows/pip-audit.yml. Remove both when
+# the lock moves past the google-adk <2.13 hold (2.14.1 admits otel 1.45.2).
 audit:
 	pip-audit --strict --require-hashes -r requirements.lock \
 		--ignore-vuln PYSEC-2026-2447 \
-		--ignore-vuln CVE-2026-114603
+		--ignore-vuln CVE-2026-114603 \
+		--ignore-vuln CVE-2026-126360
 
 # =============================================================================
 # Testing
@@ -97,8 +101,6 @@ test-agents:
 test-models:
 	.venv/bin/pytest tests/unit/test_models.py -v
 
-test-tools:
-	.venv/bin/pytest tests/unit/test_tools.py -v
 
 test-services:
 	.venv/bin/pytest tests/unit/test_services.py -v
@@ -110,10 +112,10 @@ test-integration:
 	.venv/bin/pytest tests/integration/ -v -m "integration and not real_api"
 
 test-integration-vcr-record:
-	.venv/bin/pytest tests/integration/ -v --vcr-record=all
+	STORYLAND_TEST_LANGFUSE_EXPORT=1 .venv/bin/pytest tests/integration/ -v --vcr-record=all
 
 test-integration-live:
-	.venv/bin/pytest tests/integration/ -v -m "integration and real_api"
+	STORYLAND_TEST_LANGFUSE_EXPORT=1 .venv/bin/pytest tests/integration/ -v -m "integration and real_api"
 
 test-all:
 	.venv/bin/pytest tests/ -v
@@ -152,6 +154,12 @@ eval-report:
 eval-export:
 	.venv/bin/python evaluation/tools/eval_dashboard.py --action export --days 30
 	@echo "✅ Metrics exported to evaluation/metrics.json"
+
+prompts-sync:
+	.venv/bin/python -m evaluation.tools.sync_prompts_to_langfuse
+
+prompts-sync-dry:
+	.venv/bin/python -m evaluation.tools.sync_prompts_to_langfuse --dry-run
 
 # =============================================================================
 # Running

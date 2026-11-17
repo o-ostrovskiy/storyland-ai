@@ -36,6 +36,9 @@ from core.place_to_book import (
     filter_grounded_candidates,
     enforce_label_invariants,
 )
+from agents.prompts import CURRENT_PROMPT_VERSION
+from core.cache import TTLCache
+from core.disk_cache import DiskTTLCache
 from core.session_state import SessionStateAccessor, SessionStateKeys
 
 
@@ -108,7 +111,13 @@ class TestNormalize:
         assert normalize_place(123) == ""
 
     def test_cache_key_versioned(self):
-        assert cache_key("NYC") == "place2book:v1:nyc"
+        assert cache_key("NYC") == f"place2book:v1:{CURRENT_PROMPT_VERSION}:nyc"
+
+    def test_a_prompt_bump_changes_the_key(self, monkeypatch):
+        """On disk nothing restarts the cache any more, so the key must move."""
+        before = cache_key("NYC")
+        monkeypatch.setattr("core.place_to_book.CURRENT_PROMPT_VERSION", "v999")
+        assert cache_key("NYC") != before
 
 
 # Extraction / validation
@@ -239,7 +248,7 @@ class TestFactories:
 
 # Resolver (Gemini chain stubbed — no network)
 
-def _make_resolver(monkeypatch, researcher_text, formatter_candidates, run_counter=None):
+def _make_resolver(monkeypatch, researcher_text, formatter_candidates, run_counter=None, cache=None, state_value=None):
     """Build a PlaceToBookResolver whose pipeline run is stubbed.
 
     ``researcher_text`` is emitted as a place_to_book_researcher event; the
@@ -274,9 +283,9 @@ def _make_resolver(monkeypatch, researcher_text, formatter_candidates, run_count
                 author="system",
                 actions=EventActions(
                     state_delta={
-                        SessionStateKeys.LAST_PLACE_TO_BOOK: {
-                            "candidates": formatter_candidates
-                        }
+                        SessionStateKeys.LAST_PLACE_TO_BOOK: state_value
+                        if state_value is not None
+                        else {"candidates": formatter_candidates}
                     }
                 ),
             )
@@ -293,7 +302,159 @@ def _make_resolver(monkeypatch, researcher_text, formatter_candidates, run_count
     return PlaceToBookResolver(
         model=object(),
         session_service=create_session_service(use_database=False),
+        cache=cache,
     )
+
+
+class _SpyCache(TTLCache):
+    """A real cache that also records the TTL each write asked for."""
+
+    def __init__(self):
+        super().__init__(ttl_seconds=60, max_entries=10)
+        self.writes = []
+
+    async def set(self, key, value, ttl_seconds=None):
+        self.writes.append((key, ttl_seconds))
+        await super().set(key, value, ttl_seconds=ttl_seconds)
+
+
+class TestPersistentCache:
+    """ai#70: answers outlive a restart; only decided answers are written."""
+
+    BATH_TEXT = "Persuasion is set in Bath."
+    BATH = [_candidate("Persuasion", match_type="literal", maps_to="Bath")]
+
+    def _disk(self, tmp_path):
+        return DiskTTLCache(directory=str(tmp_path / "p2b"), ttl_seconds=60, max_entries=10)
+
+    @pytest.mark.parametrize(
+        ("text", "cands"),
+        [(BATH_TEXT, BATH), ("no grounded books here", [])],
+        ids=["found", "not_found"],
+    )
+    async def test_an_answer_survives_a_restart_with_zero_model_calls(self, monkeypatch, tmp_path, text, cands):
+        runs = []
+        first_cache = self._disk(tmp_path)
+        first = await _make_resolver(monkeypatch, text, cands, run_counter=runs, cache=first_cache).resolve("Bath")
+        first_cache.close()
+        assert len(runs) == 1
+
+        restarted = self._disk(tmp_path)
+        second = await _make_resolver(monkeypatch, text, cands, run_counter=runs, cache=restarted).resolve("Bath")
+        restarted.close()
+
+        assert len(runs) == 1
+        assert second == first
+
+    async def test_a_disk_hit_logs_its_line(self, monkeypatch, tmp_path):
+        import core.place_to_book as p2b
+
+        events = []
+        monkeypatch.setattr(p2b.logger, "info", lambda event, **kw: events.append(event))
+        cache = self._disk(tmp_path)
+        resolver = _make_resolver(monkeypatch, self.BATH_TEXT, self.BATH, cache=cache)
+        await resolver.resolve("Bath")
+        await resolver.resolve("Bath")
+        cache.close()
+        assert "place2book cache hit (disk)" in events
+
+    async def test_found_and_not_found_keep_their_own_ttls(self, monkeypatch):
+        import core.place_to_book as p2b
+
+        found = _SpyCache()
+        await _make_resolver(monkeypatch, self.BATH_TEXT, self.BATH, cache=found).resolve("Bath")
+        assert [ttl for _, ttl in found.writes] == [p2b.PLACE_TO_BOOK_TTL_SECONDS]
+
+        not_found = _SpyCache()
+        await _make_resolver(monkeypatch, "no grounded books here", [], cache=not_found).resolve("Wakanda")
+        assert [ttl for _, ttl in not_found.writes] == [p2b._NOT_FOUND_TTL_SECONDS]
+        assert p2b._NOT_FOUND_TTL_SECONDS < p2b.PLACE_TO_BOOK_TTL_SECONDS
+
+    @pytest.mark.parametrize(
+        ("text", "state_value"),
+        [("", None), ("Some research text.", "{not json"), ("Some research text.", {"candidates": "nope"})],
+        ids=["empty_answer", "malformed_string", "malformed_shape"],
+    )
+    async def test_couldnt_check_is_never_written(self, monkeypatch, text, state_value):
+        cache = _SpyCache()
+        runs = []
+        resolver = _make_resolver(monkeypatch, text, [], run_counter=runs, cache=cache, state_value=state_value)
+
+        result = await resolver.resolve("Lisbon")
+        await resolver.resolve("Lisbon")
+
+        assert result.found is False
+        assert cache.writes == []
+        assert len(runs) == 2  # the next ask checks again
+
+    async def test_a_model_error_is_never_written(self, monkeypatch):
+        cache = _SpyCache()
+        resolver = _make_resolver(monkeypatch, "x", [], cache=cache)
+
+        async def boom(place):
+            raise RuntimeError("model down")
+
+        monkeypatch.setattr(resolver, "_run_pipeline", boom)
+        with pytest.raises(RuntimeError):
+            await resolver.resolve("Lisbon")
+        assert cache.writes == []
+
+    @pytest.mark.parametrize("corrupt", [{"place": "only"}, "garbage", 42], ids=["old_shape", "string", "number"])
+    async def test_a_corrupt_entry_is_a_miss(self, monkeypatch, corrupt):
+        runs = []
+        cache = TTLCache(ttl_seconds=60, max_entries=10)
+        resolver = _make_resolver(monkeypatch, self.BATH_TEXT, self.BATH, run_counter=runs, cache=cache)
+        await cache.set(cache_key("Bath"), corrupt)
+
+        result = await resolver.resolve("Bath")
+
+        assert result.found is True
+        assert len(runs) == 1
+
+    async def test_a_cache_read_error_is_a_miss(self, monkeypatch):
+        runs = []
+        cache = TTLCache(ttl_seconds=60, max_entries=10)
+
+        async def unreadable(key):
+            raise OSError("database disk image is malformed")
+
+        monkeypatch.setattr(cache, "get", unreadable)
+        resolver = _make_resolver(monkeypatch, self.BATH_TEXT, self.BATH, run_counter=runs, cache=cache)
+
+        assert (await resolver.resolve("Bath")).found is True
+        assert len(runs) == 1
+
+    async def test_a_cache_write_error_still_answers(self, monkeypatch):
+        cache = TTLCache(ttl_seconds=60, max_entries=10)
+
+        async def full(key, value, ttl_seconds=None):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(cache, "set", full)
+        resolver = _make_resolver(monkeypatch, self.BATH_TEXT, self.BATH, cache=cache)
+
+        assert (await resolver.resolve("Bath")).found is True
+
+
+def test_the_app_resolver_keeps_its_answers_on_disk(monkeypatch, tmp_path):
+    import api.dependencies as deps
+
+    config = SimpleNamespace(
+        cache_backend="disk",
+        cache_dir=str(tmp_path),
+        langfuse_secret_key=None,
+        langfuse_public_key=None,
+        langfuse_host=None,
+    )
+    state = SimpleNamespace(executor=SimpleNamespace(model=object()), config=config)
+    monkeypatch.setattr(deps, "_place_to_book_resolver", None)
+    monkeypatch.setattr(deps, "_app_state", state)
+
+    resolver = deps.get_place_to_book_resolver()
+
+    assert isinstance(resolver._cache, DiskTTLCache)
+    assert resolver._cache.directory == str(tmp_path / "place2book")
+    resolver.close()
 
 
 class TestResolver:
@@ -655,3 +816,129 @@ class TestObserverIsFlushed:
             await resolver._run_pipeline("Lisbon")
 
         assert flushed == [True], "flush must run even when the pump raises"
+
+
+class TestDropRepeatedTitles:
+    """ai-private#71: an answer never lists the same book twice."""
+
+    def _c(self, title, match_type="literal", maps_to="Baixa"):
+        return {"title": title, "author": "A", "match_type": match_type,
+                "maps_to": maps_to if match_type == "literal" else None}
+
+    def test_case_article_and_punctuation_repeats_are_dropped(self):
+        from core.place_to_book import drop_repeated_titles
+
+        out = drop_repeated_titles([
+            self._c("The Book of Disquiet"),
+            self._c("book of disquiet"),
+            self._c("Book of Disquiet!"),
+            self._c("Night Train to Lisbon"),
+        ])
+        assert [c["title"] for c in out] == ["The Book of Disquiet", "Night Train to Lisbon"]
+
+    def test_a_literal_repeat_replaces_a_vibe_entry_in_place(self):
+        from core.place_to_book import drop_repeated_titles
+
+        out = drop_repeated_titles([
+            self._c("Ulysses", match_type="vibe"),
+            self._c("Dubliners"),
+            self._c("Ulysses", maps_to="Eccles Street"),
+        ])
+        assert [(c["title"], c["match_type"]) for c in out] == [
+            ("Ulysses", "literal"), ("Dubliners", "literal"),
+        ]
+
+    def test_distinct_titles_untouched(self):
+        from core.place_to_book import drop_repeated_titles
+
+        cands = [self._c("Emma"), self._c("Persuasion")]
+        assert drop_repeated_titles(cands) == cands
+
+    def test_same_title_by_different_authors_keeps_both(self):
+        """Codex P2 on ai#302: a title is not a book's identity."""
+        from core.place_to_book import drop_repeated_titles
+
+        cands = [
+            {"title": "Paris", "author": "Edward Rutherfurd",
+             "match_type": "literal", "maps_to": "Île de la Cité"},
+            {"title": "Paris", "author": "Julien Green",
+             "match_type": "literal", "maps_to": "Montmartre"},
+        ]
+        assert drop_repeated_titles(cands) == cands
+
+    def test_same_book_with_author_formatting_drift_is_one_book(self):
+        from core.place_to_book import drop_repeated_titles
+
+        out = drop_repeated_titles([
+            {"title": "Paris", "author": "Edward Rutherfurd",
+             "match_type": "literal", "maps_to": "Île de la Cité"},
+            {"title": "paris", "author": "edward rutherfurd.",
+             "match_type": "literal", "maps_to": "Montmartre"},
+        ])
+        assert [c["maps_to"] for c in out] == ["Île de la Cité"]
+
+    def test_accented_and_plain_author_are_one_book(self):
+        """The same author with and without the accent (NFC, NFD, or none) is one book."""
+        import unicodedata
+
+        from core.place_to_book import drop_repeated_titles
+
+        out = drop_repeated_titles([
+            {"title": "Blindness", "author": "José Saramago",
+             "match_type": "literal", "maps_to": "Chiado"},
+            {"title": "Blindness", "author": unicodedata.normalize("NFD", "José Saramago"),
+             "match_type": "literal", "maps_to": "Baixa"},
+            {"title": "Blindness", "author": "Jose Saramago",
+             "match_type": "literal", "maps_to": "Alfama"},
+        ])
+        assert [c["maps_to"] for c in out] == ["Chiado"]
+
+    def test_missing_author_falls_back_to_title(self):
+        from core.place_to_book import drop_repeated_titles
+
+        out = drop_repeated_titles([
+            {"title": "Paris", "author": None, "match_type": "literal", "maps_to": "Marais"},
+            {"title": "Paris", "author": "", "match_type": "literal", "maps_to": "Bastille"},
+        ])
+        assert [c["maps_to"] for c in out] == ["Marais"]
+
+
+async def test_resolve_drops_a_repeated_title(monkeypatch):
+    """Wiring: the resolver's answer carries each book once."""
+    text = "Persuasion by Jane Austen is set in Bath. Northanger Abbey is set in Bath."
+    cands = [
+        {"title": "Persuasion", "author": "Jane Austen", "why_it_fits": "w",
+         "match_type": "literal", "maps_to": "Bath"},
+        {"title": "persuasion", "author": "Jane Austen", "why_it_fits": "w",
+         "match_type": "literal", "maps_to": "Bath"},
+        {"title": "Northanger Abbey", "author": "Jane Austen", "why_it_fits": "w",
+         "match_type": "literal", "maps_to": "Bath"},
+    ]
+    resolver = _make_resolver(monkeypatch, text, cands, cache=_SpyCache())
+    result = await resolver.resolve("Bath")
+    assert [c.title for c in result.candidates] == ["Persuasion", "Northanger Abbey"]
+
+
+class TestPromptV4PlaceToBook:
+    """ai-private#71: the revised researcher/formatter keep their guardrails."""
+
+    def test_researcher_rules(self):
+        from agents.prompts import load_prompts
+
+        text = load_prompts("v4").place_to_book_researcher
+        assert "exists only inside fiction" in text  # invented places → empty
+        assert "Do not substitute the real place" in text
+        assert "AROUND {place}" in text  # literal = inside the place typed
+        assert "List each book ONCE" in text
+        assert "never the translator" in text
+        assert "region or a country" in text  # queries cover regions/countries
+        assert "{place}" in text and text.format(place="Lisbon")
+
+    def test_formatter_rules(self):
+        from agents.prompts import load_prompts
+
+        text = load_prompts("v4").place_to_book_formatter
+        assert "Each book appears ONCE" in text
+        assert '"vibe" at most' in text
+        assert "MUST be null" in text
+        assert text.format(place="Lisbon")

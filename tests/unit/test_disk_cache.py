@@ -5,7 +5,7 @@ import asyncio
 
 import pytest
 
-from core.cache import TTLCache, build_discovery_cache
+from core.cache import TTLCache, build_discovery_cache, build_place_to_book_cache
 from core.disk_cache import DiskTTLCache
 from core.types import ExecutorConfig
 
@@ -111,3 +111,39 @@ class TestBuildDiscoveryCache:
             self._cfg(cache_backend="disk", cache_dir="/dev/null/cannot/exist")
         )
         assert isinstance(cache, TTLCache)
+
+
+# ai#70: place→book caches found and not-found answers for different lengths.
+
+
+async def test_a_per_entry_ttl_overrides_the_default_on_disk(tmp_path):
+    cache = DiskTTLCache(directory=str(tmp_path / "ttl"), ttl_seconds=3600, max_entries=10)
+    await cache.set("short", "v", ttl_seconds=-1)  # already expired
+    await cache.set("default", "v")
+    assert await cache.get("short") is None
+    assert await cache.get("default") == "v"
+    cache.close()
+
+
+async def test_a_per_entry_ttl_overrides_the_default_in_memory():
+    now = [0.0]
+    cache = TTLCache(ttl_seconds=100, max_entries=10, clock=lambda: now[0])
+    await cache.set("short", "v", ttl_seconds=10)
+    await cache.set("default", "v")
+    now[0] = 50.0
+    assert await cache.get("short") is None
+    assert await cache.get("default") == "v"
+
+
+def test_place_to_book_gets_its_own_store_under_cache_dir(tmp_path):
+    config = ExecutorConfig(model_name="m", google_api_key="k", cache_backend="disk", cache_dir=str(tmp_path))
+    cache = build_place_to_book_cache(config, ttl_seconds=60, max_entries=10)
+    assert isinstance(cache, DiskTTLCache)
+    assert cache.directory == str(tmp_path / "place2book")
+    cache.close()
+
+
+def test_place_to_book_stays_in_memory_on_the_memory_backend():
+    config = ExecutorConfig(model_name="m", google_api_key="k", cache_backend="memory")
+    cache = build_place_to_book_cache(config, ttl_seconds=60, max_entries=10)
+    assert isinstance(cache, TTLCache)

@@ -24,6 +24,14 @@ class CityStop(BaseModel):
         default=None,
         description="If this is a filming location: describe the specific scene or sequence filmed here (e.g., 'The opening chase scene from the 2005 film adaptation was filmed on these steps'). Leave null if not a filming location.",
     )
+    screen_claim: Optional[Literal["filmed_here", "set_here"]] = Field(
+        default=None,
+        description=(
+            "Only for a film or series journey: 'filmed_here' if scenes were shot at this "
+            "place, 'set_here' if the story takes place here. Keep the two apart; never "
+            "infer one from the other. Leave null for a book journey."
+        ),
+    )
     time_of_day: str = Field(
         description='Best time to visit: morning, afternoon, evening, full_day'
     )

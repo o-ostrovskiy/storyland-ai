@@ -19,6 +19,7 @@ from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from common.logging import get_logger
 from common.search_grounding import SearchMetadata, extract_search_metadata
+from agents.prompts import CURRENT_PROMPT_VERSION, prompt_content_hash
 
 logger = get_logger(__name__)
 
@@ -120,6 +121,7 @@ class LangfusePlugin(BasePlugin):
         host: Optional[str] = None,
         enabled: bool = True,
         root_name: Optional[str] = None,
+        prompt_version: str = CURRENT_PROMPT_VERSION,
     ):
         """
         Initialize Langfuse plugin.
@@ -135,9 +137,16 @@ class LangfusePlugin(BasePlugin):
                 plugin cannot recover the root identity from the context —
                 the caller that builds the Runner KNOWS the workflow and
                 injects its name here (see WorkflowExecutor._build_runner).
+            prompt_version: The prompt set this run actually uses, written on
+                every trace. An eval run with --prompt-version passes its own;
+                production uses the default.
         """
         super().__init__(name="langfuse_plugin")
         self.root_name = root_name
+        self._prompt_version = prompt_version
+        # The prompt JSON can't change under a running process: hash it once
+        # per plugin, not per trace.
+        self._prompt_hash = prompt_content_hash(prompt_version)
         self.enabled = enabled and LANGFUSE_AVAILABLE
         self.client: Optional[Langfuse] = None
         self._token_usage = TokenUsage()
@@ -272,10 +281,19 @@ class LangfusePlugin(BasePlugin):
             user_id = invocation_context.user_id
             session_id = invocation_context.session.id if invocation_context.session else None
 
+            # Prompt identity on every production trace, so traces can be
+            # filtered/compared by prompt in Langfuse. The hash distinguishes an
+            # in-place vN.json edit from the published vN (MYS-462); prompts
+            # stay in git, this only labels which set produced the trace.
             self._propagation_cm = propagate_attributes(
                 user_id=user_id,
                 session_id=session_id,
                 trace_name=f"{agent_name}_invocation",
+                version=self._prompt_version,
+                metadata={
+                    "prompt_version": self._prompt_version,
+                    "prompt_hash": self._prompt_hash,
+                },
             )
             self._propagation_cm.__enter__()
 
@@ -289,15 +307,6 @@ class LangfusePlugin(BasePlugin):
                 },
                 input=str(user_message),
             )
-            # Mirror the root span's input onto the TRACE. Langfuse's session
-            # view and trace list render trace-level I/O, not the root span's,
-            # so without this every production trace displays as "This trace
-            # has no input or output" even though the span tree is complete.
-            # v4's observations-first model deprecates trace I/O in favour of
-            # propagate_attributes(), but propagate_attributes carries only
-            # correlating attributes (user/session/tags) -- set_trace_io is
-            # still the only way to populate the fields those views read.
-            self._current_trace.set_trace_io(input=str(user_message))
             logger.debug("langfuse_trace_created", trace_id=self._current_trace.trace_id, user_id=user_id)
         except Exception as e:
             logger.warning("langfuse_trace_error", error=str(e), error_type=type(e).__name__)
@@ -726,23 +735,20 @@ class LangfusePlugin(BasePlugin):
             return
 
         try:
+            # The root observation carries the run's overall I/O: Langfuse v4 is
+            # observations-first and trace-level I/O is gone. Falls back to the
+            # status blob only when the run produced no final-response text, so
+            # the root never renders blank.
             self._current_trace.update(
-                output={"status": "completed"},
+                output=self._final_response_text
+                if self._final_response_text is not None
+                else {"status": "completed"},
                 metadata={
                     "total_input_tokens": self._token_usage.input_tokens,
                     "total_output_tokens": self._token_usage.output_tokens,
                     "total_cost_usd": self._total_cost_usd,
                     "cost_unknown": self._cost_unknown,
                 },
-            )
-            # Trace-level output, for the same reason as the input above. Falls
-            # back to the status blob only when the run produced no final-
-            # response text (error paths), so the trace never renders blank.
-            # set_trace_io drops None fields, so this cannot clear the input.
-            self._current_trace.set_trace_io(
-                output=self._final_response_text
-                if self._final_response_text is not None
-                else {"status": "completed"}
             )
             self._current_trace.end()
             logger.info(
@@ -789,7 +795,6 @@ class LangfusePlugin(BasePlugin):
                     "cost_unknown": self._cost_unknown,
                 },
             )
-            self._current_trace.set_trace_io(output={"status": "error", "error_type": error_type})
             self._current_trace.end()
         except Exception as e:
             logger.warning("langfuse_finalize_error", error=str(e), error_type=type(e).__name__)

@@ -13,8 +13,9 @@ from fastapi import Header, HTTPException, Request
 
 from common.config import Config, load_config
 from common.logging import configure_logging, get_logger
+from core.cache import build_place_to_book_cache
 from core.executor import WorkflowExecutor
-from core.place_to_book import PlaceToBookResolver
+from core.place_to_book import PLACE_TO_BOOK_MAX_ENTRIES, PLACE_TO_BOOK_TTL_SECONDS, PlaceToBookResolver
 from core.types import ExecutorConfig
 from api.ratelimit import InFlightLimiter, SlidingWindowRateLimiter
 
@@ -138,6 +139,8 @@ async def shutdown() -> None:
     if _app_state:
         await _app_state.executor.close()
     _app_state = None
+    if _place_to_book_resolver is not None:
+        _place_to_book_resolver.close()
     _place_to_book_resolver = None
 
 
@@ -152,8 +155,8 @@ def get_place_to_book_resolver() -> PlaceToBookResolver:
     """Return the process-wide place→book resolver (lazy singleton).
 
     Reuses the executor's already-constructed model so we don't spin up a second
-    Gemini client, and keeps the resolver's in-process cache warm across
-    requests. The resolver keeps its own (in-memory) session service, isolated
+    Gemini client. Its cache follows ``CACHE_BACKEND`` (a store of its own under
+    ``cache_dir`` when that's disk), so answers survive a restart. The resolver keeps its own (in-memory) session service, isolated
     from the discovery/compose session lifecycle.
 
     Threads the app's Langfuse credentials through so this endpoint gets the
@@ -166,6 +169,11 @@ def get_place_to_book_resolver() -> PlaceToBookResolver:
         app_state = get_app_state()
         _place_to_book_resolver = PlaceToBookResolver(
             model=app_state.executor.model,
+            cache=build_place_to_book_cache(
+                app_state.config,
+                ttl_seconds=PLACE_TO_BOOK_TTL_SECONDS,
+                max_entries=PLACE_TO_BOOK_MAX_ENTRIES,
+            ),
             langfuse_secret_key=app_state.config.langfuse_secret_key,
             langfuse_public_key=app_state.config.langfuse_public_key,
             langfuse_host=app_state.config.langfuse_host,

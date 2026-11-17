@@ -281,7 +281,9 @@ def sdk_span():
     """One REAL `LangfuseSpan` from the installed SDK, exported in-memory.
 
     No network: the client is handed an `InMemorySpanExporter`, so nothing is
-    sent anywhere and the exported span is readable in-process.
+    sent anywhere and the exported span is readable in-process. That is why it
+    alone may lift the tests/conftest.py tracing switch, and only while the
+    client is built.
     """
     from langfuse import Langfuse
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
@@ -289,14 +291,16 @@ def sdk_span():
     )
 
     exporter = InMemorySpanExporter()
-    client = Langfuse(
-        public_key="pk-lf-mys951-accessor-row",
-        secret_key="sk-lf-mys951-accessor-row",
-        host="http://127.0.0.1:1",
-        span_exporter=exporter,
-        flush_at=1,
-        flush_interval=0.1,
-    )
+    with pytest.MonkeyPatch.context() as env:
+        env.setenv("LANGFUSE_TRACING_ENABLED", "true")
+        client = Langfuse(
+            public_key="pk-lf-mys951-accessor-row",
+            secret_key="sk-lf-mys951-accessor-row",
+            host="http://127.0.0.1:1",
+            span_exporter=exporter,
+            flush_at=1,
+            flush_interval=0.1,
+        )
     yield client, exporter
 
 
