@@ -1317,6 +1317,31 @@ A client that drops the SSE stream mid-generation makes sse_starlette cancel its
 ### Trade-offs
 A dropped stream's last DB statement still runs to completion (milliseconds on SQLite), so nothing is cancelled half-written. The wrapper overrides ADK's public method names with pass-through `*args/**kwargs`, so an ADK upgrade that adds a new DB-touching method needs it added here.
 
+## 33. The Two Reader Waits Have Numbers: a Langfuse Latency Report (2026-11-01)
+
+### Context
+"Quicker" (storyland-web#519, track B7) had no number behind it. A reader feels two waits: until the regions appear after they pick a book, and until the full journey arrives after they pick regions (storyland-ai-private#65).
+
+### Decision
+- `scripts/latency_report.py` reads p50/p95 latency per UTC day, with the sample size, from `GET /api/public/v2/metrics` (one call per wait and window, through the SDK's bare `LangfuseAPI` REST client, so no tracer starts and nothing is written). Keys come from the repo's `.env` when not exported; an exported variable wins.
+- **First region** = the `book_to_place_discovery_invocation` root: `RegionsReady` is yielded when the discovery workflow ends (`core/executor.py`), so that root's latency is the wait. **Full journey** = the `book_to_place_composition_invocation` root. Only the `*_invocation` root counts (each trace also has an `invoke_workflow <name>` root). Environment `production` by default.
+- A discovery-cache hit runs no workflow and writes no trace, so the numbers are **fresh runs only**: the slow path, which is the one worth tracking.
+- Fewer than 20 runs in a row prints "too few", and no runs prints "no data", never 0 s. An API error, a missing data list or a malformed row (a daily row with runs but no day in the window included) exits 2 (`latency unverified`), the same contract as Ops Watch's `langfuse_health.py`.
+
+### Baseline (measured 2026-11-01, production)
+| Wait | 30 days (10-03 … 11-01) | Last 7 days |
+|---|---|---|
+| First region | p50 15.1 s · p95 20.6 s (n=46) | too few (n=11) |
+| Full journey | p50 4.5 s · p95 5.7 s (n=43) | too few (n=9) |
+
+No single day comes close to 20 fresh runs yet, so per-day rows say "too few"; read `--days 30` until traffic grows.
+
+### Targets
+Proposed in the PR; Olga sets them at merge. Proposed: first region p95 ≤ 15 s, full journey p95 ≤ 6 s (hold today's level).
+
+### Trade-offs
+It measures the workflow inside the agent service, not the browser: the be hop, the executor's post-workflow steps (enrichment, cache write) and the SSE delivery are not in it, so a reader's wait is somewhat longer than the report.
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -1350,5 +1375,6 @@ A dropped stream's last DB statement still runs to completion (milliseconds on S
 | **Persistent place→book cache (ADR #30)** | A restart costs no repeat AI runs; a failed check is never remembered as "no books here" | In-place prompt edits wait out the 6h TTL; the gateway still holds a failed check for 1h |
 | **Work kind on the AI contract (ADR #31)** | Films and series ride the same pipeline; a book request, its metadata event and its cache key are byte-identical | Book fields and `work` coexist on the wire; film prompts are a later story |
 | **Cancellation-safe session DB (ADR #32)** | A dropped SSE stream returns its pooled connection; caller cancellation is unchanged | One wrapper method per ADK DB call to keep in step on upgrades |
+| **Reader-wait latency report (ADR #33)** | First-region and full-journey p50/p95 from Langfuse, never a fake 0 s | Fresh runs only, measured inside the agent service (no be hop or SSE delivery) |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.
