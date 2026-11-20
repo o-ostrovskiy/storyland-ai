@@ -171,6 +171,14 @@ Each case logs a Langfuse dataset run (`exp_eval_YYYYMMDD_HHMMSS`) with scores:
 `case_pass`, `no_duplicates`, `source_stamped`, `places_schema_valid`,
 `chip_ids_stamped` (all 0/1), `new_places_count`, and `chips_available`.
 
+### Release verdict (place→book, local-atmosphere, expansion)
+
+These three runners end with one line, `RELEASE: ALLOWED` or `RELEASE: BLOCKED — <reasons>`, write it into the
+results JSON as `release_gate`, and **exit 1 when blocked** (`evaluation/tools/release_gate.py`, 2026-11-19). Blocked =
+no case evaluated, any case skipped or errored, pass rate below `--min-pass-rate` (default 0.85), or — place→book only —
+`grounding_clean` below 1.0 (a fabricated grounding is never allowed). They stay manual (they spend Gemini); a ship that
+depends on an AI change quotes the `RELEASE:` line. The itinerary runner (`run_scheduled_eval.py`) is not gated yet.
+
 ### Which model runs where
 
 Two models participate in every judged eval run — keep them straight when reading results:
