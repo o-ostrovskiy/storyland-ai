@@ -47,6 +47,7 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from evaluation.tools.experiment_run import link_experiment_item  # noqa: E402
+from evaluation.tools.release_gate import add_gate_args, exit_with_verdict  # noqa: E402
 
 from common.logging import get_logger
 from models.itinerary import CityStop
@@ -397,7 +398,13 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
     print("=" * 72)
     print(f"Result: {passed}/{len(evaluated)} PASS | Langfuse run: {run_name}")
     print(f"Results saved to {out_path}")
+    summary["_results_path"] = str(out_path)
     return summary
+
+
+# Release floor (2026-11-19 audit): the runner used to exit 0 at any score. 85% is the shared starting floor;
+# raise it once a few runs confirm the baseline.
+MIN_PASS_RATE = 0.85
 
 
 async def _run_case(
@@ -499,9 +506,12 @@ def main():
         "--no-register", action="store_true",
         help="Skip refreshing dataset items from the evalset (assume already correct)",
     )
+    add_gate_args(parser, MIN_PASS_RATE)
     args = parser.parse_args()
-    asyncio.run(run(max_cases=args.max_cases, register=not args.no_register,
-                    output_dir=args.output_dir))
+    summary = asyncio.run(run(max_cases=args.max_cases, register=not args.no_register,
+                              output_dir=args.output_dir))
+    path = summary.pop("_results_path", None)
+    sys.exit(exit_with_verdict(summary, args.min_pass_rate, results_path=path))
 
 
 if __name__ == "__main__":
