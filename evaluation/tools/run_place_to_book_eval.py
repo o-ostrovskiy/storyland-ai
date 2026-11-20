@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from evaluation.tools.experiment_run import link_experiment_item  # noqa: E402
+from evaluation.tools.release_gate import add_gate_args, exit_with_verdict  # noqa: E402
 
 from common.config import load_config
 from common.logging import configure_logging, get_logger
@@ -302,7 +303,14 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
     print(f"Result: {passed}/{len(evaluated)} PASS | Langfuse run: {run_name}")
     print(f"Metrics: {json.dumps(summary['metrics'])}")
     print(f"Results saved to {out_path}")
+    summary["_results_path"] = str(out_path)
     return summary
+
+
+# Release floor (2026-11-19). Baseline Jun–Aug 2026: 9/10–10/11 (~90%) with one stable known miss; 85% leaves room
+# for that miss and nothing more. Fabricated grounding (a literal with no maps_to, or a vibe with one) is never OK.
+MIN_PASS_RATE = 0.85
+HARD_METRICS = ("grounding_clean",)
 
 
 def main():
@@ -315,8 +323,11 @@ def main():
         "--no-register", action="store_true",
         help="Skip refreshing dataset items from the evalset (assume already correct)",
     )
+    add_gate_args(parser, MIN_PASS_RATE)
     args = parser.parse_args()
-    asyncio.run(run(max_cases=args.max_cases, register=not args.no_register, output_dir=args.output_dir))
+    summary = asyncio.run(run(max_cases=args.max_cases, register=not args.no_register, output_dir=args.output_dir))
+    path = summary.pop("_results_path", None)
+    sys.exit(exit_with_verdict(summary, args.min_pass_rate, HARD_METRICS, results_path=path))
 
 
 if __name__ == "__main__":
