@@ -1349,7 +1349,7 @@ A film or series journey makes a claim a book journey never does: "the story is 
 
 ### Decision
 - `models/screen.py::ScreenContext` holds the three separate answers: `story_locations`, `filming_locations`, `source_work` (a book or nothing) and `is_fictional_world`. An invented world has no story locations, enforced by the model.
-- `core/guardrails/screen_claims.py`, applied in `core/extraction.py` before any `ItineraryReady`/expansion event leaves: on a film or series journey, a `set_here` stop labelled `literal`/`historical` with no `grounding_source` becomes `filmed_here` + `vibe` (the weaker claim, the book path's "choose the weaker claim when unsure" rule). A `set_here` stop whose cited evidence the book-path downgrade (`downgrade_ungrounded_match_types`) rejects is demoted the same way. Stops are never dropped or upgraded; `filming_scene` is kept.
+- `core/guardrails/screen_claims.py`, applied in `core/extraction.py` before any `ItineraryReady`/expansion event leaves: on a film or series journey, a `set_here` stop becomes `filmed_here` + `vibe` unless it is labelled `literal`/`historical` **and** has a `grounding_source` (a `vibe`/`thematic`/missing label is no evidence for a setting) (the weaker claim, the book path's "choose the weaker claim when unsure" rule). A `set_here` stop whose cited evidence the book-path downgrade (`downgrade_ungrounded_match_types`) rejects is demoted the same way. Stops are never dropped or upgraded; `filming_scene` is kept.
 - Book journeys are untouched; their screen claims are still nulled by `clear_screen_claims_unless_screen_work`.
 
 ### Trade-offs

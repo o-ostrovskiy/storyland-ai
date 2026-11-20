@@ -128,16 +128,23 @@ class TestDowngradeUnsupportedSetHere:
             ("Place de l'Estrapade", "set_here", match_type, "Emily's flat, S1E1")
         ]
 
-    def test_filmed_here_and_weak_labels_are_left_alone(self):
+    def test_filmed_here_and_unclaimed_stops_are_left_alone(self):
         stops = [
             _stop("Fort Lovrijenac", "filmed_here", "literal"),
-            _stop("Old Town", "set_here", "vibe"),
-            _stop("Stradun", "set_here", "thematic"),
             _stop("Lokrum", None, "literal"),
         ]
         it = _itinerary(*stops, city="Dubrovnik", country="Croatia")
         before = _claims(it)
         assert _claims(downgrade_unsupported_set_here_claims(it, "series")) == before
+
+    @pytest.mark.parametrize("match_type", ["vibe", "thematic", None])
+    @pytest.mark.parametrize("source", [None, "Castello Aragonese, Ischia"])
+    def test_a_set_here_on_a_weak_or_missing_label_is_demoted_even_with_a_source(self, match_type, source):
+        # ai#311 review probe: Castello Aragonese, set_here + vibe, no source came out as set_here.
+        it = _itinerary(_stop("Castello Aragonese", "set_here", match_type, source=source), city="Ischia")
+        assert _claims(downgrade_unsupported_set_here_claims(it, "film")) == [
+            ("Castello Aragonese", "filmed_here", "vibe", None)
+        ]
 
     def test_a_book_journey_is_untouched(self):
         it = _itinerary(_stop("Café de Flore", "set_here", "literal"))
@@ -224,6 +231,14 @@ class TestExtractionPath:
             ("Ischia Ponte", "filmed_here", "vibe", None),
             ("Piazza di Spagna", "set_here", "literal", "opening"),
         ]
+
+    def test_a_set_here_typed_vibe_leaves_as_filmed_here(self):
+        """ai#311 review probe: set_here + vibe, no source, used to ship as "Set here"."""
+        it = _itinerary(_stop("Castello Aragonese", "set_here", "vibe"), city="Ischia", country="Italy")
+        itinerary, _ = extract_itinerary_from_response(
+            None, _accessor("film", it, grounding_text="Castello Aragonese Ischia")
+        )
+        assert _claims(itinerary) == [("Castello Aragonese", "filmed_here", "vibe", None)]
 
     def test_a_book_journey_still_ships_no_screen_claim(self):
         it = _itinerary(_stop("Pump Room", "set_here", "literal", source="ch. 3"), city="Bath", country="UK")

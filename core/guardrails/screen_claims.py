@@ -6,9 +6,10 @@ filming location is sold as the setting (Dubrovnik is not King's Landing). So a
 ``set_here`` stop must carry its evidence, the same way a book stop's
 ``literal``/``historical`` label must (``core.extraction.downgrade_ungrounded_match_types``):
 
-* a ``set_here`` stop labelled ``literal``/``historical`` with no
-  ``grounding_source`` is downgraded to the weaker claim, ``filmed_here`` +
-  ``vibe``, before any event leaves the service;
+* a ``set_here`` stop is downgraded to the weaker claim, ``filmed_here`` +
+  ``vibe``, before any event leaves the service unless it is labelled
+  ``literal``/``historical`` **and** carries a ``grounding_source`` (a
+  ``vibe``/``thematic`` label, or no label, is no evidence for "set here");
 * a ``set_here`` stop that was ``literal``/``historical`` but lost its grounding
   in the book-path downgrade (the cited evidence did not trace to research) is
   downgraded the same way.
@@ -55,7 +56,7 @@ def _demote(stop: dict) -> None:
 def downgrade_unsupported_set_here_claims(
     holder: Optional[dict], work_kind: object, stops_path: str = "itinerary"
 ) -> Optional[dict]:
-    """Downgrade every ``set_here`` stop that claims literal/historical with no source.
+    """Downgrade every ``set_here`` stop that isn't literal/historical with a source.
 
     ``stops_path`` is ``"itinerary"`` (cities → stops) or ``"expansion"`` (places).
     No-op unless ``work_kind`` is film or series. Mutates and returns ``holder``.
@@ -64,15 +65,14 @@ def downgrade_unsupported_set_here_claims(
         return holder
     downgraded = 0
     for stop in _stops(holder, stops_path):
-        if (
-            stop.get("screen_claim") == "set_here"
-            and stop.get("match_type") in _STRONG_MATCH_TYPES
-            and not (stop.get("grounding_source") or "").strip()
+        if stop.get("screen_claim") == "set_here" and not (
+            stop.get("match_type") in _STRONG_MATCH_TYPES
+            and (stop.get("grounding_source") or "").strip()
         ):
             _demote(stop)
             downgraded += 1
     if downgraded:
-        logger.info("screen_set_here_downgraded", downgraded=downgraded, reason="no_grounding_source")
+        logger.info("screen_set_here_downgraded", downgraded=downgraded, reason="no_strong_sourced_evidence")
     return holder
 
 
