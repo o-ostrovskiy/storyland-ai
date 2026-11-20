@@ -195,16 +195,22 @@ make eval-screen OUTPUTS=evaluation/results/screen_outputs.json
 python evaluation/tools/run_screen_eval.py --outputs <file> [--log-langfuse]
 ```
 
-**Release gate:** `claim_precision` ≥ 0.9 over the set (`metric_floors`), `book_pairing_honesty` = 1.0 (hard), every
-case scored. ai-private#67 merges only with these numbers quoted in its PR. `make eval-report` adds a
+**Release gate:** `claim_precision` ≥ 0.9 over the set (`metric_floors`), counted **per claim** (correct `set_here`
+÷ all `set_here` across the titles; a found title that composed nothing counts as one unsupported claim), never a
+mean of per-title ratios; `book_pairing_honesty` = 1.0 (hard), every case scored. The per-case pass rate does not
+gate the screen runner (`--min-pass-rate` defaults to 0.0 there). A stop is placed by its own name + address first
+(a filming-only place there, e.g. Ischia or Big Sur, is never the setting); its city decides only when the stop names
+no known place. `--log-langfuse` writes the local results JSON first, so a Langfuse failure never loses a run. ai-private#67 merges only with these numbers quoted in its PR. `make eval-report` adds a
 "Screen path" table (claim precision, book-pairing honesty, release) from `evaluation/results/screen_*.json`.
 
 ### Release verdict (place→book, local-atmosphere, expansion, screen)
 
-These three runners end with one line, `RELEASE: ALLOWED` or `RELEASE: BLOCKED — <reasons>`, write it into the
+These four runners end with one line, `RELEASE: ALLOWED` or `RELEASE: BLOCKED — <reasons>`, write it into the
 results JSON as `release_gate`, and **exit 1 when blocked** (`evaluation/tools/release_gate.py`, 2026-11-19). Blocked =
-no case evaluated, any case skipped or errored, pass rate below `--min-pass-rate` (default 0.85), or — place→book only —
-`grounding_clean` below 1.0 (a fabricated grounding is never allowed). They stay manual (they spend Gemini); a ship that
+no case evaluated, any case skipped or errored, pass rate below `--min-pass-rate` (default 0.85; the screen runner's
+is 0.0), a hard metric below 1.0 (place→book: `grounding_clean`, a fabricated grounding is never allowed; screen:
+`book_pairing_honesty`, an invented book), or a floored metric under its floor (`metric_floors`; screen:
+`claim_precision` < 0.9). They stay manual (they spend Gemini); a ship that
 depends on an AI change quotes the `RELEASE:` line. The itinerary runner (`run_scheduled_eval.py`) is not gated yet.
 
 ### Which model runs where

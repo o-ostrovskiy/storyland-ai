@@ -129,12 +129,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     outputs = json.loads(Path(args.outputs).read_text())
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     summary = score_outputs(load_cases(args.evalset), outputs, run_name=f"screen_eval_{stamp}")
-    if args.log_langfuse:
-        log_to_langfuse(summary, outputs)
 
+    # The local results are written before anything that talks to Langfuse, so a
+    # Langfuse failure (e.g. screen_v1 not registered yet) never loses a run.
     out_path = Path(args.output_dir) / f"screen_{stamp}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False))
+    if args.log_langfuse:
+        try:
+            log_to_langfuse(summary, outputs)
+        except Exception as exc:  # live only; the verdict below still stands on the local results
+            print(f"Langfuse logging failed ({type(exc).__name__}: {exc}); local results kept at {out_path}")
 
     for c in summary["case_results"]:
         if "pass" in c:

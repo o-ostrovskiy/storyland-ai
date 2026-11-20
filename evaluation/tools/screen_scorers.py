@@ -11,7 +11,13 @@ Two metrics, both in [0, 1]:
   case's ``story_locations``). A ``set_here`` on Dubrovnik for *Game of Thrones*
   (Westeros is invented) or on Ischia for *The Talented Mr. Ripley* (Mongibello
   is invented) lowers it. A journey with stops but no ``set_here`` claim makes no
-  false claim: 1.0.
+  false claim: 1.0. Over the set it is **per claim** (correct ``set_here`` ÷ all
+  ``set_here``), never a mean of per-title ratios: one title full of false
+  claims must weigh by how many it makes (``aggregate``).
+  A stop is placed by its own name + address first; a stop whose own name or
+  address names a filming-only place (Ischia, Big Sur) is that place, whatever
+  city it is filed under. The city is a fallback only when the stop's own words
+  name no known place.
 * **book-pairing honesty** -- the discovered ``source_work`` is the expected book,
   or there is none. ``none`` is always honest (a missing pairing is a gap, not a
   lie); a book that is not the expected one, or any book for a work with no
@@ -39,7 +45,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 CLAIM_PRECISION = "claim_precision"
 BOOK_PAIRING_HONESTY = "book_pairing_honesty"
@@ -70,14 +76,21 @@ def _matches_any(place: str, expected: Iterable[str]) -> bool:
     return any(place_matches(place, e) for e in expected)
 
 
-def extract_stops(output: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Every composed stop as ``{"place": <stop + address + city + country>, "screen_claim": ...}``.
+def _join(*parts: object) -> str:
+    return ", ".join(p for p in parts if isinstance(p, str) and p.strip())
 
-    Accepts a ``TripItinerary`` dict or a ``ComposerEnvelope`` (``{"itinerary": {...}}``)
-    under ``output["itinerary"]``. The city and country are part of the place so a
-    stop named for a café still matches the city it stands in.
+
+def extract_stops(output: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Every composed stop as ``{"place", "own", "city", "screen_claim"}``.
+
+    ``own`` is the stop's name + address, ``city`` its city + country, ``place``
+    both joined. Accepts a ``TripItinerary`` dict or a ``ComposerEnvelope``
+    (``{"itinerary": {...}}``) under ``output["itinerary"]``. A non-dict output
+    (or itinerary) yields no stops.
     """
-    itinerary = (output or {}).get("itinerary") or {}
+    itinerary = output.get("itinerary") if isinstance(output, dict) else None
+    if not isinstance(itinerary, dict):
+        return []
     if isinstance(itinerary.get("itinerary"), dict):  # ComposerEnvelope
         itinerary = itinerary["itinerary"]
     stops: List[Dict[str, Any]] = []
@@ -87,23 +100,57 @@ def extract_stops(output: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
         for stop in city.get("stops") or []:
             if not isinstance(stop, dict):
                 continue
-            parts = [stop.get("name"), stop.get("address"), city.get("name"), city.get("country")]
+            own = _join(stop.get("name"), stop.get("address"))
+            where = _join(city.get("name"), city.get("country"))
             stops.append({
-                "place": ", ".join(p for p in parts if isinstance(p, str) and p.strip()),
+                "place": _join(own, where),
+                "own": own,
+                "city": where,
                 "screen_claim": stop.get("screen_claim"),
             })
     return stops
 
 
-def claim_precision(stops: List[Dict[str, Any]], story_locations: List[str]) -> float:
+def is_setting(
+    stop: Dict[str, Any], story_locations: List[str], filming_locations: Iterable[str] = ()
+) -> bool:
+    """Whether a stop stands in one of the work's narrative settings.
+
+    The stop's own name + address decide first: naming a filming-only place
+    (one that is not also a setting) is a no; naming a setting is a yes. Only
+    when its own words name no known place does its city decide.
+    """
+    filming_only = [
+        f for f in filming_locations
+        if not any(place_matches(f, s) or place_matches(s, f) for s in story_locations)
+    ]
+    own = stop.get("own", stop.get("place", ""))
+    if _matches_any(own, filming_only):
+        return False
+    if _matches_any(own, story_locations):
+        return True
+    city = stop.get("city", "")
+    return _matches_any(city, story_locations) and not _matches_any(city, filming_only)
+
+
+def set_here_counts(
+    stops: List[Dict[str, Any]], story_locations: List[str], filming_locations: Iterable[str] = ()
+) -> Tuple[int, int]:
+    """(correct ``set_here`` stops, all ``set_here`` stops)."""
+    filming = list(filming_locations)
+    set_here = [s for s in stops if s.get("screen_claim") == "set_here"]
+    right = sum(1 for s in set_here if is_setting(s, story_locations, filming))
+    return right, len(set_here)
+
+
+def claim_precision(
+    stops: List[Dict[str, Any]], story_locations: List[str], filming_locations: Iterable[str] = ()
+) -> float:
     """Share of ``set_here`` stops whose place is a narrative setting. No stops → 0.0."""
     if not stops:
         return 0.0
-    set_here = [s for s in stops if s.get("screen_claim") == "set_here"]
-    if not set_here:
-        return 1.0
-    right = sum(1 for s in set_here if _matches_any(s["place"], story_locations))
-    return right / len(set_here)
+    right, total = set_here_counts(stops, story_locations, filming_locations)
+    return right / total if total else 1.0
 
 
 def _same_book(found: Dict[str, Any], expected: Dict[str, Any]) -> bool:
@@ -153,8 +200,10 @@ def named_claims(stops: List[Dict[str, Any]], required: List[Dict[str, str]]) ->
 def score_case(output: Optional[Dict[str, Any]], expected: Dict[str, Any]) -> Dict[str, Any]:
     """Score one title's discovery output against its expected block from the evalset."""
     stops = extract_stops(output)
-    context = (output or {}).get("screen_context") or {}
+    context = (output.get("screen_context") if isinstance(output, dict) else None) or {}
     source_work = context.get("source_work") if isinstance(context, dict) else None
+    if not isinstance(source_work, dict):
+        source_work = None
     expect = expected.get("expect", "found")
 
     if expect == "not_found":
@@ -172,19 +221,25 @@ def score_case(output: Optional[Dict[str, Any]], expected: Dict[str, Any]) -> Di
         return {
             "expect": expect,
             "n_stops": 0,
+            "n_set_here": 0,
+            "n_set_here_right": 0,
             CLAIM_PRECISION: 0.0,
             BOOK_PAIRING_HONESTY: 0.0,
             NAMED_CLAIMS: 0.0,
             "pass": False,
         }
 
-    precision = claim_precision(stops, expected.get("story_locations") or [])
+    story = expected.get("story_locations") or []
+    filming = expected.get("filming_locations") or []
+    right, total = set_here_counts(stops, story, filming)
+    precision = right / total if total else 1.0
     honesty = book_pairing_honesty(source_work, expected.get("source_work"))
     named = named_claims(stops, expected.get("required_claims") or [])
     return {
         "expect": expect,
         "n_stops": len(stops),
-        "n_set_here": sum(1 for s in stops if s.get("screen_claim") == "set_here"),
+        "n_set_here": total,
+        "n_set_here_right": right,
         CLAIM_PRECISION: precision,
         BOOK_PAIRING_HONESTY: honesty,
         NAMED_CLAIMS: named,
@@ -197,10 +252,38 @@ def score_case(output: Optional[Dict[str, Any]], expected: Dict[str, Any]) -> Di
 CLAIM_PRECISION_FLOOR = 0.9
 
 
+def _set_wide_claim_precision(case_scores: List[Dict[str, Any]]) -> Optional[float]:
+    """Correct ``set_here`` ÷ all ``set_here`` across the set (the card's definition).
+
+    A found case that composed nothing counts as one unsupported claim, so an
+    empty run scores 0 and a partly empty one is pulled down, never up. Cases
+    from an older summary without the counts fall back to their ratio as one
+    claim. No set_here anywhere (and no empty case) is 1.0: no false claim made.
+    """
+    scored = [c for c in case_scores if c.get(CLAIM_PRECISION) is not None]
+    if not scored:
+        return None
+    right = total = 0.0
+    for c in scored:
+        if c.get("n_stops") == 0:
+            total += 1
+        elif "n_set_here" in c:
+            right += c.get("n_set_here_right", 0)
+            total += c["n_set_here"]
+        else:
+            right += float(c[CLAIM_PRECISION])
+            total += 1
+    return right / total if total else 1.0
+
+
 def aggregate(case_scores: List[Dict[str, Any]]) -> Dict[str, float]:
-    """Mean of each metric over the cases that carry it (``None`` = not applicable)."""
+    """Each metric over the set: claim precision per claim, the others as a mean
+    over the cases that carry them (``None`` = not applicable)."""
     out: Dict[str, float] = {}
-    for metric in (CLAIM_PRECISION, BOOK_PAIRING_HONESTY, NAMED_CLAIMS):
+    precision = _set_wide_claim_precision(case_scores)
+    if precision is not None:
+        out[CLAIM_PRECISION] = round(precision, 4)
+    for metric in (BOOK_PAIRING_HONESTY, NAMED_CLAIMS):
         values = [c[metric] for c in case_scores if c.get(metric) is not None]
         if values:
             out[metric] = round(sum(values) / len(values), 4)

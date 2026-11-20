@@ -121,9 +121,18 @@ def test_stops_are_read_from_an_itinerary_or_a_composer_envelope():
     out = _out([("Dubrovnik", "Croatia", [("Fort Lovrijenac", "filmed_here")])])
     envelope = {"itinerary": {"itinerary": out["itinerary"], "suggestions": []}}
     for shape in (out, envelope):
-        assert extract_stops(shape) == [
-            {"place": "Fort Lovrijenac, Dubrovnik, Croatia", "screen_claim": "filmed_here"}
-        ]
+        assert extract_stops(shape) == [{
+            "place": "Fort Lovrijenac, Dubrovnik, Croatia",
+            "own": "Fort Lovrijenac",
+            "city": "Dubrovnik, Croatia",
+            "screen_claim": "filmed_here",
+        }]
+
+
+@pytest.mark.parametrize("output", [None, [], "oops", {"itinerary": ["x"]}, {"itinerary": {"cities": "x"}}])
+def test_an_odd_output_shape_has_no_stops_and_never_raises(output):
+    assert extract_stops(output) == []
+    assert score_case(output, _expected("screen_in_bruges"))["pass"] is False
 
 
 # ── claim precision ──────────────────────────────────────────────────────────
@@ -220,6 +229,55 @@ def test_aggregate_skips_not_applicable_metrics():
     assert aggregate(cases) == {"claim_precision": 0.75, "book_pairing_honesty": 0.6667, "named_claims": 0.75}
 
 
+def _stop_out(city, country, stops):
+    """Like ``_out`` but each stop is (name, address, claim)."""
+    return {
+        "itinerary": {"cities": [{"name": city, "country": country, "stops": [
+            {"name": n, "address": a, "screen_claim": c} for n, a, c in stops
+        ]}]},
+        "screen_context": {"source_work": None},
+    }
+
+
+def test_a_filming_only_place_in_the_address_is_not_the_setting_even_near_one():
+    # ai#310 review: "Monterey County" in a Big Sur stop's address used to match Monterey.
+    exp = _expected("screen_big_little_lies")
+    stops = extract_stops(_stop_out("Big Sur", "USA", [("Bixby Creek Bridge", "Big Sur, Monterey County, CA", "set_here")]))
+    assert claim_precision(stops, exp["story_locations"], exp["filming_locations"]) == 0.0
+    # without the filming list the old matcher's false credit comes back: the control
+    assert claim_precision(stops, exp["story_locations"]) == 1.0
+
+
+def test_a_filming_only_stop_filed_under_a_setting_city_gets_no_credit():
+    # ai#310 review: an Ischia stop filed under Naples matched Ripley's Naples.
+    exp = _expected("screen_talented_mr_ripley")
+    stops = extract_stops(_stop_out("Naples", "Italy", [("Castello Aragonese", "Ischia", "set_here")]))
+    assert claim_precision(stops, exp["story_locations"], exp["filming_locations"]) == 0.0
+
+
+def test_the_city_decides_only_when_the_stop_names_no_known_place():
+    exp = _expected("screen_big_little_lies")
+    stops = extract_stops(_stop_out("Monterey", "USA", [("Old Fisherman's Wharf", "1 Old Fisherman's Wharf", "set_here")]))
+    assert claim_precision(stops, exp["story_locations"], exp["filming_locations"]) == 1.0
+
+
+def test_claim_precision_over_the_set_is_per_claim_not_per_title():
+    # Codex P2 on ai#310: 10 right claims + 100 wrong ones is 10/110, not the mean of 1.0 and 0.0.
+    cases = [
+        {"n_stops": 10, "n_set_here": 10, "n_set_here_right": 10, "claim_precision": 1.0},
+        {"n_stops": 100, "n_set_here": 100, "n_set_here_right": 0, "claim_precision": 0.0},
+        {"n_stops": 3, "n_set_here": 0, "n_set_here_right": 0, "claim_precision": 1.0},  # no claim adds no weight
+    ]
+    assert aggregate(cases)["claim_precision"] == round(10 / 110, 4)
+
+
+def test_an_empty_composition_still_pulls_the_set_down():
+    empty = score_case({"itinerary": {"cities": []}}, _expected("screen_in_bruges"))
+    assert aggregate([empty])["claim_precision"] == 0.0
+    clean = {"n_stops": 2, "n_set_here": 1, "n_set_here_right": 1, "claim_precision": 1.0}
+    assert aggregate([clean, empty])["claim_precision"] == 0.5
+
+
 # ── the runner + release gate ────────────────────────────────────────────────
 
 
@@ -264,6 +322,19 @@ def test_claim_precision_under_the_floor_blocks_the_release():
     assert any("claim_precision" in r for r in reasons)
 
 
+def test_one_fictional_world_sold_as_the_setting_blocks_the_release():
+    """ai#310 review probe: a perfect run except Game of Thrones with every stop set_here.
+    Per-title averaging gave 0.9091 and RELEASE: ALLOWED."""
+    outputs = _perfect_outputs()
+    for stop in outputs["screen_game_of_thrones"]["itinerary"]["cities"][0]["stops"]:
+        stop["screen_claim"] = "set_here"
+    summary = score_outputs(load_cases(str(EVALSET)), outputs, run_name="t")
+    assert summary["metrics"]["claim_precision"] < 0.9
+    allowed, reasons = verdict(summary, MIN_PASS_RATE, HARD_METRICS, metric_floors=METRIC_FLOORS)
+    assert not allowed
+    assert any("claim_precision" in r for r in reasons)
+
+
 def test_a_missing_output_is_unscored_and_blocks():
     outputs = _perfect_outputs()
     del outputs["screen_amelie"]
@@ -281,6 +352,32 @@ def test_the_cli_writes_results_and_exits_non_zero_when_blocked(tmp_path, capsys
     assert "RELEASE: BLOCKED" in capsys.readouterr().out
     written = sorted(tmp_path.glob("screen_*.json"))
     assert written and "release_gate" in json.loads(written[-1].read_text())
+
+
+def test_a_langfuse_failure_never_loses_the_local_results(tmp_path, monkeypatch, capsys):
+    import evaluation.tools.run_screen_eval as runner
+
+    def boom(summary, outputs):
+        raise RuntimeError("dataset screen_v1 not found")
+
+    monkeypatch.setattr(runner, "log_to_langfuse", boom)
+    good = tmp_path / "good.json"
+    good.write_text(json.dumps(_perfect_outputs()))
+    code = run_screen_main(
+        ["--outputs", str(good), "--evalset", str(EVALSET), "--output-dir", str(tmp_path), "--log-langfuse"]
+    )
+    assert code == 0
+    written = sorted(tmp_path.glob("screen_*.json"))
+    assert written and json.loads(written[-1].read_text())["release_gate"]["allowed"] is True
+    assert "Langfuse logging failed" in capsys.readouterr().out
+
+
+def test_a_non_dict_output_entry_is_scored_as_empty_not_a_traceback(tmp_path):
+    outputs = _perfect_outputs()
+    outputs["screen_amelie"] = ["not", "a", "dict"]
+    summary = score_outputs(load_cases(str(EVALSET)), outputs, run_name="t")
+    amelie = next(c for c in summary["case_results"] if c["item_id"] == "screen_amelie")
+    assert amelie["pass"] is False and amelie["n_stops"] == 0
 
 
 # ── trend report columns ─────────────────────────────────────────────────────
