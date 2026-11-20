@@ -6,6 +6,7 @@ Tests domain events, session state, prompts, extraction, and regions.
 
 import json
 import pytest
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from core.events import (
@@ -273,11 +274,26 @@ class TestSessionStateAccessor:
 
 
 class TestPrompts:
+    # ai-private#7: the base user message is the research request, nothing else.
+    BASE_1984 = (
+        'Research "1984" by George Orwell: use Google Search to find the real '
+        "places tied to this book and its author."
+    )
+
     def test_discovery_prompt(self):
-        prompt = build_discovery_prompt("1984", "George Orwell")
-        assert '"1984"' in prompt
-        assert "George Orwell" in prompt
-        assert "cities" in prompt.lower()
+        assert build_discovery_prompt("1984", "George Orwell") == self.BASE_1984
+
+    def test_discovery_prompt_is_research_framed_not_pipeline_shaped(self):
+        # The old wording read as a trip-planning order and researchers skipped
+        # Google Search a third of the time (ai-private#7).
+        prompt = build_discovery_prompt("1984", "George Orwell", "cozy", {"titles": ["Dune"], "moods": []})
+        assert "group them into practical travel regions" not in prompt
+        assert "Discover travel locations" not in prompt
+        assert "use Google Search" in prompt
+
+    def test_discovery_prompt_keeps_title_and_author_exactly_as_quoted(self):
+        prompt = build_discovery_prompt('The "Odd" Book', "Ann O'Hara")
+        assert prompt.startswith("Research \"The \"Odd\" Book\" by Ann O'Hara:")
 
     def test_discovery_prompt_vibe_absent_is_byte_identical(self):
         # The whole point of the optional vibe: omitting it must not change the
@@ -288,9 +304,8 @@ class TestPrompts:
 
     def test_discovery_prompt_vibe_present_biases_and_names_mood(self):
         prompt = build_discovery_prompt("1984", "George Orwell", "melancholic")
-        # Still contains the base discovery instruction...
-        assert '"1984"' in prompt
-        assert "cities" in prompt.lower()
+        # Still starts with the base research request...
+        assert prompt.startswith(self.BASE_1984 + "\n\n")
         # ...plus the mood bias, named explicitly for the "why this fits" copy.
         assert "melancholic" in prompt
         # ...and an explicit grounding-wins guard so vibe can't invent links.
@@ -315,8 +330,8 @@ class TestPrompts:
             None,
             {"titles": ["Wuthering Heights"], "moods": ["melancholic"]},
         )
-        assert '"1984"' in prompt
-        assert "cities" in prompt.lower()
+        assert prompt.startswith(self.BASE_1984 + "\n\n")
+        assert "melancholic" not in prompt.split("reading history")[0]  # no vibe clause
         # The reader's titles + moods surface in the bias clause...
         assert "Wuthering Heights" in prompt
         assert "melancholic" in prompt
@@ -336,6 +351,26 @@ class TestPrompts:
         assert "Dune" in prompt
         assert "adventurous" in prompt
         assert prompt.count("grounding") >= 2
+        # vibe first, then taste, each its own paragraph after the base.
+        assert prompt.index("cozy") < prompt.index("Dune")
+        assert prompt.count("\n\n") == 2
+
+    def test_discovery_prompt_biases_only_weigh_researched_places(self):
+        # ai-private#7 item 2: the clauses must not read as trip-planning orders;
+        # they weigh places the research already tied to the book.
+        prompt = build_discovery_prompt(
+            "1984", "George Orwell", "cozy", {"titles": ["Dune"], "moods": ["adventurous"]}
+        )
+        assert prompt.count("only weighs places your research has already tied to the book") == 2
+        assert prompt.count("Never add a place your research did not tie to the book") == 2
+
+    def test_the_eval_runner_sends_the_same_discovery_message_as_prod(self):
+        # A copy of the old wording in run_scheduled_eval meant a prompt eval
+        # measured the pre-change text (found while building ai-private#7).
+        src = Path("evaluation/tools/run_scheduled_eval.py").read_text(encoding="utf-8")
+        assert "discovery_prompt = build_discovery_prompt(exact_title, exact_author)" in src
+        assert "Discover travel locations" not in src
+        assert "practical travel regions" not in src
 
     def test_composition_prompt(self):
         regions = [{"region_id": 1, "region_name": "England"}]

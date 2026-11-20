@@ -1342,6 +1342,23 @@ Proposed in the PR; Olga sets them at merge. Proposed: first region p95 ≤ 15 s
 ### Trade-offs
 It measures the workflow inside the agent service, not the browser: the be hop, the executor's post-workflow steps (enrichment, cache write) and the SSE delivery are not in it, so a reader's wait is somewhat longer than the report.
 
+
+## 35. The Discovery User Message States the Research Task; Agents Own the Shape (2026-11-20)
+
+(#34 is taken by storyland-ai#311, the screen-claims ADR, still in review.)
+
+### Context
+The discovery user message read like a trip-planning order: "Discover travel locations for … Find cities, landmarks, and author-related sites, then group them into practical travel regions." The researchers answered from memory and skipped Google Search on about a third of runs (storyland-ai-private#7). On the card's 11-04 measurements, a stronger MUST clause changed nothing (6/12 → 6/12) and an explicit search request did best; ADK's `GoogleSearch` tool has no force setting, so no config flag fixes it.
+
+### Decision
+- `core/prompts.py::build_discovery_prompt` sends only the research request: `Research "<title>" by <author>: use Google Search to find the real places tied to this book and its author.` The pipeline's shape (cities, landmarks, author sites, regions) is each agent's own instruction.
+- The `vibe` and `taste_context` clauses weigh places the research already tied to the book and never add one; "factual grounding always wins" stays.
+- `run_scheduled_eval.py` builds its message with the same function (it had a copy of the old text, so a prompt eval would have measured the old wording).
+- Labelled prompt version `v5` for evals; agent instructions byte-identical to v4. The discovery cache flips by itself (`core.prompts` is fingerprinted); `CURRENT_PROMPT_VERSION` is not bumped, so the place-to-book cache is untouched.
+
+### Trade-offs
+The effect is measured by one paid eval run (pinned judge) against the v4 baseline; until then the change rests on the 11-04 sample. If grounding doesn't rise, the fallback on the card is an explicit query step built in code.
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |

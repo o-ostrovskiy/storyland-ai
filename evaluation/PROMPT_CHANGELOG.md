@@ -4,6 +4,25 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 
 ---
 
+## v5 — 2026-11-20
+
+**Card:** storyland-ai-private#7 (researchers skip Google Search a third of the time). Only the discovery **user message** changed (`core/prompts.py::build_discovery_prompt`); every agent instruction is byte-identical to v4 (`agents/prompts/v5.json` = v4's agents, pinned by `test_v5_is_v4_with_every_agent_byte_identical`). `v5.json` exists so an eval run can be tagged `--prompt-version v5` against the v4 baselines; `CURRENT_PROMPT_VERSION` stays `v4` (a bump would also move the `place2book` cache key, and the place-to-book prompts did not change). The discovery cache still flips on deploy: `core.prompts` is in the cache fingerprint.
+
+### Changes
+| Where | Before (v4) | After (v5) |
+|---|---|---|
+| Discovery user message, base | `Discover travel locations for "<title>" by <author>.` + `Find cities, landmarks, and author-related sites, then group them into practical travel regions.` | `Research "<title>" by <author>: use Google Search to find the real places tied to this book and its author.` |
+| `vibe` clause | "Among places that are genuinely and verifiably connected to the book, prefer…" | "It only weighs places your research has already tied to the book: among those, favour…"; "Never add a place your research did not tie to the book…"; grounding-wins sentence kept |
+| `taste_context` clause | same pattern as vibe | same rewording as vibe |
+| `run_scheduled_eval.py` | its own copy of the v4 user message | calls `build_discovery_prompt`, so an eval sends what prod sends |
+
+Not changed (11-04 evidence on the card): agents' own instructions, `thinking_level` (HIGH made `city` worse), the fail-closed `vibe` guard.
+
+### Eval
+**Pending: needs eval (spend).** One paid baseline-comparison run is approved (Olga's A, 2026-11-14): `make eval-run` with `--prompt-version v5`, pinned judge, `storyland_eval` (10 cases), compared with the latest v4 baseline on `search_grounding` (`researchers_grounded / researchers_total`, `cases_fully_grounded`, `unsearched_by_agent` per agent) and the judge dimensions. The results table goes here and in the PR walkthrough.
+
+---
+
 ## v4 — 2026-11-10
 
 **Card:** storyland-ai-private#71 (Destinations revisit 2/2). Only `place_to_book_researcher` and `place_to_book_formatter` changed; every other agent is byte-identical to v3 (pinned by `test_v4_is_v3_plus_the_place_to_book_change_only`).

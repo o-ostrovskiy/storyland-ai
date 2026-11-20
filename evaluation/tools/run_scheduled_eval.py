@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from common.logging import get_logger, configure_logging
 from common.config import load_config
 from core.extraction import downgrade_ungrounded_match_types, validate_composer_envelope
-from core.prompts import build_composition_prompt
+from core.prompts import build_composition_prompt, build_discovery_prompt
 from core.retry import build_retry_options
 from core.session_state import SessionStateAccessor, SessionStateKeys
 from services.session_service import create_session_service
@@ -941,9 +941,10 @@ async def _run_evaluation_case(
                 session_service=session_service,
             )
 
-            discovery_prompt = f"""Discover travel locations for "{exact_title}" by {exact_author}.
-
-Find cities, landmarks, and author-related sites, then group them into practical travel regions."""
+            # The same user message prod sends (core.prompts), never a copy: a
+            # copy here kept the pre-v5 wording, so a prompt eval measured the
+            # old text (ai-private#7).
+            discovery_prompt = build_discovery_prompt(exact_title, exact_author)
             discovery_message = types.Content(
                 role="user", parts=[types.Part(text=discovery_prompt)]
             )

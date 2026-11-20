@@ -34,19 +34,24 @@ def build_discovery_prompt(
     ``taste_context`` leaves the prompt byte-identical to a no-taste
     request.
     """
+    # ai-private#7: the user message states the RESEARCH task and nothing else.
+    # The old pipeline-shaped wording ("Discover travel locations … then group
+    # them into practical travel regions") read as a trip-planning order, and the
+    # researchers skipped Google Search a third of the time; an explicit search
+    # request measured best (11-04 evidence on the card). Each agent's own
+    # instruction owns the pipeline's shape (cities, landmarks, regions).
     prompt = (
-        f'Discover travel locations for "{book_title}" by {author}.\n\n'
-        f"Find cities, landmarks, and author-related sites, "
-        f"then group them into practical travel regions."
+        f'Research "{book_title}" by {author}: use Google Search to find the '
+        f"real places tied to this book and its author."
     )
     if vibe:
         prompt += (
-            f"\n\nThe reader has chosen a \"{vibe}\" mood. Among places that are "
-            f"genuinely and verifiably connected to the book, prefer those whose "
-            f"atmosphere best fits a {vibe} feeling, and name that {vibe} "
-            f"atmosphere in each place's connection note. Do NOT include or "
-            f"invent any place that is not truly tied to the book just to match "
-            f"the mood — factual grounding always wins over vibe."
+            f"\n\nThe reader's chosen mood is \"{vibe}\". It only weighs places "
+            f"your research has already tied to the book: among those, favour the "
+            f"ones whose atmosphere fits a {vibe} feeling, and name that {vibe} "
+            f"atmosphere in each place's connection note. Never add a place your "
+            f"research did not tie to the book to match the mood — factual "
+            f"grounding always wins over vibe."
         )
     if taste_context:
         titles = [t for t in (taste_context.get("titles") or []) if t]
@@ -60,11 +65,11 @@ def build_discovery_prompt(
             taste_desc = "; ".join(descriptors)
             prompt += (
                 f"\n\nThe reader's own reading history leans toward {taste_desc}. "
-                f"Among places that are genuinely and verifiably connected to the "
-                f"book, prefer those whose atmosphere resonates with that taste, and "
-                f"you may name that resonance in the place's connection note. Do NOT "
-                f"include or invent any place that is not truly tied to the book just "
-                f"to match the reader's taste — factual grounding always wins over "
+                f"It only weighs places your research has already tied to the book: "
+                f"among those, favour the ones whose atmosphere resonates with that "
+                f"taste, and you may name that resonance in the place's connection "
+                f"note. Never add a place your research did not tie to the book to "
+                f"match the reader's taste — factual grounding always wins over "
                 f"taste."
             )
     return prompt
