@@ -68,3 +68,15 @@ def test_runner_main_exit_code_follows_the_verdict(module, passed, code, monkeyp
     with pytest.raises(SystemExit) as exc:
         module.main()
     assert exc.value.code == code
+
+
+def test_a_metric_under_its_floor_blocks_and_at_the_floor_passes():
+    """ai-private#68: the screen path gates on claim precision ≥ 0.9, not a hard 1.0."""
+    from evaluation.tools.release_gate import verdict as _verdict
+
+    base = {"total": 12, "evaluated": 12, "passed": 12}
+    assert _verdict({**base, "metrics": {"claim_precision": 0.9}}, 0.0, metric_floors={"claim_precision": 0.9}) == (True, [])
+    allowed, reasons = _verdict({**base, "metrics": {"claim_precision": 0.89}}, 0.0, metric_floors={"claim_precision": 0.9})
+    assert not allowed and reasons == ["metric claim_precision = 0.89 < 0.9"]
+    allowed, reasons = _verdict({**base, "metrics": {}}, 0.0, metric_floors={"claim_precision": 0.9})
+    assert reasons == ["floored metric claim_precision missing from the run"]
