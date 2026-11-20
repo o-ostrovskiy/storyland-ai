@@ -1342,6 +1342,19 @@ Proposed in the PR; Olga sets them at merge. Proposed: first region p95 ≤ 15 s
 ### Trade-offs
 It measures the workflow inside the agent service, not the browser: the be hop, the executor's post-workflow steps (enrichment, cache write) and the SSE delivery are not in it, so a reader's wait is somewhat longer than the report.
 
+## 34. A Screen Journey's "Set Here" Needs Evidence; Unsure Means "Filmed Here" (2026-11-20)
+
+### Context
+A film or series journey makes a claim a book journey never does: "the story is set here" versus "scenes were filmed here" (`CityStop.screen_claim`, ADR #31). Conflating them is the Movies epic's failure class: Dubrovnik sold as the setting of *Game of Thrones* (Westeros is invented), Ischia as the setting of *The Talented Mr. Ripley* (Mongibello is invented). It is invisible in a demo and obvious to a fan (storyland-ai-private#67; measured by `evaluation/screen_v1`, ai-private#68).
+
+### Decision
+- `models/screen.py::ScreenContext` holds the three separate answers: `story_locations`, `filming_locations`, `source_work` (a book or nothing) and `is_fictional_world`. An invented world has no story locations, enforced by the model.
+- `core/guardrails/screen_claims.py`, applied in `core/extraction.py` before any `ItineraryReady`/expansion event leaves: on a film or series journey, a `set_here` stop labelled `literal`/`historical` with no `grounding_source` becomes `filmed_here` + `vibe` (the weaker claim, the book path's "choose the weaker claim when unsure" rule). A `set_here` stop whose cited evidence the book-path downgrade (`downgrade_ungrounded_match_types`) rejects is demoted the same way. Stops are never dropped or upgraded; `filming_scene` is kept.
+- Book journeys are untouched; their screen claims are still nulled by `clear_screen_claims_unless_screen_work`.
+
+### Trade-offs
+A true setting the composer labelled without a source reads as "Filmed here" until the prompts cite it (the screen prompts are the next part of ai-private#67). That under-claims; it never over-claims.
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -1374,6 +1387,7 @@ It measures the workflow inside the agent service, not the browser: the be hop, 
 | **Composer truncation at the model boundary (ADR #29)** | A cut-off envelope is retried once, then a clean transient error; never half-recovered; counted as an eval defect | Local-atmosphere composer not yet covered; a retry costs one more composer call on that rare path |
 | **Persistent place→book cache (ADR #30)** | A restart costs no repeat AI runs; a failed check is never remembered as "no books here" | In-place prompt edits wait out the 6h TTL; the gateway still holds a failed check for 1h |
 | **Work kind on the AI contract (ADR #31)** | Films and series ride the same pipeline; a book request, its metadata event and its cache key are byte-identical | Book fields and `work` coexist on the wire; film prompts are a later story |
+| **Screen claims need evidence (ADR #34)** | A film/series stop is "set here" only with a cited, research-traced source | Unsupported "set here" ships as "filmed here" + vibe: under-claims, never over-claims |
 | **Cancellation-safe session DB (ADR #32)** | A dropped SSE stream returns its pooled connection; caller cancellation is unchanged | One wrapper method per ADK DB call to keep in step on upgrades |
 | **Reader-wait latency report (ADR #33)** | First-region and full-journey p50/p95 from Langfuse, never a fake 0 s | Fresh runs only, measured inside the agent service (no be hop or SSE delivery) |
 
