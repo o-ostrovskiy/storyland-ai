@@ -42,6 +42,8 @@ from .local_atmosphere_agent import create_local_atmosphere_agents
 from .trip_composer_agent import create_trip_composer_agent
 from .region_analyzer_agent import create_region_analyzer_agent
 from .prompts import AgentPrompts, load_prompts
+from .work_prompts import for_kind
+from models.work import DEFAULT_WORK_KIND
 
 
 def create_book_to_place_discovery_workflow(
@@ -51,9 +53,13 @@ def create_book_to_place_discovery_workflow(
     vibe: str | None = None,
     taste_context: dict | None = None,
     prompts: AgentPrompts | None = None,
+    work_kind: str = DEFAULT_WORK_KIND,
 ):
     """
     Create the book→place discovery workflow (phase 1 of the primary flow).
+
+    A film or series (``work_kind``) runs the same graph with the screen
+    instructions (``for_kind``, ai-private#67 Part 2): no extra agents.
 
     Runs after the book metadata has been confirmed and before user region
     selection. It discovers cities, landmarks, and author sites, then groups
@@ -87,10 +93,15 @@ def create_book_to_place_discovery_workflow(
         Workflow graph for book→place discovery
     """
     if prompts is None:
-        prompts = load_prompts()
+        prompts = for_kind(work_kind)
 
     book_context_researcher, book_context_formatter = create_book_context_agents(
-        model, google_search, book_title=book_title, author=author, prompts=prompts
+        model,
+        google_search,
+        book_title=book_title,
+        author=author,
+        prompts=prompts,
+        work_kind=work_kind,
     )
     city_researcher, city_formatter = create_city_agents(
         model,
@@ -140,7 +151,7 @@ def create_book_to_place_discovery_workflow(
 
 
 def create_book_to_place_composition_workflow(
-    model, prompts: AgentPrompts | None = None
+    model, prompts: AgentPrompts | None = None, work_kind: str = DEFAULT_WORK_KIND
 ):
     """
     Create the book→place composition workflow (phase 2 of the primary flow).
@@ -159,7 +170,7 @@ def create_book_to_place_composition_workflow(
         Workflow graph for book→place composition
     """
     if prompts is None:
-        prompts = load_prompts()
+        prompts = for_kind(work_kind)
 
     trip_composer = create_trip_composer_agent(model, prompts=prompts)
 
