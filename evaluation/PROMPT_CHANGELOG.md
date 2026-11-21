@@ -4,6 +4,23 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 
 ---
 
+## v5 — 2026-11-21
+
+**Trigger:** "We haven't mapped Luga yet" for Luga, Leningrad Oblast (Langfuse trace `22802024ae591d84ff203bb7cb4198a0`). The v4 researcher ran only Step 0 reality-check searches ("is Luga a real place", "where is Luga located"), never a book search, then answered that it "cannot confirm at least five real books set within Luga"; the formatter returned `{"candidates":[]}` and the not-found was cached. Only `place_to_book_researcher` and `place_to_book_formatter` changed; every other agent is byte-identical to v4 (pinned by `test_v5_is_v4_plus_the_place_to_book_change_only`).
+
+### Changes
+| Agent | Change |
+|---|---|
+| place_to_book_researcher | Step 0: a small real town is real once a search places it on a map, and being small or unfamiliar is never a reason to stop; the "fiction only" exit is the ONLY early exit. "5 literal" is a target for famous places, never a pass mark; 1–2 confirmed books is a complete answer for a small town. Before an empty answer the researcher MUST have run "novels set in {place}" and "{place} in fiction/literature", plus, for a small town, a search with its region, country and best-known history; existence/location searches don't count. The "obscure → none" rule is gone: empty only when fictional or when the book searches confirm nothing. |
+| place_to_book_formatter | One or two grounded books is a valid answer; never drop grounded books for being few. |
+
+Code guard alongside: `searched_for_books()` in the resolver. An empty answer whose researcher ran no book/novel/fiction/literature query (either receipt channel, captured by `RunCapture.captured_queries`) re-runs the pipeline once; if the re-run still runs no book search, the not-found is returned **unwritten**, so it is not cached for an hour.
+
+### Eval
+`place_to_book_v1` gains `p2b_small_town_luga` (`min_literal: 0`, any grounded book passes) and `p2b_small_town_holcomb` (Holcomb, Kansas → *In Cold Blood*, 1 literal). Wakanda, Macondo and the gibberish township still expect not-found. **Before/after run pending** (live Gemini calls; waits on Olga's yes).
+
+---
+
 ## v4 — 2026-11-10
 
 **Card:** storyland-ai-private#71 (Destinations revisit 2/2). Only `place_to_book_researcher` and `place_to_book_formatter` changed; every other agent is byte-identical to v3 (pinned by `test_v4_is_v3_plus_the_place_to_book_change_only`).

@@ -1286,6 +1286,13 @@ Place→book results sat in an in-process `TTLCache`, so every deploy or restart
 
 ## 31. A Work Has a Kind; Book Fields Stay on the Wire for Compatibility (2026-11-10)
 
+### Addendum (2026-11-21, Luga): v5 place→book prompts and a no-book-search guard
+
+- Prompt set `v5` = `v4` with only `place_to_book_researcher` / `place_to_book_formatter` revised: a small real town is never an early exit; an empty answer only after book searches ("novels set in X", "X in fiction"), plus a region/country/history search for small towns; "5 literal" is a target for famous places, and 1–2 confirmed books is a valid answer. Trigger: trace `22802024ae591d84ff203bb7cb4198a0` (Luga answered not-found after only reality-check searches).
+- `core/run_harness.py` `RunCapture.captured_queries` records the google_search queries of each captured author (both receipt channels, via `common.search_grounding.extract_search_metadata`).
+- `PlaceToBookResolver.resolve`: an empty answer with no book query (`searched_for_books`) re-runs once; a second empty answer without a book search is returned not-found **unwritten** (same rule as "couldn't check"). An empty answer after a book search is a verdict and is cached for 1h as before. Worst case is two pipeline runs for an invented place whose researcher skips book searches.
+- The bump moves the place→book key (`place2book:v1:v5:…`) and the discovery cache namespace, so the cached Luga not-found is not served under v5. The backend's own 1h not-found cache (`storyland-services app/place_to_book/service.py`) is separate and expires on its own.
+
 ### Context
 
 Every entry into the service was a book: `DiscoverRequest` / `LocalAtmosphereRequest` take `book_title` + `author`, and the metadata event, the session and the discovery cache key all speak of a book. The Movies epic (storyland-team-os#45) needs films and series as one more *kind* of work, not a second pipeline, and its non-negotiable rule is that "filmed here" and "set here" never blur. fe, be and ios all parse the book fields today, and the persisted discovery cache is keyed on them.
