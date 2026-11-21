@@ -1284,8 +1284,6 @@ Place→book results sat in an in-process `TTLCache`, so every deploy or restart
 - The bump moves both the place→book key (`place2book:v1:v4:…`) and the discovery cache namespace (`CURRENT_PROMPT_VERSION` is in the fingerprinted source), so there is one cold-cache window for both.
 - Count wording (Olga's B, 2026-11-11): for a well-known place the researcher looks for at least 5 books that happen there (6-8 candidates, 2-3 vibe) and searches more when it has fewer. The one approved run, `p2b_eval_20261111_181533`, holds 14/14 with Macondo/Wakanda empty; literal books per found place 4.36 vs v3's 4.73 (table in `evaluation/PROMPT_CHANGELOG.md`).
 
-## 31. A Work Has a Kind; Book Fields Stay on the Wire for Compatibility (2026-11-10)
-
 ### Addendum (2026-11-21, Luga): v5 place→book prompts and a no-book-search guard
 
 - Prompt set `v5` = `v4` with only `place_to_book_researcher` / `place_to_book_formatter` revised: a small real town is never an early exit; an empty answer only after book searches ("novels set in X", "X in fiction"), plus a region/country/history search for small towns; "5 literal" is a target for famous places, and 1–2 confirmed books is a valid answer. Trigger: trace `22802024ae591d84ff203bb7cb4198a0` (Luga answered not-found after only reality-check searches).
@@ -1293,6 +1291,8 @@ Place→book results sat in an in-process `TTLCache`, so every deploy or restart
 - `PlaceToBookResolver.resolve`: an empty answer with no book query (`searched_for_books`) re-runs once before anything is cached. A second empty answer without a book search is the Step 0 "invented place" verdict and is cached as not-found (1h); a malformed second answer is "couldn't check" and is never written. An empty answer after a book search is cached for 1h as before. Cost: an invented place (Wakanda, a gibberish string, which stop before any book search by design) takes two pipeline runs per cache window instead of one.
 - Live eval 2026-11-21: 16/16 on both v4 and v5; the Luga failure did not reproduce on v4 (6 tries), so the guard, not the eval, is what pins the fix. Numbers in `evaluation/PROMPT_CHANGELOG.md`.
 - The bump moves the place→book key (`place2book:v1:v5:…`) and the discovery cache namespace, so the cached Luga not-found is not served under v5. The backend's own 1h not-found cache (`storyland-services app/place_to_book/service.py`) is separate and expires on its own.
+
+## 31. A Work Has a Kind; Book Fields Stay on the Wire for Compatibility (2026-11-10)
 
 ### Context
 
