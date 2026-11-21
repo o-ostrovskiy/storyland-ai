@@ -4,6 +4,20 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 
 ---
 
+## v5 — 2026-11-21
+
+**Why:** prod run "dddd" by "ddd" was researched as Inio Asano's *Dead Dead Demon's Dededede Destruction* and produced a Tokyo trip under the typed title. Only `book_context_researcher` and `book_context_formatter` changed; every other agent is byte-identical to v4 (pinned by `test_v5_is_v4_plus_the_book_context_change_only`).
+
+### Changes
+| Agent | Change |
+|---|---|
+| book_context_researcher | Step 0 BOOK IDENTITY: name the book the sources describe and say whether it is the requested one (different author or a work sharing an abbreviation/spelling = not it; translations/transliterations of the author = same). Answer starts with that finding. |
+| book_context_formatter | New fields `matches_requested_book`, `identified_title`, `identified_author`; a different book returns empty locations/themes. |
+
+Code guard alongside: `core/book_identity.py`, read by `discover()` (ADR #34).
+
+---
+
 ## v4 — 2026-11-10
 
 **Card:** storyland-ai-private#71 (Destinations revisit 2/2). Only `place_to_book_researcher` and `place_to_book_formatter` changed; every other agent is byte-identical to v3 (pinned by `test_v4_is_v3_plus_the_place_to_book_change_only`).

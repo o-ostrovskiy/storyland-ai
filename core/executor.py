@@ -59,6 +59,11 @@ from models.work import DEFAULT_WORK_KIND, WorkRef
 from plugins.langfuse_plugin import LangfusePlugin
 from services.session_service import create_session_service
 
+from .book_identity import (
+    NOT_FOUND_MESSAGE,
+    check_book_identity,
+    mismatch_message,
+)
 from .discovery_errors import classify_discovery_failure
 from .events import (
     DomainEvent,
@@ -839,6 +844,42 @@ class WorkflowExecutor:
             run_state = SessionStateAccessor(session.state)
 
             self._audit_discovery_grounding(job_id, capture, run_state, unverified)
+
+            # Book-identity guard: the search may have researched a DIFFERENT
+            # work than the one typed ("dddd" -> a Tokyo manga). Checked before
+            # the region guards and the cache write, so such a run is never
+            # emitted, cached or composed (core/book_identity.py).
+            identity = check_book_identity(
+                run_state.book_context, exact_title, exact_author
+            )
+            if identity.kind != "ok":
+                logger.info(
+                    "discovery_book_identity_failed",
+                    job_id=job_id[:8],
+                    verdict=identity.kind,
+                    suggested_title=identity.suggested_title,
+                )
+                await self._mark_session_failed(job_id, user_id)
+                if identity.kind == "mismatch":
+                    message = mismatch_message(
+                        identity.suggested_title or "",
+                        identity.suggested_author,
+                    )
+                    reason = "book_mismatch"
+                else:
+                    message = NOT_FOUND_MESSAGE
+                    reason = "book_not_found"
+                for ev in error_events(
+                    job_id,
+                    message,
+                    "BookNotFound",
+                    phase=Phase.DISCOVERY,
+                    reason=reason,
+                    suggested_title=identity.suggested_title,
+                    suggested_author=identity.suggested_author,
+                ):
+                    yield ev
+                return
 
             # Empty-discovery guard: when discovery yields zero regions
             # (obscure book, failed/empty google_search, extraction miss),

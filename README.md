@@ -361,7 +361,9 @@ storyland-ai/
 │   └── prompts/                  # Versioned prompt sets
 │       ├── v1.json               # Original prompts (git ref 4c6fdc9)
 │       ├── v2.json               # Prompts as of PR #63 (history)
-│       └── v3.json               # Current prompts (CURRENT_PROMPT_VERSION)
+│       ├── v3.json               # + region geo identity fields (MYS-460)
+│       ├── v4.json               # + place→book revision (ai-private#71)
+│       └── v5.json               # Current prompts (CURRENT_PROMPT_VERSION): + book-identity check
 │
 ├── core/                # Transport-agnostic orchestration & SDK
 │   ├── executor.py      # WorkflowExecutor (discover/compose/expand/recommend)
@@ -423,7 +425,7 @@ Agent prompts include reliability improvements:
 - **Error handling:** `"If the tool returns an error, report it clearly and explain what went wrong"`
 - **Disambiguation:** Book title and author injected into search queries to avoid confusion with similarly-named books
 
-**Versioned prompts** — all agent instructions live in `agents/prompts/v3.json` (`v1.json`/`v2.json` kept for history). To add a new prompt version, create the next `agents/prompts/vN.json` and pass `--prompt-version vN` to the eval runner. The current version (`v3`) is controlled by `CURRENT_PROMPT_VERSION` in `agents/prompts.py`. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md). Git is the only source of prompts; a read-only mirror is pushed to Langfuse for the playground (`make prompts-sync`, auto on merge to `main` — see [evaluation/README.md](evaluation/README.md#prompt-versioning)).
+**Versioned prompts** — all agent instructions live in `agents/prompts/v5.json` (`v1.json`–`v4.json` kept for history). To add a new prompt version, create the next `agents/prompts/vN.json` and pass `--prompt-version vN` to the eval runner. The current version (`v5`) is controlled by `CURRENT_PROMPT_VERSION` in `agents/prompts.py`. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md). Git is the only source of prompts; a read-only mirror is pushed to Langfuse for the playground (`make prompts-sync`, auto on merge to `main` — see [evaluation/README.md](evaluation/README.md#prompt-versioning)).
 
 ## Deployment
 
@@ -466,7 +468,7 @@ The unit suite (`tests/unit/`) by area — per-module counts rot with every PR, 
 | Area | Modules |
 |------|---------|
 | Models & agents | `test_models.py`, `test_agents.py` |
-| Core workflow | `test_core.py`, `test_discovery_errors.py`, `test_empty_discovery_guard.py`, `test_retry_backoff.py` |
+| Core workflow | `test_core.py`, `test_discovery_errors.py`, `test_empty_discovery_guard.py`, `test_book_identity.py`, `test_retry_backoff.py` |
 | API layer | `test_api.py`, `test_gateway_auth.py`, `test_ratelimit.py`, `test_request_input_limits.py`, `test_dependencies.py` |
 | Caching | `test_cache.py`, `test_disk_cache.py`, `test_cache_version.py` |
 | Place features | `test_place_key.py`, `test_place_to_book.py`, `test_place_to_book_eval.py` |

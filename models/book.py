@@ -40,6 +40,28 @@ class BookContext(BaseModel):
         default=None, description="Historical era or time period of the story"
     )
     themes: List[str] = Field(description="Main themes of the book")
+    # Book identity (prompts v5). A web search can resolve a title to a
+    # DIFFERENT work -- "dddd" by "ddd" came back as Inio Asano's "Dead Dead
+    # Demon's Dededede Destruction", set in Tokyo -- and every later agent then
+    # plans a trip for that other book. discover() reads these three fields
+    # and stops the run (core/book_identity.py). All optional: v1-v4 prompts
+    # and the local-atmosphere flow never fill them, which means "unknown".
+    matches_requested_book: Optional[bool] = Field(
+        default=None,
+        description=(
+            "True if the research describes the requested book (same work and "
+            "author), false if it describes a different book or found none, "
+            "null if the research does not say"
+        ),
+    )
+    identified_title: Optional[str] = Field(
+        default=None,
+        description="Title of the book the research actually describes; null if none",
+    )
+    identified_author: Optional[str] = Field(
+        default=None,
+        description="Author of the book the research actually describes; null if none",
+    )
 
 
 class BookRecommendation(BaseModel):

@@ -27,7 +27,11 @@ from pathlib import Path
 # only inside the place typed, invented places come back empty, each book once,
 # the real author, queries for regions and countries). Also moves the
 # place2book:v1:<version> cache key, so no v3 answer is served under v4.
-CURRENT_PROMPT_VERSION = "v4"
+# v5: v4 + a book-identity step in book_context_researcher/formatter
+# (matches_requested_book / identified_title / identified_author), read by
+# core/book_identity.py so a title the search resolves to a different work
+# stops with BookNotFound instead of a trip for that other book.
+CURRENT_PROMPT_VERSION = "v5"
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _cache: dict[str, "AgentPrompts"] = {}
