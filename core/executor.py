@@ -466,12 +466,19 @@ class WorkflowExecutor:
                 total=total,
             )
 
-    def _create_langfuse_plugin(self) -> LangfusePlugin:
-        """Fresh plugin per workflow run to isolate token tracking."""
+    def _create_langfuse_plugin(
+        self, work_kind: str = DEFAULT_WORK_KIND
+    ) -> LangfusePlugin:
+        """Fresh plugin per workflow run to isolate token tracking.
+
+        ``work_kind`` tags the trace (ai-private#67); runs that aren't a
+        journey's discovery or composition keep the book default.
+        """
         return LangfusePlugin(
             secret_key=self._config.langfuse_secret_key,
             public_key=self._config.langfuse_public_key,
             host=self._config.langfuse_host,
+            work_kind=work_kind,
         )
 
     def _build_runner(self, workflow, langfuse_plugin=None) -> Runner:
@@ -764,7 +771,7 @@ class WorkflowExecutor:
                 phase=Phase.DISCOVERY, step="Starting location discovery"
             )
 
-            langfuse_plugin = self._create_langfuse_plugin()
+            langfuse_plugin = self._create_langfuse_plugin(_work_kind(work))
             # vibe/taste ride the researcher instructions now (ADR #24:
             # graph-scoped context — branch researchers never see the user
             # prompt that used to carry them).
@@ -1023,7 +1030,7 @@ class WorkflowExecutor:
                 detail=f"{len(selected_regions)} region(s) selected",
             )
 
-            langfuse_plugin = self._create_langfuse_plugin()
+            langfuse_plugin = self._create_langfuse_plugin(state.work_kind)
             composition_workflow = create_book_to_place_composition_workflow(
                 self._model, work_kind=state.work_kind
             )

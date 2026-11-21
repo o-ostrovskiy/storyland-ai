@@ -20,6 +20,8 @@ from google.adk.models.llm_response import LlmResponse
 from common.logging import get_logger
 from common.search_grounding import SearchMetadata, extract_search_metadata
 from agents.prompts import CURRENT_PROMPT_VERSION, prompt_content_hash
+from agents.work_prompts import is_screen_kind, screen_prompt_hash
+from models.work import DEFAULT_WORK_KIND
 
 logger = get_logger(__name__)
 
@@ -122,6 +124,7 @@ class LangfusePlugin(BasePlugin):
         enabled: bool = True,
         root_name: Optional[str] = None,
         prompt_version: str = CURRENT_PROMPT_VERSION,
+        work_kind: str = DEFAULT_WORK_KIND,
     ):
         """
         Initialize Langfuse plugin.
@@ -140,6 +143,11 @@ class LangfusePlugin(BasePlugin):
             prompt_version: The prompt set this run actually uses, written on
                 every trace. An eval run with --prompt-version passes its own;
                 production uses the default.
+            work_kind: The kind of work this run is for ("book", "film" or
+                "series"), written on every trace as metadata and as a
+                ``work_kind:<kind>`` tag so Langfuse can split screen journeys
+                from book ones (ai-private#67). A film or series trace also
+                carries the screen overlay's hash.
         """
         super().__init__(name="langfuse_plugin")
         self.root_name = root_name
@@ -147,6 +155,8 @@ class LangfusePlugin(BasePlugin):
         # The prompt JSON can't change under a running process: hash it once
         # per plugin, not per trace.
         self._prompt_hash = prompt_content_hash(prompt_version)
+        self._work_kind = work_kind
+        self._screen_prompt_hash = screen_prompt_hash() if is_screen_kind(work_kind) else None
         self.enabled = enabled and LANGFUSE_AVAILABLE
         self.client: Optional[Langfuse] = None
         self._token_usage = TokenUsage()
@@ -285,15 +295,22 @@ class LangfusePlugin(BasePlugin):
             # filtered/compared by prompt in Langfuse. The hash distinguishes an
             # in-place vN.json edit from the published vN (MYS-462); prompts
             # stay in git, this only labels which set produced the trace.
+            # work_kind (ai-private#67) splits film/series traces from books;
+            # a screen trace also names the overlay that shaped its prompts.
+            trace_metadata = {
+                "prompt_version": self._prompt_version,
+                "prompt_hash": self._prompt_hash,
+                "work_kind": self._work_kind,
+            }
+            if self._screen_prompt_hash is not None:
+                trace_metadata["screen_prompt_hash"] = self._screen_prompt_hash
             self._propagation_cm = propagate_attributes(
                 user_id=user_id,
                 session_id=session_id,
                 trace_name=f"{agent_name}_invocation",
                 version=self._prompt_version,
-                metadata={
-                    "prompt_version": self._prompt_version,
-                    "prompt_hash": self._prompt_hash,
-                },
+                metadata=trace_metadata,
+                tags=[f"work_kind:{self._work_kind}"],
             )
             self._propagation_cm.__enter__()
 
