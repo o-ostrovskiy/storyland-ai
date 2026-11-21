@@ -1036,6 +1036,14 @@ class TestNoBookSearchGuard:
             (["best books about Luga"], True),
             (["is Luga a real place", "where is Luga located"], False),
             (["Luga history World War II"], False),
+            # ai#316 review: English words that a stem-only foreign
+            # alternative used to match. A reality check is not a book search.
+            (["Roman ruins in Trier"], False),
+            (["Bath Roman baths location"], False),
+            (["Romanesque churches near Trier"], False),
+            (["livres se déroulant à Trier"], True),
+            (["Romane die in Trier spielen"], True),
+            (["novelas ambientadas en Lugo"], True),
             ([], False),
         ],
     )

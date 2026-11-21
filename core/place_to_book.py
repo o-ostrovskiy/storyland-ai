@@ -244,7 +244,11 @@ def _book_key(candidate: dict) -> tuple:
 _BOOK_QUERY = re.compile(
     r"\b(books?|novels?|fiction|literature|literary|memoirs?|stories|story|"
     r"authors?|writers?|poems?|poetry|reading list)\b"
-    r"|роман|книг|литератур|повест|libros?|novelas?|livres?|romans?|bücher|romane",
+    # Latin-script foreign words carry word boundaries: as bare stems they hit
+    # English reality checks ("Roman ruins", "Romanesque"). French "roman(s)"
+    # is left out because it is also English; French book searches say "livres".
+    r"|\b(livres?|libros?|novelas?|bücher|romane)\b"
+    r"|роман|книг|литератур|повест",
     re.IGNORECASE,
 )
 
