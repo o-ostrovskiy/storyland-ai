@@ -1409,6 +1409,6 @@ A true setting the composer labelled without a source reads as "Filmed here" unt
 | **Screen claims need evidence (ADR #34)** | A film/series stop is "set here" only with a cited, research-traced source | Unsupported "set here" ships as "filmed here" + vibe: under-claims, never over-claims |
 | **Cancellation-safe session DB (ADR #32)** | A dropped SSE stream returns its pooled connection; caller cancellation is unchanged | One wrapper method per ADK DB call to keep in step on upgrades |
 | **Reader-wait latency report (ADR #33)** | First-region and full-journey p50/p95 from Langfuse, never a fake 0 s | Fresh runs only, measured inside the agent service (no be hop or SSE delivery) |
-| **Book-identity guard (ADR #34)** | A title the search resolves to a different work stops with BookNotFound ("did you mean …?") instead of a trip for that other book | Runs after the full discovery graph; trusts the model's label (fails open when silent) |
+| **Book-identity guard (ADR #35)** | A title the search resolves to a different work stops with BookNotFound ("did you mean …?") instead of a trip for that other book | Runs after the full discovery graph; trusts the model's label (fails open when silent) |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.
