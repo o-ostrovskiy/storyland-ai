@@ -234,6 +234,32 @@ class TestDiscoverGuard:
         assert len([e for e in events if isinstance(e, RegionsReady)]) == 1
         assert not any(isinstance(e, WorkflowError) for e in events)
 
+    async def test_a_film_journey_is_not_held_to_a_book_identity(self, monkeypatch):
+        # Codex on ai#317: a film's `author` is its director. The book
+        # researcher rightly names Jane Austen for "Persuasion", which must not
+        # turn the accepted Persuasion / Carrie Cracknell film into BookNotFound.
+        from models.work import WorkRef
+
+        ctx = {
+            "primary_locations": ["Bath"],
+            "themes": ["second chances"],
+            "matches_requested_book": False,
+            "identified_title": "Persuasion",
+            "identified_author": "Jane Austen",
+        }
+        bath = [dict(TOKYO[0], name="Bath, England", country_code="GB",
+                     primary_locality="Bath", cities=[{"name": "Bath", "country": "England"}])]
+        executor = _make_executor(monkeypatch, ctx, bath)
+        film = WorkRef(kind="film", title="Persuasion", creator="Carrie Cracknell", year=2022)
+        events = [
+            e
+            async for e in executor.discover(
+                book_title="Persuasion", author="Carrie Cracknell", work=film
+            )
+        ]
+        assert not any(isinstance(e, WorkflowError) for e in events)
+        assert len([e for e in events if isinstance(e, RegionsReady)]) == 1
+
 
 def test_the_suggestion_reaches_the_sse_error_event():
     from api.streaming import domain_event_to_sse

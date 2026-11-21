@@ -848,11 +848,16 @@ class WorkflowExecutor:
             # Book-identity guard: the search may have researched a DIFFERENT
             # work than the one typed ("dddd" -> a Tokyo manga). Checked before
             # the region guards and the cache write, so such a run is never
-            # emitted, cached or composed (core/book_identity.py).
-            identity = check_book_identity(
-                run_state.book_context, exact_title, exact_author
+            # emitted, cached or composed (core/book_identity.py). Books only:
+            # a film or series carries its director/showrunner as `author`, and
+            # the book researcher naming the source novel's author is not a
+            # wrong work (Persuasion / Carrie Cracknell, ADR #31).
+            identity = (
+                check_book_identity(run_state.book_context, exact_title, exact_author)
+                if _work_kind(work) == DEFAULT_WORK_KIND
+                else None
             )
-            if identity.kind != "ok":
+            if identity is not None and identity.kind != "ok":
                 logger.info(
                     "discovery_book_identity_failed",
                     job_id=job_id[:8],
