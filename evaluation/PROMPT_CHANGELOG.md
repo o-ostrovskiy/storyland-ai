@@ -14,7 +14,7 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 | book_context_researcher | Step 0 BOOK IDENTITY: name the book the sources describe and say whether it is the requested one (different author or a work sharing an abbreviation/spelling = not it; translations/transliterations of the author = same). Answer starts with that finding. |
 | book_context_formatter | New fields `matches_requested_book`, `identified_title`, `identified_author`; a different book returns empty locations/themes. |
 
-Code guard alongside: `core/book_identity.py`, read by `discover()` (ADR #34).
+Code guard alongside: `core/book_identity.py`, read by `discover()` (ADR #35).
 
 ---
 

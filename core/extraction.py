@@ -19,6 +19,12 @@ from core.guardrails import (
     sanitize_expansion_explanations,
     sanitize_book_recommendations,
 )
+from core.guardrails.screen_claims import (
+    SCREEN_WORK_KINDS,
+    demote_set_here_that_lost_grounding,
+    downgrade_unsupported_set_here_claims,
+    strong_set_here_stops,
+)
 from models.book import BookRecommendationsResult
 from models.itinerary import TripItinerary, ComposerEnvelope, ExpansionResult
 from models.place_key import resolve_country_name, slug
@@ -738,7 +744,7 @@ def _drop_suggestions_naming_removed_cities(
 
 
 # Kinds of work whose journeys may carry CityStop.screen_claim (ADR #31).
-_SCREEN_WORK_KINDS = frozenset({"film", "series"})
+_SCREEN_WORK_KINDS = SCREEN_WORK_KINDS
 
 
 def clear_screen_claims_unless_screen_work(
@@ -790,9 +796,17 @@ def extract_itinerary_from_response(
     evidence_disqualified = state_accessor.all_discovery_unverified
 
     def _finalize(itinerary_dict, suggestions):
+        # ai-private#67: a screen journey's "set here" must carry its evidence.
+        # Source-less strong set_here stops go first; those that cite evidence the
+        # book-path downgrade then rejects follow it (see core/guardrails/screen_claims.py).
+        itinerary_dict = downgrade_unsupported_set_here_claims(
+            itinerary_dict, state_accessor.work_kind
+        )
+        strong_set_here = strong_set_here_stops(itinerary_dict, state_accessor.work_kind)
         itinerary_dict = downgrade_ungrounded_match_types(
             itinerary_dict, grounding_text, evidence_disqualified
         )
+        demote_set_here_that_lost_grounding(strong_set_here)
         identities_before = _city_names(itinerary_dict)
         itinerary_dict = reconcile_stop_city_grouping(itinerary_dict)
         # MYS-660 r6/r7: a city the guard above just removed can orphan a
@@ -851,8 +865,12 @@ def extract_itinerary_from_response(
 def extract_expansion_from_state(state_accessor) -> Optional[dict]:
     """Extract and validate the last expansion result from session state."""
     return clear_screen_claims_unless_screen_work(
-        sanitize_expansion_explanations(
-            validate_expansion_result(state_accessor.last_expansion)
+        downgrade_unsupported_set_here_claims(
+            sanitize_expansion_explanations(
+                validate_expansion_result(state_accessor.last_expansion)
+            ),
+            state_accessor.work_kind,
+            stops_path="expansion",
         ),
         state_accessor.work_kind,
         stops_path="expansion",
