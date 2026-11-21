@@ -90,6 +90,40 @@ _URL_QUERY_RE = re.compile(r"\?[^\s\"]*")
 _QUERY_KEY_RE = re.compile(r"(^|[._])query($|[._])", re.IGNORECASE)
 
 
+# Header names that never reach Sentry (ai-private#77). send_default_pii=False
+# drops only the SDK's fixed list (authorization, cookie, x-forwarded-for,
+# x-real-ip) and the SDK's EventScrubber matches WHOLE key names, so the
+# gateway's x-internal-secret (INTERNAL_API_SECRET) and x-user-id rode every
+# backend-forwarded transaction in clear. Any name containing one of these
+# words is dropped, plus x-user-id by name (it holds no such word).
+_SENSITIVE_HEADER_RE = re.compile(r"secret|token|key|auth|session|cookie", re.IGNORECASE)
+_DROPPED_HEADER_NAMES = frozenset({"x-user-id"})
+# OTel-style span/trace attributes that carry one header each.
+_HEADER_ATTR_RE = re.compile(r"^http\.(?:request|response)\.header\.(.+)$", re.IGNORECASE)
+
+
+def _is_sensitive_header(name) -> bool:
+    return isinstance(name, str) and (
+        name.lower() in _DROPPED_HEADER_NAMES or bool(_SENSITIVE_HEADER_RE.search(name))
+    )
+
+
+def _scrub_headers(headers):
+    """Drop sensitive header names from a dict or a [name, value] pair list."""
+    if isinstance(headers, dict):
+        for name in list(headers):
+            if _is_sensitive_header(name):
+                del headers[name]
+        return headers
+    if isinstance(headers, list):
+        return [
+            pair
+            for pair in headers
+            if not (isinstance(pair, (list, tuple)) and pair and _is_sensitive_header(pair[0]))
+        ]
+    return headers
+
+
 def _scrub_data_record(data):
     """
     Scrub one span/trace attribute dict in place (MYS-551): query-named keys
@@ -98,7 +132,8 @@ def _scrub_data_record(data):
     gateway (storyland-services#127) and the frontend (storyland-web#310).
     """
     for key, value in list(data.items()):
-        if _QUERY_KEY_RE.search(key):
+        header = _HEADER_ATTR_RE.match(key) if isinstance(key, str) else None
+        if _QUERY_KEY_RE.search(key) or (header and _is_sensitive_header(header.group(1))):
             del data[key]
         elif isinstance(value, str) and "?" in value:
             data[key] = _URL_QUERY_RE.sub("", value)
@@ -132,7 +167,9 @@ def _scrub_event(event, hint):
     """
     before_send: strip URL query strings from error EVENTS (request.url,
     stdlib logentry message/params) — these bypass the log-path scrub.
-    Parity with the backend gateway (storyland-services#92).
+    Parity with the backend gateway (storyland-services#92). Also drops
+    sensitive request header names (ai-private#77) from errors and, as
+    before_send_transaction, from transactions.
     """
     request = event.get("request")
     if request:
@@ -140,6 +177,8 @@ def _scrub_event(event, hint):
         if isinstance(url, str) and "?" in url:
             request["url"] = _URL_QUERY_RE.sub("", url)
         request.pop("query_string", None)
+        if "headers" in request:
+            request["headers"] = _scrub_headers(request["headers"])
     logentry = event.get("logentry")
     if logentry:
         for key in ("message", "formatted"):
@@ -246,8 +285,11 @@ def init_sentry() -> bool:
         # every error/log scrubber. before_send_transaction covers opt-in.
         traces_sample_rate=traces_sample_rate if traces_sample_rate > 0 else None,
         before_send_transaction=_scrub_event,
-        # No request headers/IPs/cookies on events. User prompts already live
-        # in Langfuse traces under access control; Sentry only needs the error.
+        # No IPs/cookies and only the SDK's fixed sensitive-header list: events
+        # built from a request DO carry request.headers, so _scrub_event drops
+        # the rest (x-internal-secret, x-user-id, any *secret/token/key/auth/
+        # session/cookie* name; ai-private#77). User prompts already live in
+        # Langfuse traces under access control; Sentry only needs the error.
         send_default_pii=False,
         # send_default_pii=False does NOT cover request bodies — the SDK
         # default ("medium") uploads small failing-request bodies, which here
