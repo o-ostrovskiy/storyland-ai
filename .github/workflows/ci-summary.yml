@@ -123,8 +123,8 @@ jobs:
               '',
               table,
               '',
-              `<sub>Posted by CI because the fleet cannot read check status directly ` +
-              `([MYS-672](https://linear.app/mystoryland/issue/MYS-672)). **This comment is only true for ` +
+              `<sub>Posted by CI because the fleet cannot read check status directly. ` +
+              `**This comment is only true for ` +
               `\`${headSha.slice(0, 8)}\`** — if that is not the PR's current head, a newer commit has ` +
               `landed and this is stale. Informational; branch protection is what actually gates the merge.</sub>`,
             ].join('\n');
