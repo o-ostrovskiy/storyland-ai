@@ -718,6 +718,15 @@ class TestPromptV3:
         )
         assert v3["agents"].keys() == v4["agents"].keys()
 
+    def test_v5_is_v4_with_every_agent_byte_identical(self):
+        # ai-private#7: v5 labels the eval run of the discovery USER message change
+        # (core/prompts.py); no agent instruction moves with it.
+        v4 = json.loads(Path("agents/prompts/v4.json").read_text(encoding="utf-8"))
+        v5 = json.loads(Path("agents/prompts/v5.json").read_text(encoding="utf-8"))
+        assert v5["version"] == "v5"
+        assert v5["agents"] == v4["agents"]
+        assert load_prompts("v5") == load_prompts("v4")
+
     def test_v2_is_still_loadable(self):
         # Published versions are immutable and must stay pinnable (eval/rollback).
         assert load_prompts("v2").region_analyzer
