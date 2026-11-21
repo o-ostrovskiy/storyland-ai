@@ -57,6 +57,7 @@ DEDICATED_RUNNERS = {
     "place_to_book": "evaluation/tools/run_place_to_book_eval.py",
     "local_atmosphere": "evaluation/tools/run_local_atmosphere_eval.py",
     "expansion": "evaluation/tools/run_expansion_eval.py",
+    "screen": "evaluation/tools/run_screen_eval.py",
 }
 
 
