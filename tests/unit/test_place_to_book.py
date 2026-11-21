@@ -1019,7 +1019,8 @@ class TestPromptV4PlaceToBook:
 
 
 class TestNoBookSearchGuard:
-    """Luga, 2026-11-21: an empty answer is only cached after a book search."""
+    """Luga, 2026-11-21: an empty answer with no book search is retried once
+    before any not-found is cached."""
 
     REALITY_CHECK = ["is Luga a real place", "where is Luga located"]
     LUGA_TEXT = "The Sixtieth Parallel is partly set near Luga."
@@ -1070,19 +1071,46 @@ class TestNoBookSearchGuard:
 
         assert [ttl for _, ttl in cache.writes] == [p2b.PLACE_TO_BOOK_TTL_SECONDS]
 
-    async def test_still_no_book_search_after_rerun_is_never_written(self, monkeypatch):
+    async def test_two_runs_without_a_book_search_are_cached_as_not_found(self, monkeypatch):
+        # Wakanda in the 2026-11-21 live eval: Step 0 stops before any book
+        # search, twice. That is a verdict; caching it keeps an invented place
+        # at two runs an hour instead of two runs per request.
+        cache = _SpyCache()
+        runs = []
+        resolver = _make_resolver(
+            monkeypatch, "Wakanda is fictional.", [], run_counter=runs,
+            cache=cache, queries_per_run=[["is Wakanda a real place"]],
+        )
+        import core.place_to_book as p2b
+
+        result = await resolver.resolve("Wakanda")
+        await resolver.resolve("Wakanda")
+
+        assert result.found is False
+        assert len(runs) == 2  # one re-run, not a loop; the second ask is a cache hit
+        assert [ttl for _, ttl in cache.writes] == [p2b._NOT_FOUND_TTL_SECONDS]
+
+    async def test_a_rerun_that_cannot_be_checked_is_never_written(self, monkeypatch):
         cache = _SpyCache()
         runs = []
         resolver = _make_resolver(
             monkeypatch, "I cannot confirm five books set in Luga.", [], run_counter=runs,
             cache=cache, queries_per_run=[self.REALITY_CHECK],
         )
+        real = resolver._run_pipeline
+        calls = []
 
+        async def second_malformed(place):
+            candidates, text, queries = await real(place)
+            calls.append(1)
+            return (candidates, text, queries) if len(calls) == 1 else (None, text, queries)
+
+        monkeypatch.setattr(resolver, "_run_pipeline", second_malformed)
         result = await resolver.resolve("Luga")
 
         assert result.found is False
-        assert len(runs) == 2  # one re-run, not a loop
-        assert cache.writes == []  # the next ask checks again
+        assert len(runs) == 2
+        assert cache.writes == []
 
     async def test_empty_after_a_book_search_is_cached_without_a_rerun(self, monkeypatch):
         # Wakanda: the researcher looked for books and found none. That is a

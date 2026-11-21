@@ -13,8 +13,9 @@ before any write; an empty or malformed pipeline answer returns the not-found
 envelope unwritten, because it says nothing about the place. So does an empty
 answer from a researcher that never searched for a book (Luga, 2026-11-21: it
 ran only "is Luga a real place" searches and gave up): that run is retried
-once, and if the retry still runs no book search, its empty answer is returned
-unwritten too (see ``searched_for_books``).
+once before any not-found is cached (see ``searched_for_books``). A second
+empty answer with no book search is the researcher's "invented place" verdict
+and is cached as not-found.
 
 HTTP surface: exposed as the internal ``POST /place-to-book`` endpoint
 (``api/routes.py``, gateway secret enforced). The storyland-services gateway
@@ -401,17 +402,17 @@ class PlaceToBookResolver:
             )
             raw_candidates, researcher_text, queries = await self._run_pipeline(place)
             cleaned = self._clean(raw_candidates, researcher_text)
-            if not cleaned and (
-                raw_candidates is None
-                or not researcher_text.strip()
-                or not searched_for_books(queries)
-            ):
-                # Still no verdict: answer not-found now, but write nothing so
-                # the next ask checks again instead of serving this for an hour.
+            if not cleaned and (raw_candidates is None or not researcher_text.strip()):
+                logger.warning("place_to_book_couldnt_check", place=normalized)
+                return self._not_found(place, normalized)
+            if not cleaned and not searched_for_books(queries):
+                # Two runs in a row stopped before any book search. That is
+                # the researcher's Step 0 verdict (an invented place: Wakanda,
+                # a gibberish string), so it is cached like any not-found;
+                # leaving it unwritten made every such request cost two runs.
                 logger.warning(
                     "place_to_book_no_book_search", place=normalized, queries=queries, attempt=2
                 )
-                return self._not_found(place, normalized)
 
         if cleaned:
             result = PlaceToBookResult(

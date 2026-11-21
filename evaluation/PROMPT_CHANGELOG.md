@@ -14,10 +14,25 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 | place_to_book_researcher | Step 0: a small real town is real once a search places it on a map, and being small or unfamiliar is never a reason to stop; the "fiction only" exit is the ONLY early exit. "5 literal" is a target for famous places, never a pass mark; 1–2 confirmed books is a complete answer for a small town. Before an empty answer the researcher MUST have run "novels set in {place}" and "{place} in fiction/literature", plus, for a small town, a search with its region, country and best-known history; existence/location searches don't count. The "obscure → none" rule is gone: empty only when fictional or when the book searches confirm nothing. |
 | place_to_book_formatter | One or two grounded books is a valid answer; never drop grounded books for being few. |
 
-Code guard alongside: `searched_for_books()` in the resolver. An empty answer whose researcher ran no book/novel/fiction/literature query (either receipt channel, captured by `RunCapture.captured_queries`) re-runs the pipeline once; if the re-run still runs no book search, the not-found is returned **unwritten**, so it is not cached for an hour.
+Code guard alongside: `searched_for_books()` in the resolver. An empty answer whose researcher ran no book/novel/fiction/literature query (either receipt channel, captured by `RunCapture.captured_queries`) re-runs the pipeline once before any not-found is cached. A second empty answer with no book search is the researcher's Step 0 "invented place" verdict and is cached as not-found. (A first cut returned it unwritten; the live eval showed Wakanda and the gibberish township never search for books by design, so every such request would have cost two runs.)
 
 ### Eval
-`place_to_book_v1` gains `p2b_small_town_luga` (`min_literal: 0`, any grounded book passes) and `p2b_small_town_holcomb` (Holcomb, Kansas → *In Cold Blood*, 1 literal). Wakanda, Macondo and the gibberish township still expect not-found. **Before/after run pending** (live Gemini calls; waits on Olga's yes).
+`place_to_book_v1` gains `p2b_small_town_luga` (`min_literal: 0`, any grounded book passes) and `p2b_small_town_holcomb` (Holcomb, Kansas → *In Cold Blood*, 1 literal). Wakanda, Macondo and the gibberish township still expect not-found.
+
+Live run 2026-11-21 (16 cases, gemini-3.1-flash-lite, in-memory cache, same evalset + scorer for both):
+
+| Metric | v4 (`p2b_eval_20261121_150714`) | v5 (`p2b_eval_20261121_150526`) |
+|---|---|---|
+| case_pass | 1.000 (16/16) | 1.000 (16/16) |
+| found_classification | 1.000 | 1.000 |
+| grounding_clean / no_duplicate_titles / authors_correct | 1.000 | 1.000 |
+| literal_grounded (mean, all 16) | 3.50 | 3.13 |
+| Luga, Leningrad Oblast | 3 literal + 2 vibe | 2 literal + 2 vibe |
+| Holcomb, Kansas | *In Cold Blood* + 2 vibe | *In Cold Blood* + 2 vibe |
+
+Bare "Luga" (the prod input), 5 fresh runs per version: v4 found 5/5, v5 found 5/5 (mostly vibe; *The Bronze Horseman* literal in 2 runs of each).
+
+**Reading:** the prod failure (1 of 19 places) did not reproduce on v4 in 6 Luga tries, so this eval cannot show that v5 fixes it; it shows v5 does not regress (invented places still empty, small towns non-empty). The deterministic protection is the code guard, covered by unit tests. The literal mean moved 3.50 → 3.13, inside the 3 ↔ 5–6 run-to-run swing recorded for v4 (Lisbon, Dublin, Tokyo 3 in v5; Paris, Kyoto 3 in v4).
 
 ---
 
