@@ -457,6 +457,23 @@ eval_run_YYYYMMDD_v2  (dataset run root — from start_as_current_observation)
 - **ADK plugin callbacks** — everything inside `runner.run_async()`: agents, model calls, tools. This is the only way to hook into ADK's internal lifecycle.
 - **`@observe` decorator** — `score_itinerary()` in `llm_scorer.py`. Used for standalone LLM calls outside the ADK runner. Note: `@observe` is not used on `discover()`/`compose()` because those are async generators — OTel context is lost after each `yield` (Langfuse issue [#8447](https://github.com/langfuse/langfuse/issues/8447)).
 
+### Trace source tags (MCP vs website)
+
+Every plugin root span carries `metadata.prompt_version` / `prompt_hash` (MYS-462).
+A job started by a My Storyland MCP tool (storyland-services#266) additionally gets:
+
+- **tags** `mcp`, `tool:<search_book_places|get_literary_route|plan_trip>`, `client:<clientInfo.name>`
+  (`client:unknown` when the client did not identify itself);
+- **metadata** `source: "mcp"`, `mcp_tool`, `mcp_client`, `mcp_client_version`, `mcp_session` (the MCP
+  session id or `none`).
+
+The gateway sends them as `X-Request-Source: mcp` + `X-MCP-Tool` / `X-MCP-Client` / `X-MCP-Client-Version` /
+`X-MCP-Session` (`api/dependencies.py:get_request_source`); discover stores them in session state
+(`request_source`, `common/request_source.py`), so compose on the same job is tagged too. Values are
+re-cleaned to 64 ASCII characters. Website calls send none of the headers, and their traces have no tags
+and no `source` key, exactly as before. Filter by tag `mcp` in Langfuse to see MCP traffic; `tool:plan_trip`
+splits it by tool.
+
 ### Disabling the Plugin
 
 **Option 1:** Omit it from the App's plugins:

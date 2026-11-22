@@ -5,6 +5,7 @@ Tracks token usage, costs, and agent performance metrics in Langfuse.
 """
 
 import asyncio
+from collections.abc import Mapping
 from typing import Any, Iterable, Optional
 from dataclasses import dataclass
 
@@ -20,6 +21,7 @@ from google.adk.models.llm_response import LlmResponse
 from common.logging import get_logger
 from common.search_grounding import SearchMetadata, extract_search_metadata
 from agents.prompts import CURRENT_PROMPT_VERSION, prompt_content_hash
+from common.request_source import STATE_KEY as REQUEST_SOURCE_STATE_KEY, RequestSource
 
 logger = get_logger(__name__)
 
@@ -235,6 +237,14 @@ class LangfusePlugin(BasePlugin):
         return "unknown_agent"
 
     @staticmethod
+    def _request_source(invocation_context: InvocationContext) -> Optional[RequestSource]:
+        """The job's stored request source (common/request_source.py), if any."""
+        state = getattr(getattr(invocation_context, "session", None), "state", None)
+        if not isinstance(state, Mapping):
+            return None
+        return RequestSource.from_state(state.get(REQUEST_SOURCE_STATE_KEY))
+
+    @staticmethod
     def _branch_key(callback_context: CallbackContext) -> str:
         """Per-concurrent-call key so parallel sub-agent branches never
         share the same generation/agent-stack/span slot (MYS-398).
@@ -285,15 +295,23 @@ class LangfusePlugin(BasePlugin):
             # filtered/compared by prompt in Langfuse. The hash distinguishes an
             # in-place vN.json edit from the published vN (MYS-462); prompts
             # stay in git, this only labels which set produced the trace.
+            metadata = {
+                "prompt_version": self._prompt_version,
+                "prompt_hash": self._prompt_hash,
+            }
+            # An MCP-started job (storyland-services#266) is tagged by source,
+            # tool and client so Langfuse can filter and cost it per tool; a
+            # website job has no source and keeps exactly the attributes above.
+            source = self._request_source(invocation_context)
+            if source:
+                metadata.update(source.langfuse_metadata())
             self._propagation_cm = propagate_attributes(
                 user_id=user_id,
                 session_id=session_id,
                 trace_name=f"{agent_name}_invocation",
                 version=self._prompt_version,
-                metadata={
-                    "prompt_version": self._prompt_version,
-                    "prompt_hash": self._prompt_hash,
-                },
+                metadata=metadata,
+                tags=source.langfuse_tags() if source else None,
             )
             self._propagation_cm.__enter__()
 
