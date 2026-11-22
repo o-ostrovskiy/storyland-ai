@@ -76,7 +76,7 @@ agent it never observed — so an empty ledger, the one state that means the
 measurement itself broke, reported a clean 4/4. `cases_fully_grounded` reads
 `grounded == total` for the same reason.
 - `books_v1` — 10 cases with expected outputs and book-specific scoring criteria
-- `place_to_book_v1` — 14 cases for the **place→book reverse-routing** grounding gate (literal/vibe labelling, repeats, authors + not-found state, incl. a country and an invented town). Register with `make eval-setup-one EVALSET_FILE=evaluation/place_to_book_v1.evalset.json`.
+- `place_to_book_v1` — 16 cases for the **place→book reverse-routing** grounding gate (literal/vibe labelling, repeats, authors + not-found state, incl. a country, two small real towns and an invented town). Register with `make eval-setup-one EVALSET_FILE=evaluation/place_to_book_v1.evalset.json`.
 - `local_atmosphere_v1` — 8 cases for the **local-atmosphere** ("book near me") flow: mixed preference shapes (4 with / 4 without `user:preferences`), LLM judge + deterministic envelope/radius gate.
 - `expansion_v1` — 5 cases for the **expansion** (suggestion-chip) flow: deterministic two-step gate (compose → expand), no judge.
 
@@ -112,7 +112,10 @@ Since ai-private#71 it also scores `no_duplicate_titles` (0/1: no book, title + 
 `authors_correct` (0/1: a returned book the evalset names as an example carries that book's
 real author; other books can't be checked offline and don't count). Either failing fails
 `case_pass`. Lisbon, Paris, Kyoto and the Scottish Highlands need `min_literal: 3`; Macondo
-(an invented town) and Wakanda must come back empty. The results JSON carries a `metrics`
+(an invented town) and Wakanda must come back empty. Since v5 (Luga, 2026-11-21) two small
+real towns must come back non-empty: Holcomb, Kansas needs one literal book, and Luga
+(Leningrad Oblast) uses `min_literal: 0`, which passes on any grounded book, literal or vibe
+(an unset `min_literal` still means 1). The results JSON carries a `metrics`
 block of run-level means, the numbers a prompt PR compares before and after.
 
 > Note: `_extract_input_from_case` stores `{place}` (not `{book_title, author}`) for
@@ -512,7 +515,7 @@ evaluation/
 │   └── judge_calibration.py       # Human-label queue + judge-vs-human agreement
 ├── storyland_eval.evalset.json    # Dataset (10 diverse books, incl. 2 fictional-world)
 ├── books_v1.evalset.json          # Dataset (10 books with expected output + criteria)
-├── place_to_book_v1.evalset.json  # Dataset (11 place→book reverse-routing grounding cases)
+├── place_to_book_v1.evalset.json  # Dataset (16 place→book reverse-routing grounding cases)
 ├── local_atmosphere_v1.evalset.json  # Dataset (8 local-atmosphere cases, mixed preference shapes)
 ├── expansion_v1.evalset.json      # Dataset (5 expansion two-step deterministic cases)
 ├── langfuse_datasets.json         # Dataset registry incl. per-dataset flow (gitignored)

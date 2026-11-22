@@ -680,8 +680,8 @@ class TestCacheNamespaceFlush:
         import inspect
         import agents.prompts as prompts_module
 
-        assert CURRENT_PROMPT_VERSION == "v4"
-        assert 'CURRENT_PROMPT_VERSION = "v4"' in inspect.getsource(prompts_module)
+        assert CURRENT_PROMPT_VERSION == "v5"
+        assert 'CURRENT_PROMPT_VERSION = "v5"' in inspect.getsource(prompts_module)
 
 
 class TestPromptV3:
@@ -717,6 +717,19 @@ class TestPromptV3:
             "v4 must not quietly re-tune any other agent: it rides a cache flush"
         )
         assert v3["agents"].keys() == v4["agents"].keys()
+
+    def test_v5_is_v4_plus_the_place_to_book_change_only(self):
+        v4 = json.loads(Path("agents/prompts/v4.json").read_text(encoding="utf-8"))
+        v5 = json.loads(Path("agents/prompts/v5.json").read_text(encoding="utf-8"))
+        changed = [a for a in v4["agents"] if v4["agents"][a] != v5["agents"][a]]
+        assert changed == ["place_to_book_researcher", "place_to_book_formatter"], (
+            "v5 must not quietly re-tune any other agent: it rides a cache flush"
+        )
+        assert v4["agents"].keys() == v5["agents"].keys()
+
+    def test_v4_is_still_loadable(self):
+        # v5 (Luga, 2026-11-21) is current; v4 stays pinnable for eval/rollback.
+        assert "exists only inside fiction" in load_prompts("v4").place_to_book_researcher
 
     def test_v2_is_still_loadable(self):
         # Published versions are immutable and must stay pinnable (eval/rollback).

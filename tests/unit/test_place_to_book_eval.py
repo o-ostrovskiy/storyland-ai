@@ -161,3 +161,40 @@ def test_aggregate_metrics_means():
     assert metrics["grounding_clean"] == 1.0
     assert metrics["literal_grounded_mean"] == 0.5
     assert aggregate_metrics([]) == {}
+
+
+# Luga, 2026-11-21: a small real town must come back non-empty.
+
+def test_min_literal_zero_passes_on_any_grounded_book():
+    # A small town whose only book is atmosphere-level still beats "not mapped".
+    result = _result(True, [_cand("vibe", None, title="The Siege")])
+    scored = score_case(result, expect="found", min_literal=0)
+    assert scored["pass"] is True
+
+
+def test_min_literal_zero_still_fails_an_empty_answer():
+    scored = score_case(_result(False, []), expect="found", min_literal=0)
+    assert scored["pass"] is False
+    assert scored["found_classification"] == 0.0
+
+
+def test_unset_min_literal_still_needs_one_literal():
+    result = _result(True, [_cand("vibe", None)])
+    assert score_case(result, expect="found", min_literal=None)["pass"] is False
+
+
+def test_evalset_has_small_towns_found_and_invented_places_not_found():
+    import json
+    from pathlib import Path
+
+    cases = {
+        c["eval_id"]: c
+        for c in json.loads(
+            Path("evaluation/place_to_book_v1.evalset.json").read_text(encoding="utf-8")
+        )["eval_cases"]
+    }
+    assert cases["p2b_small_town_luga"]["expect"] == "found"
+    assert cases["p2b_small_town_luga"]["place"].startswith("Luga")
+    assert cases["p2b_small_town_holcomb"]["expect"] == "found"
+    for invented in ("p2b_notfound_wakanda", "p2b_notfound_macondo", "p2b_notfound_gibberish"):
+        assert cases[invented]["expect"] == "not_found", invented
