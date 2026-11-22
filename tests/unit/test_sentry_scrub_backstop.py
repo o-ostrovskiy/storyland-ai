@@ -115,3 +115,103 @@ def test_no_query_survives_the_scrubbers(name):
 )
 def test_query_predicate(value, expected):
     assert _looks_like_query(value) is expected
+
+
+# ── Second property (ai-private#77): no sensitive header name survives ──────
+# send_default_pii=False drops only the SDK's fixed header list, and the SDK's
+# EventScrubber matches whole key names, so x-internal-secret / x-user-id rode
+# ai transactions in clear. Same shape as the query property: walk the WHOLE
+# event, every "headers" container and every OTel-style header attribute.
+_SENSITIVE_HEADER = re.compile(r"secret|token|key|auth|session|cookie", re.IGNORECASE)
+_ALWAYS_DROPPED = {"x-user-id"}
+_HEADER_ATTR = re.compile(r"^http\.(request|response)\.header\.(.+)$", re.IGNORECASE)
+
+
+def _is_sensitive_header(name: str) -> bool:
+    return name.lower() in _ALWAYS_DROPPED or bool(_SENSITIVE_HEADER.search(name))
+
+
+def _header_names(container):
+    if isinstance(container, dict):
+        yield from (k for k in container if isinstance(k, str))
+    elif isinstance(container, (list, tuple)):
+        for pair in container:
+            if isinstance(pair, (list, tuple)) and pair and isinstance(pair[0], str):
+                yield pair[0]
+
+
+def _sensitive_headers(node, path="$"):
+    """Every (path, header name) with a sensitive name, at any depth."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "headers":
+                for name in _header_names(value):
+                    if _is_sensitive_header(name):
+                        yield f"{path}.headers", name
+            if isinstance(key, str):
+                attr = _HEADER_ATTR.match(key)
+                if attr and _is_sensitive_header(attr.group(2)):
+                    yield path, key
+            yield from _sensitive_headers(value, f"{path}.{key}")
+    elif isinstance(node, (list, tuple)):
+        for i, value in enumerate(node):
+            yield from _sensitive_headers(value, f"{path}[{i}]")
+
+
+def test_the_captured_status_request_really_carries_the_internal_headers():
+    found = {name for _, name in _sensitive_headers(_fixture("transaction_status_request.json"))}
+    assert {"x-internal-secret", "x-user-id"} <= found
+
+
+@pytest.mark.parametrize("name", FIXTURE_NAMES)
+def test_no_sensitive_header_survives_the_scrubbers(name):
+    scrubbed = _through_the_pipeline(_fixture(name))
+    leaks = list(_sensitive_headers(scrubbed))
+    assert not leaks, f"sensitive headers survived the Sentry scrubbers: {leaks}"
+
+
+def test_the_scrub_keeps_harmless_headers():
+    scrubbed = _through_the_pipeline(_fixture("transaction_status_request.json"))
+    assert {"accept", "host", "user-agent"} <= set(scrubbed["request"]["headers"])
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"X-Internal-Secret": "s", "Authorization": "b", "X-Api-Key": "k", "Cookie": "c", "Accept": "a"},
+        [["X-Internal-Secret", "s"], ["x-session-id", "i"], ["X-User-Id", "u"], ["accept", "a"]],
+    ],
+)
+def test_header_shapes_dict_and_pair_list_are_both_scrubbed(headers):
+    event = {"request": {"url": "http://x/api", "headers": headers}}
+    scrubbed = _scrub_event(event, {})
+    assert not list(_sensitive_headers(scrubbed))
+    assert [n.lower() for n in _header_names(scrubbed["request"]["headers"])] == ["accept"]
+
+
+def test_header_attributes_on_spans_and_the_root_trace_are_scrubbed():
+    event = {
+        "spans": [{"data": {"http.request.header.x-internal-secret": "s", "http.method": "GET"}}],
+        "contexts": {"trace": {"data": {"http.request.header.authorization": "b"}}},
+    }
+    scrubbed = _scrub_event(event, {})
+    assert not list(_sensitive_headers(scrubbed))
+    assert scrubbed["spans"][0]["data"] == {"http.method": "GET"}
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("x-internal-secret", True),
+        ("X-User-Id", True),
+        ("authorization", True),
+        ("x-api-key", True),
+        ("cookie", True),
+        ("x-session-id", True),
+        ("accept", False),
+        ("user-agent", False),
+        ("host", False),
+    ],
+)
+def test_sensitive_header_predicate(name, expected):
+    assert _is_sensitive_header(name) is expected

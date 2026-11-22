@@ -24,6 +24,7 @@ from typing import AsyncGenerator, AsyncIterator, Awaitable, Callable, Optional
 from async_timeout import timeout as async_timeout
 
 from common.logging import get_logger
+from common.search_grounding import extract_search_metadata
 
 from .events import (
     DomainEvent,
@@ -42,10 +43,15 @@ class RunCapture:
 
     final_response: object = None
     captured_texts: dict[str, list[str]] = field(default_factory=dict)
+    captured_queries: dict[str, list[str]] = field(default_factory=dict)
 
     def text_for(self, author: str) -> str:
         """Joined captured text for one author ('' when none captured)."""
         return "\n".join(self.captured_texts.get(author, []))
+
+    def queries_for(self, author: str) -> list[str]:
+        """Search queries one author ran, in order ([] when none captured)."""
+        return list(self.captured_queries.get(author, []))
 
 
 async def pump_events(
@@ -68,7 +74,9 @@ async def pump_events(
 
     Capture semantics (both require ``capture``):
       * ``capture_authors``: text parts from these authors are accumulated into
-        ``capture.captured_texts`` (grounding post-validation input).
+        ``capture.captured_texts`` (grounding post-validation input), and the
+        google_search queries they ran (either receipt channel, see
+        ``common.search_grounding``) into ``capture.captured_queries``.
       * ``track_final_response``: the last event for which
         ``is_final_response()`` is true is stored on ``capture.final_response``.
     """
@@ -82,6 +90,11 @@ async def pump_events(
             new_message=message,
         ):
             author = getattr(event, "author", None)
+            if capture is not None and author in capture_authors:
+                receipts = extract_search_metadata(event)
+                if receipts is not None and receipts.queries:
+                    seen = capture.captured_queries.setdefault(author, [])
+                    seen.extend(q for q in receipts.queries if q not in seen)
             if (
                 capture is not None
                 and author in capture_authors
