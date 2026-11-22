@@ -363,7 +363,8 @@ storyland-ai/
 │       ├── v2.json               # Prompts as of PR #63 (history)
 │       ├── v3.json               # + region geo identity fields (MYS-460)
 │       ├── v4.json               # + place→book revision (ai-private#71)
-│       └── v5.json               # Current prompts (CURRENT_PROMPT_VERSION): + book-identity check
+│       ├── v5.json               # + place→book small-town revision (Luga)
+│       └── v6.json               # Current prompts (CURRENT_PROMPT_VERSION): + book-identity check
 │
 ├── core/                # Transport-agnostic orchestration & SDK
 │   ├── executor.py      # WorkflowExecutor (discover/compose/expand/recommend)
@@ -425,7 +426,7 @@ Agent prompts include reliability improvements:
 - **Error handling:** `"If the tool returns an error, report it clearly and explain what went wrong"`
 - **Disambiguation:** Book title and author injected into search queries to avoid confusion with similarly-named books
 
-**Versioned prompts** — all agent instructions live in `agents/prompts/v5.json` (`v1.json`–`v4.json` kept for history). To add a new prompt version, create the next `agents/prompts/vN.json` and pass `--prompt-version vN` to the eval runner. The current version (`v5`) is controlled by `CURRENT_PROMPT_VERSION` in `agents/prompts.py`. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md). Git is the only source of prompts; a read-only mirror is pushed to Langfuse for the playground (`make prompts-sync`, auto on merge to `main` — see [evaluation/README.md](evaluation/README.md#prompt-versioning)).
+**Versioned prompts** — all agent instructions live in `agents/prompts/v6.json` (`v1.json`–`v5.json` kept for history). To add a new prompt version, create the next `agents/prompts/vN.json` and pass `--prompt-version vN` to the eval runner. The current version (`v6`) is controlled by `CURRENT_PROMPT_VERSION` in `agents/prompts.py`. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md). Git is the only source of prompts; a read-only mirror is pushed to Langfuse for the playground (`make prompts-sync`, auto on merge to `main` — see [evaluation/README.md](evaluation/README.md#prompt-versioning)).
 
 ## Deployment
 

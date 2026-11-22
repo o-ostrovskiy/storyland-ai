@@ -1284,6 +1284,14 @@ Place→book results sat in an in-process `TTLCache`, so every deploy or restart
 - The bump moves both the place→book key (`place2book:v1:v4:…`) and the discovery cache namespace (`CURRENT_PROMPT_VERSION` is in the fingerprinted source), so there is one cold-cache window for both.
 - Count wording (Olga's B, 2026-11-11): for a well-known place the researcher looks for at least 5 books that happen there (6-8 candidates, 2-3 vibe) and searches more when it has fewer. The one approved run, `p2b_eval_20261111_181533`, holds 14/14 with Macondo/Wakanda empty; literal books per found place 4.36 vs v3's 4.73 (table in `evaluation/PROMPT_CHANGELOG.md`).
 
+### Addendum (2026-11-21, Luga): v5 place→book prompts and a no-book-search guard
+
+- Prompt set `v5` = `v4` with only `place_to_book_researcher` / `place_to_book_formatter` revised: a small real town is never an early exit; an empty answer only after book searches ("novels set in X", "X in fiction"), plus a region/country/history search for small towns; "5 literal" is a target for famous places, and 1–2 confirmed books is a valid answer. Trigger: trace `22802024ae591d84ff203bb7cb4198a0` (Luga answered not-found after only reality-check searches).
+- `core/run_harness.py` `RunCapture.captured_queries` records the google_search queries of each captured author (both receipt channels, via `common.search_grounding.extract_search_metadata`).
+- `PlaceToBookResolver.resolve`: an empty answer with no book query (`searched_for_books`) re-runs once before anything is cached. A second empty answer without a book search is the Step 0 "invented place" verdict and is cached as not-found (1h); a malformed second answer is "couldn't check" and is never written. An empty answer after a book search is cached for 1h as before. Cost: an invented place (Wakanda, a gibberish string, which stop before any book search by design) takes two pipeline runs per cache window instead of one.
+- Live eval 2026-11-21: 16/16 on both v4 and v5; the Luga failure did not reproduce on v4 (6 tries), so the guard, not the eval, is what pins the fix. Numbers in `evaluation/PROMPT_CHANGELOG.md`.
+- The bump moves the place→book key (`place2book:v1:v5:…`) and the discovery cache namespace, so the cached Luga not-found is not served under v5. The backend's own 1h not-found cache (`storyland-services app/place_to_book/service.py`) is separate and expires on its own.
+
 ## 31. A Work Has a Kind; Book Fields Stay on the Wire for Compatibility (2026-11-10)
 
 ### Context
@@ -1362,16 +1370,16 @@ A true setting the composer labelled without a source reads as "Filmed here" unt
 `discover()` takes the title and author on trust and hands them to a google_search researcher. A search does not fail on a title that names no book: it resolves it to whatever the web associates with it. In prod on 2026-11-21, "dddd" by "ddd" resolved to Inio Asano's manga *Dead Dead Demon's Dededede Destruction* (fans write it "DeDeDeDe"), set in Tokyo, and the reader got a Tokyo trip titled "dddd by ddd". Nothing on the page said which book it was for. The LLM judge rated the run "generic" because discovery data was nearly empty.
 
 ### Decision
-- Prompt set `v5` = `v4` with only `book_context_researcher` / `book_context_formatter` changed. The researcher first states which book its sources describe and whether it is the requested one (a different author, or a different work sharing an abbreviation or spelling, is not). The formatter fills three new optional `BookContext` fields: `matches_requested_book`, `identified_title`, `identified_author`, and returns empty locations/themes for a different book.
+- Prompt set `v6` = `v5` with only `book_context_researcher` / `book_context_formatter` changed. The researcher first states which book its sources describe and whether it is the requested one (a different author, or a different work sharing an abbreviation or spelling, is not). The formatter fills three new optional `BookContext` fields: `matches_requested_book`, `identified_title`, `identified_author`, and returns empty locations/themes for a different book.
 - `core/book_identity.py:check_book_identity()` turns them into `ok` / `mismatch` / `not_found`. `discover()` runs it after the discovery workflow and before the region guards and the cache write. Anything but `ok` marks the session failed and emits `WorkflowError(error_type="BookNotFound", reason="book_mismatch" | "book_not_found")`; a mismatch also carries `suggested_title` / `suggested_author` (on the SSE `error` event too) for a "did you mean …?".
 - Book journeys only: a film or series request carries its director or showrunner as `author`, so the book researcher naming the source novel's author (Persuasion → Jane Austen for the Carrie Cracknell film) is not a different work. The guard is skipped when the work kind is not `book`.
-- It fails **open**: a missing or null label (pre-v5 payloads, the local-atmosphere flow) is `ok`, and a `false` label that names the requested book itself (same title tokens, a shared author-name token, accents and case folded) is overruled. Blocking a real book is worse than the old behaviour.
+- It fails **open**: a missing or null label (pre-v6 payloads, the local-atmosphere flow) is `ok`, and a `false` label that names the requested book itself (same title tokens, a shared author-name token, accents and case folded) is overruled. Blocking a real book is worse than the old behaviour.
 - `core.book_identity` is in the cache fingerprint (`_PROMPT_MODULES`): it decides which runs may reach the cache, so a stricter guard must not be bypassed by entries a looser one let in.
 
 ### Trade-offs
 - The check runs after the whole discovery graph, so a wrong-book run still pays for the three discovery branches. It is rare, and this keeps the graph and its pinned tests as they are. Stopping right after `book_context_formatter` is the follow-up if the cost shows up.
 - The verdict rests on the model's label. The deterministic overrule only protects against a self-contradicting `false`, not against a wrong `true`.
-- The `v5` bump moves the discovery cache namespace and the place→book key (`place2book:v1:v5:…`): one cold-cache window for both.
+- The `v6` bump moves the discovery cache namespace and the place→book key (`place2book:v1:v6:…`): one cold-cache window for both.
 - fe still shows its generic discover error for `BookNotFound` until a designed "did you mean" state lands. The SSE event already carries what it needs.
 
 ## Summary: Key Architectural Patterns

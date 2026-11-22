@@ -27,11 +27,17 @@ from pathlib import Path
 # only inside the place typed, invented places come back empty, each book once,
 # the real author, queries for regions and countries). Also moves the
 # place2book:v1:<version> cache key, so no v3 answer is served under v4.
-# v5: v4 + a book-identity step in book_context_researcher/formatter
+# v5 (Luga, 2026-11-21): v4 + the place_to_book researcher/formatter revised so
+# a small real town is never an early exit: an empty answer only after book
+# searches (plus a region/country/history search for small towns), and "5" is a
+# target for famous places, not a pass mark. Moves place2book:v1:<version>, so
+# the cached Luga not-found (and its kind) are not served under v5.
+# v6: v5 + a book-identity step in book_context_researcher/formatter
 # (matches_requested_book / identified_title / identified_author), read by
 # core/book_identity.py so a title the search resolves to a different work
-# stops with BookNotFound instead of a trip for that other book.
-CURRENT_PROMPT_VERSION = "v5"
+# stops with BookNotFound instead of a trip for that other book. Also moves the
+# place2book cache key to place2book:v1:v6:…, so no v5 answer is served under v6.
+CURRENT_PROMPT_VERSION = "v6"
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _cache: dict[str, "AgentPrompts"] = {}

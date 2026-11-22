@@ -107,7 +107,13 @@ def score_case(
     )
 
     if expect == "found":
-        passed = bool(result.found) and n_literal_grounded >= (min_literal or 1)
+        # min_literal 0 (a small town whose books are few, Luga 2026-11-21):
+        # any grounded book, literal or vibe, passes; the case asserts only
+        # that a real place is not answered "not mapped yet". Unset means 1.
+        needed = 1 if min_literal is None else min_literal
+        passed = bool(result.found) and (
+            len(candidates) >= 1 if needed == 0 else n_literal_grounded >= needed
+        )
     else:  # not_found
         passed = (not result.found) and len(candidates) == 0
 

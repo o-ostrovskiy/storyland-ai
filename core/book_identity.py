@@ -7,14 +7,14 @@ book: it resolves it to whatever work the web associates with it. "dddd" by
 (fans write it "DeDeDeDe"), set in Tokyo, and the run produced a Tokyo trip
 titled "dddd by ddd" with nothing to tell the reader which book it was for.
 
-The book_context formatter (prompts v5) now reports whether its research
+The book_context formatter (prompts v6) now reports whether its research
 describes the requested book (``matches_requested_book``) and which book it
 does describe (``identified_title`` / ``identified_author``). This module
 turns that into a verdict discover() acts on before any region is emitted or
 cached:
 
 * ``ok``         -- proceed. Also the answer whenever the formatter is silent
-                    (pre-v5 cache entries, a null flag): fail open, because
+                    (pre-v6 cache entries, a null flag): fail open, because
                     blocking a real book the model forgot to label is worse
                     than today's behaviour.
 * ``mismatch``   -- the research is about a different, named book: stop and

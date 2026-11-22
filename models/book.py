@@ -40,7 +40,7 @@ class BookContext(BaseModel):
         default=None, description="Historical era or time period of the story"
     )
     themes: List[str] = Field(description="Main themes of the book")
-    # Book identity (prompts v5). A web search can resolve a title to a
+    # Book identity (prompts v6). A web search can resolve a title to a
     # DIFFERENT work -- "dddd" by "ddd" came back as Inio Asano's "Dead Dead
     # Demon's Dededede Destruction", set in Tokyo -- and every later agent then
     # plans a trip for that other book. discover() reads these three fields

@@ -3,7 +3,7 @@
 Prod 2026-11-21: "dddd" by "ddd" was searched, resolved by google_search to
 Inio Asano's "Dead Dead Demon's Dededede Destruction" (set in Tokyo), and the
 reader got a Tokyo trip titled "dddd by ddd". The book_context formatter
-(prompts v5) now labels whether its research is about the requested book;
+(prompts v6) now labels whether its research is about the requested book;
 core/book_identity.py turns that label into a verdict and discover() stops
 the run with a BookNotFound error before any region is emitted or cached.
 """
@@ -93,18 +93,18 @@ class TestVerdict:
         assert v.suggested_title is None
 
 
-class TestPromptV5:
-    def test_v5_is_v4_plus_the_book_context_change_only(self):
-        v4 = json.loads(Path("agents/prompts/v4.json").read_text(encoding="utf-8"))
+class TestPromptV6:
+    def test_v6_is_v5_plus_the_book_context_change_only(self):
         v5 = json.loads(Path("agents/prompts/v5.json").read_text(encoding="utf-8"))
-        changed = [a for a in v4["agents"] if v4["agents"][a] != v5["agents"][a]]
+        v6 = json.loads(Path("agents/prompts/v6.json").read_text(encoding="utf-8"))
+        changed = [a for a in v5["agents"] if v5["agents"][a] != v6["agents"][a]]
         assert changed == ["book_context_researcher", "book_context_formatter"], (
-            "v5 must not quietly re-tune any other agent: it rides a cache flush"
+            "v6 must not quietly re-tune any other agent: it rides a cache flush"
         )
-        assert v4["agents"].keys() == v5["agents"].keys()
+        assert v5["agents"].keys() == v6["agents"].keys()
 
-    def test_v5_asks_for_the_identity_fields(self):
-        prompts = load_prompts("v5")
+    def test_v6_asks_for_the_identity_fields(self):
+        prompts = load_prompts("v6")
         assert "BOOK IDENTITY" in prompts.book_context_researcher
         for field in ("matches_requested_book", "identified_title", "identified_author"):
             assert field in prompts.book_context_formatter
