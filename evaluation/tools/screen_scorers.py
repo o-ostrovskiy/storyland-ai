@@ -166,7 +166,9 @@ def _same_book(found: Dict[str, Any], expected: Dict[str, Any]) -> bool:
     if not found_title or all(found_title != title(t) for t in accepted):
         return False
     surname = (_tokens(expected.get("author")) or [""])[-1]
-    return not surname or surname in _tokens(found.get("author"))
+    # Discovery serializes source_work as a WorkRef, whose author is `creator`
+    # (models/work.py); `author` stays accepted for hand-written outputs.
+    return not surname or surname in _tokens(found.get("creator") or found.get("author"))
 
 
 def book_pairing_honesty(

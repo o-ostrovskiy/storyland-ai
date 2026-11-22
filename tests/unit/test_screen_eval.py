@@ -393,3 +393,23 @@ def test_the_trend_report_gets_the_two_screen_columns(tmp_path):
     lines = build_screen_section(str(tmp_path))
     assert "| Date | Run | Cases | Claim precision | Book-pairing honesty | Release |" in lines
     assert lines[-1].endswith("| screen_eval_x | 12/12 | 0.92 | 1.00 | ✅ allowed |")
+
+
+def test_a_real_serialized_screen_context_pairs_its_source_book():
+    # ai#310 round 3 (Codex P1): discovery output carries ScreenContext.source_work
+    # as a WorkRef, whose author field is `creator`, not `author`. The evalset's
+    # `expected` keeps `author`. A correct pairing must score 1.0 on the real shape.
+    from models.screen import ScreenContext
+    from models.work import WorkRef
+
+    ctx = ScreenContext(
+        story_locations=["Dublin"],
+        source_work=WorkRef(kind="book", title="Normal People", creator="Sally Rooney"),
+    ).model_dump()
+    assert "author" not in ctx["source_work"]
+    expected = {"title": "Normal People", "author": "Sally Rooney"}
+    assert book_pairing_honesty(ctx["source_work"], expected) == 1.0
+    wrong = ScreenContext(
+        source_work=WorkRef(kind="book", title="Normal People", creator="Someone Else"),
+    ).model_dump()
+    assert book_pairing_honesty(wrong["source_work"], expected) == 0.0
