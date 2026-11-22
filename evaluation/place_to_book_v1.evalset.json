@@ -92,6 +92,21 @@
       "notes": "ai-private#71: a country, not a city — the researcher's queries must cover countries and regions; literal = the story is set in Portugal."
     },
     {
+      "eval_id": "p2b_small_town_luga",
+      "place": "Luga, Leningrad Oblast",
+      "expect": "found",
+      "min_literal": 0,
+      "notes": "Luga, 2026-11-21 (trace 22802024ae591d84ff203bb7cb4198a0): v4 ran only 'is Luga a real place' searches and answered not-found for a real town. A small real town must come back non-empty; its books are few (e.g. Uspensky & Karaev's The Sixtieth Parallel, partly set near Luga in 1941), so min_literal 0 = any grounded book passes."
+    },
+    {
+      "eval_id": "p2b_small_town_holcomb",
+      "place": "Holcomb, Kansas",
+      "expect": "found",
+      "expected_literal_examples": ["In Cold Blood (Truman Capote)"],
+      "min_literal": 1,
+      "notes": "Luga, 2026-11-21: a village of ~2,000 people with one famous literal book. The '5 books' target must not turn one confirmed book into an empty answer."
+    },
+    {
       "eval_id": "p2b_notfound_wakanda",
       "place": "Wakanda",
       "expect": "not_found",
