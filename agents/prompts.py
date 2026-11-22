@@ -27,7 +27,12 @@ from pathlib import Path
 # only inside the place typed, invented places come back empty, each book once,
 # the real author, queries for regions and countries). Also moves the
 # place2book:v1:<version> cache key, so no v3 answer is served under v4.
-CURRENT_PROMPT_VERSION = "v4"
+# v5 (Luga, 2026-11-21): v4 + the place_to_book researcher/formatter revised so
+# a small real town is never an early exit: an empty answer only after book
+# searches (plus a region/country/history search for small towns), and "5" is a
+# target for famous places, not a pass mark. Moves place2book:v1:<version>, so
+# the cached Luga not-found (and its kind) are not served under v5.
+CURRENT_PROMPT_VERSION = "v5"
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _cache: dict[str, "AgentPrompts"] = {}
