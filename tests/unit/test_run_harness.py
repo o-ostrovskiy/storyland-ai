@@ -107,6 +107,34 @@ class TestPumpEvents:
         assert capture.text_for("researcher") == "alpha\nbeta\ngamma"
         assert capture.text_for("other") == ""
 
+    async def test_captures_search_queries_only_for_requested_authors(self):
+        def searched(author, queries):
+            ev = _adk_event(author, texts=["t"])
+            ev.grounding_metadata = SimpleNamespace(web_search_queries=queries, grounding_chunks=None)
+            return ev
+
+        runner = _FakeRunner(
+            [
+                searched("researcher", ["is Luga a real place"]),
+                searched("other", ["noise"]),
+                searched("researcher", ["is Luga a real place", "novels set in Luga"]),
+                _adk_event("researcher", texts=["no receipts"]),
+            ]
+        )
+        capture = RunCapture()
+        async for _ in pump_events(
+            runner,
+            user_id="u",
+            session_id="s",
+            message=_message(),
+            agent_steps={},
+            capture=capture,
+            capture_authors=("researcher",),
+        ):
+            pass
+        assert capture.queries_for("researcher") == ["is Luga a real place", "novels set in Luga"]
+        assert capture.queries_for("other") == []
+
     async def test_tracks_last_final_response(self):
         first_final = _adk_event("composer", final=True)
         last_final = _adk_event("composer", final=True)
