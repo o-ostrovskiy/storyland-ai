@@ -68,6 +68,7 @@ def test_all_committed_evalsets_declare_expected_flows():
         "place_to_book_v1": "place_to_book",
         "local_atmosphere_v1": "local_atmosphere",
         "expansion_v1": "expansion",
+        "screen_v1": "screen",
     }
     for path in (REPO_ROOT / "evaluation").glob("*.evalset.json"):
         evalset = json.loads(path.read_text())

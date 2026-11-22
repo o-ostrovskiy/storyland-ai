@@ -1,7 +1,7 @@
 # StoryLand AI - Makefile
 # Common commands for development and demo
 
-.PHONY: help install install-dev lock audit test test-ci test-cov test-agents test-models test-services test-api test-integration test-integration-live test-integration-vcr-record test-all eval eval-setup eval-setup-one eval-run eval-place-to-book eval-local-atmosphere eval-expansion eval-summary eval-report eval-export prompts-sync prompts-sync-dry run-api db-reset db-show db-users clean check-env
+.PHONY: help install install-dev lock audit test test-ci test-cov test-agents test-models test-services test-api test-integration test-integration-live test-integration-vcr-record test-all eval eval-setup eval-setup-one eval-run eval-place-to-book eval-local-atmosphere eval-expansion eval-screen eval-summary eval-report eval-export prompts-sync prompts-sync-dry run-api db-reset db-show db-users clean check-env
 
 # Default target
 help:
@@ -30,6 +30,7 @@ help:
 	@echo "  make eval-place-to-book      Run the place->book reverse-routing grounding eval"
 	@echo "  make eval-local-atmosphere   Run the local-atmosphere (book near me) eval"
 	@echo "  make eval-expansion          Run the expansion (suggestion-chip) eval"
+	@echo "  make eval-screen OUTPUTS=<f> Score film/series discovery outputs against screen_v1"
 	@echo "  make eval-report   Generate evaluation trend report"
 	@echo "  make prompts-sync  Mirror current agent prompts to Langfuse (git stays source of truth)"
 	@echo "  make prompts-sync-dry  Show which prompts a sync would create, without writing"
@@ -143,6 +144,11 @@ eval-local-atmosphere:
 
 eval-expansion:
 	PYTHONIOENCODING=utf-8 .venv/bin/python evaluation/tools/run_expansion_eval.py --output-dir evaluation/results
+
+# Screen path (film & series), ai-private#68. Offline scorer: OUTPUTS is a JSON file
+# {eval_id: discovery output} produced by ai-private#67's screen discovery.
+eval-screen:
+	PYTHONIOENCODING=utf-8 .venv/bin/python evaluation/tools/run_screen_eval.py --outputs $(OUTPUTS) --output-dir evaluation/results
 
 eval-summary:
 	.venv/bin/python evaluation/tools/eval_dashboard.py --action summary --days 7
