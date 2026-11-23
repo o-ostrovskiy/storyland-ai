@@ -10,7 +10,12 @@ app (see ``build_place_to_book_cache``), so they survive a restart.
 What gets cached (engineering-standards §2): a ``found`` answer for 6h, a
 ``not_found`` answer for 1h, and never a "couldn't check". A model error raises
 before any write; an empty or malformed pipeline answer returns the not-found
-envelope unwritten, because it says nothing about the place.
+envelope unwritten, because it says nothing about the place. So does an empty
+answer from a researcher that never searched for a book (Luga, 2026-11-21: it
+ran only "is Luga a real place" searches and gave up): that run is retried
+once before any not-found is cached (see ``searched_for_books``). A second
+empty answer with no book search is the researcher's "invented place" verdict
+and is cached as not-found.
 
 HTTP surface: exposed as the internal ``POST /place-to-book`` endpoint
 (``api/routes.py``, gateway secret enforced). The storyland-services gateway
@@ -61,8 +66,10 @@ APP_NAME = "storyland"
 
 # Cache key version; bump when the candidate shape or grounding rules change.
 # The key also carries CURRENT_PROMPT_VERSION: a persistent store has no restart
-# to wash out answers an older prompt gave.
-_CACHE_KEY_PREFIX = "place2book:v1:"
+# to wash out answers an older prompt gave. v2 (2026-11-22): the formatter gained
+# READER_CLARITY_RULES (agents/prompts.py) without a prompt-version bump, so the
+# prefix moves instead and no answer written under the old wording is served.
+_CACHE_KEY_PREFIX = "place2book:v2:"
 
 # Cache sizing: place→book lookups are cheap to keep and repeat often for the
 # seeded/landing destinations. 6h TTL mirrors the BE place→book hit TTL.
@@ -233,6 +240,34 @@ def _book_key(candidate: dict) -> tuple:
     return (_title_key(candidate.get("title")), _author_key(candidate.get("author")))
 
 
+# A query that asks for books, in the words the researcher prompt uses
+# ("novels set in X", "X in literature", "best books about X") plus the
+# Russian/Spanish/French/German stems a model may switch to for a local place.
+_BOOK_QUERY = re.compile(
+    r"\b(books?|novels?|fiction|literature|literary|memoirs?|stories|story|"
+    r"authors?|writers?|poems?|poetry|reading list)\b"
+    # Latin-script foreign words carry word boundaries: as bare stems they hit
+    # English reality checks ("Roman ruins", "Romanesque"). French "roman(s)"
+    # is left out because it is also English; French book searches say "livres".
+    r"|\b(livres?|libros?|novelas?|bücher|romane)\b"
+    r"|роман|книг|литератур|повест",
+    re.IGNORECASE,
+)
+
+
+def searched_for_books(queries: List[str]) -> bool:
+    """True if any researcher search was a book search.
+
+    An empty place→book answer is only a verdict on the place once the
+    researcher has looked for its books. The 2026-11-21 Luga trace
+    (``22802024ae591d84ff203bb7cb4198a0``) ran only reality-check queries
+    ("is Luga a real place", "where is Luga located") and then answered that
+    it could not confirm five books, which was cached as not-found for a real
+    town. No queries at all counts as no book search.
+    """
+    return any(_BOOK_QUERY.search(q or "") for q in queries)
+
+
 def drop_repeated_titles(candidates: List[dict]) -> List[dict]:
     """Keep each book once (ai-private#71).
 
@@ -358,13 +393,32 @@ class PlaceToBookResolver:
             logger.info(f"place2book cache hit ({backend})", place=normalized)
             return cached
 
-        raw_candidates, researcher_text = await self._run_pipeline(place)
-        grounded = filter_grounded_candidates(raw_candidates, researcher_text)
-        cleaned = drop_repeated_titles(enforce_label_invariants(grounded))
+        raw_candidates, researcher_text, queries = await self._run_pipeline(place)
+        cleaned = self._clean(raw_candidates, researcher_text)
 
         if not cleaned and (raw_candidates is None or not researcher_text.strip()):
             logger.warning("place_to_book_couldnt_check", place=normalized)
             return self._not_found(place, normalized)
+
+        if not cleaned and not searched_for_books(queries):
+            # An empty answer with no book search behind it says nothing about
+            # the place: run the pipeline once more before believing it.
+            logger.warning(
+                "place_to_book_no_book_search", place=normalized, queries=queries, attempt=1
+            )
+            raw_candidates, researcher_text, queries = await self._run_pipeline(place)
+            cleaned = self._clean(raw_candidates, researcher_text)
+            if not cleaned and (raw_candidates is None or not researcher_text.strip()):
+                logger.warning("place_to_book_couldnt_check", place=normalized)
+                return self._not_found(place, normalized)
+            if not cleaned and not searched_for_books(queries):
+                # Two runs in a row stopped before any book search. That is
+                # the researcher's Step 0 verdict (an invented place: Wakanda,
+                # a gibberish string), so it is cached like any not-found;
+                # leaving it unwritten made every such request cost two runs.
+                logger.warning(
+                    "place_to_book_no_book_search", place=normalized, queries=queries, attempt=2
+                )
 
         if cleaned:
             result = PlaceToBookResult(
@@ -386,6 +440,11 @@ class PlaceToBookResolver:
             count=len(result.candidates),
         )
         return result
+
+    @staticmethod
+    def _clean(raw_candidates: Optional[List[dict]], researcher_text: str) -> List[dict]:
+        grounded = filter_grounded_candidates(raw_candidates, researcher_text)
+        return drop_repeated_titles(enforce_label_invariants(grounded))
 
     async def _read_cache(self, key: str, normalized: str) -> Optional[PlaceToBookResult]:
         """The cached answer, or None. An entry that can't be read is a miss:
@@ -414,9 +473,10 @@ class PlaceToBookResolver:
             candidates=[],
         )
 
-    async def _run_pipeline(self, place: str) -> Tuple[Optional[List[dict]], str]:
-        """Run the pipeline once; return (candidate dicts, researcher text).
-        Candidates are None when the formatter's answer is missing or malformed."""
+    async def _run_pipeline(self, place: str) -> Tuple[Optional[List[dict]], str, List[str]]:
+        """Run the pipeline once; return (candidate dicts, researcher text,
+        researcher search queries). Candidates are None when the formatter's
+        answer is missing or malformed."""
         job_id = str(uuid.uuid4())
         user_id = "place2book"
 
@@ -464,4 +524,8 @@ class PlaceToBookResolver:
             run_state = SessionStateAccessor(refreshed.state)
             candidates = extract_place_to_book_from_state(run_state)
 
-        return candidates, capture.text_for("place_to_book_researcher")
+        return (
+            candidates,
+            capture.text_for("place_to_book_researcher"),
+            capture.queries_for("place_to_book_researcher"),
+        )

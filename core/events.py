@@ -99,6 +99,10 @@ class WorkflowError:
     phase: Optional[Phase] = None
     reason: Optional[str] = None
     offending_title: Optional[str] = None
+    # BookNotFound / reason="book_mismatch" only: the book the search found
+    # instead, for a "did you mean ...?" prompt (core/book_identity.py).
+    suggested_title: Optional[str] = None
+    suggested_author: Optional[str] = None
 
 
 @dataclass(frozen=True)

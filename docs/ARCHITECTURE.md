@@ -917,6 +917,7 @@ Env-gated Sentry for the API — performance tracing **off** by default, logs an
 - Performance tracing off by default: `traces_sample_rate` resolves to `None` (not `0.0`) so inbound trace headers that would bypass scrubbers aren't honored.
 - Privacy: `send_default_pii=False`, `max_request_body_size="never"`, `include_local_variables=False` (frame locals hold prompts, taste context, lat/lng), URL query-string scrubbing across events/logs/breadcrumbs/spans, health-probe noise dropped.
 - **Addendum (2026-11-10, ai-private#74): the scrub backstop.** Behind the per-key rules, `tests/unit/test_sentry_scrub_backstop.py` runs events captured from the real SDK + app + google-genai client (`scripts/capture_sentry_fixtures.py`: synthetic local run, Gemini stubbed in-process; re-run after a sentry-sdk or google-genai bump) through the hooks `init_sentry()` wires and walks every string at any depth, failing on anything that looks like a query (`?`/`#` tail or a bare `k=v`). Its first run found HTTPX breadcrumbs carrying `data['http.query']`; breadcrumb data now gets the same record rules as span data (query-named keys dropped).
+- **Addendum (2026-11-20, ai-private#77): request headers.** `send_default_pii=False` drops only the SDK's fixed header list and its `EventScrubber` matches whole key names, so backend-forwarded transactions carried `x-internal-secret` and `x-user-id` in `request.headers`. `_scrub_event` now drops any request header whose name contains `secret|token|key|auth|session|cookie` (case-insensitive) plus `x-user-id`, from a dict or a pair list, and the same names as `http.request|response.header.*` span/trace attributes. The backstop has a second property: no such header name survives anywhere in a captured event (red on `transaction_status_request.json` before the fix).
 
 ### Rationale
 We need to see production exceptions without shipping user data to a third party; Langfuse owns the "what did the agents do" question, Sentry only the "what broke" question.
@@ -959,6 +960,7 @@ Five smaller decisions, recorded together:
 - **Rate limiting + concurrency cap** (2026-06-23): per-identity request rate limit and in-flight concurrency cap on discovery endpoints (`api/ratelimit.py`); input-size bounds return 422 **before** any Gemini tokens are spent.
 - **Bounded session retention** (2026-06-24): a periodic retention sweep (`services/session_retention.py`) bounds the in-memory/SQLite session store — extends ADR #6, which predates it.
 - **Recommendation-tone guardrail** (2026-06-28): rec explanations are fit-only and never grade the reader (`core/guardrails/tone_guardrail.py`).
+- **Reader clarity rules** (2026-11-22): `READER_CLARITY_RULES` in `agents/prompts.py` is appended by `load_prompts()` to the same explanation agents plus `city_formatter` and `landmark_formatter` (the one-line "connection" text). It tells the model to state the book↔place link first, name the actors, avoid noun stacks and invented verbs, keep every hedge, and add nothing the research does not support. It lives in `agents.prompts` so the discovery cache fingerprint flushes on any edit; the place→book cache prefix moved to `place2book:v2:` for the same reason.
 - **Langfuse per-branch scoping** (2026-07-17, MYS-398): generation/agent-stack/span state is scoped **per ParallelAgent branch** (`_branch_key()` in `plugins/langfuse_plugin.py`) — per-request plugin instances (ADR #8) were not enough under the ADR #3 parallel fan-out.
 - **Langfuse run I/O lives on the root observation** (2026-11-04, supersedes MYS-788's trace-level write): Langfuse v4 is observations-first and removes trace-level I/O, so the plugin no longer calls the deprecated `set_trace_io()`. `plugins/langfuse_plugin.py` writes the user message and the run's final-response text to its root observation (last event where `is_final_response()` is true, the same rule as `core/run_harness.py`), falling back to `{"status": "completed"}` when the run produced no final text.
 
@@ -1283,6 +1285,14 @@ Place→book results sat in an in-process `TTLCache`, so every deploy or restart
 - The bump moves both the place→book key (`place2book:v1:v4:…`) and the discovery cache namespace (`CURRENT_PROMPT_VERSION` is in the fingerprinted source), so there is one cold-cache window for both.
 - Count wording (Olga's B, 2026-11-11): for a well-known place the researcher looks for at least 5 books that happen there (6-8 candidates, 2-3 vibe) and searches more when it has fewer. The one approved run, `p2b_eval_20261111_181533`, holds 14/14 with Macondo/Wakanda empty; literal books per found place 4.36 vs v3's 4.73 (table in `evaluation/PROMPT_CHANGELOG.md`).
 
+### Addendum (2026-11-21, Luga): v5 place→book prompts and a no-book-search guard
+
+- Prompt set `v5` = `v4` with only `place_to_book_researcher` / `place_to_book_formatter` revised: a small real town is never an early exit; an empty answer only after book searches ("novels set in X", "X in fiction"), plus a region/country/history search for small towns; "5 literal" is a target for famous places, and 1–2 confirmed books is a valid answer. Trigger: trace `22802024ae591d84ff203bb7cb4198a0` (Luga answered not-found after only reality-check searches).
+- `core/run_harness.py` `RunCapture.captured_queries` records the google_search queries of each captured author (both receipt channels, via `common.search_grounding.extract_search_metadata`).
+- `PlaceToBookResolver.resolve`: an empty answer with no book query (`searched_for_books`) re-runs once before anything is cached. A second empty answer without a book search is the Step 0 "invented place" verdict and is cached as not-found (1h); a malformed second answer is "couldn't check" and is never written. An empty answer after a book search is cached for 1h as before. Cost: an invented place (Wakanda, a gibberish string, which stop before any book search by design) takes two pipeline runs per cache window instead of one.
+- Live eval 2026-11-21: 16/16 on both v4 and v5; the Luga failure did not reproduce on v4 (6 tries), so the guard, not the eval, is what pins the fix. Numbers in `evaluation/PROMPT_CHANGELOG.md`.
+- The bump moves the place→book key (`place2book:v1:v5:…`) and the discovery cache namespace, so the cached Luga not-found is not served under v5. The backend's own 1h not-found cache (`storyland-services app/place_to_book/service.py`) is separate and expires on its own.
+
 ## 31. A Work Has a Kind; Book Fields Stay on the Wire for Compatibility (2026-11-10)
 
 ### Context
@@ -1342,10 +1352,41 @@ Proposed in the PR; Olga sets them at merge. Proposed: first region p95 ≤ 15 s
 ### Trade-offs
 It measures the workflow inside the agent service, not the browser: the be hop, the executor's post-workflow steps (enrichment, cache write) and the SSE delivery are not in it, so a reader's wait is somewhat longer than the report.
 
+## 34. A Screen Journey's "Set Here" Needs Evidence; Unsure Means "Filmed Here" (2026-11-20)
 
-## 35. The Discovery User Message States the Research Task; Agents Own the Shape (2026-11-20)
+### Context
+A film or series journey makes a claim a book journey never does: "the story is set here" versus "scenes were filmed here" (`CityStop.screen_claim`, ADR #31). Conflating them is the Movies epic's failure class: Dubrovnik sold as the setting of *Game of Thrones* (Westeros is invented), Ischia as the setting of *The Talented Mr. Ripley* (Mongibello is invented). It is invisible in a demo and obvious to a fan (storyland-ai-private#67; measured by `evaluation/screen_v1`, ai-private#68).
 
-(#34 is taken by storyland-ai#311, the screen-claims ADR, still in review.)
+### Decision
+- `models/screen.py::ScreenContext` holds the three separate answers: `story_locations`, `filming_locations`, `source_work` (a book or nothing) and `is_fictional_world`. An invented world has no story locations, enforced by the model.
+- `core/guardrails/screen_claims.py`, applied in `core/extraction.py` before any `ItineraryReady`/expansion event leaves: on a film or series journey, a `set_here` stop becomes `filmed_here` + `vibe` unless it is labelled `literal`/`historical` **and** has a `grounding_source` (a `vibe`/`thematic`/missing label is no evidence for a setting) (the weaker claim, the book path's "choose the weaker claim when unsure" rule). A `set_here` stop whose cited evidence the book-path downgrade (`downgrade_ungrounded_match_types`) rejects is demoted the same way. Stops are never dropped or upgraded; `filming_scene` is kept.
+- Book journeys are untouched; their screen claims are still nulled by `clear_screen_claims_unless_screen_work`.
+
+### Trade-offs
+A true setting the composer labelled without a source reads as "Filmed here" until the prompts cite it (the screen prompts are the next part of ai-private#67). That under-claims; it never over-claims.
+
+## 35. Discovery Stops When the Search Found a Different Book (2026-11-21)
+
+### Context
+`discover()` takes the title and author on trust and hands them to a google_search researcher. A search does not fail on a title that names no book: it resolves it to whatever the web associates with it. In prod on 2026-11-21, "dddd" by "ddd" resolved to Inio Asano's manga *Dead Dead Demon's Dededede Destruction* (fans write it "DeDeDeDe"), set in Tokyo, and the reader got a Tokyo trip titled "dddd by ddd". Nothing on the page said which book it was for. The LLM judge rated the run "generic" because discovery data was nearly empty.
+
+### Decision
+- Prompt set `v6` = `v5` with only `book_context_researcher` / `book_context_formatter` changed. The researcher first states which book its sources describe and whether it is the requested one (a different author, or a different work sharing an abbreviation or spelling, is not). The formatter fills three new optional `BookContext` fields: `matches_requested_book`, `identified_title`, `identified_author`, and returns empty locations/themes for a different book.
+- `core/book_identity.py:check_book_identity()` turns them into `ok` / `mismatch` / `not_found`. `discover()` runs it after the discovery workflow and before the region guards and the cache write. Anything but `ok` marks the session failed and emits `WorkflowError(error_type="BookNotFound", reason="book_mismatch" | "book_not_found")`; a mismatch also carries `suggested_title` / `suggested_author` (on the SSE `error` event too) for a "did you mean …?".
+- The rejection is persisted, not only the failure flag: `discover()` writes `book_identity_rejected` (the BookNotFound payload) with `job_failed` in one `append_event`. `compose()` clears `job_failed` on every retry and the wrong book's regions stay in state, so it reads that key first and answers the same BookNotFound; retries after ordinary composition failures are unaffected (Codex on ai#317).
+- Book journeys only: a film or series request carries its director or showrunner as `author`, so the book researcher naming the source novel's author (Persuasion → Jane Austen for the Carrie Cracknell film) is not a different work. The guard is skipped when the work kind is not `book`.
+- It fails **open**: a missing or null label (pre-v6 payloads, the local-atmosphere flow) is `ok`, and a `false` label that names the requested book itself (same title tokens, a shared author-name token, accents and case folded) is overruled. Blocking a real book is worse than the old behaviour.
+- `core.book_identity` is in the cache fingerprint (`_PROMPT_MODULES`): it decides which runs may reach the cache, so a stricter guard must not be bypassed by entries a looser one let in.
+
+### Trade-offs
+- The check runs after the whole discovery graph, so a wrong-book run still pays for the three discovery branches. It is rare, and this keeps the graph and its pinned tests as they are. Stopping right after `book_context_formatter` is the follow-up if the cost shows up.
+- The verdict rests on the model's label. The deterministic overrule only protects against a self-contradicting `false`, not against a wrong `true`.
+- The `v6` bump moves the discovery cache namespace and the place→book key (`place2book:v1:v6:…`): one cold-cache window for both.
+- fe still shows its generic discover error for `BookNotFound` until a designed "did you mean" state lands. The SSE event already carries what it needs.
+
+## 38. The Discovery User Message States the Research Task; Agents Own the Shape (2026-11-20)
+
+(#36 and #37 are taken by storyland-ai#313 and #315, the screen-prompt ADRs, still in review.)
 
 ### Context
 The discovery user message read like a trip-planning order: "Discover travel locations for … Find cities, landmarks, and author-related sites, then group them into practical travel regions." The researchers answered from memory and skipped Google Search on about a third of runs (storyland-ai-private#7). On the card's 11-04 measurements, a stronger MUST clause changed nothing (6/12 → 6/12) and an explicit search request did best; ADK's `GoogleSearch` tool has no force setting, so no config flag fixes it.
@@ -1354,10 +1395,10 @@ The discovery user message read like a trip-planning order: "Discover travel loc
 - `core/prompts.py::build_discovery_prompt` sends only the research request: `Research "<title>" by <author>: use Google Search to find the real places tied to this book and its author.` The pipeline's shape (cities, landmarks, author sites, regions) is each agent's own instruction.
 - The `vibe` and `taste_context` clauses weigh places the research already tied to the book and never add one; "factual grounding always wins" stays.
 - `run_scheduled_eval.py` builds its message with the same function (it had a copy of the old text, so a prompt eval would have measured the old wording).
-- Labelled prompt version `v5` for evals; agent instructions byte-identical to v4. The discovery cache flips by itself (`core.prompts` is fingerprinted); `CURRENT_PROMPT_VERSION` is not bumped, so the place-to-book cache is untouched.
+- Labelled prompt version `v7` for evals; agent instructions byte-identical to v6. The discovery cache flips by itself (`core.prompts` is fingerprinted); `CURRENT_PROMPT_VERSION` is not bumped, so the place-to-book cache is untouched.
 
 ### Trade-offs
-The effect is measured by one paid eval run (pinned judge) against the v4 baseline; until then the change rests on the 11-04 sample. If grounding doesn't rise, the fallback on the card is an explicit query step built in code.
+The effect is measured by one paid eval run (pinned judge) against the v6 baseline; until then the change rests on the 11-04 sample. If grounding doesn't rise, the fallback on the card is an explicit query step built in code.
 
 ## Summary: Key Architectural Patterns
 
@@ -1391,7 +1432,9 @@ The effect is measured by one paid eval run (pinned judge) against the v4 baseli
 | **Composer truncation at the model boundary (ADR #29)** | A cut-off envelope is retried once, then a clean transient error; never half-recovered; counted as an eval defect | Local-atmosphere composer not yet covered; a retry costs one more composer call on that rare path |
 | **Persistent place→book cache (ADR #30)** | A restart costs no repeat AI runs; a failed check is never remembered as "no books here" | In-place prompt edits wait out the 6h TTL; the gateway still holds a failed check for 1h |
 | **Work kind on the AI contract (ADR #31)** | Films and series ride the same pipeline; a book request, its metadata event and its cache key are byte-identical | Book fields and `work` coexist on the wire; film prompts are a later story |
+| **Screen claims need evidence (ADR #34)** | A film/series stop is "set here" only with a cited, research-traced source | Unsupported "set here" ships as "filmed here" + vibe: under-claims, never over-claims |
 | **Cancellation-safe session DB (ADR #32)** | A dropped SSE stream returns its pooled connection; caller cancellation is unchanged | One wrapper method per ADK DB call to keep in step on upgrades |
 | **Reader-wait latency report (ADR #33)** | First-region and full-journey p50/p95 from Langfuse, never a fake 0 s | Fresh runs only, measured inside the agent service (no be hop or SSE delivery) |
+| **Book-identity guard (ADR #35)** | A title the search resolves to a different work stops with BookNotFound ("did you mean …?") instead of a trip for that other book | Runs after the full discovery graph; trusts the model's label (fails open when silent) |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.

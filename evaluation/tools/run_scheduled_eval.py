@@ -57,6 +57,7 @@ DEDICATED_RUNNERS = {
     "place_to_book": "evaluation/tools/run_place_to_book_eval.py",
     "local_atmosphere": "evaluation/tools/run_local_atmosphere_eval.py",
     "expansion": "evaluation/tools/run_expansion_eval.py",
+    "screen": "evaluation/tools/run_screen_eval.py",
 }
 
 
@@ -942,7 +943,7 @@ async def _run_evaluation_case(
             )
 
             # The same user message prod sends (core.prompts), never a copy: a
-            # copy here kept the pre-v5 wording, so a prompt eval measured the
+            # copy here kept the pre-v7 wording, so a prompt eval measured the
             # old text (ai-private#7).
             discovery_prompt = build_discovery_prompt(exact_title, exact_author)
             discovery_message = types.Content(

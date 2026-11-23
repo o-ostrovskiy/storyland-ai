@@ -27,7 +27,17 @@ from pathlib import Path
 # only inside the place typed, invented places come back empty, each book once,
 # the real author, queries for regions and countries). Also moves the
 # place2book:v1:<version> cache key, so no v3 answer is served under v4.
-CURRENT_PROMPT_VERSION = "v4"
+# v5 (Luga, 2026-11-21): v4 + the place_to_book researcher/formatter revised so
+# a small real town is never an early exit: an empty answer only after book
+# searches (plus a region/country/history search for small towns), and "5" is a
+# target for famous places, not a pass mark. Moves place2book:v1:<version>, so
+# the cached Luga not-found (and its kind) are not served under v5.
+# v6: v5 + a book-identity step in book_context_researcher/formatter
+# (matches_requested_book / identified_title / identified_author), read by
+# core/book_identity.py so a title the search resolves to a different work
+# stops with BookNotFound instead of a trip for that other book. Also moves the
+# place2book cache key to place2book:v1:v6:…, so no v5 answer is served under v6.
+CURRENT_PROMPT_VERSION = "v6"
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _cache: dict[str, "AgentPrompts"] = {}
@@ -155,7 +165,7 @@ def load_prompts(version: str = CURRENT_PROMPT_VERSION) -> AgentPrompts:
             )
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        agents_data = _inject_tone_guardrail(data["agents"])
+        agents_data = _inject_clarity_rules(_inject_tone_guardrail(data["agents"]))
         _cache[version] = AgentPrompts(**agents_data)
     return _cache[version]
 
@@ -172,6 +182,74 @@ _EXPLANATION_AGENTS = (
     "book_recommendation_formatter",
     "place_to_book_formatter",
 )
+
+
+# Agents that write the one-line "connection" / "relevance" text on a city or
+# landmark ("why this place is linked to the book"). They get the clarity rules
+# below but not the tone guardrail, which was scoped to the explanation agents.
+_CONNECTION_AGENTS = (
+    "city_formatter",
+    "landmark_formatter",
+)
+
+# Clarity rules for every reader-facing explanation (2026-11-22). Readers found
+# some "why this place is connected" lines hard to follow: packed noun strings,
+# unclear "it"/"this", the link to the book implied rather than stated. Adapted
+# from ksoomro's "write for human understanding" rules (TLDR community thread,
+# distilled from arXiv 2610.29162) for a literary-travel reader.
+#
+# Lives in THIS module, not core/guardrails, on purpose: core/cache_version.py
+# fingerprints agents.prompts source, so editing this text flushes cached
+# discovery results instead of serving old wording (the MYS-462 class of error).
+# No braces in the text: several instructions are str.format templates.
+READER_CLARITY_RULES = (
+    "\n\n## WRITE FOR THE READER'S UNDERSTANDING (explanation text)\n"
+    "Every reader-facing sentence you write (connection, relevance, reason, "
+    "why it fits, overview, summary, description) must be understood on one "
+    "read by a curious traveler who may not know the book well. A few extra "
+    "words are worth it when they make the link clearer.\n"
+    "- Say the link first and say it plainly: what happens in the book at this "
+    "place, who is there, or why the author wrote about it. Then, if there is "
+    "room, why it is worth seeing today.\n"
+    "- Name the actors. Use the character's, author's or book's name instead of "
+    "an unclear \"it\", \"this\" or \"they\".\n"
+    "- Keep the subject next to its verb. Split a sentence that carries more "
+    "than one idea instead of nesting clauses inside it.\n"
+    "- Unpack noun stacks (\"Victorian dockside smuggling-scene backdrop\") "
+    "into a phrase that shows the relationship (\"the docks where the smugglers "
+    "meet in chapter 3\"). Keep small connecting words such as \"that\", "
+    "\"where\" and \"because\".\n"
+    "- Prefer familiar, precise words over unusual word pairs, invented verbs "
+    "or places that \"whisper\" and \"breathe\". A metaphor is fine only when it "
+    "makes the point clearer.\n"
+    "- Explain a needed literary or historical term in a few words the first "
+    "time it appears.\n"
+    "- Keep every fact, qualification and hedge from the research (\"inspired "
+    "by\", \"likely\", \"the author never named it\"). Add nothing the research "
+    "does not support. If the link is loose, say so honestly rather than "
+    "dressing it up.\n"
+    "- Respect every length limit in these instructions (for example \"one "
+    "sentence\"), but never compress so far that the link becomes ambiguous.\n"
+    "- Plain prose inside text fields: no markdown, bullets or headings there. "
+    "American spelling.\n"
+    "Before returning, reread each explanation as that traveler: could they "
+    "tell, without rereading or guessing, how this place is tied to the book?"
+)
+
+
+def _inject_clarity_rules(agents_data: dict) -> dict:
+    """Append READER_CLARITY_RULES to every agent that writes reader-facing text.
+
+    Covers the explanation agents (which also get the tone guardrail) and the
+    city/landmark formatters that write the "connection" line. Idempotent, and
+    returns a shallow copy like _inject_tone_guardrail.
+    """
+    out = dict(agents_data)
+    for name in _EXPLANATION_AGENTS + _CONNECTION_AGENTS:
+        instruction = out.get(name)
+        if isinstance(instruction, str) and READER_CLARITY_RULES not in instruction:
+            out[name] = instruction + READER_CLARITY_RULES
+    return out
 
 
 def _inject_tone_guardrail(agents_data: dict) -> dict:

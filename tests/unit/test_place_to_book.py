@@ -111,7 +111,7 @@ class TestNormalize:
         assert normalize_place(123) == ""
 
     def test_cache_key_versioned(self):
-        assert cache_key("NYC") == f"place2book:v1:{CURRENT_PROMPT_VERSION}:nyc"
+        assert cache_key("NYC") == f"place2book:v2:{CURRENT_PROMPT_VERSION}:nyc"
 
     def test_a_prompt_bump_changes_the_key(self, monkeypatch):
         """On disk nothing restarts the cache any more, so the key must move."""
@@ -248,17 +248,33 @@ class TestFactories:
 
 # Resolver (Gemini chain stubbed — no network)
 
-def _make_resolver(monkeypatch, researcher_text, formatter_candidates, run_counter=None, cache=None, state_value=None):
+_BOOK_SEARCH = ["novels set in Bath"]
+
+
+def _make_resolver(
+    monkeypatch,
+    researcher_text,
+    formatter_candidates,
+    run_counter=None,
+    cache=None,
+    state_value=None,
+    queries_per_run=None,
+):
     """Build a PlaceToBookResolver whose pipeline run is stubbed.
 
     ``researcher_text`` is emitted as a place_to_book_researcher event; the
     ``formatter_candidates`` list is written to session state under the
-    formatter output_key, exactly as the real run does.
+    formatter output_key, exactly as the real run does. The researcher event
+    carries search receipts (``grounding_metadata.web_search_queries``): run
+    N uses ``queries_per_run[N]`` (the last entry repeats), default one book
+    search.
     """
     import core.place_to_book as p2b
     from services.session_service import create_session_service
 
     monkeypatch.setattr(p2b, "create_place_to_book_workflow", lambda *a, **k: Workflow(name="stub_workflow"))
+
+    runs_seen = [0]
 
     class _FakeRunner:
         def __init__(self, *args, **kwargs):
@@ -291,10 +307,16 @@ def _make_resolver(monkeypatch, researcher_text, formatter_candidates, run_count
             )
             await self._session_service.append_event(session, ev_state)
             # Emit a researcher event carrying the grounded text.
+            plan = queries_per_run or [_BOOK_SEARCH]
+            queries = plan[min(runs_seen[0], len(plan) - 1)]
+            runs_seen[0] += 1
             yield Event(
                 invocation_id="r",
                 author="place_to_book_researcher",
                 content=types.Content(role="model", parts=[types.Part(text=researcher_text)]),
+                grounding_metadata=types.GroundingMetadata(web_search_queries=queries)
+                if queries
+                else None,
             )
 
     monkeypatch.setattr(p2b, "Runner", _FakeRunner)
@@ -919,6 +941,58 @@ async def test_resolve_drops_a_repeated_title(monkeypatch):
     assert [c.title for c in result.candidates] == ["Persuasion", "Northanger Abbey"]
 
 
+class TestPromptV5PlaceToBook:
+    """Luga, 2026-11-21: a small real town is searched for books before any
+    empty answer, and v4's guardrails all still hold."""
+
+    def _researcher(self):
+        from agents.prompts import load_prompts
+
+        return load_prompts("v5").place_to_book_researcher
+
+    def test_v4_guardrails_carry_over(self):
+        text = self._researcher()
+        for rule in (
+            "exists only inside fiction",
+            "Do not substitute the real place",
+            "AROUND {place}",
+            "List each book ONCE",
+            "never the translator",
+            "region or a country",
+        ):
+            assert rule in text, rule
+        assert text.format(place="Luga")
+
+    def test_small_real_town_is_never_an_early_exit(self):
+        text = self._researcher()
+        assert "small real town" in text
+        assert "NEVER a reason to stop" in text
+        assert "ONLY early exit" in text
+        # v4's exit fired on "obscure"; v5 must not.
+        assert "If {place} is obscure" not in text
+
+    def test_empty_answer_needs_book_searches_first(self):
+        text = self._researcher()
+        assert "MUST have run at least these two book searches" in text
+        assert '"novels set in {place}"' in text and '"{place} in fiction"' in text
+        assert "do not count as book searches" in text
+        assert "region and country and with the history" in text
+
+    def test_five_is_a_target_not_a_pass_mark(self):
+        text = self._researcher()
+        assert "never a pass mark" in text
+        assert "1 or 2 confirmed books is a complete, valid answer" in text
+        assert "at least 5 LITERAL" not in text
+
+    def test_formatter_keeps_one_or_two_books(self):
+        from agents.prompts import load_prompts
+
+        text = load_prompts("v5").place_to_book_formatter
+        assert "One or two grounded books is a valid answer" in text
+        assert "Each book appears ONCE" in text and "MUST be null" in text
+        assert text.format(place="Luga")
+
+
 class TestPromptV4PlaceToBook:
     """ai-private#71: the revised researcher/formatter keep their guardrails."""
 
@@ -942,3 +1016,138 @@ class TestPromptV4PlaceToBook:
         assert '"vibe" at most' in text
         assert "MUST be null" in text
         assert text.format(place="Lisbon")
+
+
+class TestNoBookSearchGuard:
+    """Luga, 2026-11-21: an empty answer with no book search is retried once
+    before any not-found is cached."""
+
+    REALITY_CHECK = ["is Luga a real place", "where is Luga located"]
+    LUGA_TEXT = "The Sixtieth Parallel is partly set near Luga."
+    LUGA = [_candidate("The Sixtieth Parallel", match_type="literal", maps_to="Luga")]
+
+    @pytest.mark.parametrize(
+        ("queries", "expected"),
+        [
+            (["novels set in Luga"], True),
+            (["Luga in fiction"], True),
+            (["Luga, Leningrad Oblast literature"], True),
+            (["роман Луга"], True),
+            (["best books about Luga"], True),
+            (["is Luga a real place", "where is Luga located"], False),
+            (["Luga history World War II"], False),
+            # ai#316 review: English words that a stem-only foreign
+            # alternative used to match. A reality check is not a book search.
+            (["Roman ruins in Trier"], False),
+            (["Bath Roman baths location"], False),
+            (["Romanesque churches near Trier"], False),
+            (["livres se déroulant à Trier"], True),
+            (["Romane die in Trier spielen"], True),
+            (["novelas ambientadas en Lugo"], True),
+            ([], False),
+        ],
+    )
+    def test_searched_for_books(self, queries, expected):
+        from core.place_to_book import searched_for_books
+
+        assert searched_for_books(queries) is expected
+
+    async def test_no_book_search_reruns_once_and_a_book_answer_is_kept(self, monkeypatch):
+        # Run 1 is the Luga trace (reality checks only, empty answer); run 2
+        # searches for books. The empty first answer must not be the verdict.
+        cache = _SpyCache()
+        runs = []
+        resolver = _make_resolver(
+            monkeypatch, self.LUGA_TEXT, self.LUGA, run_counter=runs, cache=cache,
+            queries_per_run=[self.REALITY_CHECK, ["novels set in Luga, Russia"]],
+        )
+        calls = []
+        real = resolver._run_pipeline
+
+        async def first_empty(place):
+            candidates, text, queries = await real(place)
+            calls.append(queries)
+            return ([], text, queries) if len(calls) == 1 else (candidates, text, queries)
+
+        monkeypatch.setattr(resolver, "_run_pipeline", first_empty)
+        result = await resolver.resolve("Luga")
+
+        assert len(runs) == 2
+        assert result.found is True
+        assert [c.title for c in result.candidates] == ["The Sixtieth Parallel"]
+        import core.place_to_book as p2b
+
+        assert [ttl for _, ttl in cache.writes] == [p2b.PLACE_TO_BOOK_TTL_SECONDS]
+
+    async def test_two_runs_without_a_book_search_are_cached_as_not_found(self, monkeypatch):
+        # Wakanda in the 2026-11-21 live eval: Step 0 stops before any book
+        # search, twice. That is a verdict; caching it keeps an invented place
+        # at two runs an hour instead of two runs per request.
+        cache = _SpyCache()
+        runs = []
+        resolver = _make_resolver(
+            monkeypatch, "Wakanda is fictional.", [], run_counter=runs,
+            cache=cache, queries_per_run=[["is Wakanda a real place"]],
+        )
+        import core.place_to_book as p2b
+
+        result = await resolver.resolve("Wakanda")
+        await resolver.resolve("Wakanda")
+
+        assert result.found is False
+        assert len(runs) == 2  # one re-run, not a loop; the second ask is a cache hit
+        assert [ttl for _, ttl in cache.writes] == [p2b._NOT_FOUND_TTL_SECONDS]
+
+    async def test_a_rerun_that_cannot_be_checked_is_never_written(self, monkeypatch):
+        cache = _SpyCache()
+        runs = []
+        resolver = _make_resolver(
+            monkeypatch, "I cannot confirm five books set in Luga.", [], run_counter=runs,
+            cache=cache, queries_per_run=[self.REALITY_CHECK],
+        )
+        real = resolver._run_pipeline
+        calls = []
+
+        async def second_malformed(place):
+            candidates, text, queries = await real(place)
+            calls.append(1)
+            return (candidates, text, queries) if len(calls) == 1 else (None, text, queries)
+
+        monkeypatch.setattr(resolver, "_run_pipeline", second_malformed)
+        result = await resolver.resolve("Luga")
+
+        assert result.found is False
+        assert len(runs) == 2
+        assert cache.writes == []
+
+    async def test_empty_after_a_book_search_is_cached_without_a_rerun(self, monkeypatch):
+        # Wakanda: the researcher looked for books and found none. That is a
+        # real verdict, cached as not-found, with no second run.
+        cache = _SpyCache()
+        runs = []
+        resolver = _make_resolver(
+            monkeypatch, "Wakanda is fictional.", [], run_counter=runs, cache=cache,
+            queries_per_run=[["is Wakanda a real place", "novels set in Wakanda"]],
+        )
+        import core.place_to_book as p2b
+
+        result = await resolver.resolve("Wakanda")
+
+        assert result.found is False
+        assert len(runs) == 1
+        assert [ttl for _, ttl in cache.writes] == [p2b._NOT_FOUND_TTL_SECONDS]
+
+    async def test_rerun_that_searches_books_and_finds_none_is_cached(self, monkeypatch):
+        cache = _SpyCache()
+        runs = []
+        resolver = _make_resolver(
+            monkeypatch, "No books found.", [], run_counter=runs, cache=cache,
+            queries_per_run=[self.REALITY_CHECK, ["novels set in Zxq"]],
+        )
+        import core.place_to_book as p2b
+
+        result = await resolver.resolve("Zxq")
+
+        assert result.found is False
+        assert len(runs) == 2
+        assert [ttl for _, ttl in cache.writes] == [p2b._NOT_FOUND_TTL_SECONDS]

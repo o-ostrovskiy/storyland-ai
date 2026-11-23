@@ -76,9 +76,10 @@ agent it never observed — so an empty ledger, the one state that means the
 measurement itself broke, reported a clean 4/4. `cases_fully_grounded` reads
 `grounded == total` for the same reason.
 - `books_v1` — 10 cases with expected outputs and book-specific scoring criteria
-- `place_to_book_v1` — 14 cases for the **place→book reverse-routing** grounding gate (literal/vibe labelling, repeats, authors + not-found state, incl. a country and an invented town). Register with `make eval-setup-one EVALSET_FILE=evaluation/place_to_book_v1.evalset.json`.
+- `place_to_book_v1` — 16 cases for the **place→book reverse-routing** grounding gate (literal/vibe labelling, repeats, authors + not-found state, incl. a country, two small real towns and an invented town). Register with `make eval-setup-one EVALSET_FILE=evaluation/place_to_book_v1.evalset.json`.
 - `local_atmosphere_v1` — 8 cases for the **local-atmosphere** ("book near me") flow: mixed preference shapes (4 with / 4 without `user:preferences`), LLM judge + deterministic envelope/radius gate.
 - `expansion_v1` — 5 cases for the **expansion** (suggestion-chip) flow: deterministic two-step gate (compose → expand), no judge.
+- `screen_v1` — 12 film & series titles for the **screen path** (Movies epic, ai-private#68): the claim matrix (set and filmed in one place, set somewhere real but filmed elsewhere, fictional worlds, series with a source book, films with no book, one bad input). Deterministic scorers, no judge. Register with `make eval-setup-one EVALSET_FILE=evaluation/screen_v1.evalset.json`.
 
 ## Quality Evaluation
 
@@ -112,7 +113,10 @@ Since ai-private#71 it also scores `no_duplicate_titles` (0/1: no book, title + 
 `authors_correct` (0/1: a returned book the evalset names as an example carries that book's
 real author; other books can't be checked offline and don't count). Either failing fails
 `case_pass`. Lisbon, Paris, Kyoto and the Scottish Highlands need `min_literal: 3`; Macondo
-(an invented town) and Wakanda must come back empty. The results JSON carries a `metrics`
+(an invented town) and Wakanda must come back empty. Since v5 (Luga, 2026-11-21) two small
+real towns must come back non-empty: Holcomb, Kansas needs one literal book, and Luga
+(Leningrad Oblast) uses `min_literal: 0`, which passes on any grounded book, literal or vibe
+(an unset `min_literal` still means 1). The results JSON carries a `metrics`
 block of run-level means, the numbers a prompt PR compares before and after.
 
 > Note: `_extract_input_from_case` stores `{place}` (not `{book_title, author}`) for
@@ -171,12 +175,45 @@ Each case logs a Langfuse dataset run (`exp_eval_YYYYMMDD_HHMMSS`) with scores:
 `case_pass`, `no_duplicates`, `source_stamped`, `places_schema_valid`,
 `chip_ids_stamped` (all 0/1), `new_places_count`, and `chips_available`.
 
-### Release verdict (place→book, local-atmosphere, expansion)
+### Screen path eval (film & series)
 
-These three runners end with one line, `RELEASE: ALLOWED` or `RELEASE: BLOCKED — <reasons>`, write it into the
+`screen_v1` measures the screen path's one failure class: saying **"set here"** about a place that was only a
+**filming location** (Dubrovnik for *Game of Thrones*, Ischia for *The Talented Mr. Ripley*). Scorers in
+`evaluation/tools/screen_scorers.py`, offline:
+
+- **`claim_precision`** — of the stops with `screen_claim="set_here"`, the share whose place (stop name + address +
+  city + country, whole-word match) is one of the case's `story_locations`. No `set_here` stop = no false claim = 1.0.
+- **`book_pairing_honesty`** — the discovered `screen_context.source_work` is the expected book (title words, a leading
+  article ignored, `also_titles` accepted; the author's surname present) or there is none. Any other book = 0.0.
+- **`named_claims`** — the 1–4 stops each case names are present with their required claim (diagnostic, gates the case).
+- **Empty-composition trap:** a `found` case with zero stops scores **0** on every metric and fails; the bad input
+  (`not_found`) passes only when nothing was composed and no book was paired.
+
+Until ai-private#67 lands there is no screen discovery to call, so the runner scores a file of outputs
+(`{eval_id: {"itinerary": TripItinerary-or-ComposerEnvelope, "screen_context": ScreenContext}}`):
+
+```bash
+make eval-screen OUTPUTS=evaluation/results/screen_outputs.json
+# Or directly, also writing a Langfuse experiment on the screen_v1 dataset (experiment attributes, v2 path):
+python evaluation/tools/run_screen_eval.py --outputs <file> [--log-langfuse]
+```
+
+**Release gate:** `claim_precision` ≥ 0.9 over the set (`metric_floors`), counted **per claim** (correct `set_here`
+÷ all `set_here` across the titles; a found title that composed nothing counts as one unsupported claim), never a
+mean of per-title ratios; `book_pairing_honesty` = 1.0 (hard), every case scored. The per-case pass rate does not
+gate the screen runner (`--min-pass-rate` defaults to 0.0 there). A stop is placed by its own name + address first
+(a filming-only place there, e.g. Ischia or Big Sur, is never the setting); its city decides only when the stop names
+no known place. `--log-langfuse` writes the local results JSON first, so a Langfuse failure never loses a run. ai-private#67 merges only with these numbers quoted in its PR. `make eval-report` adds a
+"Screen path" table (claim precision, book-pairing honesty, release) from `evaluation/results/screen_*.json`.
+
+### Release verdict (place→book, local-atmosphere, expansion, screen)
+
+These four runners end with one line, `RELEASE: ALLOWED` or `RELEASE: BLOCKED — <reasons>`, write it into the
 results JSON as `release_gate`, and **exit 1 when blocked** (`evaluation/tools/release_gate.py`, 2026-11-19). Blocked =
-no case evaluated, any case skipped or errored, pass rate below `--min-pass-rate` (default 0.85), or — place→book only —
-`grounding_clean` below 1.0 (a fabricated grounding is never allowed). They stay manual (they spend Gemini); a ship that
+no case evaluated, any case skipped or errored, pass rate below `--min-pass-rate` (default 0.85; the screen runner's
+is 0.0), a hard metric below 1.0 (place→book: `grounding_clean`, a fabricated grounding is never allowed; screen:
+`book_pairing_honesty`, an invented book), or a floored metric under its floor (`metric_floors`; screen:
+`claim_precision` < 0.9). They stay manual (they spend Gemini); a ship that
 depends on an AI change quotes the `RELEASE:` line. The itinerary runner (`run_scheduled_eval.py`) is not gated yet.
 
 ### Which model runs where
@@ -196,7 +233,7 @@ Rules that apply to every evalset and eval report in this repo:
 
 1. **`flow` routing.** Every evalset declares a top-level `"flow"` field
    (`itinerary` [default when absent], `place_to_book`, `local_atmosphere`,
-   `expansion`). The dataset sync records it in `evaluation/langfuse_datasets.json`,
+   `expansion`, `screen`). The dataset sync records it in `evaluation/langfuse_datasets.json`,
    and `run_scheduled_eval.py`'s auto-discovery only consumes `flow: itinerary`
    datasets — others are logged as routed to their dedicated runner (INFO, not a
    failure). This prevents the scheduled itinerary runner from either skip-failing on
@@ -495,7 +532,7 @@ evaluation/
 │   └── judge_calibration.py       # Human-label queue + judge-vs-human agreement
 ├── storyland_eval.evalset.json    # Dataset (10 diverse books, incl. 2 fictional-world)
 ├── books_v1.evalset.json          # Dataset (10 books with expected output + criteria)
-├── place_to_book_v1.evalset.json  # Dataset (11 place→book reverse-routing grounding cases)
+├── place_to_book_v1.evalset.json  # Dataset (16 place→book reverse-routing grounding cases)
 ├── local_atmosphere_v1.evalset.json  # Dataset (8 local-atmosphere cases, mixed preference shapes)
 ├── expansion_v1.evalset.json      # Dataset (5 expansion two-step deterministic cases)
 ├── langfuse_datasets.json         # Dataset registry incl. per-dataset flow (gitignored)

@@ -188,12 +188,21 @@ class LangfuseEvalPipeline:
           ``run_place_to_book_eval.py``.
         - local-atmosphere: ``{book_title, author, location_label, lat, lng,
           radius_km}`` — the executor input for ``run_local_atmosphere_eval.py``.
+        - screen (film & series): ``{title, kind, year}`` — for
+          ``run_screen_eval.py``; the expectations ride in ``expected_output``.
         - itinerary (book→place) AND expansion: ``{book_title, author}``.
           Expansion deliberately shares the itinerary input shape — the
           disambiguator is the dataset-level ``flow`` field, never the input.
         """
         if case.get('place'):
             return {'place': case['place']}
+        if 'screen_title' in case:
+            # screen path (ai-private#68): a film or series, not a book.
+            return {
+                'title': case['screen_title'],
+                'kind': case.get('screen_kind', 'film'),
+                'year': case.get('screen_year'),
+            }
         if 'location_label' in case:
             return {
                 'book_title': case.get('book_title', ''),

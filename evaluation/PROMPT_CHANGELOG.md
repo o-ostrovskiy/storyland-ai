@@ -4,22 +4,70 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 
 ---
 
-## v5 — 2026-11-20
+## v7 — 2026-11-23 (built 2026-11-20 as v5; renumbered after main took v5 and v6)
 
-**Card:** storyland-ai-private#7 (researchers skip Google Search a third of the time). Only the discovery **user message** changed (`core/prompts.py::build_discovery_prompt`); every agent instruction is byte-identical to v4 (`agents/prompts/v5.json` = v4's agents, pinned by `test_v5_is_v4_with_every_agent_byte_identical`). `v5.json` exists so an eval run can be tagged `--prompt-version v5` against the v4 baselines; `CURRENT_PROMPT_VERSION` stays `v4` (a bump would also move the `place2book` cache key, and the place-to-book prompts did not change). The discovery cache still flips on deploy: `core.prompts` is in the cache fingerprint.
+**Card:** storyland-ai-private#7 (researchers skip Google Search a third of the time). Only the discovery **user message** changed (`core/prompts.py::build_discovery_prompt`); every agent instruction is byte-identical to v6 (`agents/prompts/v7.json` = v6's agents, pinned by `test_v7_is_v6_with_every_agent_byte_identical`). `v7.json` exists so an eval run can be tagged `--prompt-version v7` against the v6 baselines; `CURRENT_PROMPT_VERSION` stays `v6` (a bump would also move the `place2book` cache key, and the place-to-book prompts did not change). The discovery cache still flips on deploy: `core.prompts` is in the cache fingerprint.
 
 ### Changes
-| Where | Before (v4) | After (v5) |
+| Where | Before (v6) | After (v7) |
 |---|---|---|
 | Discovery user message, base | `Discover travel locations for "<title>" by <author>.` + `Find cities, landmarks, and author-related sites, then group them into practical travel regions.` | `Research "<title>" by <author>: use Google Search to find the real places tied to this book and its author.` |
 | `vibe` clause | "Among places that are genuinely and verifiably connected to the book, prefer…" | "It only weighs places your research has already tied to the book: among those, favour…"; "Never add a place your research did not tie to the book…"; grounding-wins sentence kept |
 | `taste_context` clause | same pattern as vibe | same rewording as vibe |
-| `run_scheduled_eval.py` | its own copy of the v4 user message | calls `build_discovery_prompt`, so an eval sends what prod sends |
+| `run_scheduled_eval.py` | its own copy of the old user message | calls `build_discovery_prompt`, so an eval sends what prod sends |
 
 Not changed (11-04 evidence on the card): agents' own instructions, `thinking_level` (HIGH made `city` worse), the fail-closed `vibe` guard.
 
 ### Eval
-**Pending: needs eval (spend).** One paid baseline-comparison run is approved (Olga's A, 2026-11-14): `make eval-run` with `--prompt-version v5`, pinned judge, `storyland_eval` (10 cases), compared with the latest v4 baseline on `search_grounding` (`researchers_grounded / researchers_total`, `cases_fully_grounded`, `unsearched_by_agent` per agent) and the judge dimensions. The results table goes here and in the PR walkthrough.
+**Pending: needs eval (spend).** One paid baseline-comparison run is approved (Olga's A, 2026-11-14): `make eval-run` with `--prompt-version v7`, pinned judge, `storyland_eval` (10 cases), compared with the latest v6 baseline on `search_grounding` (`researchers_grounded / researchers_total`, `cases_fully_grounded`, `unsearched_by_agent` per agent) and the judge dimensions. The results table goes here and in the PR walkthrough.
+
+---
+
+## v6 — 2026-11-22
+
+**Why:** prod run "dddd" by "ddd" was researched as Inio Asano's *Dead Dead Demon's Dededede Destruction* and produced a Tokyo trip under the typed title. Only `book_context_researcher` and `book_context_formatter` changed; every other agent is byte-identical to v5 (pinned by `test_v6_is_v5_plus_the_book_context_change_only`).
+
+### Changes
+| Agent | Change |
+|---|---|
+| book_context_researcher | Step 0 BOOK IDENTITY: name the book the sources describe and say whether it is the requested one (different author or a work sharing an abbreviation/spelling = not it; translations/transliterations of the author = same). Answer starts with that finding. |
+| book_context_formatter | New fields `matches_requested_book`, `identified_title`, `identified_author`; a different book returns empty locations/themes. |
+
+Code guard alongside: `core/book_identity.py`, read by `discover()` (ADR #35).
+
+Cache: the version bump moves the place2book key to `place2book:v1:v6:…`, so no v5 answer is served under v6.
+
+---
+
+## v5 — 2026-11-21
+
+**Trigger:** "We haven't mapped Luga yet" for Luga, Leningrad Oblast (Langfuse trace `22802024ae591d84ff203bb7cb4198a0`). The v4 researcher ran only Step 0 reality-check searches ("is Luga a real place", "where is Luga located"), never a book search, then answered that it "cannot confirm at least five real books set within Luga"; the formatter returned `{"candidates":[]}` and the not-found was cached. Only `place_to_book_researcher` and `place_to_book_formatter` changed; every other agent is byte-identical to v4 (pinned by `test_v5_is_v4_plus_the_place_to_book_change_only`).
+
+### Changes
+| Agent | Change |
+|---|---|
+| place_to_book_researcher | Step 0: a small real town is real once a search places it on a map, and being small or unfamiliar is never a reason to stop; the "fiction only" exit is the ONLY early exit. "5 literal" is a target for famous places, never a pass mark; 1–2 confirmed books is a complete answer for a small town. Before an empty answer the researcher MUST have run "novels set in {place}" and "{place} in fiction/literature", plus, for a small town, a search with its region, country and best-known history; existence/location searches don't count. The "obscure → none" rule is gone: empty only when fictional or when the book searches confirm nothing. |
+| place_to_book_formatter | One or two grounded books is a valid answer; never drop grounded books for being few. |
+
+Code guard alongside: `searched_for_books()` in the resolver. An empty answer whose researcher ran no book/novel/fiction/literature query (either receipt channel, captured by `RunCapture.captured_queries`) re-runs the pipeline once before any not-found is cached. A second empty answer with no book search is the researcher's Step 0 "invented place" verdict and is cached as not-found. (A first cut returned it unwritten; the live eval showed Wakanda and the gibberish township never search for books by design, so every such request would have cost two runs.)
+
+### Eval
+`place_to_book_v1` gains `p2b_small_town_luga` (`min_literal: 0`, any grounded book passes) and `p2b_small_town_holcomb` (Holcomb, Kansas → *In Cold Blood*, 1 literal). Wakanda, Macondo and the gibberish township still expect not-found.
+
+Live run 2026-11-21 (16 cases, gemini-3.1-flash-lite, in-memory cache, same evalset + scorer for both):
+
+| Metric | v4 (`p2b_eval_20261121_150714`) | v5 (`p2b_eval_20261121_150526`) |
+|---|---|---|
+| case_pass | 1.000 (16/16) | 1.000 (16/16) |
+| found_classification | 1.000 | 1.000 |
+| grounding_clean / no_duplicate_titles / authors_correct | 1.000 | 1.000 |
+| literal_grounded (mean, all 16) | 3.50 | 3.13 |
+| Luga, Leningrad Oblast | 3 literal + 2 vibe | 2 literal + 2 vibe |
+| Holcomb, Kansas | *In Cold Blood* + 2 vibe | *In Cold Blood* + 2 vibe |
+
+Bare "Luga" (the prod input), 5 fresh runs per version: v4 found 5/5, v5 found 5/5 (mostly vibe; *The Bronze Horseman* literal in 2 runs of each).
+
+**Reading:** the prod failure (1 of 19 places) did not reproduce on v4 in 6 Luga tries, so this eval cannot show that v5 fixes it; it shows v5 does not regress (invented places still empty, small towns non-empty). The deterministic protection is the code guard, covered by unit tests. The literal mean moved 3.50 → 3.13, inside the 3 ↔ 5–6 run-to-run swing recorded for v4 (Lisbon, Dublin, Tokyo 3 in v5; Paris, Kyoto 3 in v4).
 
 ---
 
