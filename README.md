@@ -20,7 +20,7 @@ The eval harness in [`evaluation/`](evaluation/README.md) runs the pipeline on f
 | Place → books | `place_to_book_v1` (16 places) | Pass or fail: a minimum number of `literal` books per place, an empty answer for invented places (Macondo, Wakanda), no book listed twice, the expected author for each named book. |
 | Near me, suggestion chips, film and series claims | `local_atmosphere_v1` (8), `expansion_v1` (5), `screen_v1` (12) | Pass-or-fail checks; "near me" is also scored by the judge. |
 
-Runs are on demand, not on a schedule, because each one spends Gemini quota. The place → books, near-me, chips and film runners end with `RELEASE: ALLOWED` or `RELEASE: BLOCKED`, and a change to the AI quotes that line before it ships; the book → trip runner has no release gate yet. Results by prompt version are in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md): the latest entry, prompt v5 on 2026-11-21, passed 16 of 16 place → books cases. Runs made in GitHub Actions attach their results JSON to the run ([Evaluation (manual dispatch)](https://github.com/o-ostrovskiy/storyland-ai/actions/workflows/scheduled-eval.yml)). The judge's scores move by up to ±0.40 between identical runs, so they catch large regressions, not small ones.
+Runs are on demand, not on a schedule, because each one spends Gemini quota. The place → books, near-me, chips and film runners end with `RELEASE: ALLOWED` or `RELEASE: BLOCKED`, and a change to the AI quotes that line before it ships; the book → trip runner has no release gate yet. Results by prompt version are in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md): the latest published run, prompt v5 on 2026-11-21, passed 16 of 16 place → books cases (v6 changed only the book-identity step and publishes no eval run). Runs made in GitHub Actions attach their results JSON to the run ([Evaluation (manual dispatch)](https://github.com/o-ostrovskiy/storyland-ai/actions/workflows/scheduled-eval.yml)). The judge's scores move by up to ±0.40 between identical runs, so they catch large regressions, not small ones.
 
 ## Quick Start
 
@@ -324,9 +324,10 @@ storyland-ai/
 │   └── prompts/                  # Versioned prompt sets
 │       ├── v1.json               # Original prompts (git ref 4c6fdc9)
 │       ├── v2.json               # Prompts as of PR #63 (history)
-│       ├── v3.json               # History
-│       ├── v4.json               # History (place→book v4)
-│       └── v5.json               # Current prompts (CURRENT_PROMPT_VERSION)
+│       ├── v3.json               # + region geo identity fields (MYS-460)
+│       ├── v4.json               # + place→book revision (ai-private#71)
+│       ├── v5.json               # + place→book small-town revision (Luga)
+│       └── v6.json               # Current prompts (CURRENT_PROMPT_VERSION): + book-identity check
 │
 ├── core/                # Transport-agnostic orchestration & SDK
 │   ├── executor.py      # WorkflowExecutor (discover/compose/expand/recommend)
@@ -388,7 +389,7 @@ Agent prompts include reliability improvements:
 - **Error handling:** `"If the tool returns an error, report it clearly and explain what went wrong"`
 - **Disambiguation:** Book title and author injected into search queries to avoid confusion with similarly-named books
 
-**Versioned prompts** — all agent instructions live in `agents/prompts/v5.json` (`v1.json`–`v4.json` kept for history). To add a new prompt version, create the next `agents/prompts/vN.json` and pass `--prompt-version vN` to the eval runner. The current version (`v5`) is controlled by `CURRENT_PROMPT_VERSION` in `agents/prompts.py`. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md). Git is the only source of prompts; a read-only mirror is pushed to Langfuse for the playground (`make prompts-sync`, auto on merge to `main` — see [evaluation/README.md](evaluation/README.md#prompt-versioning)).
+**Versioned prompts** — all agent instructions live in `agents/prompts/v6.json` (`v1.json`–`v5.json` kept for history). To add a new prompt version, create the next `agents/prompts/vN.json` and pass `--prompt-version vN` to the eval runner. The current version (`v6`) is controlled by `CURRENT_PROMPT_VERSION` in `agents/prompts.py`. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md). Git is the only source of prompts; a read-only mirror is pushed to Langfuse for the playground (`make prompts-sync`, auto on merge to `main` — see [evaluation/README.md](evaluation/README.md#prompt-versioning)).
 
 ## Deployment
 
@@ -431,7 +432,7 @@ The unit suite (`tests/unit/`) by area — per-module counts rot with every PR, 
 | Area | Modules |
 |------|---------|
 | Models & agents | `test_models.py`, `test_agents.py` |
-| Core workflow | `test_core.py`, `test_discovery_errors.py`, `test_empty_discovery_guard.py`, `test_retry_backoff.py` |
+| Core workflow | `test_core.py`, `test_discovery_errors.py`, `test_empty_discovery_guard.py`, `test_book_identity.py`, `test_retry_backoff.py` |
 | API layer | `test_api.py`, `test_gateway_auth.py`, `test_ratelimit.py`, `test_request_input_limits.py`, `test_dependencies.py` |
 | Caching | `test_cache.py`, `test_disk_cache.py`, `test_cache_version.py` |
 | Place features | `test_place_key.py`, `test_place_to_book.py`, `test_place_to_book_eval.py` |
