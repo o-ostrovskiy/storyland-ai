@@ -111,7 +111,7 @@ class TestNormalize:
         assert normalize_place(123) == ""
 
     def test_cache_key_versioned(self):
-        assert cache_key("NYC") == f"place2book:v1:{CURRENT_PROMPT_VERSION}:nyc"
+        assert cache_key("NYC") == f"place2book:v2:{CURRENT_PROMPT_VERSION}:nyc"
 
     def test_a_prompt_bump_changes_the_key(self, monkeypatch):
         """On disk nothing restarts the cache any more, so the key must move."""
