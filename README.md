@@ -64,39 +64,18 @@ See [Configuration](#configuration) for environment variables.
 
 ## Architecture
 
-StoryLand AI uses a two-phase workflow with human-in-the-loop region selection. Book title and author are pre-confirmed by the upstream service (Backend → storyland-ai):
+The service uses a two-phase workflow with region selection between the phases (diagram at the top; ADR #1). Book title and author arrive pre-confirmed from the gateway (ADR #12). The discovery graph, as wired in `agents/orchestrator.py`:
 
 ```mermaid
-flowchart TB
-    subgraph Input["Input (pre-confirmed)"]
-        DTO[book_title + author<br/>📖 from Backend]
-    end
-
-    subgraph Phase1["Phase 1: Discovery"]
-        BC[book_context researcher→formatter<br/>🔍 Setting & themes]
-
-        subgraph PD["Parallel graph branches ⚡ (fan-out → join)"]
-            CP[City Agent<br/>🏙️]
-            LP[Landmark Agent<br/>🏛️]
-            AP[Author Agent<br/>✍️]
-        end
-
-        BC --> PD
-        PD --> RA[region_analyzer<br/>🌍 Geographic grouping]
-    end
-
-    subgraph HITL["Human Selection"]
-        Select[Choose region to explore]
-    end
-
-    subgraph Phase2["Phase 2: Composition"]
-        TC[trip_composer<br/>🗺️ Personalized itinerary]
-    end
-
-    DTO --> BC
-    RA --> Select
-    Select --> TC
+flowchart LR
+    S([START]) --> bcr[book_context_researcher] --> bcf[book_context_formatter]
+    bcf --> cr[city_researcher] --> cf[city_formatter] --> j[discovery_join]
+    bcf --> lr[landmark_researcher] --> lf[landmark_formatter] --> j
+    bcf --> ar[author_researcher] --> af[author_formatter] --> j
+    j --> ra[region_analyzer]
 ```
+
+Composition is a single agent, `trip_composer` (`book_to_place_composition`), run on the regions the caller sends to `/compose`.
 
 **Two-phase design:**
 1. **Phase 1 (Discovery)**: Finds all locations and groups them into practical travel regions
@@ -109,7 +88,8 @@ flowchart TB
 - **Discovery Agents** - Parallel search for cities, landmarks, and author sites
 - **Region Analyzer** - Groups cities by geographic proximity using LLM world knowledge
 - **Trip Composer** - Creates personalized itinerary based on user preferences
-- **Reader Profile Agent** - Accesses user preferences from session state
+- **Reader preferences** - `user:preferences` from session state go straight into the composer prompt (`core/prompts.py`); the separate reader-profile agent was removed in MYS-436
+- **Place→Book Resolver** - `core/place_to_book.py`: researcher → formatter that returns books that happen in a named place (ADR #20, #30)
 - **Local Atmosphere Pipeline** - Single-phase researcher → formatter that finds nearby places (within ~80 km of the user) whose mood and aesthetic evoke the book, for readers who can't travel to the actual setting
 - **Expansion Pipeline** - On-demand researcher → formatter that adds 3-5 new places to an existing city when the user clicks a suggestion chip
 - **Book Recommendation Agent** - On-demand single agent that recommends 5 books based on the source book, destination cities, and themes (triggered by the "Find books like this" chip)
@@ -125,7 +105,9 @@ flowchart TB
 | `author_sites` | 1 | Author-related locations |
 | `region_analysis` | 1 | Geographic region grouping |
 | `user:preferences` | All | User travel preferences (persists across sessions) |
+| `composer_envelope` | 2 | Composer output: itinerary + suggestion chips, checked before it is used |
 | `final_itinerary` | 2 | Complete travel plan |
+| `unverified_discovery` | 1 | Discovery payloads whose researcher never called Google Search; excluded from evidence (MYS-816) |
 | `last_suggestions` | 2 | Current set of suggestion chips |
 | `expansion_count` | Post-2 | Number of place-expansion requests made |
 | `book_recommendation_chip_id` | 2 | ID of the server-stamped "Find books like this" chip |
@@ -153,7 +135,7 @@ flowchart TB
 
 ### API (FastAPI SSE)
 
-StoryLand AI includes a FastAPI server with Server-Sent Events streaming for web/mobile clients. The API offers a two-phase travel-planning flow plus a single-phase **local-atmosphere** mode for users who can't travel:
+The service includes a FastAPI server with Server-Sent Events streaming for web/mobile clients. The API offers a two-phase travel-planning flow plus a single-phase **local-atmosphere** mode for users who can't travel:
 
 ```bash
 # Start the API server
@@ -204,7 +186,7 @@ Failed jobs can be retried by calling `/compose` again with the same `job_id`; t
 
 ### AI Models
 
-StoryLand AI uses Google Gemini models (default: `gemini-3.1-flash-lite`) for all agents, chosen for native ADK integration, fast parallel execution (sub-2s response times), and excellent structured output adherence across 16 Pydantic data models. The complete workflow takes 60-100 seconds end-to-end with parallel discovery providing 3x speedup over sequential execution.
+All agents share one Gemini model (default `gemini-3.1-flash-lite`, see the table above). Agent outputs are validated against the Pydantic models in `models/` and `api/models.py`. For measured speed, see the numbers at the top of this README and ADR #33 in `docs/ARCHITECTURE.md`.
 
 ### Search-grounding observability
 
@@ -293,7 +275,7 @@ All configuration is via environment variables in `.env`. Copy `.env.example` to
 | `GOOGLE_API_KEY` | **Required.** Google AI API key from [AI Studio](https://aistudio.google.com/app/apikey) | — |
 | `MODEL_NAME` | Gemini model to use | `gemini-3.1-flash-lite` (code default — a deploy without MODEL_NAME no longer crashes at boot) |
 | `USE_DATABASE` | Enable SQLite persistence | `false` |
-| `DATABASE_URL` | SQLite database path | `sqlite+aiosqlite:///storyland_sessions.db` |
+| `DATABASE_URL` | SQLite database path | `sqlite+aiosqlite:///storyland_sessions_v2.db` |
 | `SESSION_MAX_EVENTS` | Max events in session | `20` |
 | `MAX_CONTEXT_TOKENS` | Max tokens for context window | `30000` |
 | `WORKFLOW_TIMEOUT` | Max seconds for entire workflow | `300` |
@@ -342,7 +324,9 @@ storyland-ai/
 │   └── prompts/                  # Versioned prompt sets
 │       ├── v1.json               # Original prompts (git ref 4c6fdc9)
 │       ├── v2.json               # Prompts as of PR #63 (history)
-│       └── v3.json               # Current prompts (CURRENT_PROMPT_VERSION)
+│       ├── v3.json               # History
+│       ├── v4.json               # History (place→book v4)
+│       └── v5.json               # Current prompts (CURRENT_PROMPT_VERSION)
 │
 ├── core/                # Transport-agnostic orchestration & SDK
 │   ├── executor.py      # WorkflowExecutor (discover/compose/expand/recommend)
@@ -353,7 +337,7 @@ storyland-ai/
 │
 ├── api/                 # FastAPI SSE streaming API
 │   ├── app.py           # Application factory with lifespan
-│   ├── routes.py        # HTTP endpoints (discover, compose, expand, recommend-books, local-atmosphere, status, health)
+│   ├── routes.py        # HTTP endpoints (discover, compose, expand, recommend-books, local-atmosphere, place-to-book, status, health)
 │   ├── streaming.py     # SSE async generators wrapping ADK Runner
 │   ├── models.py        # Request/response/SSE event Pydantic models
 │   └── dependencies.py  # Shared app state & dependency injection
@@ -404,7 +388,7 @@ Agent prompts include reliability improvements:
 - **Error handling:** `"If the tool returns an error, report it clearly and explain what went wrong"`
 - **Disambiguation:** Book title and author injected into search queries to avoid confusion with similarly-named books
 
-**Versioned prompts** — all agent instructions live in `agents/prompts/v3.json` (`v1.json`/`v2.json` kept for history). To add a new prompt version, create the next `agents/prompts/vN.json` and pass `--prompt-version vN` to the eval runner. The current version (`v3`) is controlled by `CURRENT_PROMPT_VERSION` in `agents/prompts.py`. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md). Git is the only source of prompts; a read-only mirror is pushed to Langfuse for the playground (`make prompts-sync`, auto on merge to `main` — see [evaluation/README.md](evaluation/README.md#prompt-versioning)).
+**Versioned prompts** — all agent instructions live in `agents/prompts/v5.json` (`v1.json`–`v4.json` kept for history). To add a new prompt version, create the next `agents/prompts/vN.json` and pass `--prompt-version vN` to the eval runner. The current version (`v5`) is controlled by `CURRENT_PROMPT_VERSION` in `agents/prompts.py`. Prompt change history is in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md). Git is the only source of prompts; a read-only mirror is pushed to Langfuse for the playground (`make prompts-sync`, auto on merge to `main` — see [evaluation/README.md](evaluation/README.md#prompt-versioning)).
 
 ## Deployment
 
@@ -433,7 +417,7 @@ reviewer.
 ## Testing
 
 ```bash
-make test                  # Unit tests (700+; exact count changes per PR)
+make test                  # Unit tests (1,500+; exact count changes per PR)
 make test-integration      # Integration tests with VCR cassettes (excludes real_api)
 make test-integration-live # Live tests that hit real APIs (real_api marker; uses quota)
 make test-all              # Both
@@ -476,7 +460,7 @@ amount of quota; it skips when the key is absent.
 
 - **Rate limits (429):** Retry logic handles automatically. Wait ~60s between books.
 - **API key issues:** `python -c "import os; from dotenv import load_dotenv; load_dotenv(); print('OK' if os.getenv('GOOGLE_API_KEY') else 'MISSING')"`
-- **Database issues:** `rm storyland_sessions.db` to start fresh
+- **Database issues:** `rm storyland_sessions_v2.db` to start fresh
 - **Virtual env not activated:** `source .venv/bin/activate`
 - **Missing dependencies:** `pip install -e ".[dev]"`
 - **Timeout errors:** Increase `WORKFLOW_TIMEOUT` in `.env` (default: 300s)
@@ -514,37 +498,15 @@ ORDER BY create_time DESC LIMIT 1;
 
 **Maintenance:**
 ```bash
-rm storyland_sessions.db                    # Start fresh
-sqlite3 storyland_sessions.db "VACUUM;"     # Reclaim space
-cp storyland_sessions.db backup_$(date +%Y%m%d).db  # Backup
+rm storyland_sessions_v2.db                    # Start fresh
+sqlite3 storyland_sessions_v2.db "VACUUM;"     # Reclaim space
+cp storyland_sessions_v2.db backup_$(date +%Y%m%d).db  # Backup
 ```
 
 ## Documentation
 
 - **[Architecture Decisions](docs/ARCHITECTURE.md)** - ADRs explaining key design choices
 - **[Evaluation & Observability](evaluation/README.md)** - Quality evaluation pipeline and Langfuse token/cost tracking
-
-## Why StoryLand AI?
-
-**For Readers:**
-- Turn literary inspiration into real travel experiences
-- Save hours of research and planning
-- Discover places you'd never find through conventional searches
-- Get personalized recommendations that match your travel style
-
-**For Developers:**
-- Demonstrates real-world multi-agent coordination
-- Shows parallel vs. sequential agent patterns
-- Implements session-based personalization
-- Production-ready with database persistence and error handling
-
-## Vision
-
-A great book doesn't just end—it opens a door. StoryLand AI helps readers step through it.
-
-We believe that every story deserves to be experienced beyond the page, and every reader should be able to walk through the worlds they love without the friction of scattered information and endless research.
-
-**A single prompt can describe a world—but only agents can build a bridge between that world and real places someone can actually visit.**
 
 ---
 
