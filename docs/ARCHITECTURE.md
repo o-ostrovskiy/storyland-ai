@@ -1363,20 +1363,7 @@ A film or series journey makes a claim a book journey never does: "the story is 
 - Book journeys are untouched; their screen claims are still nulled by `clear_screen_claims_unless_screen_work`.
 
 ### Trade-offs
-A true setting the composer labelled without a source reads as "Filmed here" until the prompts cite it (the screen prompts, ADR #35, ask for the source). That under-claims; it never over-claims.
-
-## 35. Film and Series Prompts Are an Overlay on the Book Set, Keyed Apart in the Cache (2026-11-20)
-
-### Context
-ADR #31 left `agents/work_prompts.py::for_kind` as a seam that returned the book prompts for every kind. A film or series needs different instructions (story locations vs filming locations, creator sites instead of author sites, a composer that writes `screen_claim` on every stop) but the same graph: the screen path must add no agents and must not move a book journey by a byte (storyland-ai-private#67 Part 2).
-
-### Decision
-- `agents/prompts/screen_v1.json` is an overlay, not a full prompt version: `replace` swaps five instructions (context researcher + formatter, city, landmark and creator researchers), `append` adds a "Step 6" claim section to the book `trip_composer`. `for_kind("film"|"series")` applies it to `load_prompts(CURRENT_PROMPT_VERSION)`; `for_kind("book")` returns the loaded set itself. An overlay naming an unknown agent raises.
-- The discovery and composition workflows take `work_kind` (the executor passes the journey's kind) and pick `for_kind(work_kind)`. For a screen kind the context formatter's schema is `models/screen.py::ScreenResearch` (ScreenContext without `source_work`, plus `time_period`), still written to `state["book_context"]`, which the composer and the recommender read as a plain dict. The model has no field in which to invent a source book: that comes from the backend (Story 6).
-- The overlay is NOT in `core/cache_version.py::_PROMPT_MODULES`: that fingerprint is global, and hashing a film-only file there would cold-start every cached book. A screen journey's discovery key carries `|screen=<screen_prompt_hash()>` after `|kind=`, so an overlay edit re-keys films only; a book key is unchanged (pinned).
-
-### Trade-offs
-Two places now version prompts (`vN.json` for books, `screen_vN.json` for films). The overlay rides whichever book version is current, so a future book bump also changes film text that the overlay does not replace; the film key moves with it because the global fingerprint is in every key. The `screen_v1` numbers (ai-private#68's eval set, live Gemini) are Part 3/3.
+A true setting the composer labelled without a source reads as "Filmed here" until the prompts cite it (the screen prompts, ADR #36, ask for the source). That under-claims; it never over-claims.
 
 ## 35. Discovery Stops When the Search Found a Different Book (2026-11-21)
 
@@ -1396,6 +1383,19 @@ Two places now version prompts (`vN.json` for books, `screen_vN.json` for films)
 - The verdict rests on the model's label. The deterministic overrule only protects against a self-contradicting `false`, not against a wrong `true`.
 - The `v6` bump moves the discovery cache namespace and the place→book key (`place2book:v1:v6:…`): one cold-cache window for both.
 - fe still shows its generic discover error for `BookNotFound` until a designed "did you mean" state lands. The SSE event already carries what it needs.
+
+## 36. Film and Series Prompts Are an Overlay on the Book Set, Keyed Apart in the Cache (2026-11-20)
+
+### Context
+ADR #31 left `agents/work_prompts.py::for_kind` as a seam that returned the book prompts for every kind. A film or series needs different instructions (story locations vs filming locations, creator sites instead of author sites, a composer that writes `screen_claim` on every stop) but the same graph: the screen path must add no agents and must not move a book journey by a byte (storyland-ai-private#67 Part 2).
+
+### Decision
+- `agents/prompts/screen_v1.json` is an overlay, not a full prompt version: `replace` swaps five instructions (context researcher + formatter, city, landmark and creator researchers), `append` adds a "Step 6" claim section to the book `trip_composer`. `for_kind("film"|"series")` applies it to `load_prompts(CURRENT_PROMPT_VERSION)`; `for_kind("book")` returns the loaded set itself. An overlay naming an unknown agent raises.
+- The discovery and composition workflows take `work_kind` (the executor passes the journey's kind) and pick `for_kind(work_kind)`. For a screen kind the context formatter's schema is `models/screen.py::ScreenResearch` (ScreenContext without `source_work`, plus `time_period`), still written to `state["book_context"]`, which the composer and the recommender read as a plain dict. The model has no field in which to invent a source book: that comes from the backend (Story 6).
+- The overlay is NOT in `core/cache_version.py::_PROMPT_MODULES`: that fingerprint is global, and hashing a film-only file there would cold-start every cached book. A screen journey's discovery key carries `|screen=<screen_prompt_hash()>` after `|kind=`, so an overlay edit re-keys films only; a book key is unchanged (pinned).
+
+### Trade-offs
+Two places now version prompts (`vN.json` for books, `screen_vN.json` for films). The overlay rides whichever book version is current, so a future book bump also changes film text that the overlay does not replace; the film key moves with it because the global fingerprint is in every key. The `screen_v1` numbers (ai-private#68's eval set, live Gemini) are Part 3/3.
 
 ## Summary: Key Architectural Patterns
 
@@ -1433,5 +1433,6 @@ Two places now version prompts (`vN.json` for books, `screen_vN.json` for films)
 | **Cancellation-safe session DB (ADR #32)** | A dropped SSE stream returns its pooled connection; caller cancellation is unchanged | One wrapper method per ADK DB call to keep in step on upgrades |
 | **Reader-wait latency report (ADR #33)** | First-region and full-journey p50/p95 from Langfuse, never a fake 0 s | Fresh runs only, measured inside the agent service (no be hop or SSE delivery) |
 | **Book-identity guard (ADR #35)** | A title the search resolves to a different work stops with BookNotFound ("did you mean …?") instead of a trip for that other book | Runs after the full discovery graph; trusts the model's label (fails open when silent) |
+| **Screen prompts as an overlay (ADR #36)** | A film or series journey gets its own instructions on the same graph; a book journey does not move by a byte | Overlay edits re-key film entries only; a book version bump also changes the film text the overlay does not replace |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.
