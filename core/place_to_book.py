@@ -66,8 +66,10 @@ APP_NAME = "storyland"
 
 # Cache key version; bump when the candidate shape or grounding rules change.
 # The key also carries CURRENT_PROMPT_VERSION: a persistent store has no restart
-# to wash out answers an older prompt gave.
-_CACHE_KEY_PREFIX = "place2book:v1:"
+# to wash out answers an older prompt gave. v2 (2026-11-22): the formatter gained
+# READER_CLARITY_RULES (agents/prompts.py) without a prompt-version bump, so the
+# prefix moves instead and no answer written under the old wording is served.
+_CACHE_KEY_PREFIX = "place2book:v2:"
 
 # Cache sizing: place→book lookups are cheap to keep and repeat often for the
 # seeded/landing destinations. 6h TTL mirrors the BE place→book hit TTL.

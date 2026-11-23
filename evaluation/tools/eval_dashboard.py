@@ -155,6 +155,45 @@ def build_spot_check_section(
     return lines
 
 
+def build_screen_section(results_dir: str, days: int = 30) -> List[str]:
+    """Trend rows for the screen path (ai-private#68): one per ``screen_*.json``
+    run from ``run_screen_eval.py``, with its two metrics and release verdict.
+    Empty list when no screen run exists in the window."""
+    cutoff = datetime.now() - timedelta(days=days)
+    runs = []
+    for filepath in glob.glob(os.path.join(results_dir, "screen_*.json")):
+        try:
+            with open(filepath, 'r') as f:
+                data = json.load(f)
+            if datetime.fromisoformat(data.get('timestamp', '')) >= cutoff:
+                runs.append(data)
+        except Exception as e:
+            logger.warning("failed_to_load_screen_result", filepath=filepath, error=str(e))
+    if not runs:
+        return []
+    runs.sort(key=lambda r: r.get('timestamp', ''))
+
+    def fmt(value: Any) -> str:
+        return "—" if value is None else f"{float(value):.2f}"
+
+    lines = [
+        "## Screen path (film & series)",
+        "",
+        "| Date | Run | Cases | Claim precision | Book-pairing honesty | Release |",
+        "|------|-----|-------|-----------------|----------------------|---------|",
+    ]
+    for run in runs[-10:]:
+        metrics = run.get('metrics') or {}
+        gate = run.get('release_gate') or {}
+        release = "✅ allowed" if gate.get('allowed') else ("❌ blocked" if gate else "—")
+        lines.append(
+            f"| {run.get('timestamp', '')[:10]} | {run.get('run_name', '')} "
+            f"| {run.get('evaluated', 0)}/{run.get('total', 0)} "
+            f"| {fmt(metrics.get('claim_precision'))} | {fmt(metrics.get('book_pairing_honesty'))} | {release} |"
+        )
+    return lines
+
+
 class EvalDashboard:
     """
     Dashboard for tracking evaluation quality metrics over time.
@@ -292,6 +331,11 @@ class EvalDashboard:
                 "- Add new test scenarios to evalsets",
                 "- Monitor trends for quality regression",
             ])
+
+        screen_lines = build_screen_section(self.results_dir, days=days)
+        if screen_lines:
+            report_lines.append("")
+            report_lines.extend(screen_lines)
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, 'w') as f:

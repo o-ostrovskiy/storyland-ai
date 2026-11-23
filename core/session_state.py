@@ -49,6 +49,11 @@ class SessionStateKeys:
     # Where the run came from (common/request_source.py): only MCP-started jobs
     # carry it; the Langfuse plugin turns it into trace tags/metadata.
     REQUEST_SOURCE = REQUEST_SOURCE_STATE_KEY
+    # Set by discover() when the book-identity guard rejects the run (the
+    # search researched a different work, or none). compose() refuses such a
+    # job: a cleared JOB_FAILED must never turn the wrong-book research into
+    # an itinerary (Codex on ai#317). Value: the BookNotFound error payload.
+    BOOK_IDENTITY_REJECTED = "book_identity_rejected"
 
 
 class SessionStateAccessor:
@@ -105,6 +110,11 @@ class SessionStateAccessor:
     @property
     def failed(self) -> bool:
         return bool(self._state.get(SessionStateKeys.JOB_FAILED))
+
+    @property
+    def book_identity_rejection(self) -> Optional[dict]:
+        value = self._state.get(SessionStateKeys.BOOK_IDENTITY_REJECTED)
+        return value if isinstance(value, dict) else None
 
     @property
     def book_title(self) -> str:

@@ -62,12 +62,18 @@ import inspect
 # ``validate_region_selection``, which does not shape the cached payload — an
 # edit to it flushes the cache spuriously. That is an unnecessary re-warm, not a
 # wrong combine, so it is the safe side to be wrong on.)
+#
+# ``core.book_identity`` decides which fresh runs are allowed to reach the
+# cache at all (a run that researched a different book than the one typed is
+# stopped before the write). A stricter guard must not be bypassed by entries
+# the looser one let in, so its source is an input too.
 _PROMPT_MODULES = (
     "core.prompts",
     "agents.prompts",
     "models.discovery",
     "models.place_key",
     "core.regions",
+    "core.book_identity",
 )
 
 

@@ -110,6 +110,8 @@ def domain_event_to_sse(event: DomainEvent) -> dict:
             phase=p,
             reason=r,
             offending_title=ot,
+            suggested_title=st,
+            suggested_author=sa,
         ):
             return _sse(
                 "error",
@@ -119,6 +121,8 @@ def domain_event_to_sse(event: DomainEvent) -> dict:
                     phase=int(p) if p is not None else None,
                     reason=r,
                     offending_title=ot,
+                    suggested_title=st,
+                    suggested_author=sa,
                 ).model_dump_json(),
             )
         case WorkflowComplete(job_id=j, token_usage=u):
