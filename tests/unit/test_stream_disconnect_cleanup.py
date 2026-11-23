@@ -132,6 +132,46 @@ async def test_on_cancel_skipped_once_the_result_went_out():
     assert calls == []
 
 
+async def test_on_cancel_skipped_when_closed_at_the_result():
+    """Codex on ai#321: receive the result with anext(), then aclose() --
+    the generator never resumes past that yield. The job was delivered, so
+    on_cancel must not run (the test above asks for the next event first)."""
+    calls = []
+
+    async def cleanup():
+        calls.append(True)
+
+    async def body():
+        yield JobStarted(job_id="job-1")
+        yield RegionsReady(job_id="job-1", regions=[], analysis_note="")
+        await asyncio.Event().wait()
+
+    gen = run_guarded(body(), _spec(on_cancel=cleanup))
+    assert isinstance(await anext(gen), JobStarted)
+    assert isinstance(await anext(gen), RegionsReady)
+    await gen.aclose()
+
+    assert calls == []
+
+
+async def test_on_cancel_runs_when_closed_before_the_result():
+    """Control for the test above: a close before the result still cleans up."""
+    calls = []
+
+    async def cleanup():
+        calls.append(True)
+
+    async def body():
+        yield JobStarted(job_id="job-1")
+        yield RegionsReady(job_id="job-1", regions=[], analysis_note="")
+
+    gen = run_guarded(body(), _spec(on_cancel=cleanup))
+    assert isinstance(await anext(gen), JobStarted)
+    await gen.aclose()
+
+    assert calls == [True]
+
+
 async def test_on_cancel_is_bounded(monkeypatch):
     """A stuck cleanup gives up at the deadline instead of hanging the request."""
     monkeypatch.setattr(harness, "CANCEL_CLEANUP_TIMEOUT_S", 0.05)

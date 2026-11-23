@@ -210,9 +210,13 @@ async def run_guarded(
     try:
         async with async_timeout(spec.timeout_seconds):
             async for ev in body:
-                yield ev
+                # Set BEFORE the yield (Codex, ai#321): a consumer that closes
+                # the iterator right after receiving the result never resumes
+                # this generator, so a flag set after the yield stays False
+                # and on_cancel would mark a delivered job failed.
                 if isinstance(ev, RESULT_EVENTS):
                     result_sent = True
+                yield ev
     except GeneratorExit:
         # The consumer stopped iterating at a yield (the SSE transport was
         # cancelled mid-send and the generator is being closed). Same cleanup
