@@ -5,7 +5,11 @@ Thin adapter that maps core DomainEvents to SSE event dicts for
 EventSourceResponse. All business logic lives in core.executor.
 """
 
-from typing import AsyncGenerator, List, Optional
+import asyncio
+import time
+from typing import AsyncGenerator, AsyncIterator, List, Optional
+
+from sse_starlette.sse import AppStatus
 
 from api.models import (
     SSEProgressEvent,
@@ -30,8 +34,12 @@ from core.events import (
     WorkflowError,
     WorkflowComplete,
 )
+from common.logging import get_logger
 from core.executor import WorkflowExecutor
+from core.run_harness import RESULT_EVENTS
 from models.work import WorkRef
+
+logger = get_logger("storyland.api.streaming")
 
 
 def _sse(event_type: str, data: str) -> dict:
@@ -134,6 +142,57 @@ def domain_event_to_sse(event: DomainEvent) -> dict:
             )
 
 
+async def track_abandonment(
+    flow: str, events: AsyncIterator[DomainEvent]
+) -> AsyncGenerator[dict, None]:
+    """Map domain events to SSE dicts; log once if the client leaves early.
+
+    sse_starlette cancels the stream when the client disconnects (a reader
+    closing the page, a superseded search, the MCP server closing discover
+    after `regions`) or the server shuts down. That is expected traffic, not
+    an error, so it is recorded as ONE info line, `sse_stream_abandoned`,
+    carrying where the client left: the last SSE event it was sent, the last
+    progress phase, whether the result had already gone out, and the seconds
+    since the stream began. Read it in Sentry Logs
+    (`message:sse_stream_abandoned`, grouped by `flow` / `last_event` /
+    `result_sent`); the bridge in common.logging also counts it as
+    `log.events{event=sse_stream_abandoned}`. `result_sent=false` is a
+    visitor who gave up during the wait.
+    """
+    started = time.monotonic()
+    last_event = "none"
+    phase: Optional[int] = None
+    result_sent = False
+    events_sent = 0
+    job_id: Optional[str] = None
+    try:
+        async for event in events:
+            sse = domain_event_to_sse(event)
+            yield sse
+            events_sent += 1
+            last_event = sse["event"]
+            job_id = getattr(event, "job_id", None) or job_id
+            if isinstance(event, ProgressEvent) and event.phase is not None:
+                # The phase number only: step/detail text can carry a chip
+                # label or a place the reader typed, which never goes to Sentry.
+                phase = int(event.phase)
+            if isinstance(event, RESULT_EVENTS):
+                result_sent = True
+    except (asyncio.CancelledError, GeneratorExit):
+        logger.info(
+            "sse_stream_abandoned",
+            flow=flow,
+            reason="server_shutdown" if AppStatus.should_exit else "client_closed",
+            last_event=last_event,
+            phase=phase,
+            result_sent=result_sent,
+            events_sent=events_sent,
+            elapsed_s=round(time.monotonic() - started, 1),
+            job_id=job_id[:8] if job_id else None,
+        )
+        raise
+
+
 async def discover_stream(
     book_title: str,
     author: Optional[str],
@@ -145,16 +204,19 @@ async def discover_stream(
     work: Optional[WorkRef] = None,
 ) -> AsyncGenerator[dict, None]:
     """Run phases 1-2 via executor and yield SSE events."""
-    async for event in executor.discover(
-        book_title=book_title,
-        author=author,
-        preferences=preferences,
-        vibe=vibe,
-        taste_context=taste_context,
-        user_id=user_id,
-        work=work,
+    async for sse in track_abandonment(
+        "discover",
+        executor.discover(
+            book_title=book_title,
+            author=author,
+            preferences=preferences,
+            vibe=vibe,
+            taste_context=taste_context,
+            user_id=user_id,
+            work=work,
+        ),
     ):
-        yield domain_event_to_sse(event)
+        yield sse
 
 
 async def compose_stream(
@@ -164,12 +226,15 @@ async def compose_stream(
     executor: WorkflowExecutor,
 ) -> AsyncGenerator[dict, None]:
     """Run phase 3 via executor and yield SSE events."""
-    async for event in executor.compose(
-        job_id=job_id,
-        region_ids=region_ids,
-        user_id=user_id,
+    async for sse in track_abandonment(
+        "compose",
+        executor.compose(
+            job_id=job_id,
+            region_ids=region_ids,
+            user_id=user_id,
+        ),
     ):
-        yield domain_event_to_sse(event)
+        yield sse
 
 
 async def local_atmosphere_stream(
@@ -185,18 +250,21 @@ async def local_atmosphere_stream(
     work: Optional[WorkRef] = None,
 ) -> AsyncGenerator[dict, None]:
     """Run the local-atmosphere flow via executor and yield SSE events."""
-    async for event in executor.local_atmosphere(
-        book_title=book_title,
-        author=author,
-        location_label=location_label,
-        lat=lat,
-        lng=lng,
-        radius_km=radius_km,
-        preferences=preferences,
-        user_id=user_id,
-        work=work,
+    async for sse in track_abandonment(
+        "local_atmosphere",
+        executor.local_atmosphere(
+            book_title=book_title,
+            author=author,
+            location_label=location_label,
+            lat=lat,
+            lng=lng,
+            radius_km=radius_km,
+            preferences=preferences,
+            user_id=user_id,
+            work=work,
+        ),
     ):
-        yield domain_event_to_sse(event)
+        yield sse
 
 
 async def expand_stream(
@@ -208,14 +276,17 @@ async def expand_stream(
     executor: WorkflowExecutor,
 ) -> AsyncGenerator[dict, None]:
     """Run the expansion flow via executor and yield SSE events."""
-    async for event in executor.expand(
-        job_id=job_id,
-        action_id=action_id,
-        action_label=action_label,
-        action_prompt=action_prompt,
-        user_id=user_id,
+    async for sse in track_abandonment(
+        "expand",
+        executor.expand(
+            job_id=job_id,
+            action_id=action_id,
+            action_label=action_label,
+            action_prompt=action_prompt,
+            user_id=user_id,
+        ),
     ):
-        yield domain_event_to_sse(event)
+        yield sse
 
 
 async def recommend_books_stream(
@@ -227,11 +298,14 @@ async def recommend_books_stream(
     executor: WorkflowExecutor,
 ) -> AsyncGenerator[dict, None]:
     """Run the book recommendation flow via executor and yield SSE events."""
-    async for event in executor.recommend_books(
-        job_id=job_id,
-        action_id=action_id,
-        action_label=action_label,
-        action_prompt=action_prompt,
-        user_id=user_id,
+    async for sse in track_abandonment(
+        "recommend_books",
+        executor.recommend_books(
+            job_id=job_id,
+            action_id=action_id,
+            action_label=action_label,
+            action_prompt=action_prompt,
+            user_id=user_id,
+        ),
     ):
-        yield domain_event_to_sse(event)
+        yield sse

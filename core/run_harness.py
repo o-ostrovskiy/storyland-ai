@@ -21,15 +21,20 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import AsyncGenerator, AsyncIterator, Awaitable, Callable, Optional
 
+import anyio
 from async_timeout import timeout as async_timeout
 
 from common.logging import get_logger
 from common.search_grounding import extract_search_metadata
 
 from .events import (
+    BookRecommendationsReady,
     DomainEvent,
+    ExpansionReady,
+    ItineraryReady,
     Phase,
     ProgressEvent,
+    RegionsReady,
     WorkflowComplete,
     WorkflowError,
 )
@@ -123,6 +128,43 @@ async def pump_events(
 # Async cleanup hook run before the terminal error events are emitted.
 Cleanup = Callable[[], Awaitable[None]]
 
+# The success payload each flow yields once. After one of these went out, the
+# flow's work is delivered: a later cancel skips on_cancel.
+RESULT_EVENTS = (
+    RegionsReady,
+    ItineraryReady,
+    ExpansionReady,
+    BookRecommendationsReady,
+)
+
+# Upper bound on a cancel cleanup (a session read + one append on SQLite take
+# milliseconds). The shield must never turn a cancel into a hang.
+CANCEL_CLEANUP_TIMEOUT_S = 5.0
+
+
+async def _run_cancel_cleanup(spec: "GuardSpec", cleanup: Cleanup) -> None:
+    """Run ``cleanup`` to completion even though the caller was cancelled.
+
+    sse_starlette cancels the stream through an anyio cancel scope, and anyio
+    re-delivers that cancel at EVERY later ``await`` in the scope, so a plain
+    ``await cleanup()`` here died at its first DB call: the job was never
+    marked failed and the expand / book-recs in-progress flags were never
+    cleared (a dropped expand then refused every later expand with
+    ExpansionInProgress). A shielded scope with its own deadline lets the
+    cleanup finish, bounded; the caller re-raises the cancel right after.
+    """
+    with anyio.move_on_after(CANCEL_CLEANUP_TIMEOUT_S, shield=True) as scope:
+        try:
+            await cleanup()
+        except Exception as e:
+            logger.warning(
+                f"{spec.flow_name}_cancel_cleanup_failed",
+                job_id=spec.job_id,
+                error_type=type(e).__name__,
+            )
+    if scope.cancelled_caught:
+        logger.warning(f"{spec.flow_name}_cancel_cleanup_timeout", job_id=spec.job_id)
+
 
 @dataclass(frozen=True)
 class GuardSpec:
@@ -154,14 +196,30 @@ async def run_guarded(
     The timeout context wraps the *iteration* of ``body``, so consumer time
     (e.g. a slow SSE client between events) counts against the workflow
     timeout — identical to the historical inline ``async with timeout(...)``
-    placement. CancelledError performs cleanup and re-raises (the caller's
-    cancellation must propagate); Timeout and generic exceptions terminate the
-    stream with WorkflowError + WorkflowComplete.
+    placement. CancelledError (and GeneratorExit, a consumer that stopped at a
+    yield) runs ``on_cancel`` shielded and bounded, then re-raises (the
+    caller's cancellation must propagate); ``on_cancel`` is skipped once the
+    flow's result event was already handed on. Timeout and generic exceptions
+    terminate the stream with WorkflowError + WorkflowComplete.
     """
+    # Set once the flow's result has been handed to the consumer. A cancel
+    # after that point cut only bookkeeping (e.g. the Langfuse flush before
+    # `done`) -- the MCP server closes discover right after `regions` -- so
+    # on_cancel must not mark a delivered job failed.
+    result_sent = False
     try:
         async with async_timeout(spec.timeout_seconds):
             async for ev in body:
                 yield ev
+                if isinstance(ev, RESULT_EVENTS):
+                    result_sent = True
+    except GeneratorExit:
+        # The consumer stopped iterating at a yield (the SSE transport was
+        # cancelled mid-send and the generator is being closed). Same cleanup
+        # as a cancel; awaiting is allowed here, yielding is not.
+        if spec.on_cancel is not None and not result_sent:
+            await _run_cancel_cleanup(spec, spec.on_cancel)
+        raise
     except TimeoutError:
         logger.error(f"{spec.flow_name}_timeout", job_id=spec.job_id)
         if spec.on_timeout is not None:
@@ -173,9 +231,11 @@ async def run_guarded(
         )
         yield WorkflowComplete(job_id=spec.job_id)
     except asyncio.CancelledError:
-        logger.warning(f"{spec.flow_name}_cancelled", job_id=spec.job_id)
-        if spec.on_cancel is not None:
-            await spec.on_cancel()
+        logger.warning(
+            f"{spec.flow_name}_cancelled", job_id=spec.job_id, result_sent=result_sent
+        )
+        if spec.on_cancel is not None and not result_sent:
+            await _run_cancel_cleanup(spec, spec.on_cancel)
         raise
     except Exception as e:
         if spec.map_exception is not None:
