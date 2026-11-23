@@ -1,45 +1,26 @@
-# StoryLand AI
+# My Storyland agent service
 
-> Turn your favorite books into meaningful travel experiences
+This repository is the agent service behind [My Storyland](https://mystoryland.ai). Give it a book, and it finds the places connected to the story, groups them into regions and plans stops for the chosen regions. Give it a place, and it returns books that happen there. It is a FastAPI server that streams progress and results as server-sent events (SSE). The pipeline is a set of Google ADK agents on Gemini (`gemini-3.1-flash-lite`), and the research agents can call Google Search. The website does not call this service directly: a gateway service does, with a shared secret.
 
-**We're live! Try it at [mystoryland.ai](https://mystoryland.ai/)**
+**Measured on mystoryland.ai, 2026-11-22:** a first search for a book showed the journey about 17 seconds after submit. Repeating the same search took about 5 seconds, served from the cache. The cache holds the discovery result, so the composition step still runs on every request. The service's own measurement of both waits, from Langfuse traces, is in [ADR #33](docs/ARCHITECTURE.md#33-the-two-reader-waits-have-numbers-a-langfuse-latency-report-2026-11-01) (`scripts/latency_report.py`).
 
-## Overview
+![Diagram of one book search. The gateway service sends a discover request, then a compose request, to the SSE API (1). A cache hit returns regions with no model call (2). A miss runs the discovery graph (3), whose agents call Gemini, and its researchers can use Google Search (4). The research, and which researchers searched, go to session state (5). Compose runs trip_composer for the chosen regions (6). Claim checks compare literal and historical labels with that research (7). Regions, then the itinerary, stream back as SSE events (8).](docs/images/agent-service.png)
 
-StoryLand AI transforms the worlds within beloved books into real, actionable travel plans. When readers finish a book they love, they often want to explore the places that inspired it—but turning that impulse into reality requires navigating scattered information across countless sources. StoryLand AI solves this by using a multi-agent system that automatically researches, discovers, and composes personalized travel itineraries based on any book.
+## Fail closed
 
-## The Problem
+The trip composer labels each stop with how it connects to the book: `literal` (the book names the place), `historical` (a documented link to the book or its author), `thematic`, or `vibe` (a similar mood). The label is the model's own claim, so the server checks it before the itinerary leaves ([`core/extraction.py`](core/extraction.py)). A `literal` or `historical` stop whose name is not found in the discovery research becomes `vibe`, and its cited source is removed. Research counts as evidence only when its researcher called Google Search (MYS-816). If none of the researchers that returned places searched, every `literal` and `historical` stop is downgraded. Stops are never dropped and never upgraded. Details: [Fail closed: unsearched researchers](#fail-closed-unsearched-researchers-cannot-ground-a-claim-mys-816) below and ADR #26 in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-When someone finishes a book they love, they want to stay in that world a little longer. They want to:
-- Walk the same streets the characters walked
-- Feel the atmosphere of the city where the story unfolded
-- Visit the real places that inspired the author
+## How quality is measured
 
-But the moment they try, the magic disappears.
+The eval harness in [`evaluation/`](evaluation/README.md) runs the pipeline on fixed datasets:
 
-### Current Reality
+| Flow | Dataset | What is scored |
+|---|---|---|
+| Book → trip | `storyland_eval`, `books_v1` (10 books each) | An LLM judge scores six dimensions from 1 to 5: book relevance, preferences, completeness, actionability, geography, engagement. The runner also records which researchers called Google Search. |
+| Place → books | `place_to_book_v1` (16 places) | Pass or fail: a minimum number of `literal` books per place, an empty answer for invented places (Macondo, Wakanda), no book listed twice, the expected author for each named book. |
+| Near me, suggestion chips, film and series claims | `local_atmosphere_v1` (8), `expansion_v1` (5), `screen_v1` (12) | Pass-or-fail checks; "near me" is also scored by the judge. |
 
-Readers face:
-- Endless Google searches across scattered blogs, tourist sites, and forums
-- Contradictory or incomplete information
-- Too many tabs, too much noise, too many missing pieces
-- Frustration that kills the initial inspiration
-
-**Result:** Most people never follow through on exploring the world behind the story.
-
-## The Solution: Multi-Agent Architecture
-
-StoryLand AI uses specialized AI agents that work together to solve this complex problem. Each agent is an expert in a specific part of the journey from book to travel plan.
-
-### Why Agents?
-
-Creating a meaningful travel plan from a book requires:
-- **Multiple information sources:** Settings, real locations, cultural context, maps, routes, historical notes, travel details
-- **Parallel research:** Looking up landmarks, author sites, filming locations, museums simultaneously
-- **Intelligent coordination:** Merging disparate information into a coherent journey
-- **Personalization:** Remembering preferences across multiple books
-
-A single LLM prompt can't handle this complexity. Agents can.
+Runs are on demand, not on a schedule, because each one spends Gemini quota. The place → books, near-me, chips and film runners end with `RELEASE: ALLOWED` or `RELEASE: BLOCKED`, and a change to the AI quotes that line before it ships; the book → trip runner has no release gate yet. Results by prompt version are in [`evaluation/PROMPT_CHANGELOG.md`](evaluation/PROMPT_CHANGELOG.md): the latest entry, prompt v5 on 2026-11-21, passed 16 of 16 place → books cases. Runs made in GitHub Actions attach their results JSON to the run ([Evaluation (manual dispatch)](https://github.com/o-ostrovskiy/storyland-ai/actions/workflows/scheduled-eval.yml)). The judge's scores move by up to ±0.40 between identical runs, so they catch large regressions, not small ones.
 
 ## Quick Start
 
@@ -47,7 +28,7 @@ A single LLM prompt can't handle this complexity. Agents can.
 
 ```bash
 # Clone and setup
-git clone <repository-url>
+git clone https://github.com/o-ostrovskiy/storyland-ai
 cd storyland-ai
 python3 -m venv .venv
 source .venv/bin/activate
