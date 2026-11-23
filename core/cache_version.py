@@ -76,6 +76,20 @@ _PROMPT_MODULES = (
     "core.book_identity",
 )
 
+# Extra inputs to a COMPOSED envelope (ADR #36), on top of _PROMPT_MODULES:
+# the composer agent (instruction wiring, output_key, output ceiling), the
+# response schema the model is constrained to, and the truncation detector that
+# decides which outputs are complete enough to store. They are hashed only into
+# the compose namespace, so a composer-only change re-pays composes but never
+# the costlier discovers. The guards that run AFTER the model (core.extraction,
+# core.guardrails) are deliberately absent: a cache hit stores the raw envelope
+# and re-runs them on every replay, so a guard fix applies to hits at once.
+_COMPOSE_MODULES = (
+    "agents.trip_composer_agent",
+    "models.itinerary",
+    "agents.composer_truncation",
+)
+
 
 def _module_source(module_name: str) -> str:
     """Return a module's source text, or '' if it can't be read."""
@@ -112,3 +126,16 @@ def compute_cache_version(
     parts.append(_prompt_data_hash() if prompt_data is None else prompt_data)
     digest = hashlib.sha1("\x00".join(parts).encode("utf-8")).hexdigest()
     return digest[:12]
+
+
+def compute_compose_cache_version(model_name: str, max_output_tokens: int) -> str:
+    """The compose cache namespace: everything that flips the Discovery
+    namespace, plus the composer's own modules and its output ceiling.
+
+    ``max_output_tokens`` lives in ``common.config``; hashing that whole module
+    would flush the cache on any unrelated config edit, so only the value goes in.
+    """
+    return compute_cache_version(
+        f"{model_name or ''}|compose|max_output_tokens={max_output_tokens}",
+        prompt_modules=_PROMPT_MODULES + _COMPOSE_MODULES,
+    )
