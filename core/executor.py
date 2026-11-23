@@ -864,7 +864,6 @@ class WorkflowExecutor:
                     verdict=identity.kind,
                     suggested_title=identity.suggested_title,
                 )
-                await self._mark_session_failed(job_id, user_id)
                 if identity.kind == "mismatch":
                     message = mismatch_message(
                         identity.suggested_title or "",
@@ -874,6 +873,27 @@ class WorkflowExecutor:
                 else:
                     message = NOT_FOUND_MESSAGE
                     reason = "book_not_found"
+                # Persist the rejection, not only JOB_FAILED: compose() clears
+                # JOB_FAILED on every retry, and the wrong-book regions are
+                # still in state. compose() reads this key and refuses.
+                await self._session_service.append_event(
+                    session,
+                    Event(
+                        invocation_id="system",
+                        author="system",
+                        actions=EventActions(
+                            state_delta={
+                                SessionStateKeys.BOOK_IDENTITY_REJECTED: {
+                                    "message": message,
+                                    "reason": reason,
+                                    "suggested_title": identity.suggested_title,
+                                    "suggested_author": identity.suggested_author,
+                                },
+                                SessionStateKeys.JOB_FAILED: True,
+                            }
+                        ),
+                    ),
+                )
                 for ev in error_events(
                     job_id,
                     message,
@@ -1010,6 +1030,24 @@ class WorkflowExecutor:
 
         state = SessionStateAccessor(session.state)
         all_regions = state.regions
+
+        rejection = state.book_identity_rejection
+        if rejection is not None:
+            # discover() found a different book than the one typed (or none).
+            # Its regions are the wrong book's, so no retry may compose them.
+            logger.info("compose_refused_book_identity", job_id=job_id[:8])
+            await self._mark_session_failed(job_id, user_id)
+            for ev in error_events(
+                job_id,
+                rejection.get("message") or NOT_FOUND_MESSAGE,
+                "BookNotFound",
+                phase=Phase.COMPOSITION,
+                reason=rejection.get("reason"),
+                suggested_title=rejection.get("suggested_title"),
+                suggested_author=rejection.get("suggested_author"),
+            ):
+                yield ev
+            return
 
         if not all_regions:
             await self._mark_session_failed(job_id, user_id)

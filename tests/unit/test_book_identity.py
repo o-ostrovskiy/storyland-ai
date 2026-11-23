@@ -17,7 +17,8 @@ from google.adk.workflow import Workflow
 
 from agents.prompts import load_prompts
 from core.book_identity import NOT_FOUND_MESSAGE, check_book_identity
-from core.events import RegionsReady, WorkflowComplete, WorkflowError
+from core.events import ItineraryReady, RegionsReady, WorkflowComplete, WorkflowError
+from core.executor import APP_NAME
 from core.session_state import SessionStateKeys
 from core.types import ExecutorConfig
 from models.book import BookContext
@@ -259,6 +260,63 @@ class TestDiscoverGuard:
         ]
         assert not any(isinstance(e, WorkflowError) for e in events)
         assert len([e for e in events if isinstance(e, RegionsReady)]) == 1
+
+
+class TestComposeRefusesARejectedJob:
+    """Codex on ai#317 @0cf8af2: compose() clears JOB_FAILED on every retry,
+    so a rejected discover's wrong-book regions must be refused explicitly."""
+
+    @staticmethod
+    def _job_id(events):
+        return next(e.job_id for e in events if isinstance(e, WorkflowComplete))
+
+    async def test_compose_after_a_rejected_discover_is_book_not_found(self, monkeypatch):
+        executor = _make_executor(monkeypatch, DDDD_FOUND, TOKYO)
+        discovered = [e async for e in executor.discover(book_title="dddd", author="ddd")]
+        job_id = self._job_id(discovered)
+
+        composed = [e async for e in executor.compose(job_id, [1])]
+
+        errors = [e for e in composed if isinstance(e, WorkflowError)]
+        assert [e.error_type for e in errors] == ["BookNotFound"]
+        assert errors[0].reason == "book_mismatch"
+        assert errors[0].suggested_title == "Dead Dead Demon's Dededede Destruction"
+        assert not any(isinstance(e, ItineraryReady) for e in composed)
+        session = await executor._session_service.get_session(
+            app_name=APP_NAME, user_id="default", session_id=job_id
+        )
+        assert session.state.get(SessionStateKeys.FINAL_ITINERARY) is None
+        assert session.state.get(SessionStateKeys.JOB_FAILED) is True
+
+    async def test_an_ordinary_failed_job_can_still_retry_compose(self, monkeypatch):
+        ctx = {
+            "primary_locations": ["Tokyo"],
+            "themes": ["urban life"],
+            "matches_requested_book": True,
+            "identified_title": "Dead Dead Demon's Dededede Destruction",
+            "identified_author": "Inio Asano",
+        }
+        executor = _make_executor(monkeypatch, ctx, TOKYO)
+        discovered = [
+            e
+            async for e in executor.discover(
+                book_title="Dead Dead Demon's Dededede Destruction", author="Inio Asano"
+            )
+        ]
+        job_id = self._job_id(discovered)
+        await executor._mark_session_failed(job_id, "default")  # an earlier compose failed
+
+        composed = [e async for e in executor.compose(job_id, [1])]
+
+        assert not any(
+            isinstance(e, WorkflowError) and e.error_type == "BookNotFound" for e in composed
+        )
+        session = await executor._session_service.get_session(
+            app_name=APP_NAME, user_id="default", session_id=job_id
+        )
+        assert session.state.get(SessionStateKeys.SELECTED_REGIONS), (
+            "the retry must get past the guard and record its selection"
+        )
 
 
 def test_the_suggestion_reaches_the_sse_error_event():
