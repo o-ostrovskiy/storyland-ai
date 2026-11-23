@@ -1322,7 +1322,7 @@ A client that drops the SSE stream mid-generation makes sse_starlette cancel its
 - `services/session_service.py::CancellationSafeDatabaseSessionService` (what `create_session_service(use_database=True)` now returns) runs each `create_session` / `get_session` / `list_sessions` / `delete_session` / `append_event` as its own task under `asyncio.shield`. The caller still gets `CancelledError` at once, and the task, outside the cancelled scope, finishes and returns its connection.
 - In-flight tasks are held by strong reference until done. A failure that lands after the caller has gone is logged as `session_db_op_failed_after_caller_left`, not swallowed by the shield. `close()` drains them before disposing the engine.
 - Pinned by `tests/unit/test_session_service_cancellation.py`, which drops a real `EventSourceResponse` mid-query and asserts the pool's `checkedout() == 0`.
-- The disconnect `CancelledError` itself is expected and is not part of this fix. (Correction, 2026-11-23, #35: it never reached Sentry on its own. Every STORYLAND-AI-A event is the `sqlalchemy.pool` log "Exception terminating connection", part of this same leak, so no Sentry-side filter is needed.)
+- The disconnect `CancelledError` itself is expected and is not part of this fix. (Correction, 2026-11-23, #36: it never reached Sentry on its own. Every STORYLAND-AI-A event is the `sqlalchemy.pool` log "Exception terminating connection", part of this same leak, so no Sentry-side filter is needed.)
 
 ### Trade-offs
 A dropped stream's last DB statement still runs to completion (milliseconds on SQLite), so nothing is cancelled half-written. The wrapper overrides ADK's public method names with pass-through `*args/**kwargs`, so an ADK upgrade that adds a new DB-touching method needs it added here.
@@ -1365,7 +1365,26 @@ A film or series journey makes a claim a book journey never does: "the story is 
 ### Trade-offs
 A true setting the composer labelled without a source reads as "Filmed here" until the prompts cite it (the screen prompts are the next part of ai-private#67). That under-claims; it never over-claims.
 
-## 35. Cancel Cleanup Runs Shielded; a Reader Leaving Is Counted, Not Reported (2026-11-23)
+## 35. Discovery Stops When the Search Found a Different Book (2026-11-21)
+
+### Context
+`discover()` takes the title and author on trust and hands them to a google_search researcher. A search does not fail on a title that names no book: it resolves it to whatever the web associates with it. In prod on 2026-11-21, "dddd" by "ddd" resolved to Inio Asano's manga *Dead Dead Demon's Dededede Destruction* (fans write it "DeDeDeDe"), set in Tokyo, and the reader got a Tokyo trip titled "dddd by ddd". Nothing on the page said which book it was for. The LLM judge rated the run "generic" because discovery data was nearly empty.
+
+### Decision
+- Prompt set `v6` = `v5` with only `book_context_researcher` / `book_context_formatter` changed. The researcher first states which book its sources describe and whether it is the requested one (a different author, or a different work sharing an abbreviation or spelling, is not). The formatter fills three new optional `BookContext` fields: `matches_requested_book`, `identified_title`, `identified_author`, and returns empty locations/themes for a different book.
+- `core/book_identity.py:check_book_identity()` turns them into `ok` / `mismatch` / `not_found`. `discover()` runs it after the discovery workflow and before the region guards and the cache write. Anything but `ok` marks the session failed and emits `WorkflowError(error_type="BookNotFound", reason="book_mismatch" | "book_not_found")`; a mismatch also carries `suggested_title` / `suggested_author` (on the SSE `error` event too) for a "did you mean …?".
+- The rejection is persisted, not only the failure flag: `discover()` writes `book_identity_rejected` (the BookNotFound payload) with `job_failed` in one `append_event`. `compose()` clears `job_failed` on every retry and the wrong book's regions stay in state, so it reads that key first and answers the same BookNotFound; retries after ordinary composition failures are unaffected (Codex on ai#317).
+- Book journeys only: a film or series request carries its director or showrunner as `author`, so the book researcher naming the source novel's author (Persuasion → Jane Austen for the Carrie Cracknell film) is not a different work. The guard is skipped when the work kind is not `book`.
+- It fails **open**: a missing or null label (pre-v6 payloads, the local-atmosphere flow) is `ok`, and a `false` label that names the requested book itself (same title tokens, a shared author-name token, accents and case folded) is overruled. Blocking a real book is worse than the old behaviour.
+- `core.book_identity` is in the cache fingerprint (`_PROMPT_MODULES`): it decides which runs may reach the cache, so a stricter guard must not be bypassed by entries a looser one let in.
+
+### Trade-offs
+- The check runs after the whole discovery graph, so a wrong-book run still pays for the three discovery branches. It is rare, and this keeps the graph and its pinned tests as they are. Stopping right after `book_context_formatter` is the follow-up if the cost shows up.
+- The verdict rests on the model's label. The deterministic overrule only protects against a self-contradicting `false`, not against a wrong `true`.
+- The `v6` bump moves the discovery cache namespace and the place→book key (`place2book:v1:v6:…`): one cold-cache window for both.
+- fe still shows its generic discover error for `BookNotFound` until a designed "did you mean" state lands. The SSE event already carries what it needs.
+
+## 36. Cancel Cleanup Runs Shielded; a Reader Leaving Is Counted, Not Reported (2026-11-23)
 
 ### Context
 #32 made each session DB call survive sse_starlette's anyio cancel. The `on_cancel` hook of `core/run_harness.py::run_guarded` still ran inside the cancelled scope, so it died at its first `await`. A cancelled discover, compose or local-atmosphere job was never marked failed (`/status` stayed at its last phase), and a dropped expand or book-recs stream left `EXPANSION_IN_PROGRESS` / `BOOK_RECS_IN_PROGRESS` set, so every later request of that kind on the job was refused. Who drops streams: readers closing the page or starting another search (the web app aborts the previous stream), the backend MCP server (it closes discover right after `regions`), the weekly e2e smoke, and deploy restarts.
@@ -1415,7 +1434,8 @@ A dropped stream's response task stays alive for the cleanup (milliseconds on SQ
 | **Work kind on the AI contract (ADR #31)** | Films and series ride the same pipeline; a book request, its metadata event and its cache key are byte-identical | Book fields and `work` coexist on the wire; film prompts are a later story |
 | **Screen claims need evidence (ADR #34)** | A film/series stop is "set here" only with a cited, research-traced source | Unsupported "set here" ships as "filmed here" + vibe: under-claims, never over-claims |
 | **Cancellation-safe session DB (ADR #32)** | A dropped SSE stream returns its pooled connection; caller cancellation is unchanged | One wrapper method per ADK DB call to keep in step on upgrades |
-| **Shielded cancel cleanup + abandonment count (ADR #35)** | A dropped stream still marks its job failed / clears its in-progress flag; each early close is one countable info line | The dying response waits up to 5 s for the cleanup |
+| **Shielded cancel cleanup + abandonment count (ADR #36)** | A dropped stream still marks its job failed / clears its in-progress flag; each early close is one countable info line | The dying response waits up to 5 s for the cleanup |
 | **Reader-wait latency report (ADR #33)** | First-region and full-journey p50/p95 from Langfuse, never a fake 0 s | Fresh runs only, measured inside the agent service (no be hop or SSE delivery) |
+| **Book-identity guard (ADR #35)** | A title the search resolves to a different work stops with BookNotFound ("did you mean …?") instead of a trip for that other book | Runs after the full discovery graph; trusts the model's label (fails open when silent) |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.

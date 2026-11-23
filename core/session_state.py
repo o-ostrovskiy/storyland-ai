@@ -44,6 +44,11 @@ class SessionStateKeys:
     USER_PREFERENCES = "user:preferences"
     USER_LOCATION = "user_location"
     JOB_FAILED = "job_failed"
+    # Set by discover() when the book-identity guard rejects the run (the
+    # search researched a different work, or none). compose() refuses such a
+    # job: a cleared JOB_FAILED must never turn the wrong-book research into
+    # an itinerary (Codex on ai#317). Value: the BookNotFound error payload.
+    BOOK_IDENTITY_REJECTED = "book_identity_rejected"
 
 
 class SessionStateAccessor:
@@ -100,6 +105,11 @@ class SessionStateAccessor:
     @property
     def failed(self) -> bool:
         return bool(self._state.get(SessionStateKeys.JOB_FAILED))
+
+    @property
+    def book_identity_rejection(self) -> Optional[dict]:
+        value = self._state.get(SessionStateKeys.BOOK_IDENTITY_REJECTED)
+        return value if isinstance(value, dict) else None
 
     @property
     def book_title(self) -> str:
