@@ -244,7 +244,12 @@ class TestDiscoverThreadsKind:
             if isinstance(e, MetadataReady)
         ]
         assert [m["kind"] for m in metadata] == ["film"]
-        assert keys and keys[0].endswith("|kind=film")
+        from agents.work_prompts import screen_prompt_hash
+
+        # ai-private#67 Part 2: a film key also carries the screen overlay's
+        # hash, so an overlay edit re-keys films without touching books.
+        assert keys and keys[0].endswith(f"|kind=film|screen={screen_prompt_hash()}")
+        assert screen_prompt_hash()
         job_id = events[0].job_id
         session = await executor._session_service.get_session(
             app_name=APP_NAME, user_id="default", session_id=job_id
@@ -332,11 +337,12 @@ class TestPromptSeam:
         assert for_kind("book") == load_prompts()
 
     @pytest.mark.parametrize("kind", ["film", "series"])
-    def test_screen_kinds_fall_back_until_story_4(self, kind):
+    def test_screen_kinds_get_their_own_prompts(self, kind):
+        # Story 4 (ai-private#67 Part 2) landed: the fallback is gone.
         from agents.prompts import load_prompts
         from agents.work_prompts import for_kind
 
-        assert for_kind(kind) == load_prompts()
+        assert for_kind(kind) != load_prompts()
 
     def test_unknown_kind_raises(self):
         from agents.work_prompts import for_kind

@@ -21,7 +21,14 @@ from models.work import WorkRef
 MAX_SCREEN_LOCATIONS = 20
 
 
-class ScreenContext(BaseModel):
+class ScreenResearch(BaseModel):
+    """What the screen context formatter may fill from search (ai-private#67 Part 2).
+
+    It is ScreenContext without ``source_work`` on purpose: the source book is
+    decided by the backend (Story 6) and read from session state, so the
+    formatter's schema has no field in which a model could invent one.
+    """
+
     story_locations: List[str] = Field(
         default_factory=list,
         description="Real places where the story takes place. Empty for an invented world.",
@@ -29,13 +36,12 @@ class ScreenContext(BaseModel):
     filming_locations: List[str] = Field(
         default_factory=list, description="Real places where scenes were filmed."
     )
-    source_work: Optional[WorkRef] = Field(
-        default=None,
-        description="The book the film or series is based on, when one exists; never guessed.",
-    )
     is_fictional_world: bool = Field(
         default=False,
         description="True when the story's world is invented (Westeros, Middle-earth, Pandora).",
+    )
+    time_period: Optional[str] = Field(
+        default=None, description="Era or timeframe of the story; null when unknown."
     )
 
     @field_validator("story_locations", "filming_locations")
@@ -48,17 +54,24 @@ class ScreenContext(BaseModel):
                 seen.append(name)
         return seen[:MAX_SCREEN_LOCATIONS]
 
+    @model_validator(mode="after")
+    def _invented_world_has_no_real_setting(self) -> "ScreenResearch":
+        # The epic's rule: no invented "set in" places. A fictional world's
+        # journey is built from filming locations and creator sites only.
+        if self.is_fictional_world and self.story_locations:
+            self.story_locations = []
+        return self
+
+
+class ScreenContext(ScreenResearch):
+    source_work: Optional[WorkRef] = Field(
+        default=None,
+        description="The book the film or series is based on, when one exists; never guessed.",
+    )
+
     @field_validator("source_work")
     @classmethod
     def _source_is_a_book(cls, work: Optional[WorkRef]) -> Optional[WorkRef]:
         # A film's source is a book or nothing here: a stage musical or another
         # film is not "the book behind it", and saying so would invent one.
         return work if work is None or work.kind == "book" else None
-
-    @model_validator(mode="after")
-    def _invented_world_has_no_real_setting(self) -> "ScreenContext":
-        # The epic's rule: no invented "set in" places. A fictional world's
-        # journey is built from filming locations and creator sites only.
-        if self.is_fictional_world and self.story_locations:
-            self.story_locations = []
-        return self
