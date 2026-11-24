@@ -1322,7 +1322,7 @@ A client that drops the SSE stream mid-generation makes sse_starlette cancel its
 - `services/session_service.py::CancellationSafeDatabaseSessionService` (what `create_session_service(use_database=True)` now returns) runs each `create_session` / `get_session` / `list_sessions` / `delete_session` / `append_event` as its own task under `asyncio.shield`. The caller still gets `CancelledError` at once, and the task, outside the cancelled scope, finishes and returns its connection.
 - In-flight tasks are held by strong reference until done. A failure that lands after the caller has gone is logged as `session_db_op_failed_after_caller_left`, not swallowed by the shield. `close()` drains them before disposing the engine.
 - Pinned by `tests/unit/test_session_service_cancellation.py`, which drops a real `EventSourceResponse` mid-query and asserts the pool's `checkedout() == 0`.
-- The disconnect `CancelledError` itself is expected and is not part of this fix (Sentry-side filtering, MYS-790).
+- The disconnect `CancelledError` itself is expected and is not part of this fix. (Correction, 2026-11-23, ADR #39: it never reached Sentry on its own. Every STORYLAND-AI-A event is the `sqlalchemy.pool` log "Exception terminating connection", part of this same leak, so no Sentry-side filter is needed.)
 
 ### Trade-offs
 A dropped stream's last DB statement still runs to completion (milliseconds on SQLite), so nothing is cancelled half-written. The wrapper overrides ADK's public method names with pass-through `*args/**kwargs`, so an ADK upgrade that adds a new DB-touching method needs it added here.
@@ -1397,6 +1397,22 @@ ADR #31 left `agents/work_prompts.py::for_kind` as a seam that returned the book
 ### Trade-offs
 Two places now version prompts (`vN.json` for books, `screen_vN.json` for films). The overlay rides whichever book version is current, so a future book bump also changes film text that the overlay does not replace; the film key moves with it because the global fingerprint is in every key. The `screen_v1` numbers (ai-private#68's eval set, live Gemini) are Part 3/3.
 
+## 39. Cancel Cleanup Runs Shielded; a Reader Leaving Is Counted, Not Reported (2026-11-23)
+
+### Context
+#32 made each session DB call survive sse_starlette's anyio cancel. The `on_cancel` hook of `core/run_harness.py::run_guarded` still ran inside the cancelled scope, so it died at its first `await`. A cancelled discover, compose or local-atmosphere job was never marked failed (`/status` stayed at its last phase), and a dropped expand or book-recs stream left `EXPANSION_IN_PROGRESS` / `BOOK_RECS_IN_PROGRESS` set, so every later request of that kind on the job was refused. Who drops streams: readers closing the page or starting another search (the web app aborts the previous stream), the backend MCP server (it closes discover right after `regions`), the weekly e2e smoke, and deploy restarts.
+
+### Decision
+- `run_guarded` runs `on_cancel` inside `anyio.move_on_after(CANCEL_CLEANUP_TIMEOUT_S, shield=True)` on `CancelledError`, and also on `GeneratorExit` (a stream closed at a yield), then re-raises. The cancel still propagates; the shield has a 5 s deadline, so it can never hang a request.
+- `on_cancel` is skipped once the flow's result event (`RegionsReady`, `ItineraryReady`, `ExpansionReady`, `BookRecommendationsReady`) has been handed on. Otherwise the MCP server's close after `regions` would mark a delivered job failed.
+- `anyio` is now a declared dependency: it is imported directly.
+- `api/streaming.py::track_abandonment` wraps every SSE route. A stream that ends early logs ONE info line, `sse_stream_abandoned`, with `flow`, `reason` (`client_closed` / `server_shutdown`), `last_event`, `phase`, `result_sent`, `events_sent` and `elapsed_s`. It is read in Sentry Logs (`message:sse_stream_abandoned`, grouped by those attributes) and counted as `log.events{event=sse_stream_abandoned}`. `result_sent=false` is a reader who gave up during the wait.
+- No Sentry `before_send` filter. A reader leaving produces no error event, and the pool's error logs stay reported because they are the leak signal.
+- Pinned by `tests/unit/test_stream_disconnect_cleanup.py`. One test drops a real `EventSourceResponse` mid-discovery over the real SQLite session service and asserts the pool is empty, nothing is logged at error level, the job is marked failed and one abandonment line is logged. The converse test checks that a real discovery failure still logs `discover_error` at error level.
+
+### Trade-offs
+A dropped stream's response task stays alive for the cleanup (milliseconds on SQLite, 5 s at most). The cleanup can still lose a race with a shielded `append_event` the cancelled run started just before (ADK raises `StaleSessionError`); that case is logged as `{flow}_cancel_cleanup_failed` at warning level, not retried.
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -1431,6 +1447,7 @@ Two places now version prompts (`vN.json` for books, `screen_vN.json` for films)
 | **Work kind on the AI contract (ADR #31)** | Films and series ride the same pipeline; a book request, its metadata event and its cache key are byte-identical | Book fields and `work` coexist on the wire; film prompts are a later story |
 | **Screen claims need evidence (ADR #34)** | A film/series stop is "set here" only with a cited, research-traced source | Unsupported "set here" ships as "filmed here" + vibe: under-claims, never over-claims |
 | **Cancellation-safe session DB (ADR #32)** | A dropped SSE stream returns its pooled connection; caller cancellation is unchanged | One wrapper method per ADK DB call to keep in step on upgrades |
+| **Shielded cancel cleanup + abandonment count (ADR #39)** | A dropped stream still marks its job failed / clears its in-progress flag; each early close is one countable info line | The dying response waits up to 5 s for the cleanup |
 | **Reader-wait latency report (ADR #33)** | First-region and full-journey p50/p95 from Langfuse, never a fake 0 s | Fresh runs only, measured inside the agent service (no be hop or SSE delivery) |
 | **Book-identity guard (ADR #35)** | A title the search resolves to a different work stops with BookNotFound ("did you mean …?") instead of a trip for that other book | Runs after the full discovery graph; trusts the model's label (fails open when silent) |
 | **Screen prompts as an overlay (ADR #36)** | A film or series journey gets its own instructions on the same graph; a book journey does not move by a byte | Overlay edits re-key film entries only; a book version bump also changes the film text the overlay does not replace |

@@ -72,6 +72,14 @@ _SENTRY_SAFE_LOG_ATTR_KEYS = frozenset(
         "finish_reason",
         "output_length",
         "attempt",
+        # SSE abandonment (sse_stream_abandoned, api/streaming.py): the route
+        # name, the last SSE event type sent, booleans and counts. All fixed
+        # in-code vocabulary or numbers, never user content.
+        "flow",
+        "last_event",
+        "result_sent",
+        "events_sent",
+        "elapsed_s",
     }
 )
 
