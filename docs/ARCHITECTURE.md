@@ -959,6 +959,7 @@ Five smaller decisions, recorded together:
 - **Rate limiting + concurrency cap** (2026-06-23): per-identity request rate limit and in-flight concurrency cap on discovery endpoints (`api/ratelimit.py`); input-size bounds return 422 **before** any Gemini tokens are spent.
 - **Bounded session retention** (2026-06-24): a periodic retention sweep (`services/session_retention.py`) bounds the in-memory/SQLite session store — extends ADR #6, which predates it.
 - **Recommendation-tone guardrail** (2026-06-28): rec explanations are fit-only and never grade the reader (`core/guardrails/tone_guardrail.py`).
+- **Reader clarity rules** (2026-11-22): `READER_CLARITY_RULES` in `agents/prompts.py` is appended by `load_prompts()` to the same explanation agents plus `city_formatter` and `landmark_formatter` (the one-line "connection" text). It tells the model to state the book↔place link first, name the actors, avoid noun stacks and invented verbs, keep every hedge, and add nothing the research does not support. It lives in `agents.prompts` so the discovery cache fingerprint flushes on any edit; the place→book cache prefix moved to `place2book:v2:` for the same reason.
 - **Langfuse per-branch scoping** (2026-07-17, MYS-398): generation/agent-stack/span state is scoped **per ParallelAgent branch** (`_branch_key()` in `plugins/langfuse_plugin.py`) — per-request plugin instances (ADR #8) were not enough under the ADR #3 parallel fan-out.
 - **Langfuse run I/O lives on the root observation** (2026-11-04, supersedes MYS-788's trace-level write): Langfuse v4 is observations-first and removes trace-level I/O, so the plugin no longer calls the deprecated `set_trace_io()`. `plugins/langfuse_plugin.py` writes the user message and the run's final-response text to its root observation (last event where `is_final_response()` is true, the same rule as `core/run_harness.py`), falling back to `{"status": "completed"}` when the run produced no final text.
 
@@ -1353,9 +1354,28 @@ A film or series journey makes a claim a book journey never does: "the story is 
 - Book journeys are untouched; their screen claims are still nulled by `clear_screen_claims_unless_screen_work`.
 
 ### Trade-offs
-A true setting the composer labelled without a source reads as "Filmed here" until the prompts cite it (the screen prompts, ADR #35, ask for the source). That under-claims; it never over-claims.
+A true setting the composer labelled without a source reads as "Filmed here" until the prompts cite it (the screen prompts, ADR #36, ask for the source). That under-claims; it never over-claims.
 
-## 35. Film and Series Prompts Are an Overlay on the Book Set, Keyed Apart in the Cache (2026-11-20)
+## 35. Discovery Stops When the Search Found a Different Book (2026-11-21)
+
+### Context
+`discover()` takes the title and author on trust and hands them to a google_search researcher. A search does not fail on a title that names no book: it resolves it to whatever the web associates with it. In prod on 2026-11-21, "dddd" by "ddd" resolved to Inio Asano's manga *Dead Dead Demon's Dededede Destruction* (fans write it "DeDeDeDe"), set in Tokyo, and the reader got a Tokyo trip titled "dddd by ddd". Nothing on the page said which book it was for. The LLM judge rated the run "generic" because discovery data was nearly empty.
+
+### Decision
+- Prompt set `v6` = `v5` with only `book_context_researcher` / `book_context_formatter` changed. The researcher first states which book its sources describe and whether it is the requested one (a different author, or a different work sharing an abbreviation or spelling, is not). The formatter fills three new optional `BookContext` fields: `matches_requested_book`, `identified_title`, `identified_author`, and returns empty locations/themes for a different book.
+- `core/book_identity.py:check_book_identity()` turns them into `ok` / `mismatch` / `not_found`. `discover()` runs it after the discovery workflow and before the region guards and the cache write. Anything but `ok` marks the session failed and emits `WorkflowError(error_type="BookNotFound", reason="book_mismatch" | "book_not_found")`; a mismatch also carries `suggested_title` / `suggested_author` (on the SSE `error` event too) for a "did you mean …?".
+- The rejection is persisted, not only the failure flag: `discover()` writes `book_identity_rejected` (the BookNotFound payload) with `job_failed` in one `append_event`. `compose()` clears `job_failed` on every retry and the wrong book's regions stay in state, so it reads that key first and answers the same BookNotFound; retries after ordinary composition failures are unaffected (Codex on ai#317).
+- Book journeys only: a film or series request carries its director or showrunner as `author`, so the book researcher naming the source novel's author (Persuasion → Jane Austen for the Carrie Cracknell film) is not a different work. The guard is skipped when the work kind is not `book`.
+- It fails **open**: a missing or null label (pre-v6 payloads, the local-atmosphere flow) is `ok`, and a `false` label that names the requested book itself (same title tokens, a shared author-name token, accents and case folded) is overruled. Blocking a real book is worse than the old behaviour.
+- `core.book_identity` is in the cache fingerprint (`_PROMPT_MODULES`): it decides which runs may reach the cache, so a stricter guard must not be bypassed by entries a looser one let in.
+
+### Trade-offs
+- The check runs after the whole discovery graph, so a wrong-book run still pays for the three discovery branches. It is rare, and this keeps the graph and its pinned tests as they are. Stopping right after `book_context_formatter` is the follow-up if the cost shows up.
+- The verdict rests on the model's label. The deterministic overrule only protects against a self-contradicting `false`, not against a wrong `true`.
+- The `v6` bump moves the discovery cache namespace and the place→book key (`place2book:v1:v6:…`): one cold-cache window for both.
+- fe still shows its generic discover error for `BookNotFound` until a designed "did you mean" state lands. The SSE event already carries what it needs.
+
+## 36. Film and Series Prompts Are an Overlay on the Book Set, Keyed Apart in the Cache (2026-11-20)
 
 ### Context
 ADR #31 left `agents/work_prompts.py::for_kind` as a seam that returned the book prompts for every kind. A film or series needs different instructions (story locations vs filming locations, creator sites instead of author sites, a composer that writes `screen_claim` on every stop) but the same graph: the screen path must add no agents and must not move a book journey by a byte (storyland-ai-private#67 Part 2).
@@ -1368,10 +1388,10 @@ ADR #31 left `agents/work_prompts.py::for_kind` as a seam that returned the book
 ### Trade-offs
 Two places now version prompts (`vN.json` for books, `screen_vN.json` for films). The overlay rides whichever book version is current, so a future book bump also changes film text that the overlay does not replace; the film key moves with it because the global fingerprint is in every key. The `screen_v1` numbers (ai-private#68's eval set, live Gemini) are Part 3/3.
 
-## 36. A Trace Names Its Work Kind (2026-11-21)
+## 37. A Trace Names Its Work Kind (2026-11-21)
 
 ### Context
-With film and series journeys on the same graph (ADR #35), a Langfuse trace looked the same whatever it ran for, so screen-journey cost, latency and errors could not be read apart from book journeys (storyland-ai-private#67 Part 3).
+With film and series journeys on the same graph (ADR #36), a Langfuse trace looked the same whatever it ran for, so screen-journey cost, latency and errors could not be read apart from book journeys (storyland-ai-private#67 Part 3).
 
 ### Decision
 - `LangfusePlugin(work_kind=...)` writes `work_kind` into the trace metadata (beside `prompt_version` / `prompt_hash`) and a `work_kind:<kind>` trace tag via `propagate_attributes`. A film or series trace also carries `screen_prompt_hash`.
@@ -1416,5 +1436,7 @@ A book trace's metadata gains one key (`work_kind: book`); nothing a reader sees
 | **Work kind on every trace (ADR #36)** | Screen journeys filter apart from books in Langfuse (`work_kind:<kind>` tag + metadata, overlay hash on films) | Only discovery and composition carry a screen kind; other runs say `book` |
 | **Cancellation-safe session DB (ADR #32)** | A dropped SSE stream returns its pooled connection; caller cancellation is unchanged | One wrapper method per ADK DB call to keep in step on upgrades |
 | **Reader-wait latency report (ADR #33)** | First-region and full-journey p50/p95 from Langfuse, never a fake 0 s | Fresh runs only, measured inside the agent service (no be hop or SSE delivery) |
+| **Book-identity guard (ADR #35)** | A title the search resolves to a different work stops with BookNotFound ("did you mean …?") instead of a trip for that other book | Runs after the full discovery graph; trusts the model's label (fails open when silent) |
+| **Screen prompts as an overlay (ADR #36)** | A film or series journey gets its own instructions on the same graph; a book journey does not move by a byte | Overlay edits re-key film entries only; a book version bump also changes the film text the overlay does not replace |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.

@@ -605,12 +605,24 @@ class SSEErrorEvent(BaseModel):
         default=None,
         description=(
             "Machine-readable failure class for recovery UX "
-            '("transient" | "taste_validation"). Absent for unclassified errors.'
+            '("transient" | "taste_validation" | "book_not_found" | "book_mismatch"). '
+            "Absent for unclassified errors."
         ),
     )
     offending_title: Optional[str] = Field(
         default=None,
         description="taste_context title that failed validation (reason=taste_validation)",
+    )
+    suggested_title: Optional[str] = Field(
+        default=None,
+        description=(
+            "error_type=BookNotFound, reason=book_mismatch: title of the book the "
+            "search found instead of the one requested (for a 'did you mean?')"
+        ),
+    )
+    suggested_author: Optional[str] = Field(
+        default=None,
+        description="Author of suggested_title (reason=book_mismatch)",
     )
 
 

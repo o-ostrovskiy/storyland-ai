@@ -60,6 +60,11 @@ from models.work import DEFAULT_WORK_KIND, WorkRef
 from plugins.langfuse_plugin import LangfusePlugin
 from services.session_service import create_session_service
 
+from .book_identity import (
+    NOT_FOUND_MESSAGE,
+    check_book_identity,
+    mismatch_message,
+)
 from .discovery_errors import classify_discovery_failure
 from .events import (
     DomainEvent,
@@ -853,6 +858,67 @@ class WorkflowExecutor:
 
             self._audit_discovery_grounding(job_id, capture, run_state, unverified)
 
+            # Book-identity guard: the search may have researched a DIFFERENT
+            # work than the one typed ("dddd" -> a Tokyo manga). Checked before
+            # the region guards and the cache write, so such a run is never
+            # emitted, cached or composed (core/book_identity.py). Books only:
+            # a film or series carries its director/showrunner as `author`, and
+            # the book researcher naming the source novel's author is not a
+            # wrong work (Persuasion / Carrie Cracknell, ADR #31).
+            identity = (
+                check_book_identity(run_state.book_context, exact_title, exact_author)
+                if _work_kind(work) == DEFAULT_WORK_KIND
+                else None
+            )
+            if identity is not None and identity.kind != "ok":
+                logger.info(
+                    "discovery_book_identity_failed",
+                    job_id=job_id[:8],
+                    verdict=identity.kind,
+                    suggested_title=identity.suggested_title,
+                )
+                if identity.kind == "mismatch":
+                    message = mismatch_message(
+                        identity.suggested_title or "",
+                        identity.suggested_author,
+                    )
+                    reason = "book_mismatch"
+                else:
+                    message = NOT_FOUND_MESSAGE
+                    reason = "book_not_found"
+                # Persist the rejection, not only JOB_FAILED: compose() clears
+                # JOB_FAILED on every retry, and the wrong-book regions are
+                # still in state. compose() reads this key and refuses.
+                await self._session_service.append_event(
+                    session,
+                    Event(
+                        invocation_id="system",
+                        author="system",
+                        actions=EventActions(
+                            state_delta={
+                                SessionStateKeys.BOOK_IDENTITY_REJECTED: {
+                                    "message": message,
+                                    "reason": reason,
+                                    "suggested_title": identity.suggested_title,
+                                    "suggested_author": identity.suggested_author,
+                                },
+                                SessionStateKeys.JOB_FAILED: True,
+                            }
+                        ),
+                    ),
+                )
+                for ev in error_events(
+                    job_id,
+                    message,
+                    "BookNotFound",
+                    phase=Phase.DISCOVERY,
+                    reason=reason,
+                    suggested_title=identity.suggested_title,
+                    suggested_author=identity.suggested_author,
+                ):
+                    yield ev
+                return
+
             # Empty-discovery guard: when discovery yields zero regions
             # (obscure book, failed/empty google_search, extraction miss),
             # emit a clean NoRegions error instead of a silent, empty-but-
@@ -977,6 +1043,24 @@ class WorkflowExecutor:
 
         state = SessionStateAccessor(session.state)
         all_regions = state.regions
+
+        rejection = state.book_identity_rejection
+        if rejection is not None:
+            # discover() found a different book than the one typed (or none).
+            # Its regions are the wrong book's, so no retry may compose them.
+            logger.info("compose_refused_book_identity", job_id=job_id[:8])
+            await self._mark_session_failed(job_id, user_id)
+            for ev in error_events(
+                job_id,
+                rejection.get("message") or NOT_FOUND_MESSAGE,
+                "BookNotFound",
+                phase=Phase.COMPOSITION,
+                reason=rejection.get("reason"),
+                suggested_title=rejection.get("suggested_title"),
+                suggested_author=rejection.get("suggested_author"),
+            ):
+                yield ev
+            return
 
         if not all_regions:
             await self._mark_session_failed(job_id, user_id)

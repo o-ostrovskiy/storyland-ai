@@ -1,0 +1,360 @@
+{
+  "eval_set_id": "screen_v1",
+  "name": "Screen path (film & series) eval v1",
+  "description": "Movies epic story 5 (ai-private#68). 12 titles over the claim matrix: set and filmed in the same place, set in a real place but filmed elsewhere, fictional worlds, series with a source book, films with no book, and one bad input. Scored by evaluation/tools/screen_scorers.py: claim precision (share of set_here stops whose place is a real narrative setting) and book-pairing honesty (source_work is the expected book or none; never invented). Each case also names 1-4 stops with the claim they must carry.",
+  "version": "1.0",
+  "flow": "screen",
+  "eval_cases": [
+    {
+      "eval_id": "screen_emily_in_paris",
+      "screen_title": "Emily in Paris",
+      "screen_kind": "series",
+      "screen_year": 2020,
+      "expected_output": {
+        "expect": "found",
+        "story_locations": [
+          "Paris"
+        ],
+        "filming_locations": [
+          "Paris"
+        ],
+        "source_work": null,
+        "is_fictional_world": false,
+        "required_claims": [
+          {
+            "place": "Paris",
+            "screen_claim": "set_here"
+          }
+        ]
+      },
+      "notes": "Set and filmed in the same city: every Paris stop is set_here (with its scene). No source book."
+    },
+    {
+      "eval_id": "screen_amelie",
+      "screen_title": "Amélie",
+      "screen_kind": "film",
+      "screen_year": 2001,
+      "expected_output": {
+        "expect": "found",
+        "story_locations": [
+          "Paris",
+          "Montmartre"
+        ],
+        "filming_locations": [
+          "Paris",
+          "Montmartre"
+        ],
+        "source_work": null,
+        "is_fictional_world": false,
+        "required_claims": [
+          {
+            "place": "Montmartre",
+            "screen_claim": "set_here"
+          }
+        ]
+      },
+      "notes": "Set and filmed in Montmartre (Café des Deux Moulins). Original screenplay, no book."
+    },
+    {
+      "eval_id": "screen_in_bruges",
+      "screen_title": "In Bruges",
+      "screen_kind": "film",
+      "screen_year": 2008,
+      "expected_output": {
+        "expect": "found",
+        "story_locations": [
+          "Bruges"
+        ],
+        "filming_locations": [
+          "Bruges"
+        ],
+        "source_work": null,
+        "is_fictional_world": false,
+        "required_claims": [
+          {
+            "place": "Bruges",
+            "screen_claim": "set_here"
+          }
+        ]
+      },
+      "notes": "Set and filmed in Bruges. Original screenplay."
+    },
+    {
+      "eval_id": "screen_lost_in_translation",
+      "screen_title": "Lost in Translation",
+      "screen_kind": "film",
+      "screen_year": 2003,
+      "expected_output": {
+        "expect": "found",
+        "story_locations": [
+          "Tokyo",
+          "Kyoto"
+        ],
+        "filming_locations": [
+          "Tokyo",
+          "Kyoto"
+        ],
+        "source_work": null,
+        "is_fictional_world": false,
+        "required_claims": [
+          {
+            "place": "Tokyo",
+            "screen_claim": "set_here"
+          },
+          {
+            "place": "Kyoto",
+            "screen_claim": "set_here"
+          }
+        ]
+      },
+      "notes": "Set and filmed in Tokyo (Park Hyatt) and Kyoto. Original screenplay, no book."
+    },
+    {
+      "eval_id": "screen_talented_mr_ripley",
+      "screen_title": "The Talented Mr. Ripley",
+      "screen_kind": "film",
+      "screen_year": 1999,
+      "expected_output": {
+        "expect": "found",
+        "story_locations": [
+          "Rome",
+          "Venice",
+          "Sanremo",
+          "San Remo",
+          "Naples"
+        ],
+        "filming_locations": [
+          "Ischia",
+          "Procida",
+          "Rome",
+          "Venice",
+          "Anzio"
+        ],
+        "source_work": {
+          "title": "The Talented Mr. Ripley",
+          "author": "Patricia Highsmith"
+        },
+        "is_fictional_world": false,
+        "required_claims": [
+          {
+            "place": "Ischia",
+            "screen_claim": "filmed_here"
+          },
+          {
+            "place": "Procida",
+            "screen_claim": "filmed_here"
+          },
+          {
+            "place": "Rome",
+            "screen_claim": "set_here"
+          },
+          {
+            "place": "Venice",
+            "screen_claim": "set_here"
+          }
+        ]
+      },
+      "notes": "Mongibello is invented: Ischia and Procida stood in for it, so they are filmed_here only. Rome and Venice are real settings."
+    },
+    {
+      "eval_id": "screen_mamma_mia",
+      "screen_title": "Mamma Mia!",
+      "screen_kind": "film",
+      "screen_year": 2008,
+      "expected_output": {
+        "expect": "found",
+        "story_locations": [],
+        "filming_locations": [
+          "Skopelos",
+          "Skiathos",
+          "Pelion",
+          "Damouchari"
+        ],
+        "source_work": null,
+        "is_fictional_world": false,
+        "required_claims": [
+          {
+            "place": "Skopelos",
+            "screen_claim": "filmed_here"
+          },
+          {
+            "place": "Skiathos",
+            "screen_claim": "filmed_here"
+          }
+        ]
+      },
+      "notes": "Kalokairi is an invented Greek island: no real place is its setting, so any set_here is a false claim. Based on a stage musical, not a book: source_work must be none."
+    },
+    {
+      "eval_id": "screen_game_of_thrones",
+      "screen_title": "Game of Thrones",
+      "screen_kind": "series",
+      "screen_year": 2011,
+      "expected_output": {
+        "expect": "found",
+        "story_locations": [],
+        "filming_locations": [
+          "Dubrovnik",
+          "Northern Ireland",
+          "Iceland",
+          "Seville",
+          "Malta",
+          "Morocco"
+        ],
+        "source_work": {
+          "title": "A Song of Ice and Fire",
+          "author": "George R. R. Martin",
+          "also_titles": [
+            "A Game of Thrones"
+          ]
+        },
+        "is_fictional_world": true,
+        "required_claims": [
+          {
+            "place": "Dubrovnik",
+            "screen_claim": "filmed_here"
+          },
+          {
+            "place": "Northern Ireland",
+            "screen_claim": "filmed_here"
+          }
+        ]
+      },
+      "notes": "Westeros is invented: zero set_here stops; Dubrovnik stood in for King's Landing, Northern Ireland for much of the North."
+    },
+    {
+      "eval_id": "screen_lord_of_the_rings",
+      "screen_title": "The Lord of the Rings: The Fellowship of the Ring",
+      "screen_kind": "film",
+      "screen_year": 2001,
+      "expected_output": {
+        "expect": "found",
+        "story_locations": [],
+        "filming_locations": [
+          "New Zealand",
+          "Matamata",
+          "Tongariro",
+          "Wellington"
+        ],
+        "source_work": {
+          "title": "The Lord of the Rings",
+          "author": "J. R. R. Tolkien",
+          "also_titles": [
+            "The Fellowship of the Ring"
+          ]
+        },
+        "is_fictional_world": true,
+        "required_claims": [
+          {
+            "place": "Matamata",
+            "screen_claim": "filmed_here"
+          },
+          {
+            "place": "Tongariro",
+            "screen_claim": "filmed_here"
+          }
+        ]
+      },
+      "notes": "Middle-earth is invented: zero set_here stops; Hobbiton was built at Matamata, Mordor was shot around Tongariro."
+    },
+    {
+      "eval_id": "screen_normal_people",
+      "screen_title": "Normal People",
+      "screen_kind": "series",
+      "screen_year": 2020,
+      "expected_output": {
+        "expect": "found",
+        "story_locations": [
+          "Sligo",
+          "Dublin"
+        ],
+        "filming_locations": [
+          "Sligo",
+          "Dublin",
+          "Italy"
+        ],
+        "source_work": {
+          "title": "Normal People",
+          "author": "Sally Rooney"
+        },
+        "is_fictional_world": false,
+        "required_claims": [
+          {
+            "place": "Dublin",
+            "screen_claim": "set_here"
+          }
+        ]
+      },
+      "notes": "Series with a source book: Sally Rooney's novel. Trinity College Dublin is a real setting."
+    },
+    {
+      "eval_id": "screen_big_little_lies",
+      "screen_title": "Big Little Lies",
+      "screen_kind": "series",
+      "screen_year": 2017,
+      "expected_output": {
+        "expect": "found",
+        "story_locations": [
+          "Monterey"
+        ],
+        "filming_locations": [
+          "Monterey",
+          "Carmel-by-the-Sea",
+          "Big Sur",
+          "Malibu"
+        ],
+        "source_work": {
+          "title": "Big Little Lies",
+          "author": "Liane Moriarty"
+        },
+        "is_fictional_world": false,
+        "required_claims": [
+          {
+            "place": "Monterey",
+            "screen_claim": "set_here"
+          }
+        ]
+      },
+      "notes": "Series with a source book; the novel is set in Australia, the series moved the story to Monterey, so Monterey is the screen work's setting."
+    },
+    {
+      "eval_id": "screen_before_sunrise",
+      "screen_title": "Before Sunrise",
+      "screen_kind": "film",
+      "screen_year": 1995,
+      "expected_output": {
+        "expect": "found",
+        "story_locations": [
+          "Vienna"
+        ],
+        "filming_locations": [
+          "Vienna"
+        ],
+        "source_work": null,
+        "is_fictional_world": false,
+        "required_claims": [
+          {
+            "place": "Vienna",
+            "screen_claim": "set_here"
+          }
+        ]
+      },
+      "notes": "Set and filmed in Vienna over one night. Original screenplay, no book."
+    },
+    {
+      "eval_id": "screen_bad_input",
+      "screen_title": "xyzzy the movie",
+      "screen_kind": "film",
+      "screen_year": null,
+      "expected_output": {
+        "expect": "not_found",
+        "story_locations": [],
+        "filming_locations": [],
+        "source_work": null,
+        "is_fictional_world": false,
+        "required_claims": []
+      },
+      "notes": "Not a real title: discovery must compose nothing and pair no book."
+    }
+  ]
+}
