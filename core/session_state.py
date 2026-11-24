@@ -50,7 +50,7 @@ class SessionStateKeys:
     # an itinerary (Codex on ai#317). Value: the BookNotFound error payload.
     BOOK_IDENTITY_REJECTED = "book_identity_rejected"
     # The discover() cache key (unversioned) this job was discovered under.
-    # compose() builds its own cache key from it (ADR #36); a session that
+    # compose() builds its own cache key from it (ADR #40); a session that
     # predates it has none and simply composes fresh.
     DISCOVERY_CACHE_KEY = "discovery_cache_key"
 

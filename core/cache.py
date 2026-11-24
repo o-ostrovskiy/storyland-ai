@@ -172,7 +172,7 @@ def build_place_to_book_cache(config, ttl_seconds: int, max_entries: int):
 
 
 def build_compose_cache(config):
-    """Construct the compose cache (ADR #36): the Discovery cache's backend,
+    """Construct the compose cache (ADR #40): the Discovery cache's backend,
     TTL, entry budget and fallback, in its own store under ``cache_dir`` so a
     composed envelope never evicts a discovery entry (a fresh discover costs
     about three times a compose, plus ~10 search queries).

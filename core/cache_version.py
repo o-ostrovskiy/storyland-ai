@@ -76,7 +76,7 @@ _PROMPT_MODULES = (
     "core.book_identity",
 )
 
-# Extra inputs to a COMPOSED envelope (ADR #36), on top of _PROMPT_MODULES:
+# Extra inputs to a COMPOSED envelope (ADR #40), on top of _PROMPT_MODULES:
 # the composer agent (instruction wiring, output_key, output ceiling), the
 # response schema the model is constrained to, and the truncation detector that
 # decides which outputs are complete enough to store. They are hashed only into

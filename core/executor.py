@@ -45,6 +45,7 @@ from google.adk.apps import App
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
 
+from agents.work_prompts import screen_prompt_hash
 from agents.composer_truncation import COMPOSER_ATTEMPTS, find_composer_truncation
 from agents.orchestrator import (
     create_book_recommendation_workflow,
@@ -280,7 +281,7 @@ class WorkflowExecutor:
         # backend persists them across deploys — no stale grounded recs, and no
         # post-deploy warmup needed).
         self._cache_version = compute_cache_version(config.model_name)
-        # Compose cache (ADR #36): the reader's FIRST compose of a discovered
+        # Compose cache (ADR #40): the reader's FIRST compose of a discovered
         # book (Home composes regions[0]). Same backend/TTL/budget as the
         # Discovery cache, its own store, its own namespace (the Discovery
         # inputs + the composer's modules), so a prompt change flips both.
@@ -663,6 +664,10 @@ class WorkflowExecutor:
         # a book; tests/unit/test_work_kind.py pins a book's key literally.
         if kind != DEFAULT_WORK_KIND:
             key += f"|kind={kind}"
+            # ai-private#67 Part 2: films run the screen overlay, which the
+            # global fingerprint does not hash (that would cold-start every
+            # book), so an overlay edit re-keys screen entries here instead.
+            key += f"|screen={screen_prompt_hash()}"
         return key
 
     async def discover(
@@ -702,7 +707,7 @@ class WorkflowExecutor:
             SessionStateKeys.BOOK_TITLE: book_title,
             SessionStateKeys.AUTHOR: author,
             SessionStateKeys.WORK_KIND: _work_kind(work),
-            # compose() keys its cache on this (ADR #36).
+            # compose() keys its cache on this (ADR #40).
             SessionStateKeys.DISCOVERY_CACHE_KEY: discovery_key,
         }
         if preferences:
@@ -794,6 +799,7 @@ class WorkflowExecutor:
                 author=exact_author,
                 vibe=vibe,
                 taste_context=taste_context,
+                work_kind=_work_kind(work),
             )
             runner = self._build_runner(discovery_workflow, langfuse_plugin)
 
@@ -1136,7 +1142,7 @@ class WorkflowExecutor:
             langfuse_plugin = None
             result = None
             if cached_envelope is not None:
-                # ADR #36: replay the stored RAW envelope through the same
+                # ADR #40: replay the stored RAW envelope through the same
                 # extraction + guards a fresh run uses, against THIS session's
                 # grounding. No ProgressEvent: like a discover hit, a hit is
                 # told apart from a fresh run by its absence.
@@ -1145,7 +1151,13 @@ class WorkflowExecutor:
                 )
             if result is None:
                 async for ev in self._run_composer(
-                    job_id, user_id, session, selected_regions, prompt, compose_key
+                    job_id,
+                    user_id,
+                    session,
+                    selected_regions,
+                    prompt,
+                    compose_key,
+                    work_kind=state.work_kind,
                 ):
                     if isinstance(ev, _ComposerOutcome):
                         langfuse_plugin, result = ev.langfuse_plugin, ev.result
@@ -1302,7 +1314,7 @@ class WorkflowExecutor:
     async def _store_composed_envelope(
         self, compose_key: Optional[str], job_id: str, envelope, result
     ) -> None:
-        """Store a fresh run's RAW envelope (ADR #36).
+        """Store a fresh run's RAW envelope (ADR #40).
 
         Only an envelope that extracted into an itinerary with at least one
         city: an empty journey is a degraded answer, and pinning it for the
@@ -1332,6 +1344,7 @@ class WorkflowExecutor:
         selected_regions: list,
         prompt: str,
         compose_key: Optional[str],
+        work_kind: str = DEFAULT_WORK_KIND,
     ):
         """Run the composer live. Yields its stream events, then one final
         :class:`_ComposerOutcome` that compose() consumes itself.
@@ -1343,7 +1356,9 @@ class WorkflowExecutor:
         )
 
         langfuse_plugin = self._create_langfuse_plugin()
-        composition_workflow = create_book_to_place_composition_workflow(self._model)
+        composition_workflow = create_book_to_place_composition_workflow(
+            self._model, work_kind=work_kind
+        )
         runner = self._build_runner(composition_workflow, langfuse_plugin)
         message = types.Content(
             role="user", parts=[types.Part(text=prompt)]

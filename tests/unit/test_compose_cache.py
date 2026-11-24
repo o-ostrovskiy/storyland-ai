@@ -1,4 +1,4 @@
-"""ADR #36: the compose cache serves the reader's FIRST compose of a discovered book.
+"""ADR #40: the compose cache serves the reader's FIRST compose of a discovered book.
 
 These tests pin, offline (the composer model is scripted, nothing calls Gemini):
 
