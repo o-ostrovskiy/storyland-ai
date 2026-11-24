@@ -45,6 +45,7 @@ from google.adk.apps import App
 from google.adk.runners import Runner
 from google.adk.plugins.logging_plugin import LoggingPlugin
 
+from agents.work_prompts import screen_prompt_hash
 from agents.composer_truncation import COMPOSER_ATTEMPTS, find_composer_truncation
 from agents.orchestrator import (
     create_book_recommendation_workflow,
@@ -645,6 +646,10 @@ class WorkflowExecutor:
         # a book; tests/unit/test_work_kind.py pins a book's key literally.
         if kind != DEFAULT_WORK_KIND:
             key += f"|kind={kind}"
+            # ai-private#67 Part 2: films run the screen overlay, which the
+            # global fingerprint does not hash (that would cold-start every
+            # book), so an overlay edit re-keys screen entries here instead.
+            key += f"|screen={screen_prompt_hash()}"
         return key
 
     async def discover(
@@ -780,6 +785,7 @@ class WorkflowExecutor:
                 author=exact_author,
                 vibe=vibe,
                 taste_context=taste_context,
+                work_kind=_work_kind(work),
             )
             runner = self._build_runner(discovery_workflow, langfuse_plugin)
 
@@ -1112,7 +1118,9 @@ class WorkflowExecutor:
             )
 
             langfuse_plugin = self._create_langfuse_plugin()
-            composition_workflow = create_book_to_place_composition_workflow(self._model)
+            composition_workflow = create_book_to_place_composition_workflow(
+                self._model, work_kind=state.work_kind
+            )
             runner = self._build_runner(composition_workflow, langfuse_plugin)
 
             # Graph-runtime history is scoped per invocation (ADR #24): the

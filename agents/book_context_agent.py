@@ -7,6 +7,8 @@ using Google Search.
 
 from google.adk.agents import LlmAgent
 from models.book import BookContext
+from models.screen import ScreenResearch
+from models.work import DEFAULT_WORK_KIND
 from agents.prompts import AgentPrompts, load_prompts
 
 
@@ -16,9 +18,16 @@ def create_book_context_agents(
     book_title: str = "",
     author: str = "",
     prompts: AgentPrompts | None = None,
+    work_kind: str = DEFAULT_WORK_KIND,
 ):
     """
     Create the book context research pipeline.
+
+    For a film or series (``work_kind`` other than book) the formatter's schema
+    is ``ScreenResearch`` (story / filming locations kept apart, no source
+    book field) and the search hints ask for setting and filming locations.
+    It still writes ``state["book_context"]``: the composer and the book
+    recommender read that key as a plain dict.
 
     Args:
         model: The LLM model to use
@@ -26,6 +35,7 @@ def create_book_context_agents(
         book_title: The exact book title from book_metadata (optional for eval workflow)
         author: The exact author name from book_metadata (optional for eval workflow)
         prompts: Optional AgentPrompts instance. Loads default version if not provided.
+        work_kind: "book" (default), "film" or "series".
 
     Returns:
         (researcher, formatter) LlmAgent pair that researches and formats book context
@@ -50,6 +60,17 @@ def create_book_context_agents(
             f'- "{title_author_query} time period historical context"\n'
             f'- "{title_author_query} themes analysis"'
         )
+        if work_kind != DEFAULT_WORK_KIND:
+            kind_word = "series" if work_kind == "series" else "film"
+            book_ref = f'{kind_word.upper()}: "{normalized_title}"' + (
+                f" (created by {normalized_author})" if normalized_author else ""
+            )
+            search_hint = (
+                f'Search queries to use:\n'
+                f'- "{normalized_title} {kind_word} filming locations"\n'
+                f'- "{normalized_title} {kind_word} where is it set"\n'
+                f'- "{normalized_title} {kind_word} based on book"'
+            )
     else:
         book_ref = (
             "BOOK: Read the book title and author from the book_metadata "
@@ -74,7 +95,7 @@ def create_book_context_agents(
     book_context_formatter = LlmAgent(
         name="book_context_formatter",
         model=model,
-        output_schema=BookContext,
+        output_schema=BookContext if work_kind == DEFAULT_WORK_KIND else ScreenResearch,
         output_key="book_context",
         instruction=prompts.book_context_formatter,
     )
