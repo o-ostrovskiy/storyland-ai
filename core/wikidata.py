@@ -358,7 +358,9 @@ def _breadcrumb(message: str, data: dict[str, Any]) -> None:
 
 def _skip(status: LookupStatus, reason: str, place: str, place_qid: Optional[str] = None) -> WikidataLookup:
     logger.info("wikidata_lookup_skipped", status=status, reason=reason, place=place, place_qid=place_qid)
-    _breadcrumb(f"wikidata lookup {status}", {"reason": reason, "place": place, "place_qid": place_qid})
+    # The raw place query stays out of the breadcrumb: breadcrumbs ride on every later Sentry event, and
+    # `api/sentry.py` does not scrub a plain `place` key (the logging allowlist drops it from the log line).
+    _breadcrumb(f"wikidata lookup {status}", {"status": status, "reason": reason, "place_qid": place_qid})
     return WikidataLookup(status=status, place_qid=place_qid, reason=reason)
 
 

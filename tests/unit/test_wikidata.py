@@ -306,3 +306,32 @@ def test_the_default_client_carries_the_descriptive_user_agent():
         assert "mystoryland.ai" in wd.USER_AGENT
     finally:
         run(source.aclose())
+
+
+# --- the reader's place query never reaches Sentry --------------------------------
+
+SECRET_PLACE = "Quuxbridge-upon-Zed"
+
+
+class SearchFails(FakeSource):
+    async def search_items(self, name, limit):
+        raise RuntimeError("boom")
+
+
+@pytest.mark.parametrize(
+    "source, status",
+    [(FakeSource(hits=[]), "not_found"), (SearchFails(), "unavailable")],
+    ids=["not_found", "unavailable"],
+)
+def test_a_skip_breadcrumb_never_carries_the_place_query(monkeypatch, source, status):
+    import sentry_sdk
+
+    crumbs: list[dict[str, Any]] = []
+    monkeypatch.setattr(sentry_sdk, "add_breadcrumb", lambda **kw: crumbs.append(kw))
+
+    result = run(lookup_works_set_in(source, SECRET_PLACE))
+
+    assert result.status == status
+    assert len(crumbs) == 1
+    assert SECRET_PLACE not in repr(crumbs[0])
+    assert set(crumbs[0]["data"]) == {"status", "reason", "place_qid"}
