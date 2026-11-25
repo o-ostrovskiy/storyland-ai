@@ -71,14 +71,10 @@ def _derive_job_status(state: dict) -> JobStatus:
 
 @system_router.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
-    """Check API health and model configuration."""
+    """Check API health. Unauthenticated, so it never names the model (ai-private#78)."""
     try:
-        app_state = get_app_state()
-        return HealthResponse(
-            status="healthy",
-            version="0.1.0",
-            model_name=app_state.config.model_name,
-        )
+        get_app_state()
+        return HealthResponse(status="healthy", version="0.1.0")
     except RuntimeError:
         return HealthResponse(status="unhealthy", version="0.1.0")
 

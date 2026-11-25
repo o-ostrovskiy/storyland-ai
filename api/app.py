@@ -100,21 +100,21 @@ def create_app() -> FastAPI:
         ],
     )
 
-    # CORS configuration
-    cors_origins = os.getenv("CORS_ORIGINS", "*")
-    origins = [o.strip() for o in cors_origins.split(",")]
-
-    # Browsers reject Access-Control-Allow-Origin: * with credentials.
-    # Only enable credentials when specific origins are configured.
-    allow_credentials = origins != ["*"]
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=allow_credentials,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # CORS: off unless CORS_ORIGINS names origins (ai-private#78). No browser
+    # calls this service (browser → be → ai), so the default is no CORS
+    # middleware at all, which answers a cross-origin preflight with no
+    # Access-Control-Allow-Origin. Prod sets CORS_ORIGINS=https://${DOMAIN_NAME}.
+    origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+    if origins:
+        # Browsers reject Access-Control-Allow-Origin: * with credentials.
+        # Only enable credentials when specific origins are configured.
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=origins != ["*"],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     # Health check — no gateway secret required (probes, standalone testing)
     app.include_router(system_router, prefix="/api/v1")

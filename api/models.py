@@ -19,6 +19,7 @@ from pydantic import (
     model_validator,
 )
 
+from models.urls import https_only
 from models.work import WorkKind, WorkRef
 
 
@@ -541,6 +542,11 @@ class SSEMetadataEvent(BaseModel):
                 data.pop(key, None)
         return data
 
+    @field_validator("image_url", mode="before")
+    @classmethod
+    def _image_url_https_only(cls, value):
+        return https_only(value)
+
 
 class SSERegionsEvent(BaseModel):
     """Region analysis results for user selection."""
@@ -667,4 +673,3 @@ class HealthResponse(BaseModel):
 
     status: str = "healthy"
     version: str = "0.1.0"
-    model_name: str = ""

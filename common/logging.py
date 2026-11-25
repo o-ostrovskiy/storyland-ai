@@ -9,6 +9,7 @@ Logging Levels:
 """
 
 import logging
+import os
 import sys
 
 import structlog
@@ -158,6 +159,15 @@ ADK_LOGGERS = [
 ]
 
 
+def _renderer():
+    """JSON lines in production (machine-readable, no ANSI colour codes), console
+    text everywhere else (ai-private#78). Same ENVIRONMENT variable as the Sentry
+    environment tag (api/sentry.py)."""
+    if os.getenv("ENVIRONMENT", "").strip().lower() == "production":
+        return structlog.processors.JSONRenderer()
+    return structlog.dev.ConsoleRenderer(colors=True)
+
+
 def configure_logging(level: str = "INFO", enable_adk_debug: bool = False) -> None:
     """
     Configure logging for the application.
@@ -185,7 +195,7 @@ def configure_logging(level: str = "INFO", enable_adk_debug: bool = False) -> No
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S"),
             _sentry_error_processor,
-            structlog.dev.ConsoleRenderer(colors=True),
+            _renderer(),
         ],
         wrapper_class=structlog.make_filtering_bound_logger(log_level),
         context_class=dict,
