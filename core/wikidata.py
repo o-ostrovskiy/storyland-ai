@@ -270,7 +270,9 @@ def _same_name(hit: dict[str, Any], name: str) -> bool:
 def parse_place_matches(hits: list[dict[str, Any]], rows: list[dict[str, Any]], name: str) -> list[PlaceMatch]:
     """Places among the search hits whose label or alias is ``name``, best first."""
     named = {h["id"]: h for h in hits if is_qid(h.get("id")) and _same_name(h, name)}
-    places: list[PlaceMatch] = []
+    # One candidate per QID: an item with several P625 values comes back as one row per
+    # coordinate, and two copies of one place would fail pick_place's dominance check.
+    by_qid: dict[str, PlaceMatch] = {}
     for row in rows:
         qid = _entity_qid(row, "item")
         if qid is None or qid not in named:
@@ -279,15 +281,18 @@ def parse_place_matches(hits: list[dict[str, Any]], rows: list[dict[str, Any]], 
             sitelinks = int(_value(row, "sitelinks") or 0)
         except ValueError:
             sitelinks = 0
-        places.append(
-            PlaceMatch(
-                qid=qid,
-                label=str(named[qid].get("label") or name),
-                sitelinks=sitelinks,
-                has_coordinates=_value(row, "coord") is not None,
-            )
+        has_coordinates = _value(row, "coord") is not None
+        seen = by_qid.get(qid)
+        if seen is not None:
+            has_coordinates = has_coordinates or seen.has_coordinates
+            sitelinks = max(sitelinks, seen.sitelinks)
+        by_qid[qid] = PlaceMatch(
+            qid=qid,
+            label=str(named[qid].get("label") or name),
+            sitelinks=sitelinks,
+            has_coordinates=has_coordinates,
         )
-    places = [p for p in places if p.has_coordinates]
+    places = [p for p in by_qid.values() if p.has_coordinates]
     return sorted(places, key=lambda p: p.sitelinks, reverse=True)
 
 

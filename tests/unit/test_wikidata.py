@@ -17,6 +17,7 @@ from core.wikidata import (
     HttpWikidataSource,
     WikidataError,
     lookup_works_set_in,
+    parse_place_matches,
     parse_works,
     pick_place,
     PlaceMatch,
@@ -133,6 +134,20 @@ def test_two_places_of_similar_size_are_skipped_not_guessed():
     assert not any("wdt:P840" in q for q in source.queries)
 
 
+def test_a_place_with_several_coordinates_is_still_one_clear_place():
+    # Wikidata gives many cities more than one P625 value; the place check then answers
+    # one row per coordinate for the same item. That is one place, not two close ones.
+    rows = [
+        {"item": uri("Q1761"), "sitelinks": lit("239"), "coord": lit("Point(-6.26 53.35)")},
+        {"item": uri("Q1761"), "sitelinks": lit("239"), "coord": lit("Point(-6.27 53.34)")},
+        {"item": uri("Q988937"), "sitelinks": lit("49"), "coord": lit("Point(-83.14 40.11)")},
+    ]
+    source = FakeSource(place_rows=rows)
+    result = run(lookup_works_set_in(source, "Dublin"))
+    assert result.status == "found"
+    assert result.place_qid == "Q1761"
+
+
 def test_a_name_with_no_place_is_not_found():
     source = FakeSource(place_rows=[{"item": uri("Q16865980"), "sitelinks": lit("2")}])
     result = run(lookup_works_set_in(source, "Dublin"))
@@ -220,6 +235,17 @@ def test_pick_place_needs_a_clear_lead():
     assert pick_place([big, close]) is None
     assert pick_place([small]) is small
     assert pick_place([]) is None
+
+
+def test_parse_place_matches_keeps_one_candidate_per_qid():
+    hits = [{"id": "Q1761", "label": "Dublin"}]
+    rows = [
+        {"item": uri("Q1761"), "sitelinks": lit("239")},  # a row without a coordinate first
+        {"item": uri("Q1761"), "sitelinks": lit("239"), "coord": lit("Point(-6.26 53.35)")},
+        {"item": uri("Q1761"), "sitelinks": lit("239"), "coord": lit("Point(-6.27 53.34)")},
+    ]
+    places = parse_place_matches(hits, rows, "Dublin")
+    assert [(p.qid, p.has_coordinates) for p in places] == [("Q1761", True)]
 
 
 def test_parse_works_drops_qid_titles_and_malformed_rows():
