@@ -2,7 +2,7 @@
 
 This repository is the agent service behind [My Storyland](https://mystoryland.ai). Give it a book, and it finds the places connected to the story, groups them into regions and plans stops for the chosen regions. Give it a place, and it returns books that happen there. It is a FastAPI server that streams progress and results as server-sent events (SSE). The pipeline is a set of Google ADK agents on Gemini (`gemini-3.1-flash-lite`), and the research agents can call Google Search. The website does not call this service directly: a gateway service does, with a shared secret.
 
-**Measured on mystoryland.ai, 2026-11-22:** a first search for a book showed the journey about 17 seconds after submit. Repeating the same search took about 5 seconds, served from the cache. The cache holds the discovery result, so the composition step still runs on every request. The service's own measurement of both waits, from Langfuse traces, is in [ADR #33](docs/ARCHITECTURE.md#33-the-two-reader-waits-have-numbers-a-langfuse-latency-report-2026-11-01) (`scripts/latency_report.py`).
+**Measured on mystoryland.ai, 2026-11-22:** a first search for a book showed the journey about 17 seconds after submit. Repeating the same search took about 5 seconds, served from the cache. On that date the cache held only the discovery result, so the composition step ran on every request. Since [ADR #36](docs/ARCHITECTURE.md#36-the-readers-first-compose-is-cached-too-2026-11-23), the reader's first composition of a book (the first region, which is what the home page composes) is cached too; these timings were measured before that change. The service's own measurement of both waits, from Langfuse traces, is in [ADR #33](docs/ARCHITECTURE.md#33-the-two-reader-waits-have-numbers-a-langfuse-latency-report-2026-11-01) (`scripts/latency_report.py`).
 
 ![Diagram of one book search. The gateway service sends a discover request, then a compose request, to the SSE API (1). A cache hit returns regions with no model call (2). A miss runs the discovery graph (3), whose agents call Gemini, and its researchers can use Google Search (4). The research, and which researchers searched, go to session state (5). Compose runs trip_composer for the chosen regions (6). Claim checks compare literal and historical labels with that research (7). Regions, then the itinerary, stream back as SSE events (8).](docs/images/agent-service.png)
 
@@ -333,7 +333,7 @@ storyland-ai/
 │   ├── executor.py      # WorkflowExecutor (discover/compose/expand/recommend)
 │   ├── run_harness.py   # Shared ADK runner scaffold (event pump, timeout/error policy)
 │   ├── place_to_book.py # PlaceToBookResolver (place→book reverse routing)
-│   ├── cache.py         # In-process TTL/LRU result cache
+│   ├── cache.py         # TTL/LRU result cache + builders (discovery, compose, place→book stores)
 │   └── session_state.py # Typed session-state accessor
 │
 ├── api/                 # FastAPI SSE streaming API
@@ -434,7 +434,7 @@ The unit suite (`tests/unit/`) by area — per-module counts rot with every PR, 
 | Models & agents | `test_models.py`, `test_agents.py` |
 | Core workflow | `test_core.py`, `test_discovery_errors.py`, `test_empty_discovery_guard.py`, `test_book_identity.py`, `test_retry_backoff.py` |
 | API layer | `test_api.py`, `test_gateway_auth.py`, `test_ratelimit.py`, `test_request_input_limits.py`, `test_dependencies.py` |
-| Caching | `test_cache.py`, `test_disk_cache.py`, `test_cache_version.py` |
+| Caching | `test_cache.py`, `test_disk_cache.py`, `test_cache_version.py`, `test_compose_cache.py` |
 | Place features | `test_place_key.py`, `test_place_to_book.py`, `test_place_to_book_eval.py` |
 | Quality & guardrails | `test_llm_scorer.py`, `test_tone_guardrail.py`, `test_recommendation_floor.py`, `test_judge_calibration.py`, `test_spot_check.py` |
 | Eval harnesses | `test_local_atmosphere_eval.py`, `test_expansion_eval.py`, `test_eval_dataset_routing.py` |
