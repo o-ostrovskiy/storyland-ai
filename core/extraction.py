@@ -14,6 +14,7 @@ from typing import Optional, Sequence, Tuple
 from pydantic import ValidationError
 
 from common.logging import get_logger
+from core.reading_highlights import apply_reading_highlights, names_from_state
 from core.guardrails import (
     sanitize_itinerary_explanations,
     sanitize_expansion_explanations,
@@ -822,6 +823,12 @@ def extract_itinerary_from_response(
         itinerary_dict = sanitize_itinerary_explanations(itinerary_dict)
         itinerary_dict = clear_screen_claims_unless_screen_work(
             itinerary_dict, state_accessor.work_kind
+        )
+        # Prompt v7: bold the book's known names in code and keep at most one
+        # verified model pick per field (core/reading_highlights.py). Runs
+        # last, on the text the page will actually show.
+        itinerary_dict = apply_reading_highlights(
+            itinerary_dict, names_from_state(state_accessor)
         )
         return itinerary_dict, suggestions
 

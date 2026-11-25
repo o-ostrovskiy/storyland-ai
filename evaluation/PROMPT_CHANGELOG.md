@@ -6,14 +6,16 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 
 ## v7 — 2026-11-25
 
-**Why:** Olga found the itinerary page hard to read (2026-11-25) and approved a design where the page bolds the key details and leads each stop with how it appears in the book (canvas https://claude.ai/artifact/RjAqBvV5vd5ughn3wpKGtu). She asked the model to pick what gets bolded. Only `trip_composer` changed; every other agent is byte-identical to v6 (pinned by `test_v7_is_v6_plus_the_trip_composer_change_only`).
+**Why:** Olga found the itinerary page hard to read (2026-11-25) and approved a design where the page bolds the key details and leads each stop with how it appears in the book (canvas https://claude.ai/artifact/RjAqBvV5vd5ughn3wpKGtu). Three agents changed; every other agent is byte-identical to v6 (pinned by `test_v7_is_v6_plus_the_composer_and_book_context_changes_only`).
 
 ### Changes
 | Agent | Change |
 |---|---|
-| trip_composer | New output fields: `headline` (one sentence, the gist of the trip), `summary_highlights`, `overview_highlights`, per stop `book_hook` (one line, ≤10 words, must agree with `match_type`) and `highlights`. Each highlights list holds 0–2 phrases of 1–5 words copied verbatim from its own field; generic mood words are banned. `reason` is asked to be concrete (names, events, objects from the book). |
+| trip_composer | New output fields: `headline` (one sentence, the gist of the trip), per stop `book_hook` (one line, ≤10 words, must agree with `match_type`; the page labels thematic/vibe hooks "Why it fits"), and `summary_highlights` / `overview_highlights` / `highlights` holding at most ONE phrase per field: a named detail that is not the title, author or a main character, copied verbatim, with a name or number. |
+| book_context_researcher | New item 4: the main characters' names (up to 8; main real people for non-fiction). |
+| book_context_formatter | New field `main_characters`. |
 
-All five fields are optional on the models, so expansion and local-atmosphere results (prompts unchanged) and older itineraries still validate. The page bolds a phrase only when it appears in the text verbatim (storyland-web#814).
+Code: `core/reading_highlights.py` (ADR #41) bolds the title, author and main characters wherever they appear and keeps the model's one pick only if it is verbatim and holds a name or number; it runs last in `_finalize`. All new fields are optional on the models.
 
 ### Eval
 `run_scheduled_eval` records a deterministic `reading_highlights` block per case and per dataset: phrases picked, phrases found verbatim (`verbatim_rate`, None when nothing was picked), fields over the two-phrase cap, stops with a `book_hook`, cases with a `headline`. No pass rule yet.

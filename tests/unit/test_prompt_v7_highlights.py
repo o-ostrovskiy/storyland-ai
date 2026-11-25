@@ -7,12 +7,14 @@ from agents.prompts import CURRENT_PROMPT_VERSION, load_prompts
 from models.itinerary import CityPlan, CityStop, TripItinerary
 
 
-def test_v7_is_v6_plus_the_trip_composer_change_only():
+def test_v7_is_v6_plus_the_composer_and_book_context_changes_only():
     v6 = json.loads(Path("agents/prompts/v6.json").read_text(encoding="utf-8"))
     v7 = json.loads(Path("agents/prompts/v7.json").read_text(encoding="utf-8"))
     assert v6["agents"].keys() == v7["agents"].keys()
-    changed = [a for a in v6["agents"] if v6["agents"][a] != v7["agents"][a]]
-    assert changed == ["trip_composer"], "v7 must not quietly re-tune any other agent"
+    changed = sorted(a for a in v6["agents"] if v6["agents"][a] != v7["agents"][a])
+    assert changed == ["book_context_formatter", "book_context_researcher", "trip_composer"], (
+        "v7 must not quietly re-tune any other agent"
+    )
 
 
 def test_v7_is_current_and_asks_for_every_highlight_field():
@@ -21,7 +23,12 @@ def test_v7_is_current_and_asks_for_every_highlight_field():
     for field in ("headline", "summary_highlights", "overview_highlights", "book_hook", "highlights"):
         assert field in composer, field
     assert "letter for letter" in composer
-    assert "at most 2 per field" in composer
+    assert "at most 1 per field" in composer
+    prompts = load_prompts("v7")
+    assert "MAIN CHARACTERS" in prompts.book_context_researcher
+    assert "main_characters" in prompts.book_context_formatter
+    # The researcher template still formats with its two placeholders.
+    prompts.book_context_researcher.format(book_ref="BOOK: x", search_hint="")
 
 
 def test_highlight_fields_are_optional_so_older_payloads_still_validate():

@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from common.logging import get_logger, configure_logging
 from common.config import load_config
 from core.extraction import downgrade_ungrounded_match_types, validate_composer_envelope
+from core.reading_highlights import apply_reading_highlights, known_names
 from core.prompts import build_composition_prompt
 from core.retry import build_retry_options
 from core.session_state import SessionStateAccessor, SessionStateKeys
@@ -158,6 +159,25 @@ def apply_production_grounding_downgrade(itinerary_data, grounding_state):
     return itinerary_data
 
 
+def apply_production_reading_highlights(itinerary_data, title, author, grounding_state):
+    """Apply core.reading_highlights the way production's _finalize does.
+
+    The runner saves the ComposerEnvelope ({itinerary, suggestions}); the
+    highlights are written into the inner itinerary. Anything else is returned
+    unchanged.
+    """
+    if not isinstance(itinerary_data, dict):
+        return itinerary_data
+    inner = itinerary_data.get("itinerary")
+    payload = inner if isinstance(inner, dict) else itinerary_data
+    context = grounding_state.book_context or {}
+    if hasattr(context, "model_dump"):
+        context = context.model_dump()
+    characters = context.get("main_characters") if isinstance(context, dict) else None
+    apply_reading_highlights(payload, known_names(title, author, characters or []))
+    return itinerary_data
+
+
 def summarize_search_grounding(langfuse_plugin) -> Dict[str, Any]:
     """Which discovery researchers actually called google_search (MYS-817).
 
@@ -255,11 +275,7 @@ def aggregate_search_grounding(
 MAX_HIGHLIGHTS_PER_FIELD = 2
 
 
-def phrase_has_name(phrase: str) -> bool:
-    """The page bolds a phrase only if it holds a capital letter or a digit
-    (a name, a title, a number); "central hub" is not bolded. Mirrors
-    storyland-web src/utils/highlightPhrases.ts."""
-    return any(ch.isupper() or ch.isdigit() for ch in phrase)
+from core.reading_highlights import phrase_has_name  # noqa: E402  (re-exported for the tests)
 
 
 def summarize_reading_highlights(itinerary_data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -1194,6 +1210,11 @@ Find cities, landmarks, and author-related sites, then group them into practical
             # the deployed pipeline without anything going red.
             itinerary_data = apply_production_grounding_downgrade(
                 itinerary_data, grounding_state
+            )
+            # ...and the same code-picked reading highlights production adds
+            # in core.extraction._finalize (prompt v7).
+            itinerary_data = apply_production_reading_highlights(
+                itinerary_data, exact_title, exact_author, grounding_state
             )
 
             logger.info(
