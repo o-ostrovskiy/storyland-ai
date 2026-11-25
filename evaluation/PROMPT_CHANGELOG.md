@@ -32,6 +32,16 @@ Live runs 2026-11-25 (`storyland_eval`, 5 cases, `--region-selection first`, thr
 
 Cache: the version bump moves the place2book key to `place2book:v1:v7:…`, so that cache is flushed although place-to-book prompts did not change.
 
+**Final text (names by code, one fact by the model), 3 repeats × 10 cases** (`eval_run_20261125_18…_v7`, `storyland_eval`, `--region-selection first`):
+
+| Repeat | Cases (empty) | Picked | Found verbatim | Shown | Over cap | Stops with hook | Headlines |
+|---|---|---|---|---|---|---|---|
+| 1 | 10 (0) | 116 | 116 | 116 | 0 | 57/57 | 10/10 |
+| 2 | 10 (0) | 121 | 121 | 121 | 0 | 61/61 | 10/10 |
+| 3 | 10 (0) | 119 | 119 | 119 | 0 | 64/64 | 10/10 |
+
+Every bolded phrase is now a name, title or specific detail (e.g. "Platform 9 3/4", "Hercule Poirot's study", "Rosings Park"). Known limits seen: a frequent author name is bolded in most stops of an author-works trip ("Agatha Christie"), and a first name alone can be bolded ("Jacques"). One repeat turned ö/å into U+0006 in a Swedish trip (storyland-ai-private#99), unrelated to highlights.
+
 ---
 
 ## v6 — 2026-11-22
