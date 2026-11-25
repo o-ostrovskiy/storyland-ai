@@ -49,6 +49,10 @@ class SessionStateKeys:
     # job: a cleared JOB_FAILED must never turn the wrong-book research into
     # an itinerary (Codex on ai#317). Value: the BookNotFound error payload.
     BOOK_IDENTITY_REJECTED = "book_identity_rejected"
+    # The discover() cache key (unversioned) this job was discovered under.
+    # compose() builds its own cache key from it (ADR #40); a session that
+    # predates it has none and simply composes fresh.
+    DISCOVERY_CACHE_KEY = "discovery_cache_key"
 
 
 class SessionStateAccessor:
@@ -125,6 +129,11 @@ class SessionStateAccessor:
     def work_kind(self) -> str:
         """Kind of work this journey starts from; ``"book"`` when unset."""
         return self._state.get(SessionStateKeys.WORK_KIND) or "book"
+
+    @property
+    def discovery_cache_key(self) -> Optional[str]:
+        value = self._state.get(SessionStateKeys.DISCOVERY_CACHE_KEY)
+        return value if isinstance(value, str) and value else None
 
     @property
     def composer_envelope(self) -> Optional[dict]:

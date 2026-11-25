@@ -169,3 +169,20 @@ def build_place_to_book_cache(config, ttl_seconds: int, max_entries: int):
             cache_max_entries=max_entries,
         )
     )
+
+
+def build_compose_cache(config):
+    """Construct the compose cache (ADR #40): the Discovery cache's backend,
+    TTL, entry budget and fallback, in its own store under ``cache_dir`` so a
+    composed envelope never evicts a discovery entry (a fresh discover costs
+    about three times a compose, plus ~10 search queries).
+    """
+    directory = getattr(config, "cache_dir", None)
+    return build_discovery_cache(
+        SimpleNamespace(
+            cache_backend=getattr(config, "cache_backend", "memory"),
+            cache_dir=f"{directory}/compose" if directory else None,
+            cache_ttl_seconds=config.cache_ttl_seconds,
+            cache_max_entries=config.cache_max_entries,
+        )
+    )
