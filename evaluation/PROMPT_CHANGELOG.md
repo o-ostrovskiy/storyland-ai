@@ -4,6 +4,24 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 
 ---
 
+## v7 — 2026-11-25
+
+**Why:** Olga found the itinerary page hard to read (2026-11-25) and approved a design where the page bolds the key details and leads each stop with how it appears in the book (canvas https://claude.ai/artifact/RjAqBvV5vd5ughn3wpKGtu). She asked the model to pick what gets bolded. Only `trip_composer` changed; every other agent is byte-identical to v6 (pinned by `test_v7_is_v6_plus_the_trip_composer_change_only`).
+
+### Changes
+| Agent | Change |
+|---|---|
+| trip_composer | New output fields: `headline` (one sentence, the gist of the trip), `summary_highlights`, `overview_highlights`, per stop `book_hook` (one line, ≤10 words, must agree with `match_type`) and `highlights`. Each highlights list holds 0–2 phrases of 1–5 words copied verbatim from its own field; generic mood words are banned. `reason` is asked to be concrete (names, events, objects from the book). |
+
+All five fields are optional on the models, so expansion and local-atmosphere results (prompts unchanged) and older itineraries still validate. The page bolds a phrase only when it appears in the text verbatim (storyland-web#814).
+
+### Eval
+`run_scheduled_eval` records a deterministic `reading_highlights` block per case and per dataset: phrases picked, phrases found verbatim (`verbatim_rate`, None when nothing was picked), fields over the two-phrase cap, stops with a `book_hook`, cases with a `headline`. No pass rule yet. No live run has been recorded for v7.
+
+Cache: the version bump moves the place2book key to `place2book:v1:v7:…`, so that cache is flushed although place-to-book prompts did not change.
+
+---
+
 ## v6 — 2026-11-22
 
 **Why:** prod run "dddd" by "ddd" was researched as Inio Asano's *Dead Dead Demon's Dededede Destruction* and produced a Tokyo trip under the typed title. Only `book_context_researcher` and `book_context_formatter` changed; every other agent is byte-identical to v5 (pinned by `test_v6_is_v5_plus_the_book_context_change_only`).

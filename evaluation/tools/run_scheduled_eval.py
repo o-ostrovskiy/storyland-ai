@@ -252,6 +252,78 @@ def aggregate_search_grounding(
     }
 
 
+MAX_HIGHLIGHTS_PER_FIELD = 2
+
+
+def summarize_reading_highlights(itinerary_data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Deterministic check of the composer's reading highlights (prompt v7).
+
+    The page bolds a phrase only when it appears in its field verbatim, so a
+    phrase that is not found is a wasted pick, not a broken page. Counts, per
+    case: phrases picked, phrases found verbatim, fields over the two-phrase
+    cap, and how many stops / itineraries carry a `book_hook` / `headline`.
+    Returns None when there is no itinerary to read.
+    """
+    if not isinstance(itinerary_data, dict):
+        return None
+    picked = found = over_cap = 0
+
+    def check(text: Any, phrases: Any) -> None:
+        nonlocal picked, found, over_cap
+        if not isinstance(phrases, list) or not phrases:
+            return
+        if len(phrases) > MAX_HIGHLIGHTS_PER_FIELD:
+            over_cap += 1
+        for phrase in phrases:
+            picked += 1
+            if isinstance(phrase, str) and phrase.strip() and isinstance(text, str) and phrase.strip() in text:
+                found += 1
+
+    check(itinerary_data.get("summary_text"), itinerary_data.get("summary_highlights"))
+    stops_total = stops_with_hook = 0
+    for city in itinerary_data.get("cities") or []:
+        if not isinstance(city, dict):
+            continue
+        check(city.get("overview"), city.get("overview_highlights"))
+        for stop in city.get("stops") or []:
+            if not isinstance(stop, dict):
+                continue
+            stops_total += 1
+            hook = stop.get("book_hook")
+            if isinstance(hook, str) and hook.strip():
+                stops_with_hook += 1
+            check(stop.get("reason"), stop.get("highlights"))
+    headline = itinerary_data.get("headline")
+    return {
+        "phrases_picked": picked,
+        "phrases_found_verbatim": found,
+        "fields_over_cap": over_cap,
+        "stops_total": stops_total,
+        "stops_with_book_hook": stops_with_hook,
+        "has_headline": isinstance(headline, str) and bool(headline.strip()),
+    }
+
+
+def aggregate_reading_highlights(case_results: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Roll per-case reading-highlight facts up to the dataset. None when no case had them."""
+    present = [c["reading_highlights"] for c in case_results if c.get("reading_highlights")]
+    if not present:
+        return None
+    picked = sum(e["phrases_picked"] for e in present)
+    found = sum(e["phrases_found_verbatim"] for e in present)
+    return {
+        "cases": len(present),
+        "phrases_picked": picked,
+        "phrases_found_verbatim": found,
+        # None, not 1.0, when nothing was picked: no picks is not a perfect score.
+        "verbatim_rate": (found / picked) if picked else None,
+        "fields_over_cap": sum(e["fields_over_cap"] for e in present),
+        "stops_with_book_hook": sum(e["stops_with_book_hook"] for e in present),
+        "stops_total": sum(e["stops_total"] for e in present),
+        "cases_with_headline": sum(1 for e in present if e["has_headline"]),
+    }
+
+
 def case_defect(exc: BaseException) -> Optional[str]:
     """The named production defect a failed case hit, or None (ai-private#33).
 
@@ -776,6 +848,9 @@ async def run_evaluation_on_dataset(
         # case reached discovery, so an all-zero block never reads as "nothing
         # was grounded". No pass rule yet — see summarize_search_grounding.
         "search_grounding": aggregate_search_grounding(case_results),
+        # Deterministic reading-highlight roll-up (prompt v7): are the
+        # composer's bold picks found verbatim, within the cap, and present?
+        "reading_highlights": aggregate_reading_highlights(case_results),
         # Production defect occurrences (ai-private#33), counted, never folded
         # into score variance.
         "defects": count_defects(case_results),
@@ -1273,6 +1348,7 @@ Find cities, landmarks, and author-related sites, then group them into practical
             "token_usage": token_stats,
             # Deterministic, not judged — see summarize_search_grounding.
             "search_grounding": search_grounding,
+            "reading_highlights": summarize_reading_highlights(itinerary_data),
             # Full payload + the preferences the judge saw, so results JSONs
             # are self-contained for human review and judge calibration
             # (previously only Langfuse traces carried the itinerary).
@@ -1591,6 +1667,18 @@ def main():
         if defects:
             listed = ", ".join(f"{name}×{n}" for name, n in defects.items())
             print(f"DEFECTS [counted, not score variance]: {listed}")
+
+        highlights = result.get("reading_highlights")
+        if highlights:
+            rate = highlights["verbatim_rate"]
+            print(
+                f"Reading highlights [deterministic]: "
+                f"{highlights['phrases_found_verbatim']}/{highlights['phrases_picked']} phrases found verbatim"
+                f"{'' if rate is None else f' ({rate:.0%})'}; "
+                f"{highlights['fields_over_cap']} field(s) over the {MAX_HIGHLIGHTS_PER_FIELD}-phrase cap; "
+                f"{highlights['stops_with_book_hook']}/{highlights['stops_total']} stops with a book hook; "
+                f"{highlights['cases_with_headline']}/{highlights['cases']} case(s) with a headline"
+            )
 
         # Deterministic (not judged): did the researchers actually search?
         grounding = result.get("search_grounding")
