@@ -75,6 +75,8 @@ def test_summarize_reading_highlights_counts_verbatim_picks_cap_and_hooks():
     # 1 summary + 3 overview + 1 stop; the bare-string list is not a list and is skipped.
     assert out["phrases_picked"] == 5
     assert out["phrases_found_verbatim"] == 4
+    # "Theo's isolation", "The Goldfinch", "Theo Decker" hold a name; "isolation" does not.
+    assert out["phrases_shown"] == 3
     assert out["fields_over_cap"] == 1
     assert out["stops_total"] == 3 and out["stops_with_book_hook"] == 1
     assert out["has_headline"] is True
@@ -94,3 +96,17 @@ def test_aggregate_reading_highlights_rate_is_none_when_nothing_was_picked():
     agg = aggregate_reading_highlights([{"reading_highlights": summarize_reading_highlights(_ITINERARY)}, {}])
     assert agg["cases"] == 1 and agg["verbatim_rate"] == 0.8
     assert aggregate_reading_highlights([{}]) is None
+
+
+def test_summarize_reading_highlights_unwraps_the_composer_envelope():
+    # The runner saves {"itinerary": {...}, "suggestions": [...]}; the first live
+    # v7 run read 0 stops because the counters looked at the wrapper.
+    wrapped = {"itinerary": _ITINERARY, "suggestions": []}
+    assert summarize_reading_highlights(wrapped) == summarize_reading_highlights(_ITINERARY)
+    assert summarize_reading_highlights(wrapped)["stops_total"] == 3
+
+
+def test_phrase_has_name():
+    from evaluation.tools.run_scheduled_eval import phrase_has_name
+    assert phrase_has_name("Mikael Blomkvist") and phrase_has_name("Room 14")
+    assert not phrase_has_name("central hub") and not phrase_has_name("visual splendor")

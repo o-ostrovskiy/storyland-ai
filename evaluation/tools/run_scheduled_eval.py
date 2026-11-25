@@ -255,6 +255,13 @@ def aggregate_search_grounding(
 MAX_HIGHLIGHTS_PER_FIELD = 2
 
 
+def phrase_has_name(phrase: str) -> bool:
+    """The page bolds a phrase only if it holds a capital letter or a digit
+    (a name, a title, a number); "central hub" is not bolded. Mirrors
+    storyland-web src/utils/highlightPhrases.ts."""
+    return any(ch.isupper() or ch.isdigit() for ch in phrase)
+
+
 def summarize_reading_highlights(itinerary_data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Deterministic check of the composer's reading highlights (prompt v7).
 
@@ -266,10 +273,15 @@ def summarize_reading_highlights(itinerary_data: Optional[Dict[str, Any]]) -> Op
     """
     if not isinstance(itinerary_data, dict):
         return None
-    picked = found = over_cap = 0
+    # The runner stores the composer's ComposerEnvelope ({itinerary,
+    # suggestions}); unwrap it so the counters read the trip itself.
+    inner = itinerary_data.get("itinerary")
+    if isinstance(inner, dict) and "cities" not in itinerary_data:
+        itinerary_data = inner
+    picked = found = named = over_cap = 0
 
     def check(text: Any, phrases: Any) -> None:
-        nonlocal picked, found, over_cap
+        nonlocal picked, found, named, over_cap
         if not isinstance(phrases, list) or not phrases:
             return
         if len(phrases) > MAX_HIGHLIGHTS_PER_FIELD:
@@ -278,6 +290,8 @@ def summarize_reading_highlights(itinerary_data: Optional[Dict[str, Any]]) -> Op
             picked += 1
             if isinstance(phrase, str) and phrase.strip() and isinstance(text, str) and phrase.strip() in text:
                 found += 1
+                if phrase_has_name(phrase):
+                    named += 1
 
     check(itinerary_data.get("summary_text"), itinerary_data.get("summary_highlights"))
     stops_total = stops_with_hook = 0
@@ -297,6 +311,8 @@ def summarize_reading_highlights(itinerary_data: Optional[Dict[str, Any]]) -> Op
     return {
         "phrases_picked": picked,
         "phrases_found_verbatim": found,
+        # Found verbatim AND holding a name: the phrases the page will bold.
+        "phrases_shown": named,
         "fields_over_cap": over_cap,
         "stops_total": stops_total,
         "stops_with_book_hook": stops_with_hook,
@@ -311,12 +327,15 @@ def aggregate_reading_highlights(case_results: List[Dict[str, Any]]) -> Optional
         return None
     picked = sum(e["phrases_picked"] for e in present)
     found = sum(e["phrases_found_verbatim"] for e in present)
+    shown = sum(e.get("phrases_shown", 0) for e in present)
     return {
         "cases": len(present),
         "phrases_picked": picked,
         "phrases_found_verbatim": found,
         # None, not 1.0, when nothing was picked: no picks is not a perfect score.
         "verbatim_rate": (found / picked) if picked else None,
+        "phrases_shown": shown,
+        "shown_rate": (shown / picked) if picked else None,
         "fields_over_cap": sum(e["fields_over_cap"] for e in present),
         "stops_with_book_hook": sum(e["stops_with_book_hook"] for e in present),
         "stops_total": sum(e["stops_total"] for e in present),
@@ -1674,7 +1693,8 @@ def main():
             print(
                 f"Reading highlights [deterministic]: "
                 f"{highlights['phrases_found_verbatim']}/{highlights['phrases_picked']} phrases found verbatim"
-                f"{'' if rate is None else f' ({rate:.0%})'}; "
+                f"{'' if rate is None else f' ({rate:.0%})'}, "
+                f"{highlights['phrases_shown']} shown (with a name); "
                 f"{highlights['fields_over_cap']} field(s) over the {MAX_HIGHLIGHTS_PER_FIELD}-phrase cap; "
                 f"{highlights['stops_with_book_hook']}/{highlights['stops_total']} stops with a book hook; "
                 f"{highlights['cases_with_headline']}/{highlights['cases']} case(s) with a headline"

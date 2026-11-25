@@ -16,7 +16,17 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 All five fields are optional on the models, so expansion and local-atmosphere results (prompts unchanged) and older itineraries still validate. The page bolds a phrase only when it appears in the text verbatim (storyland-web#814).
 
 ### Eval
-`run_scheduled_eval` records a deterministic `reading_highlights` block per case and per dataset: phrases picked, phrases found verbatim (`verbatim_rate`, None when nothing was picked), fields over the two-phrase cap, stops with a `book_hook`, cases with a `headline`. No pass rule yet. No live run has been recorded for v7.
+`run_scheduled_eval` records a deterministic `reading_highlights` block per case and per dataset: phrases picked, phrases found verbatim (`verbatim_rate`, None when nothing was picked), fields over the two-phrase cap, stops with a `book_hook`, cases with a `headline`. No pass rule yet.
+
+Live runs 2026-11-25 (`storyland_eval`, 5 cases, `--region-selection first`, three prompt iterations before merge; final text = iteration 3):
+
+| Iteration | Picked | Found verbatim | Shown (verbatim + has a name) | Over cap | Stops with hook | Headlines |
+|---|---|---|---|---|---|---|
+| 1 (`eval_run_20261125_170243_v7`) | 74 | 72 (97%) | — | 0 | 26/26 | 5/5 |
+| 2: hook must match `match_type`; no generic or preference phrases | 67 | 66 (99%) | — | 0 | 25/25 | 5/5 |
+| 3: every phrase must hold a name or number | 72 | 63 (88%) | 50 (69%) | 0 | 31/31 | 5/5 |
+
+**Reading:** iteration 1 bolded generic phrases ("scholarly city", "moderate budget") and wrote vibe hooks as book events ("Where Ryland Grace's scientific career began." on a vibe filming location). Iteration 2 fixed most hooks but about half the picks stayed generic. Iteration 3 picks names and titles; the misses are names that are not in the stop's own `reason` (e.g. "Andy Weir"), which the page skips. The page also enforces the name rule (`hasName`) and labels a thematic/vibe hook "Why it fits", not "In the book". Iteration 1 counts were recomputed after fixing the counter to unwrap the saved `ComposerEnvelope`.
 
 Cache: the version bump moves the place2book key to `place2book:v1:v7:…`, so that cache is flushed although place-to-book prompts did not change.
 
