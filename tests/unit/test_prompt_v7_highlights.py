@@ -117,3 +117,13 @@ def test_phrase_has_name():
     from evaluation.tools.run_scheduled_eval import phrase_has_name
     assert phrase_has_name("Mikael Blomkvist") and phrase_has_name("Room 14")
     assert not phrase_has_name("central hub") and not phrase_has_name("visual splendor")
+
+
+def test_v7_composer_keeps_v6_non_urban_block_verbatim():
+    # ai#326 review (Codex P2): v7 had dropped v6's trail/wilderness/road-trip
+    # instructions, so those books would get a forced city itinerary.
+    v6 = json.loads(Path("agents/prompts/v6.json").read_text(encoding="utf-8"))["agents"]["trip_composer"]
+    start = v6.index("**Non-urban settings")
+    block = v6[start : v6.index("\n\n", start + len("**Non-urban settings (trails, wilderness, road trips):**\n"))]
+    assert "scenic_stop" in block and "route_point" in block
+    assert block in load_prompts("v7").trip_composer

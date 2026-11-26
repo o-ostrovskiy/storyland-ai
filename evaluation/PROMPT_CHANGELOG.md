@@ -15,6 +15,8 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 | book_context_researcher | New item 4: the main characters' names (up to 8; main real people for non-fiction). |
 | book_context_formatter | New field `main_characters`. |
 
+Review fix (2026-11-26, ai#326): the first v7 text had dropped v6's "Non-urban settings (trails, wilderness, road trips)" block from trip_composer by mistake; it is back, verbatim (pinned by `test_v7_composer_keeps_v6_non_urban_block_verbatim`). The eval rows below ran on the text without it. The tone guardrail (`sanitize_itinerary_explanations`) now also covers `headline` and `book_hook`; a line that is reader-directed throughout is dropped (set to null), not replaced by the stock fallback.
+
 Code: `core/reading_highlights.py` (ADR #41) bolds the title, author and main characters wherever they appear and keeps the model's one pick only if it is verbatim and holds a name or number; it runs last in `_finalize`. All new fields are optional on the models.
 
 ### Eval

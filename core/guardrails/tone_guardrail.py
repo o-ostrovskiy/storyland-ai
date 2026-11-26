@@ -196,20 +196,42 @@ def _sanitize_field(container: dict, key: str) -> int:
     return 0
 
 
+def _sanitize_optional_line(container: dict, key: str) -> int:
+    """Sanitize an optional one-line field (v7 ``headline``, ``book_hook``).
+
+    Same sentence rule as ``_sanitize_field``, but when every sentence is
+    reader-directed the field becomes ``None`` rather than the generic
+    fallback: the page hides an absent line, and a stock sentence in bold
+    would read as a claim. Returns 1 if it was changed.
+    """
+    if not isinstance(container, dict):
+        return 0
+    original = container.get(key)
+    sentinel = "\x00dropped"
+    clean, matched = sanitize_explanation(original, fallback=sentinel)
+    if not matched:
+        return 0
+    container[key] = None if clean == sentinel else clean
+    return 1
+
+
 def sanitize_itinerary_explanations(itinerary_dict: Optional[dict]) -> Optional[dict]:
     """Sanitize every reader-facing explanation field in an itinerary dict.
 
-    Covers ``summary_text``, each city's ``overview``, and each stop's
-    ``reason``. Mutates and returns the same dict (fail-open on None/empty).
+    Covers ``summary_text`` and ``headline``, each city's ``overview``, and
+    each stop's ``reason`` and ``book_hook``. Mutates and returns the same
+    dict (fail-open on None/empty).
     """
     if not itinerary_dict:
         return itinerary_dict
 
     changed = _sanitize_field(itinerary_dict, "summary_text")
+    changed += _sanitize_optional_line(itinerary_dict, "headline")
     for city in itinerary_dict.get("cities") or []:
         changed += _sanitize_field(city, "overview")
         for stop in city.get("stops") or []:
             changed += _sanitize_field(stop, "reason")
+            changed += _sanitize_optional_line(stop, "book_hook")
 
     if changed:
         logger.info("itinerary_tone_sanitized", fields=changed)
