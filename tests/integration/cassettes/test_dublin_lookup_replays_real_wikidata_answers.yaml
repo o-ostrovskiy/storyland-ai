@@ -1,0 +1,903 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - '*/*'
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - www.wikidata.org
+      user-agent:
+      - StorylandBot/1.0 (https://mystoryland.ai; place-to-book lookup)
+    method: GET
+    uri: https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&language=en&limit=7&search=Dublin&type=item
+  response:
+    body:
+      string: '{"searchinfo":{"search":"Dublin"},"search":[{"id":"Q1761","title":"Q1761","pageid":2302,"concepturi":"http://www.wikidata.org/entity/Q1761","repository":"wikidata","url":"//www.wikidata.org/wiki/Q1761","display":{"label":{"value":"Dublin","language":"en"},"description":{"value":"capital
+        and largest city of Ireland","language":"en"}},"label":"Dublin","description":"capital
+        and largest city of Ireland","match":{"type":"label","language":"en","text":"Dublin"}},{"id":"Q173500","title":"Q173500","pageid":173524,"concepturi":"http://www.wikidata.org/entity/Q173500","repository":"wikidata","url":"//www.wikidata.org/wiki/Q173500","display":{"label":{"value":"County
+        Dublin","language":"en"},"description":{"value":"county of Ireland","language":"en"}},"label":"County
+        Dublin","description":"county of Ireland","match":{"type":"alias","language":"en","text":"Dublin"},"aliases":["Dublin"]},{"id":"Q16865980","title":"Q16865980","pageid":18467452,"concepturi":"http://www.wikidata.org/entity/Q16865980","repository":"wikidata","url":"//www.wikidata.org/wiki/Q16865980","display":{"label":{"value":"Dublin","language":"en"},"description":{"value":"family
+        name","language":"en"}},"label":"Dublin","description":"family name","match":{"type":"label","language":"en","text":"Dublin"}},{"id":"Q2073605","title":"Q2073605","pageid":2000724,"concepturi":"http://www.wikidata.org/entity/Q2073605","repository":"wikidata","url":"//www.wikidata.org/wiki/Q2073605","display":{"label":{"value":"Dublin","language":"en"},"description":{"value":"village
+        in Belarus","language":"en"}},"label":"Dublin","description":"village in Belarus","match":{"type":"label","language":"en","text":"Dublin"}},{"id":"Q1202897","title":"Q1202897","pageid":1145717,"concepturi":"http://www.wikidata.org/entity/Q1202897","repository":"wikidata","url":"//www.wikidata.org/wiki/Q1202897","display":{"label":{"value":"Dublin
+        City University","language":"en"},"description":{"value":"university in Ireland","language":"en"}},"label":"Dublin
+        City University","description":"university in Ireland","match":{"type":"label","language":"en","text":"Dublin
+        City University"}},{"id":"Q988937","title":"Q988937","pageid":938553,"concepturi":"http://www.wikidata.org/entity/Q988937","repository":"wikidata","url":"//www.wikidata.org/wiki/Q988937","display":{"label":{"value":"Dublin","language":"en"},"description":{"value":"city
+        in Ohio, United States","language":"en"}},"label":"Dublin","description":"city
+        in Ohio, United States","match":{"type":"label","language":"en","text":"Dublin"}},{"id":"Q2430201","title":"Q2430201","pageid":2347482,"concepturi":"http://www.wikidata.org/entity/Q2430201","repository":"wikidata","url":"//www.wikidata.org/wiki/Q2430201","display":{"label":{"value":"Dublin","language":"en"},"description":{"value":"town
+        in New Hampshire","language":"en"}},"label":"Dublin","description":"town in
+        New Hampshire","match":{"type":"label","language":"en","text":"Dublin"}}],"search-continue":7,"success":1}'
+    headers:
+      content-type:
+      - application/json; charset=utf-8
+    status:
+      code: 200
+      message: OK
+- request:
+    body: query=SELECT+%3Fitem+%3Fsitelinks+%3Fcoord+WHERE+%7B%0A++VALUES+%3Fitem+%7B+wd%3AQ1761+wd%3AQ173500+wd%3AQ16865980+wd%3AQ2073605+wd%3AQ988937+wd%3AQ2430201+%7D%0A++%3Fitem+wikibase%3Asitelinks+%3Fsitelinks+.%0A++OPTIONAL+%7B+%3Fitem+wdt%3AP625+%3Fcoord+%7D%0A%7D
+    headers:
+      accept:
+      - application/sparql-results+json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      content-length:
+      - '262'
+      content-type:
+      - application/x-www-form-urlencoded
+      host:
+      - query.wikidata.org
+      user-agent:
+      - StorylandBot/1.0 (https://mystoryland.ai; place-to-book lookup)
+    method: POST
+    uri: https://query.wikidata.org/sparql
+  response:
+    body:
+      string: "{\n  \"head\" : {\n    \"vars\" : [ \"item\", \"sitelinks\", \"coord\"
+        ]\n  },\n  \"results\" : {\n    \"bindings\" : [ {\n      \"item\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     },\n      \"sitelinks\" : {\n        \"datatype\" : \"http://www.w3.org/2001/XMLSchema#integer\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"239\"\n      },\n      \"coord\"
+        : {\n        \"datatype\" : \"http://www.opengis.net/ont/geosparql#wktLiteral\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"Point(-6.260277777
+        53.349722222)\"\n      }\n    }, {\n      \"item\" : {\n        \"type\" :
+        \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q173500\"\n
+        \     },\n      \"sitelinks\" : {\n        \"datatype\" : \"http://www.w3.org/2001/XMLSchema#integer\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"68\"\n      },\n      \"coord\"
+        : {\n        \"datatype\" : \"http://www.opengis.net/ont/geosparql#wktLiteral\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"Point(-6.25 53.416666666)\"\n
+        \     }\n    }, {\n      \"item\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q988937\"\n      },\n      \"sitelinks\"
+        : {\n        \"datatype\" : \"http://www.w3.org/2001/XMLSchema#integer\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"49\"\n      },\n      \"coord\"
+        : {\n        \"datatype\" : \"http://www.opengis.net/ont/geosparql#wktLiteral\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"Point(-83.1403 40.1092)\"\n
+        \     }\n    }, {\n      \"item\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q2073605\"\n      },\n      \"sitelinks\"
+        : {\n        \"datatype\" : \"http://www.w3.org/2001/XMLSchema#integer\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"10\"\n      },\n      \"coord\"
+        : {\n        \"datatype\" : \"http://www.opengis.net/ont/geosparql#wktLiteral\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"Point(30.327222222
+        51.735277777)\"\n      }\n    }, {\n      \"item\" : {\n        \"type\" :
+        \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q2430201\"\n
+        \     },\n      \"sitelinks\" : {\n        \"datatype\" : \"http://www.w3.org/2001/XMLSchema#integer\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"29\"\n      },\n      \"coord\"
+        : {\n        \"datatype\" : \"http://www.opengis.net/ont/geosparql#wktLiteral\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"Point(-72.060833333
+        42.905833333)\"\n      }\n    }, {\n      \"item\" : {\n        \"type\" :
+        \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q16865980\"\n
+        \     },\n      \"sitelinks\" : {\n        \"datatype\" : \"http://www.w3.org/2001/XMLSchema#integer\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"2\"\n      }\n    }
+        ]\n  }\n}"
+    headers:
+      content-type:
+      - application/sparql-results+json;charset=utf-8
+    status:
+      code: 200
+      message: OK
+- request:
+    body: query=SELECT+DISTINCT+%3Fwork+%3Floc+WHERE+%7B%0A++%7B+%3Fwork+wdt%3AP840+wd%3AQ1761+.+BIND%28wd%3AQ1761+AS+%3Floc%29+%7D%0A++UNION%0A++%7B+%3Floc+wdt%3AP131+wd%3AQ1761+.+%3Fwork+wdt%3AP840+%3Floc+.+%7D%0A%7D+LIMIT+500
+    headers:
+      accept:
+      - application/sparql-results+json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      content-length:
+      - '218'
+      content-type:
+      - application/x-www-form-urlencoded
+      host:
+      - query.wikidata.org
+      user-agent:
+      - StorylandBot/1.0 (https://mystoryland.ai; place-to-book lookup)
+    method: POST
+    uri: https://query.wikidata.org/sparql
+  response:
+    body:
+      string: "{\n  \"head\" : {\n    \"vars\" : [ \"work\", \"loc\" ]\n  },\n  \"results\"
+        : {\n    \"bindings\" : [ {\n      \"work\" : {\n        \"type\" : \"uri\",\n
+        \       \"value\" : \"http://www.wikidata.org/entity/Q12117499\"\n      },\n
+        \     \"loc\" : {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q12127205\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q14522920\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q14689155\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q15262674\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q15525016\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q16004495\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q16205080\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q16257905\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q16385896\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q16998253\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q17006026\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q17091061\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q17092487\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q19800998\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q20875754\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q21030329\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q21189954\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q21427963\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q21819857\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q22252026\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q29018923\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q50650143\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q55191837\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q58517852\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q60738656\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q60770275\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q78669097\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q81672757\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q85797068\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q93100442\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q96418280\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q96757862\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q107980534\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q108944913\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q112090938\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q123579338\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q123579651\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q126017287\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q131036665\"\n      },\n      \"loc\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q137754\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q249350\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q265984\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q300405\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q426631\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q430535\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q465360\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q471716\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q547514\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q616385\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q616986\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q644065\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q687600\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q689428\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q721415\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q744886\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q746574\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q759330\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q820061\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q826351\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q970779\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1030259\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1146246\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1175468\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1193842\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1419676\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1476330\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1482558\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1532325\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1633092\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1664541\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1666246\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1713697\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1718298\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1741232\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1770069\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q2023667\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q2068861\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q2297900\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q2356919\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q2678153\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q2924414\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q3008824\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q3024963\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q3082474\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q3283966\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q3323866\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q3716045\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q3793923\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q3794945\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q3819166\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q3819838\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q4165605\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q4635005\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q4658974\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q4680027\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q4726030\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q4802890\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q4899078\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q4899150\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q4928147\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q5121470\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q5190434\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q5310804\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q5431286\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q5459053\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q5591425\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q5596667\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q5647357\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q5692159\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q6417178\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q6690161\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q6818495\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q6880025\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7091440\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7094356\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7268245\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7304970\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7445569\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7462610\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7502662\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7535824\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7625370\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7722773\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7729312\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7733410\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7735360\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7736458\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7738846\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7741417\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7744154\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7745685\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7757527\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7759973\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7762800\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7763577\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7764480\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7770066\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7846477\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q6511\"\n      },\n      \"loc\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1761\"\n
+        \     }\n    }, {\n      \"loc\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q2062702\"\n      },\n      \"work\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q6511\"\n
+        \     }\n    }, {\n      \"loc\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q2350741\"\n      },\n      \"work\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q6511\"\n
+        \     }\n    }, {\n      \"loc\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1263215\"\n      },\n      \"work\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q6511\"\n
+        \     }\n    }, {\n      \"loc\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1672830\"\n      },\n      \"work\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q6511\"\n
+        \     }\n    }, {\n      \"loc\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1766409\"\n      },\n      \"work\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q6511\"\n
+        \     }\n    }, {\n      \"loc\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q258464\"\n      },\n      \"work\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q81672757\"\n
+        \     }\n    }, {\n      \"loc\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q917842\"\n      },\n      \"work\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q7758892\"\n
+        \     }\n    }, {\n      \"loc\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q1263215\"\n      },\n      \"work\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q28602572\"\n
+        \     }\n    }, {\n      \"loc\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q135501\"\n      },\n      \"work\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q6511\"\n
+        \     }\n    }, {\n      \"loc\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q659895\"\n      },\n      \"work\" : {\n
+        \       \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q6511\"\n
+        \     }\n    }, {\n      \"loc\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q13156901\"\n      },\n      \"work\" :
+        {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q6511\"\n
+        \     }\n    } ]\n  }\n}"
+    headers:
+      content-type:
+      - application/sparql-results+json;charset=utf-8
+    status:
+      code: 200
+      message: OK
+- request:
+    body: query=SELECT+%3Fwork+%3FworkLabel+%3FauthorLabel+%3Fisbn13+%3Fisbn10+%3Folid+WHERE+%7B%0A++VALUES+%3Fwork+%7B+wd%3AQ1030259+wd%3AQ107980534+wd%3AQ108944913+wd%3AQ112090938+wd%3AQ1146246+wd%3AQ1175468+wd%3AQ1193842+wd%3AQ12117499+wd%3AQ12127205+wd%3AQ123579338+wd%3AQ123579651+wd%3AQ126017287+wd%3AQ131036665+wd%3AQ137754+wd%3AQ1419676+wd%3AQ14522920+wd%3AQ14689155+wd%3AQ1476330+wd%3AQ1482558+wd%3AQ15262674+wd%3AQ1532325+wd%3AQ15525016+wd%3AQ16004495+wd%3AQ16205080+wd%3AQ16257905+wd%3AQ1633092+wd%3AQ16385896+wd%3AQ1664541+wd%3AQ1666246+wd%3AQ16998253+wd%3AQ17006026+wd%3AQ17091061+wd%3AQ17092487+wd%3AQ1713697+wd%3AQ1718298+wd%3AQ1741232+wd%3AQ1770069+wd%3AQ19800998+wd%3AQ2023667+wd%3AQ2068861+wd%3AQ20875754+wd%3AQ21030329+wd%3AQ21189954+wd%3AQ21427963+wd%3AQ21819857+wd%3AQ22252026+wd%3AQ2297900+wd%3AQ2356919+wd%3AQ249350+wd%3AQ265984+wd%3AQ2678153+wd%3AQ28602572+wd%3AQ29018923+wd%3AQ2924414+wd%3AQ300405+wd%3AQ3008824+wd%3AQ3024963+wd%3AQ3082474+wd%3AQ3283966+wd%3AQ3323866+wd%3AQ3716045+wd%3AQ3793923+wd%3AQ3794945+wd%3AQ3819166+wd%3AQ3819838+wd%3AQ4165605+wd%3AQ426631+wd%3AQ430535+wd%3AQ4635005+wd%3AQ465360+wd%3AQ4658974+wd%3AQ4680027+wd%3AQ471716+wd%3AQ4726030+wd%3AQ4802890+wd%3AQ4899078+wd%3AQ4899150+wd%3AQ4928147+wd%3AQ50650143+wd%3AQ5121470+wd%3AQ5190434+wd%3AQ5310804+wd%3AQ5431286+wd%3AQ5459053+wd%3AQ547514+wd%3AQ55191837+wd%3AQ5591425+wd%3AQ5596667+wd%3AQ5647357+wd%3AQ5692159+wd%3AQ58517852+wd%3AQ60738656+wd%3AQ60770275+wd%3AQ616385+wd%3AQ616986+wd%3AQ6417178+wd%3AQ644065+wd%3AQ6511+wd%3AQ6690161+wd%3AQ6818495+wd%3AQ687600+wd%3AQ6880025+wd%3AQ689428+wd%3AQ7091440+wd%3AQ7094356+wd%3AQ721415+wd%3AQ7268245+wd%3AQ7304970+wd%3AQ7445569+wd%3AQ744886+wd%3AQ7462610+wd%3AQ746574+wd%3AQ7502662+wd%3AQ7535824+wd%3AQ759330+wd%3AQ7625370+wd%3AQ7722773+wd%3AQ7729312+wd%3AQ7733410+wd%3AQ7735360+wd%3AQ7736458+wd%3AQ7738846+wd%3AQ7741417+wd%3AQ7744154+wd%3AQ7745685+wd%3AQ7757527+wd%3AQ7758892+wd%3AQ7759973+wd%3AQ7762800+wd%3AQ7763577+wd%3AQ7764480+wd%3AQ7770066+wd%3AQ7846477+wd%3AQ78669097+wd%3AQ81672757+wd%3AQ820061+wd%3AQ826351+wd%3AQ85797068+wd%3AQ93100442+wd%3AQ96418280+wd%3AQ96757862+wd%3AQ970779+%7D%0A++FILTER+EXISTS+%7B+%3Fwork+wdt%3AP31%2Fwdt%3AP279%2A+wd%3AQ7725634+%7D%0A++OPTIONAL+%7B+%3Fwork+wdt%3AP50+%3Fauthor+%7D%0A++OPTIONAL+%7B+%3Fwork+wdt%3AP212+%3Fisbn13+%7D%0A++OPTIONAL+%7B+%3Fwork+wdt%3AP957+%3Fisbn10+%7D%0A++OPTIONAL+%7B+%3Fwork+wdt%3AP648+%3Folid+%7D%0A++SERVICE+wikibase%3Alabel+%7B+bd%3AserviceParam+wikibase%3Alanguage+%22en%22.+%7D%0A%7D
+    headers:
+      accept:
+      - application/sparql-results+json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      content-length:
+      - '2487'
+      content-type:
+      - application/x-www-form-urlencoded
+      host:
+      - query.wikidata.org
+      user-agent:
+      - StorylandBot/1.0 (https://mystoryland.ai; place-to-book lookup)
+    method: POST
+    uri: https://query.wikidata.org/sparql
+  response:
+    body:
+      string: "{\n  \"head\" : {\n    \"vars\" : [ \"work\", \"workLabel\", \"authorLabel\",
+        \"isbn13\", \"isbn10\", \"olid\" ]\n  },\n  \"results\" : {\n    \"bindings\"
+        : [ {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q6511\"\n      },\n      \"olid\" : {\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"OL86318W\"\n      },\n
+        \     \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Ulysses\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"James Joyce\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q6511\"\n
+        \     },\n      \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\"
+        : \"OL86344W\"\n      },\n      \"workLabel\" : {\n        \"xml:lang\" :
+        \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"Ulysses\"\n
+        \     },\n      \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"James Joyce\"\n      }\n    }, {\n      \"work\"
+        : {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q465360\"\n
+        \     },\n      \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\"
+        : \"OL86343W\"\n      },\n      \"workLabel\" : {\n        \"xml:lang\" :
+        \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"A Portrait
+        of the Artist as a Young Man\"\n      },\n      \"authorLabel\" : {\n        \"xml:lang\"
+        : \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"James Joyce\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q759330\"\n      },\n      \"olid\" : {\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"OL9919088W\"\n      },\n
+        \     \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"At Swim-Two-Birds\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Brian O'Nolan\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1532325\"\n
+        \     },\n      \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\"
+        : \"OL762611W\"\n      },\n      \"workLabel\" : {\n        \"xml:lang\" :
+        \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"The Commitments\"\n
+        \     },\n      \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Roddy Doyle\"\n      }\n    }, {\n      \"work\"
+        : {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q1770069\"\n
+        \     },\n      \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\"
+        : \"OL15155734W\"\n      },\n      \"workLabel\" : {\n        \"xml:lang\"
+        : \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"Watt\"\n
+        \     },\n      \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Samuel Beckett\"\n      }\n    }, {\n
+        \     \"work\" : {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q2297900\"\n
+        \     },\n      \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\"
+        : \"OL86340W\"\n      },\n      \"workLabel\" : {\n        \"xml:lang\" :
+        \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"Exiles\"\n
+        \     },\n      \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"James Joyce\"\n      }\n    }, {\n      \"work\"
+        : {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q2356919\"\n
+        \     },\n      \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\"
+        : \"OL109344W\"\n      },\n      \"workLabel\" : {\n        \"xml:lang\" :
+        \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"The Informer\"\n
+        \     },\n      \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Liam O'Flaherty\"\n      }\n    }, {\n
+        \     \"work\" : {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q3323866\"\n
+        \     },\n      \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\"
+        : \"OL134384W\"\n      },\n      \"workLabel\" : {\n        \"xml:lang\" :
+        \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"Unnatural
+        Exposure\"\n      },\n      \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"Patricia Cornwell\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q3716045\"\n      },\n      \"olid\" :
+        {\n        \"type\" : \"literal\",\n        \"value\" : \"OL762614W\"\n      },\n
+        \     \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"The Van\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Roddy Doyle\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q3793923\"\n
+        \     },\n      \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\"
+        : \"OL931866W\"\n      },\n      \"workLabel\" : {\n        \"xml:lang\" :
+        \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"The Blackwater
+        Lightship\"\n      },\n      \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"Colm T\xF3ib\xEDn\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q4726030\"\n      },\n      \"workLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Alice Next Door\"\n      },\n      \"authorLabel\" : {\n        \"xml:lang\"
+        : \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"Judi Curtin\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q4802890\"\n      },\n      \"workLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"As I Was Going Down Sackville Street\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Oliver St John Gogarty\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q4899078\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Between Foxrock and a Hard Place\"\n
+        \     },\n      \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Paul Howard\"\n      }\n    }, {\n      \"work\"
+        : {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q5121470\"\n
+        \     },\n      \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\"
+        : \"OL56806W\"\n      },\n      \"workLabel\" : {\n        \"xml:lang\" :
+        \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"Circle of
+        Friends\"\n      },\n      \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"Maeve Binchy\"\n      }\n
+        \   }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q5310804\"\n      },\n      \"workLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Dublin: Foundation\"\n      },\n      \"authorLabel\" : {\n        \"xml:lang\"
+        : \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"Edward Rutherfurd\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q5431286\"\n      },\n      \"olid\" :
+        {\n        \"type\" : \"literal\",\n        \"value\" : \"OL15191187W\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Faithful Place\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Tana French\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q5591425\"\n
+        \     },\n      \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\"
+        : \"OL735663W\"\n      },\n      \"workLabel\" : {\n        \"xml:lang\" :
+        \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"Grace and
+        Truth\"\n      },\n      \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"Jennifer Johnston\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q5596667\"\n      },\n      \"olid\" :
+        {\n        \"type\" : \"literal\",\n        \"value\" : \"OL762613W\"\n      },\n
+        \     \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"The Snapper\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Roddy Doyle\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q5692159\"\n
+        \     },\n      \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\"
+        : \"OL56787W\"\n      },\n      \"workLabel\" : {\n        \"xml:lang\" :
+        \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"Heart and
+        Soul\"\n      },\n      \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"Maeve Binchy\"\n      }\n
+        \   }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q6818495\"\n      },\n      \"olid\" :
+        {\n        \"type\" : \"literal\",\n        \"value\" : \"OL15210960W\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Mercier and Camier\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Samuel Beckett\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q7304970\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Red Roses for Me\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Se\xE1n O'Casey\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q7502662\"\n
+        \     },\n      \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\"
+        : \"OL17549620W\"\n      },\n      \"workLabel\" : {\n        \"xml:lang\"
+        : \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"Should Have
+        Got Off at Sydney Parade\"\n      },\n      \"authorLabel\" : {\n        \"xml:lang\"
+        : \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"Paul Howard\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7535824\"\n      },\n      \"olid\" :
+        {\n        \"type\" : \"literal\",\n        \"value\" : \"OL15941217W\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Skippy Dies\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Paul Murray\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q7625370\"\n
+        \     },\n      \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\"
+        : \"OL4664781W\"\n      },\n      \"workLabel\" : {\n        \"xml:lang\"
+        : \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"Strumpet
+        City\"\n      },\n      \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"James Plunkett\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7722773\"\n      },\n      \"workLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"The Christmas Tree\"\n      },\n      \"authorLabel\" : {\n        \"xml:lang\"
+        : \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"Jennifer
+        Johnston\"\n      }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n
+        \       \"value\" : \"http://www.wikidata.org/entity/Q7729312\"\n      },\n
+        \     \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\" : \"OL14873684W\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"The Dead Republic\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Roddy Doyle\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q7733410\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"The Far Hills\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Brian Cleeve\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q7736458\"\n
+        \     },\n      \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\"
+        : \"OL28177164M\"\n      },\n      \"workLabel\" : {\n        \"xml:lang\"
+        : \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"The Ginger
+        Man\"\n      },\n      \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"J. P. Donleavy\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7738846\"\n      },\n      \"olid\" :
+        {\n        \"type\" : \"literal\",\n        \"value\" : \"OL2005222W\"\n      },\n
+        \     \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"The Hard Life\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Brian O'Nolan\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q7741417\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"The Illusionist\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Jennifer Johnston\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q7745685\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"The Last Days of the Celtic Tiger\"\n
+        \     },\n      \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Paul Howard\"\n      }\n    }, {\n      \"work\"
+        : {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q7757527\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"The Plough and the Stars\"\n      },\n
+        \     \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Se\xE1n O'Casey\"\n      }\n    }, {\n
+        \     \"work\" : {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q7758892\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"The Quare Fellow\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Brendan Behan\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q7759973\"\n
+        \     },\n      \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\"
+        : \"OL1326389W\"\n      },\n      \"workLabel\" : {\n        \"xml:lang\"
+        : \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"The Red
+        and the Green\"\n      },\n      \"authorLabel\" : {\n        \"xml:lang\"
+        : \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"Iris Murdoch\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7762800\"\n      },\n      \"workLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"The Seafarer\"\n      },\n      \"authorLabel\" : {\n        \"xml:lang\"
+        : \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"Conor McPherson\"\n
+        \     }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q7763577\"\n      },\n      \"olid\" :
+        {\n        \"type\" : \"literal\",\n        \"value\" : \"OL1219629W\"\n      },\n
+        \     \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"The Shadow of a Gunman\"\n      },\n
+        \     \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Se\xE1n O'Casey\"\n      }\n    }, {\n
+        \     \"work\" : {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q7764480\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"The Singular Life of Albert Nobbs\"\n
+        \     },\n      \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Simone Benmussa\"\n      }\n    }, {\n
+        \     \"work\" : {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q14689155\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Juno and the Paycock\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Se\xE1n O'Casey\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q16257905\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Midnight's Choice\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Kate Thompson\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q16385896\"\n
+        \     },\n      \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\"
+        : \"OL17868899W\"\n      },\n      \"workLabel\" : {\n        \"xml:lang\"
+        : \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"The Guts\"\n
+        \     },\n      \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Roddy Doyle\"\n      }\n    }, {\n      \"work\"
+        : {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q17006026\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Breaking Dad\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Paul Howard\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q19800998\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"The Visitor\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Maeve Brennan\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q21030329\"\n
+        \     },\n      \"olid\" : {\n        \"type\" : \"literal\",\n        \"value\"
+        : \"OL15650247W\"\n      },\n      \"workLabel\" : {\n        \"xml:lang\"
+        : \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"Minding
+        Frankie\"\n      },\n      \"authorLabel\" : {\n        \"xml:lang\" : \"en\",\n
+        \       \"type\" : \"literal\",\n        \"value\" : \"Maeve Binchy\"\n      }\n
+        \   }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q21189954\"\n      },\n      \"workLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"The Mammy\"\n      },\n      \"authorLabel\" : {\n        \"xml:lang\"
+        : \"en\",\n        \"type\" : \"literal\",\n        \"value\" : \"Brendan
+        O'Carroll\"\n      }\n    }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n
+        \       \"value\" : \"http://www.wikidata.org/entity/Q28602572\"\n      },\n
+        \     \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Hades\"\n      }\n    }, {\n      \"work\"
+        : {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q29018923\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"The Green Road\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Anne Enright\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q55191837\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Dublin Oldschool\"\n      }\n    },
+        {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q96757862\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Sucking Dublin\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Enda Walsh\"\n      }\n    }, {\n      \"work\" : {\n        \"type\"
+        : \"uri\",\n        \"value\" : \"http://www.wikidata.org/entity/Q123579651\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"M\xE9moires de milady Worthon\"\n      }\n
+        \   }, {\n      \"work\" : {\n        \"type\" : \"uri\",\n        \"value\"
+        : \"http://www.wikidata.org/entity/Q131036665\"\n      },\n      \"olid\"
+        : {\n        \"type\" : \"literal\",\n        \"value\" : \"OL37949460W\"\n
+        \     },\n      \"workLabel\" : {\n        \"xml:lang\" : \"en\",\n        \"type\"
+        : \"literal\",\n        \"value\" : \"Intermezzo\"\n      },\n      \"authorLabel\"
+        : {\n        \"xml:lang\" : \"en\",\n        \"type\" : \"literal\",\n        \"value\"
+        : \"Sally Rooney\"\n      }\n    } ]\n  }\n}"
+    headers:
+      content-type:
+      - application/sparql-results+json;charset=utf-8
+    status:
+      code: 200
+      message: OK
+version: 1
