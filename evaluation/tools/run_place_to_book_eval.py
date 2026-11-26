@@ -22,6 +22,7 @@ import asyncio
 import json
 import re
 import sys
+import time
 import unicodedata
 from datetime import datetime
 from pathlib import Path
@@ -169,7 +170,58 @@ def aggregate_metrics(evaluated: List[Dict[str, Any]]) -> Dict[str, float]:
     }
 
 
-async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict[str, Any]:
+# ai-private#81: where the candidates come from. "search" is production.
+VARIANTS = ("search", "wikidata", "both")
+
+
+def _percentile(values: List[float], q: float) -> Optional[float]:
+    """Nearest-rank percentile (q in 0..100); None for no values."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    rank = max(1, -(-len(ordered) * q // 100))  # ceil without math
+    return round(ordered[int(rank) - 1], 2)
+
+
+def variant_stats(case_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The comparison numbers the variant table needs (ai-private#81).
+
+    Latency counts only cases the resolver actually ran (a cache hit says
+    nothing about speed). ``wikidata_nothing`` counts cases where Wikidata
+    was asked and returned no written work for any reason (not found,
+    ambiguous place, down, or none set there): the coverage gap the card
+    asks to report.
+    """
+    ran = [c for c in case_results if "latency_s" in c and not c.get("cached")]
+    latencies = [c["latency_s"] for c in ran]
+    asked = [c for c in case_results if c.get("wikidata_status") is not None]
+    tokens = [
+        (c.get("token_usage") or {}).get("total_tokens")
+        for c in ran
+        if isinstance((c.get("token_usage") or {}).get("total_tokens"), (int, float))
+    ]
+    costs = [
+        (c.get("token_usage") or {}).get("cost_usd")
+        for c in ran
+        if isinstance((c.get("token_usage") or {}).get("cost_usd"), (int, float))
+    ]
+    return {
+        "cases_run": len(ran),
+        "cases_cached": sum(1 for c in case_results if c.get("cached")),
+        "latency_p50_s": _percentile(latencies, 50),
+        "latency_p95_s": _percentile(latencies, 95),
+        "search_calls": sum(int(c.get("search_queries") or 0) for c in ran),
+        "wikidata_asked": len(asked),
+        "wikidata_nothing": sum(1 for c in asked if c.get("wikidata_status") != "found"),
+        "total_tokens": sum(tokens) if tokens else None,
+        # None when the run had no Langfuse credentials (no cost was priced).
+        "cost_usd": round(sum(costs), 4) if costs else None,
+    }
+
+
+async def run(
+    max_cases: Optional[int], register: bool, output_dir: str, variant: str = "search"
+) -> Dict[str, Any]:
     config = load_config()
     configure_logging(level=config.log_level, enable_adk_debug=config.enable_adk_debug)
 
@@ -192,6 +244,10 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
     from api import dependencies
     await dependencies.initialize()
     resolver = dependencies.get_place_to_book_resolver()
+    if variant != "search":
+        # Same model, cache and Langfuse config; the cache key carries the
+        # variant, so this run never writes into the production keys.
+        resolver = resolver.with_variant(variant)
 
     langfuse = Langfuse(
         secret_key=config.langfuse_secret_key,
@@ -203,8 +259,13 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
     if max_cases is not None:
         items = items[:max_cases]
 
-    run_name = f"p2b_eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    run_metadata = {"dataset_name": DATASET_NAME, "evaluation_type": "place_to_book_grounding"}
+    run_name = f"p2b_eval_{variant}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_metadata = {
+        "dataset_name": DATASET_NAME,
+        "evaluation_type": "place_to_book_grounding",
+        "model_under_test": config.model_name,
+        "variant": variant,
+    }
     case_results: List[Dict[str, Any]] = []
 
     logger.info("starting_place_to_book_eval", dataset=DATASET_NAME, cases=len(items), run_name=run_name)
@@ -225,7 +286,10 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
             as_type="span", name=run_name, metadata={**run_metadata, "eval_id": item.id},
         ) as root_span:
             try:
+                started = time.monotonic()
                 result = await resolver.resolve(place)
+                latency_s = round(time.monotonic() - started, 2)
+                run_info = dict(getattr(resolver, "last_run", {}) or {})
                 scored = score_case(result, expect, min_literal, expected_examples)
                 try:
                     root_span.update(input={"place": place}, output=scored)
@@ -256,7 +320,15 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
                     name="authors_correct", value=float(scored["n_author_mismatches"] == 0),
                     comment="1.0 = every returned evalset-known book names its real author",
                 )
-                case_results.append({"item_id": item.id, "place": place, "run_name": run_name, **scored})
+                case_results.append({
+                    "item_id": item.id, "place": place, "run_name": run_name, **scored,
+                    "latency_s": latency_s,
+                    "cached": bool(run_info.get("cached")),
+                    "search_queries": run_info.get("search_queries", 0),
+                    "wikidata_status": run_info.get("wikidata_status"),
+                    "wikidata_works": run_info.get("wikidata_works", 0),
+                    "token_usage": run_info.get("token_usage"),
+                })
                 logger.info(
                     "place_to_book_case_evaluated", item_id=item.id, place=place,
                     passed=scored["pass"], found=scored["found"],
@@ -282,16 +354,19 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
     summary = {
         "dataset_name": DATASET_NAME,
         "run_name": run_name,
+        "model_under_test": config.model_name,
+        "variant": variant,
         "timestamp": datetime.now().isoformat(),
         "total": len(case_results),
         "evaluated": len(evaluated),
         "passed": passed,
         "failed": len(evaluated) - passed,
         "metrics": aggregate_metrics(evaluated),
+        "variant_stats": variant_stats(case_results),
         "case_results": case_results,
     }
 
-    out_path = Path(output_dir) / f"place_to_book_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    out_path = Path(output_dir) / f"place_to_book_{variant}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False))
 
@@ -308,6 +383,7 @@ async def run(max_cases: Optional[int], register: bool, output_dir: str) -> Dict
     print("=" * 60)
     print(f"Result: {passed}/{len(evaluated)} PASS | Langfuse run: {run_name}")
     print(f"Metrics: {json.dumps(summary['metrics'])}")
+    print(f"Variant {variant}: {json.dumps(summary['variant_stats'])}")
     print(f"Results saved to {out_path}")
     summary["_results_path"] = str(out_path)
     return summary
@@ -329,9 +405,16 @@ def main():
         "--no-register", action="store_true",
         help="Skip refreshing dataset items from the evalset (assume already correct)",
     )
+    parser.add_argument(
+        "--variant", choices=VARIANTS, default="search",
+        help="Where candidates come from: search (production) · wikidata · both (ai-private#81)",
+    )
     add_gate_args(parser, MIN_PASS_RATE)
     args = parser.parse_args()
-    summary = asyncio.run(run(max_cases=args.max_cases, register=not args.no_register, output_dir=args.output_dir))
+    summary = asyncio.run(run(
+        max_cases=args.max_cases, register=not args.no_register,
+        output_dir=args.output_dir, variant=args.variant,
+    ))
     path = summary.pop("_results_path", None)
     sys.exit(exit_with_verdict(summary, args.min_pass_rate, HARD_METRICS, results_path=path))
 

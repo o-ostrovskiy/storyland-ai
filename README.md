@@ -89,7 +89,7 @@ Composition is a single agent, `trip_composer` (`book_to_place_composition`), ru
 - **Region Analyzer** - Groups cities by geographic proximity using LLM world knowledge
 - **Trip Composer** - Creates personalized itinerary based on user preferences
 - **Reader preferences** - `user:preferences` from session state go straight into the composer prompt (`core/prompts.py`); the separate reader-profile agent was removed in MYS-436
-- **Place→Book Resolver** - `core/place_to_book.py`: researcher → formatter that returns books that happen in a named place (ADR #20, #30)
+- **Place→Book Resolver** - `core/place_to_book.py`: researcher → formatter that returns books that happen in a named place (ADR #20, #30). Wikidata (`core/wikidata.py`, P840 "narrative location") is a second source behind a `variant` switch: `search` (production), `wikidata`, `both`; Wikidata candidates carry their work and place QIDs (ADR #42)
 - **Local Atmosphere Pipeline** - Single-phase researcher → formatter that finds nearby places (within ~80 km of the user) whose mood and aesthetic evoke the book, for readers who can't travel to the actual setting
 - **Expansion Pipeline** - On-demand researcher → formatter that adds 3-5 new places to an existing city when the user clicks a suggestion chip
 - **Book Recommendation Agent** - On-demand single agent that recommends 5 books based on the source book, destination cities, and themes (triggered by the "Find books like this" chip)
@@ -318,6 +318,7 @@ storyland-ai/
 │   ├── expansion_agent.py           # Researcher+formatter for place expansion chips
 │   ├── book_recommendation_agent.py # Researcher+formatter for "Find books like this" chip
 │   ├── place_to_book_agent.py        # Researcher+formatter for place→book reverse discovery
+│   ├── wikidata_nodes.py             # Wikidata lookup + evidence graph nodes for place→book (no model call)
 │   ├── region_analyzer_agent.py     # Geographic region grouping
 │   ├── orchestrator.py              # Two-phase + local-atmosphere + expansion + book-rec + place→book workflows
 │   ├── prompts.py                   # AgentPrompts dataclass + versioned loader

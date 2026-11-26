@@ -37,6 +37,7 @@ from .discovery_agents import (
 )
 from .book_recommendation_agent import create_book_recommendation_agents
 from .place_to_book_agent import create_place_to_book_agents
+from .wikidata_nodes import create_wikidata_evidence_node, create_wikidata_lookup_node
 from .expansion_agent import create_expansion_agents
 from .local_atmosphere_agent import create_local_atmosphere_agents
 from .trip_composer_agent import create_trip_composer_agent
@@ -44,6 +45,9 @@ from .region_analyzer_agent import create_region_analyzer_agent
 from .prompts import AgentPrompts, load_prompts
 from .work_prompts import for_kind
 from models.work import DEFAULT_WORK_KIND
+
+# place_to_book variants (ai-private#81): where the candidates come from.
+PLACE_TO_BOOK_VARIANTS = ("search", "wikidata", "both")
 
 
 def create_book_to_place_discovery_workflow(
@@ -351,6 +355,9 @@ def create_place_to_book_workflow(
     google_search_tool,
     place: str,
     prompts: AgentPrompts | None = None,
+    *,
+    variant: str = "search",
+    wikidata_source=None,
 ):
     """
     Create the place→book reverse-routing workflow (AI candidate layer).
@@ -361,16 +368,38 @@ def create_place_to_book_workflow(
     storyland-services gateway runs the authoritative Google Books existence
     check downstream.
 
-    Graph:
+    Graph, by ``variant`` (ai-private#81; production runs ``search``):
+
+    ``search`` (default)::
+
         START → place_to_book_researcher [google_search]
               → place_to_book_formatter [output_schema=PlaceToBookCandidates]
               → state["last_place_to_book"]
+
+    ``both``: Wikidata runs beside the researcher, so it adds no latency
+    unless it is the slower of the two::
+
+        START → ⚡ place_to_book_researcher ─┐
+                   wikidata_lookup         ─┴→ join → wikidata_evidence
+              → place_to_book_formatter
+
+    ``wikidata``: no search at all::
+
+        START → wikidata_lookup → wikidata_evidence → place_to_book_formatter
+
+    ``wikidata_lookup`` writes state["wikidata_lookup"]; ``wikidata_evidence``
+    hands the formatter the research text plus the records as a data block
+    (``agents/wikidata_nodes.py``). Neither calls a model, and the model never
+    writes SPARQL.
 
     Args:
         model: The LLM model to use.
         google_search_tool: The Google Search tool.
         place: Free-text destination.
         prompts: Optional AgentPrompts instance. Loads default version if not provided.
+        variant: ``search`` · ``wikidata`` · ``both``.
+        wikidata_source: The ``WikidataSource`` to ask; required unless
+            ``variant`` is ``search``.
 
     Returns:
         Workflow graph for the place→book flow.
@@ -378,11 +407,29 @@ def create_place_to_book_workflow(
     if prompts is None:
         prompts = load_prompts()
 
+    if variant not in PLACE_TO_BOOK_VARIANTS:
+        raise ValueError(f"unknown place_to_book variant {variant!r}")
+    if variant != "search" and wikidata_source is None:
+        raise ValueError(f"variant {variant!r} needs a wikidata_source")
+
     researcher, formatter = create_place_to_book_agents(
         model, google_search_tool, place=place, prompts=prompts
     )
 
-    return Workflow(
-        name="place_to_book_workflow",
-        edges=[(START, researcher, formatter)],
-    )
+    if variant == "search":
+        edges = [(START, researcher, formatter)]
+    else:
+        lookup = create_wikidata_lookup_node(wikidata_source, place)
+        evidence = create_wikidata_evidence_node(place)
+        if variant == "wikidata":
+            edges = [(START, lookup, evidence, formatter)]
+        else:
+            join = JoinNode(name="place_to_book_join")
+            edges = [
+                (START, (researcher, lookup)),
+                (researcher, join),
+                (lookup, join),
+                (join, evidence, formatter),
+            ]
+
+    return Workflow(name="place_to_book_workflow", edges=edges)

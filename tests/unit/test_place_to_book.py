@@ -1065,9 +1065,9 @@ class TestNoBookSearchGuard:
         real = resolver._run_pipeline
 
         async def first_empty(place):
-            candidates, text, queries = await real(place)
+            candidates, text, queries, lookup = await real(place)
             calls.append(queries)
-            return ([], text, queries) if len(calls) == 1 else (candidates, text, queries)
+            return ([], text, queries, lookup) if len(calls) == 1 else (candidates, text, queries, lookup)
 
         monkeypatch.setattr(resolver, "_run_pipeline", first_empty)
         result = await resolver.resolve("Luga")
@@ -1109,9 +1109,9 @@ class TestNoBookSearchGuard:
         calls = []
 
         async def second_malformed(place):
-            candidates, text, queries = await real(place)
+            candidates, text, queries, lookup = await real(place)
             calls.append(1)
-            return (candidates, text, queries) if len(calls) == 1 else (None, text, queries)
+            return (candidates, text, queries, lookup) if len(calls) == 1 else (None, text, queries, lookup)
 
         monkeypatch.setattr(resolver, "_run_pipeline", second_malformed)
         result = await resolver.resolve("Luga")

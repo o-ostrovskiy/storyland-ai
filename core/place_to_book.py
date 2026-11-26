@@ -46,10 +46,15 @@ from google.adk.plugins.logging_plugin import LoggingPlugin
 from google.adk.tools import google_search
 from google.genai import types
 
-from agents.orchestrator import create_place_to_book_workflow
+from agents.orchestrator import PLACE_TO_BOOK_VARIANTS, create_place_to_book_workflow
 from agents.prompts import CURRENT_PROMPT_VERSION
+from agents.wikidata_nodes import WIKIDATA_LOOKUP_KEY, lookup_from, records_block
 from common.logging import get_logger
-from models.place_to_book import PlaceBookCandidate, PlaceToBookCandidates, PlaceToBookResult
+from models.place_to_book import (
+    PlaceBookCandidateWithReceipts,
+    PlaceToBookCandidates,
+    PlaceToBookResult,
+)
 from plugins.langfuse_plugin import LangfusePlugin
 from services.session_service import create_session_service
 
@@ -58,6 +63,7 @@ from .disk_cache import DiskTTLCache
 from .extraction import grounding_token_set, is_title_grounded
 from .run_harness import RunCapture, collect_token_usage, pump_events
 from .session_state import SessionStateAccessor
+from .wikidata import HttpWikidataSource, WikidataLookup, WikidataSource
 
 logger = get_logger("storyland.core.place_to_book")
 
@@ -117,9 +123,16 @@ def normalize_place(place: object) -> str:
     return text
 
 
-def cache_key(place: str) -> str:
-    """Return the versioned cache key for a (raw) place string."""
-    return f"{_CACHE_KEY_PREFIX}{CURRENT_PROMPT_VERSION}:{normalize_place(place)}"
+def cache_key(place: str, variant: str = "search") -> str:
+    """Return the versioned cache key for a (raw) place string.
+
+    The ``search`` key is the production key and has no variant part, so
+    answers cached before ai-private#81 keep being served. Any other variant
+    gets its own segment: an eval run of ``wikidata`` must never fill the cache
+    production reads.
+    """
+    variant_part = "" if variant == "search" else f"{variant}:"
+    return f"{_CACHE_KEY_PREFIX}{CURRENT_PROMPT_VERSION}:{variant_part}{normalize_place(place)}"
 
 
 # The grounding-match primitive (grounding_token_set / is_title_grounded) is
@@ -298,6 +311,46 @@ def drop_repeated_titles(candidates: List[dict]) -> List[dict]:
     return kept
 
 
+def _work_matches(candidate: dict, work_title: str, work_authors: List[str]) -> bool:
+    """Same book: the title key matches and, when both name authors, an author does."""
+    if _title_key(candidate.get("title")) != _title_key(work_title):
+        return False
+    author = _author_key(candidate.get("author"))
+    if not author or not work_authors:
+        return True
+    return any(_author_key(a) == author for a in work_authors)
+
+
+def attach_receipts(
+    candidates: List[dict], researcher_text: str, lookup: Optional[WikidataLookup]
+) -> List[dict]:
+    """Say where each candidate came from (ai-private#81).
+
+    ``search`` when the title is grounded in the researcher's text;
+    ``wikidata`` with the work QID and the P840 place QID when a Wikidata
+    record is the same book (``_work_matches``). A book both found becomes one
+    candidate with both receipts (the formatter merged it; this only labels
+    it). Only called when the resolver ran a Wikidata variant: production
+    (``search``) answers carry no receipt fields.
+    """
+    works = list(lookup.works) if lookup is not None and lookup.status == "found" else []
+    haystack = grounding_token_set(researcher_text)
+    labelled: List[dict] = []
+    for c in candidates:
+        entry = dict(c)
+        sources: List[str] = []
+        if haystack and is_title_grounded(c.get("title"), haystack):
+            sources.append("search")
+        work = next((w for w in works if _work_matches(c, w.title, w.authors)), None)
+        if work is not None:
+            sources.append("wikidata")
+            entry["work_qid"] = work.work_qid
+            entry["place_qid"] = work.location_qid
+        entry["sources"] = sources or None
+        labelled.append(entry)
+    return labelled
+
+
 class PlaceToBookResolver:
     """Resolve a destination to grounded place→book candidates.
 
@@ -316,8 +369,22 @@ class PlaceToBookResolver:
         langfuse_secret_key: Optional[str] = None,
         langfuse_public_key: Optional[str] = None,
         langfuse_host: Optional[str] = None,
+        variant: str = "search",
+        wikidata_source: Optional[WikidataSource] = None,
     ) -> None:
+        if variant not in PLACE_TO_BOOK_VARIANTS:
+            raise ValueError(f"unknown place_to_book variant {variant!r}")
         self._model = model
+        # ai-private#81: where candidates come from. Production stays "search";
+        # "wikidata" / "both" exist for the eval comparison until Olga picks a
+        # default from its numbers.
+        self.variant = variant
+        if variant != "search" and wikidata_source is None:
+            wikidata_source = HttpWikidataSource()
+        self._wikidata_source = wikidata_source
+        # What the last resolve() did, for the eval: cache hit, search queries,
+        # Wikidata status and works, token usage. Never read by the API.
+        self.last_run: dict = {}
         self._session_service = session_service or create_session_service(
             use_database=False
         )
@@ -333,6 +400,21 @@ class PlaceToBookResolver:
         self._langfuse_secret_key = langfuse_secret_key
         self._langfuse_public_key = langfuse_public_key
         self._langfuse_host = langfuse_host
+
+    def with_variant(self, variant: str) -> "PlaceToBookResolver":
+        """A resolver that shares this one's model, sessions, cache and
+        Langfuse config but runs ``variant``. The cache key carries the
+        variant, so the copies never read each other's answers."""
+        return PlaceToBookResolver(
+            self._model,
+            session_service=self._session_service,
+            cache=self._cache,
+            langfuse_secret_key=self._langfuse_secret_key,
+            langfuse_public_key=self._langfuse_public_key,
+            langfuse_host=self._langfuse_host,
+            variant=variant,
+            wikidata_source=self._wikidata_source,
+        )
 
     def close(self) -> None:
         """Release the cache's handle (the disk backend holds a SQLite one)."""
@@ -386,29 +468,35 @@ class PlaceToBookResolver:
         if not normalized:
             return self._not_found(place, normalized)
 
-        key = cache_key(place)
+        key = cache_key(place, self.variant)
+        self.last_run = {"variant": self.variant, "cached": False}
         cached = await self._read_cache(key, normalized)
         if cached is not None:
             backend = "disk" if isinstance(self._cache, DiskTTLCache) else "memory"
             logger.info(f"place2book cache hit ({backend})", place=normalized)
+            self.last_run["cached"] = True
             return cached
 
-        raw_candidates, researcher_text, queries = await self._run_pipeline(place)
-        cleaned = self._clean(raw_candidates, researcher_text)
+        raw_candidates, researcher_text, queries, lookup = await self._run_pipeline(place)
+        evidence = self._evidence(researcher_text, lookup, place)
+        cleaned = self._clean(raw_candidates, evidence)
 
-        if not cleaned and (raw_candidates is None or not researcher_text.strip()):
+        if not cleaned and (raw_candidates is None or not evidence.strip()):
             logger.warning("place_to_book_couldnt_check", place=normalized)
             return self._not_found(place, normalized)
 
-        if not cleaned and not searched_for_books(queries):
+        # The book-search retry is about the researcher; with no researcher
+        # (variant "wikidata") there is nothing to retry.
+        if not cleaned and self.variant != "wikidata" and not searched_for_books(queries):
             # An empty answer with no book search behind it says nothing about
             # the place: run the pipeline once more before believing it.
             logger.warning(
                 "place_to_book_no_book_search", place=normalized, queries=queries, attempt=1
             )
-            raw_candidates, researcher_text, queries = await self._run_pipeline(place)
-            cleaned = self._clean(raw_candidates, researcher_text)
-            if not cleaned and (raw_candidates is None or not researcher_text.strip()):
+            raw_candidates, researcher_text, queries, lookup = await self._run_pipeline(place)
+            evidence = self._evidence(researcher_text, lookup, place)
+            cleaned = self._clean(raw_candidates, evidence)
+            if not cleaned and (raw_candidates is None or not evidence.strip()):
                 logger.warning("place_to_book_couldnt_check", place=normalized)
                 return self._not_found(place, normalized)
             if not cleaned and not searched_for_books(queries):
@@ -420,13 +508,16 @@ class PlaceToBookResolver:
                     "place_to_book_no_book_search", place=normalized, queries=queries, attempt=2
                 )
 
+        if cleaned and self.variant != "search":
+            cleaned = attach_receipts(cleaned, researcher_text, lookup)
+
         if cleaned:
             result = PlaceToBookResult(
                 place=place,
                 query=normalized,
                 found=True,
                 message=None,
-                candidates=[PlaceBookCandidate(**c) for c in cleaned],
+                candidates=[PlaceBookCandidateWithReceipts(**c) for c in cleaned],
             )
         else:
             result = self._not_found(place, normalized)
@@ -440,6 +531,14 @@ class PlaceToBookResolver:
             count=len(result.candidates),
         )
         return result
+
+    def _evidence(self, researcher_text: str, lookup: Optional[WikidataLookup], place: str) -> str:
+        """What the grounding filter checks titles against: the researcher's
+        text, plus the Wikidata records when this variant asked Wikidata. A
+        title from neither is still dropped."""
+        if self.variant == "search":
+            return researcher_text
+        return "\n\n".join(t for t in (researcher_text, records_block(lookup, place)) if t)
 
     @staticmethod
     def _clean(raw_candidates: Optional[List[dict]], researcher_text: str) -> List[dict]:
@@ -473,10 +572,13 @@ class PlaceToBookResolver:
             candidates=[],
         )
 
-    async def _run_pipeline(self, place: str) -> Tuple[Optional[List[dict]], str, List[str]]:
+    async def _run_pipeline(
+        self, place: str
+    ) -> Tuple[Optional[List[dict]], str, List[str], Optional[WikidataLookup]]:
         """Run the pipeline once; return (candidate dicts, researcher text,
-        researcher search queries). Candidates are None when the formatter's
-        answer is missing or malformed."""
+        researcher search queries, Wikidata lookup). Candidates are None when
+        the formatter's answer is missing or malformed; the lookup is None
+        when this variant did not ask Wikidata."""
         job_id = str(uuid.uuid4())
         user_id = "place2book"
 
@@ -485,7 +587,11 @@ class PlaceToBookResolver:
         )
 
         workflow = create_place_to_book_workflow(
-            self._model, google_search, place=place
+            self._model,
+            google_search,
+            place=place,
+            variant=self.variant,
+            wikidata_source=self._wikidata_source,
         )
         langfuse_plugin = self._create_langfuse_plugin()
         runner = self._build_runner(workflow, langfuse_plugin)
@@ -514,18 +620,26 @@ class PlaceToBookResolver:
             # unconditionally in the finally -- collect_token_usage() is
             # itself a no-op when the plugin is disabled (no credentials
             # configured), and this must still run if the pump raises.
-            await collect_token_usage(langfuse_plugin)
+            usage = await collect_token_usage(langfuse_plugin)
+            self.last_run["token_usage"] = usage
 
         refreshed = await self._session_service.get_session(
             app_name=APP_NAME, user_id=user_id, session_id=job_id
         )
         candidates: Optional[List[dict]] = None
+        lookup: Optional[WikidataLookup] = None
         if refreshed is not None:
             run_state = SessionStateAccessor(refreshed.state)
             candidates = extract_place_to_book_from_state(run_state)
+            lookup = lookup_from(refreshed.state.get(WIKIDATA_LOOKUP_KEY))
 
+        queries = capture.queries_for("place_to_book_researcher")
+        self.last_run["search_queries"] = len(queries)
+        self.last_run["wikidata_status"] = lookup.status if lookup is not None else None
+        self.last_run["wikidata_works"] = len(lookup.works) if lookup is not None else 0
         return (
             candidates,
             capture.text_for("place_to_book_researcher"),
-            capture.queries_for("place_to_book_researcher"),
+            queries,
+            lookup,
         )

@@ -1435,6 +1435,40 @@ Only `discover()` was cached. On mystoryland.ai on 2026-11-22, a first search fo
 - If two first readers of an uncached book arrive at the same moment, both compose and both store, and the later write wins. The discovery cache accepts the same race.
 - The compose cache starts empty after the first deploy of this change, while the discovery cache keeps its entries. Sessions created by a discover before the deploy have no `discovery_cache_key`, so they compose fresh.
 
+## 42. Wikidata Is a Second Place→Book Source Behind a Variant Switch; Production Stays on Search (2026-11-26)
+
+**Context.** `place_to_book` finds books for a place with one technique: a Gemini researcher running Google Search,
+then a formatter. Wikidata already states the fact in structured form (P840, narrative location, with a stable QID for
+every work and place). storyland-ai-private#81 asks for Wikidata as a second source and a measured comparison before
+anything changes for readers. Part 1 (ai#324) built the lookup (`core/wikidata.py`): fixed SPARQL templates filled only
+with validated QIDs, a name resolved only to one clear place, written works only, fail-open with a status.
+
+**Decision.**
+1. `create_place_to_book_workflow` takes a `variant`: `search` (unchanged graph, production), `wikidata`
+   (`START → wikidata_lookup → wikidata_evidence → formatter`, no researcher) or `both` (the researcher and
+   `wikidata_lookup` run side by side into a `JoinNode`, then `wikidata_evidence → formatter`). Running Wikidata beside
+   the researcher means it adds latency only when it is the slower branch (Dublin measured ~13 s on 2026-11-25).
+2. Both Wikidata nodes are plain code (`agents/wikidata_nodes.py`); neither calls a model. `wikidata_lookup` writes the
+   parsed `WikidataLookup` to `state["wikidata_lookup"]`. `wikidata_evidence` gives the formatter the researcher text
+   unchanged plus a fixed note and the records as a JSON data block (title and authors only, capped at 20). QIDs never
+   reach the model, so it cannot copy or invent one.
+3. The merge happens where it does today: the formatter keeps each book once. Code then labels the result
+   (`attach_receipts`): `search` when the title is grounded in the researcher text, `wikidata` with `work_qid` and
+   `place_qid` (the place the P840 statement names) when a record is the same book (title key, plus an author when both
+   name one). The grounding filter checks titles against the researcher text plus the records, so a title from neither
+   is still dropped.
+4. The receipts live on `PlaceBookCandidateWithReceipts`, used only in `PlaceToBookResult`. The formatter's
+   `output_schema` stays `PlaceBookCandidate`. All three fields are optional and null under `search`, so
+   `/place-to-book` stays backward compatible and answers cached before this change still validate.
+5. Each non-search variant gets its own cache-key segment (`place2book:v2:<prompt>:<variant>:<place>`); the `search`
+   key is unchanged. `run_place_to_book_eval.py --variant` runs any of the three and records latency, search calls,
+   tokens, cost and the cases where Wikidata returned nothing.
+
+**Consequences.** Production behaviour is unchanged until Olga picks a default from the comparison table. A Wikidata
+outage leaves `both` on search alone. The card's MCP transport (the Wikidata project's MCP server as a second
+`WikidataSource`) and reusing the gateway's place QID (services#210) come in Part 3; the HTTP source stays the
+transport here.
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
