@@ -1456,13 +1456,16 @@ with validated QIDs, a name resolved only to one clear place, written works only
    (`attach_receipts`): `search` when the title is grounded in the researcher text, `wikidata` with `work_qid` and
    `place_qid` (the place the P840 statement names) when a record is the same book (title key, plus an author when both
    name one). The grounding filter checks titles against the researcher text plus the records, so a title from neither
-   is still dropped.
+   is still dropped. Under `wikidata` there is no researcher, so a lookup with no works (`empty`, `not_found`,
+   `unavailable`) leaves no evidence: every candidate is dropped and the answer is an unwritten "couldn't check", never
+   a found answer the grounding filter let through on empty evidence.
 4. The receipts live on `PlaceBookCandidateWithReceipts`, used only in `PlaceToBookResult`. The formatter's
    `output_schema` stays `PlaceBookCandidate`. All three fields are optional and null under `search`, so
    `/place-to-book` stays backward compatible and answers cached before this change still validate.
 5. Each non-search variant gets its own cache-key segment (`place2book:v2:<prompt>:<variant>:<place>`); the `search`
    key is unchanged. `run_place_to_book_eval.py --variant` runs any of the three and records latency, search calls,
-   tokens, cost and the cases where Wikidata returned nothing.
+   tokens, cost and the cases where Wikidata returned nothing. Tokens and search calls add up over every pipeline run
+   one `resolve()` makes (the no-book-search retry runs it twice), because latency covers the whole call.
 
 **Consequences.** Production behaviour is unchanged until Olga picks a default from the comparison table. A Wikidata
 outage leaves `both` on search alone. The card's MCP transport (the Wikidata project's MCP server as a second

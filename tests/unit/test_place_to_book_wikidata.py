@@ -370,3 +370,71 @@ class TestRealGraph:
             app_name="storyland", user_id="place2book", session_id=sessions.sessions[0].id
         )
         assert session.state[WIKIDATA_LOOKUP_KEY]["place_qid"] == "Q1761"
+
+
+class _WriteSpy:
+    """A cache that is always empty and records every write."""
+
+    def __init__(self):
+        self.writes: list = []
+
+    async def get(self, key):
+        return None
+
+    async def set(self, key, value, ttl_seconds=None):
+        self.writes.append((key, ttl_seconds))
+
+
+class TestWikidataWithoutRecords:
+    """ai#327 review: under ``wikidata`` there is no researcher, so a lookup
+    with no works leaves no evidence. The grounding filter's fail-open branch
+    used to keep whatever the formatter returned, and that was cached as found."""
+
+    @pytest.mark.parametrize(
+        "lookup",
+        [
+            WikidataLookup(status="empty", place_qid="Q1761", works=[]),
+            WikidataLookup(status="not_found"),
+            WikidataLookup(status="unavailable", reason="timeout"),
+        ],
+        ids=["empty", "not_found", "unavailable"],
+    )
+    async def test_a_formatter_book_without_a_record_is_dropped_and_never_cached(
+        self, monkeypatch, lookup
+    ):
+        from google.adk.sessions import InMemorySessionService
+
+        seen: list = []
+        model = _scripted_model(
+            monkeypatch, "unused", [_cand("Ulysses", "James Joyce", maps_to="Eccles Street, Dublin")], seen
+        )
+        _stub_lookup(monkeypatch, lookup)
+        cache = _WriteSpy()
+        resolver = PlaceToBookResolver(
+            model,
+            session_service=InMemorySessionService(),
+            variant="wikidata",
+            wikidata_source=object(),
+            cache=cache,
+        )
+        result = await resolver.resolve("Dublin")
+
+        assert len(seen) == 1, "the formatter ran and returned a book"
+        assert result.found is False and result.candidates == []
+        assert cache.writes == [], "couldn't check is never written"
+        assert resolver.last_run["wikidata_status"] == lookup.status
+
+    async def test_with_records_the_supported_book_is_still_found(self, monkeypatch):
+        from google.adk.sessions import InMemorySessionService
+
+        seen: list = []
+        model = _scripted_model(monkeypatch, "unused", [_cand("Dubliners", "James Joyce")], seen)
+        _stub_lookup(monkeypatch, FOUND)
+        cache = _WriteSpy()
+        resolver = PlaceToBookResolver(
+            model, session_service=InMemorySessionService(), variant="wikidata",
+            wikidata_source=object(), cache=cache,
+        )
+        result = await resolver.resolve("Dublin")
+        assert [c.title for c in result.candidates] == ["Dubliners"]
+        assert len(cache.writes) == 1

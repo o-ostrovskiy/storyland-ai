@@ -1151,3 +1151,58 @@ class TestNoBookSearchGuard:
         assert result.found is False
         assert len(runs) == 2
         assert [ttl for _, ttl in cache.writes] == [p2b._NOT_FOUND_TTL_SECONDS]
+
+
+class TestRunCountersAddUp:
+    """ai#327 review: the eval times the whole ``resolve()`` call, so its
+    tokens and searches must cover every pipeline run, not only the last."""
+
+    def test_add_token_usage(self):
+        from core.place_to_book import add_token_usage
+
+        a = {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5, "cost_usd": 0.01, "cost_unknown": False}
+        b = {"input_tokens": 4, "output_tokens": 1, "total_tokens": 5, "cost_usd": 0.02, "cost_unknown": True}
+        assert add_token_usage(None, None) is None
+        assert add_token_usage(None, a) == a
+        assert add_token_usage(a, None) == a
+        summed = add_token_usage(a, b)
+        assert summed["total_tokens"] == 10 and summed["input_tokens"] == 7
+        assert summed["cost_usd"] == pytest.approx(0.03)
+        assert summed["cost_unknown"] is True
+        assert a["total_tokens"] == 5, "the first run's dict is not mutated"
+
+    async def test_a_retried_resolve_reports_both_runs(self, monkeypatch):
+        import core.place_to_book as p2b
+
+        stats = {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5, "cost_usd": 0.01, "cost_unknown": False}
+
+        async def fake_usage(plugin):
+            return dict(stats)
+
+        monkeypatch.setattr(p2b, "collect_token_usage", fake_usage)
+        runs = []
+        first = ["is Luga a real place", "where is Luga located"]
+        resolver = _make_resolver(
+            monkeypatch, TestNoBookSearchGuard.LUGA_TEXT, TestNoBookSearchGuard.LUGA, run_counter=runs,
+            cache=_SpyCache(), queries_per_run=[first, ["novels set in Luga, Russia"]],
+        )
+        real = resolver._run_pipeline
+        calls = []
+
+        async def first_empty(place):
+            candidates, text, queries, lookup = await real(place)
+            calls.append(1)
+            return ([], text, queries, lookup) if len(calls) == 1 else (candidates, text, queries, lookup)
+
+        monkeypatch.setattr(resolver, "_run_pipeline", first_empty)
+        await resolver.resolve("Luga")
+
+        assert len(runs) == 2
+        assert resolver.last_run["token_usage"]["total_tokens"] == 10
+        assert resolver.last_run["token_usage"]["cost_usd"] == pytest.approx(0.02)
+        assert resolver.last_run["search_queries"] == 3
+
+        # A fresh call starts from zero, not from the previous call's totals.
+        await resolver.resolve("Luga")  # cache hit: no run
+        assert resolver.last_run["search_queries"] == 0
+        assert resolver.last_run["token_usage"] is None

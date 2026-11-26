@@ -321,6 +321,27 @@ def _work_matches(candidate: dict, work_title: str, work_authors: List[str]) -> 
     return any(_author_key(a) == author for a in work_authors)
 
 
+def add_token_usage(total: Optional[dict], usage: Optional[dict]) -> Optional[dict]:
+    """Sum two Langfuse session-stat dicts key by key. Numbers add, and
+    ``cost_unknown`` is true if either run's cost was unknown. A run with no
+    stats (Langfuse off) adds nothing."""
+    if not usage:
+        return total
+    if not total:
+        return dict(usage)
+    summed = dict(total)
+    for key, value in usage.items():
+        prior = summed.get(key)
+        if isinstance(value, bool):
+            summed[key] = bool(prior) or value
+        elif isinstance(value, (int, float)):
+            numeric_prior = isinstance(prior, (int, float)) and not isinstance(prior, bool)
+            summed[key] = (prior if numeric_prior else 0) + value
+        else:
+            summed[key] = value
+    return summed
+
+
 def attach_receipts(
     candidates: List[dict], researcher_text: str, lookup: Optional[WikidataLookup]
 ) -> List[dict]:
@@ -469,7 +490,15 @@ class PlaceToBookResolver:
             return self._not_found(place, normalized)
 
         key = cache_key(place, self.variant)
-        self.last_run = {"variant": self.variant, "cached": False}
+        # Token usage and search counts add up over every pipeline run this
+        # call makes (the no-book-search retry runs it twice), so the eval's
+        # cost matches its latency, which spans the whole call (ai#327).
+        self.last_run = {
+            "variant": self.variant,
+            "cached": False,
+            "token_usage": None,
+            "search_queries": 0,
+        }
         cached = await self._read_cache(key, normalized)
         if cached is not None:
             backend = "disk" if isinstance(self._cache, DiskTTLCache) else "memory"
@@ -540,9 +569,18 @@ class PlaceToBookResolver:
             return researcher_text
         return "\n\n".join(t for t in (researcher_text, records_block(lookup, place)) if t)
 
-    @staticmethod
-    def _clean(raw_candidates: Optional[List[dict]], researcher_text: str) -> List[dict]:
-        grounded = filter_grounded_candidates(raw_candidates, researcher_text)
+    def _clean(self, raw_candidates: Optional[List[dict]], evidence: str) -> List[dict]:
+        # The grounding filter fails open on empty evidence (a capture miss in
+        # ``search`` is not proof of fabrication). Under ``wikidata`` there is
+        # no researcher, so empty evidence means no record supports any title:
+        # drop them all, and ``resolve`` answers "couldn't check" (ai#327).
+        if self.variant == "wikidata" and not evidence.strip():
+            if raw_candidates:
+                logger.warning(
+                    "place_to_book_unsupported_by_wikidata", dropped=len(raw_candidates)
+                )
+            return []
+        grounded = filter_grounded_candidates(raw_candidates, evidence)
         return drop_repeated_titles(enforce_label_invariants(grounded))
 
     async def _read_cache(self, key: str, normalized: str) -> Optional[PlaceToBookResult]:
@@ -621,7 +659,7 @@ class PlaceToBookResolver:
             # itself a no-op when the plugin is disabled (no credentials
             # configured), and this must still run if the pump raises.
             usage = await collect_token_usage(langfuse_plugin)
-            self.last_run["token_usage"] = usage
+            self.last_run["token_usage"] = add_token_usage(self.last_run.get("token_usage"), usage)
 
         refreshed = await self._session_service.get_session(
             app_name=APP_NAME, user_id=user_id, session_id=job_id
@@ -634,7 +672,7 @@ class PlaceToBookResolver:
             lookup = lookup_from(refreshed.state.get(WIKIDATA_LOOKUP_KEY))
 
         queries = capture.queries_for("place_to_book_researcher")
-        self.last_run["search_queries"] = len(queries)
+        self.last_run["search_queries"] = self.last_run.get("search_queries", 0) + len(queries)
         self.last_run["wikidata_status"] = lookup.status if lookup is not None else None
         self.last_run["wikidata_works"] = len(lookup.works) if lookup is not None else 0
         return (
