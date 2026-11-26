@@ -22,6 +22,7 @@ from api.models import (
     SSEErrorEvent,
     SSEDoneEvent,
 )
+from common.request_source import RequestSource
 from core.events import (
     DomainEvent,
     ProgressEvent,
@@ -206,6 +207,7 @@ async def discover_stream(
     vibe: Optional[str] = None,
     taste_context: Optional[dict] = None,
     work: Optional[WorkRef] = None,
+    request_source: Optional[RequestSource] = None,
 ) -> AsyncGenerator[dict, None]:
     """Run phases 1-2 via executor and yield SSE events."""
     async for sse in track_abandonment(
@@ -218,6 +220,7 @@ async def discover_stream(
             taste_context=taste_context,
             user_id=user_id,
             work=work,
+            request_source=request_source,
         ),
     ):
         yield sse
@@ -228,6 +231,7 @@ async def compose_stream(
     region_ids: List[int],
     user_id: str,
     executor: WorkflowExecutor,
+    request_source: Optional[RequestSource] = None,
 ) -> AsyncGenerator[dict, None]:
     """Run phase 3 via executor and yield SSE events."""
     async for sse in track_abandonment(
@@ -236,6 +240,7 @@ async def compose_stream(
             job_id=job_id,
             region_ids=region_ids,
             user_id=user_id,
+            request_source=request_source,
         ),
     ):
         yield sse

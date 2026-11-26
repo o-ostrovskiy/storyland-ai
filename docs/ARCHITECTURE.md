@@ -1404,6 +1404,7 @@ With film and series journeys on the same graph (ADR #36), a Langfuse trace look
 
 ### Decision
 - `LangfusePlugin(work_kind=...)` writes `work_kind` into the trace metadata (beside `prompt_version` / `prompt_hash`) and a `work_kind:<kind>` trace tag via `propagate_attributes`. A film or series trace also carries `screen_prompt_hash`.
+- An MCP-started job (storyland-services#266) adds its source tags after the kind tag: `work_kind:<kind>`, `mcp`, `tool:<tool>`, `client:<client>`. A website job carries the kind tag alone.
 - `WorkflowExecutor._create_langfuse_plugin(work_kind)`: discovery passes the request's kind, composition the session's `work_kind`. Every other run keeps the `book` default.
 
 ### Trade-offs
