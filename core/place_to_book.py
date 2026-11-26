@@ -48,7 +48,7 @@ from google.genai import types
 
 from agents.orchestrator import PLACE_TO_BOOK_VARIANTS, create_place_to_book_workflow
 from agents.prompts import CURRENT_PROMPT_VERSION
-from agents.wikidata_nodes import WIKIDATA_LOOKUP_KEY, lookup_from, records_block
+from agents.wikidata_nodes import WIKIDATA_LOOKUP_KEY, lookup_from, records_grounding_text
 from common.logging import get_logger
 from models.place_to_book import (
     PlaceBookCandidateWithReceipts,
@@ -510,7 +510,13 @@ class PlaceToBookResolver:
         evidence = self._evidence(researcher_text, lookup, place)
         cleaned = self._clean(raw_candidates, evidence)
 
-        if not cleaned and (raw_candidates is None or not evidence.strip()):
+        # Under ``wikidata`` an empty answer is never a decided "no books":
+        # either no record came back, or the formatter returned only titles no
+        # record names. Neither says the place has no books, so it is not
+        # cached (ai#327 review).
+        if not cleaned and (
+            raw_candidates is None or not evidence.strip() or self.variant == "wikidata"
+        ):
             logger.warning("place_to_book_couldnt_check", place=normalized)
             return self._not_found(place, normalized)
 
@@ -563,11 +569,13 @@ class PlaceToBookResolver:
 
     def _evidence(self, researcher_text: str, lookup: Optional[WikidataLookup], place: str) -> str:
         """What the grounding filter checks titles against: the researcher's
-        text, plus the Wikidata records when this variant asked Wikidata. A
-        title from neither is still dropped."""
+        text, plus the Wikidata records' titles and authors when this variant
+        asked Wikidata. The formatter still reads the records inside ``_NOTE``;
+        the note's fixed words are not evidence for any title (ai#327 review).
+        A title from neither source is still dropped."""
         if self.variant == "search":
             return researcher_text
-        return "\n\n".join(t for t in (researcher_text, records_block(lookup, place)) if t)
+        return "\n\n".join(t for t in (researcher_text, records_grounding_text(lookup)) if t)
 
     def _clean(self, raw_candidates: Optional[List[dict]], evidence: str) -> List[dict]:
         # The grounding filter fails open on empty evidence (a capture miss in

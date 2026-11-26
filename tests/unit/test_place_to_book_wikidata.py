@@ -23,6 +23,7 @@ from agents.wikidata_nodes import (
     evidence_text,
     lookup_from,
     records_block,
+    records_grounding_text,
 )
 from core.place_to_book import PlaceToBookResolver, attach_receipts, cache_key
 from core.wikidata import WikidataLookup, WikidataWork
@@ -133,6 +134,17 @@ class TestRecordsBlock:
         text = evidence_text("Research: Ulysses is set in Dublin.", FOUND, "Dublin")
         assert text.startswith("Research: Ulysses is set in Dublin.")
         assert "WIKIDATA RECORDS" in text
+
+    def test_grounding_text_is_titles_and_authors_only(self):
+        text = records_grounding_text(FOUND)
+        assert text.splitlines() == [
+            "Ulysses — James Joyce",
+            "Dubliners — James Joyce",
+            "The Green Road — Anne Enright",
+        ]
+        assert "WIKIDATA" not in text and "written" not in text.lower()
+        assert records_grounding_text(WikidataLookup(status="empty")) == ""
+        assert records_grounding_text(None) == ""
 
     def test_lookup_from_rejects_non_lookups(self):
         assert lookup_from({"status": "found", "works": []}).status == "found"
@@ -438,3 +450,24 @@ class TestWikidataWithoutRecords:
         result = await resolver.resolve("Dublin")
         assert [c.title for c in result.candidates] == ["Dubliners"]
         assert len(cache.writes) == 1
+
+    async def test_a_title_made_of_the_notes_words_is_not_grounded(self, monkeypatch):
+        """ai#327 review, round 2: the note around the records says "written",
+        "work" and "record". Grounding used to read the note, so "The Written
+        Record" passed with no record behind it and was cached as found."""
+        from google.adk.sessions import InMemorySessionService
+
+        only_ulysses = WikidataLookup(status="found", place_qid="Q1761", works=[ULYSSES])
+        seen: list = []
+        model = _scripted_model(monkeypatch, "unused", [_cand("The Written Record", "Nobody")], seen)
+        _stub_lookup(monkeypatch, only_ulysses)
+        cache = _WriteSpy()
+        resolver = PlaceToBookResolver(
+            model, session_service=InMemorySessionService(), variant="wikidata",
+            wikidata_source=object(), cache=cache,
+        )
+        result = await resolver.resolve("Dublin")
+
+        assert "WIKIDATA RECORDS for Dublin." in seen[0], "the formatter still reads the note"
+        assert result.found is False and result.candidates == []
+        assert cache.writes == [], "an answer no record supports is couldn't check, never cached"

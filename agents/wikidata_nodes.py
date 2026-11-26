@@ -83,6 +83,18 @@ def records_block(lookup: Optional["WikidataLookup"], place: str) -> str:
     return _NOTE.format(place=place) + "\n" + json.dumps(records, ensure_ascii=False, indent=1)
 
 
+def records_grounding_text(lookup: Optional["WikidataLookup"]) -> str:
+    """The records' titles and authors only, one record per line, for the
+    grounding filter. ``records_block`` wraps the same records in ``_NOTE``,
+    and the note's own words ("written", "record", "work") would otherwise
+    count as evidence for a title no record names (ai#327 review)."""
+    if lookup is None or lookup.status != "found" or not lookup.works:
+        return ""
+    return "\n".join(
+        " — ".join([w.title, *w.authors[:3]]) for w in lookup.works[:MAX_RECORDS_FOR_FORMATTER]
+    )
+
+
 def evidence_text(researcher_text: Optional[str], lookup: Optional["WikidataLookup"], place: str) -> str:
     """The formatter's input: the research, then the Wikidata records."""
     parts = [p for p in ((researcher_text or "").strip(), records_block(lookup, place)) if p]
