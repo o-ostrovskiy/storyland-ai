@@ -33,7 +33,12 @@ class CityStop(BaseModel):
         ),
     )
     time_of_day: str = Field(
-        description='Best time to visit: morning, afternoon, evening, full_day'
+        description=(
+            "Best time to visit: morning, afternoon, evening, or full_day. "
+            "full_day means the visit itself fills most of a day (a large estate, "
+            "a national park, a day trip), not 'any time of day'; for a place that "
+            "suits any time, pick the single best part of the day."
+        )
     )
     notes: Optional[str] = Field(
         default=None, description="Practical tips for visiting"
