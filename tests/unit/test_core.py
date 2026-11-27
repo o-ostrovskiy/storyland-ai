@@ -975,6 +975,33 @@ class TestDowngradeUngroundedMatchTypes:
         assert stop["match_type"] == "literal"
         assert stop["grounding_source"] == "author's home"
 
+    def test_ungrounded_literal_loses_its_book_hook(self):
+        """A hook asserts the book event the grounding check just rejected
+        (ai#326 round 3, Codex P2): it must go with the downgrade."""
+        stop_in = _stop("Faulkner Invented Manor", "literal", grounding_source="chapter 3")
+        stop_in["book_hook"] = "Where Theo stays"
+        stop_in["highlights"] = ["test"]
+        out = downgrade_ungrounded_match_types(_itinerary_with_stops([stop_in]), _RESEARCH)
+        stop = out["cities"][0]["stops"][0]
+        assert stop["match_type"] == "vibe"
+        assert stop["book_hook"] is None
+        # highlights are copied from `reason`, not from the hook, so they stay
+        assert stop["highlights"] == ["test"]
+
+    def test_grounded_literal_keeps_its_book_hook(self):
+        stop_in = _stop("Margaret Mitchell House", "literal", grounding_source="author's home")
+        stop_in["book_hook"] = "Where Mitchell wrote the novel"
+        out = downgrade_ungrounded_match_types(_itinerary_with_stops([stop_in]), _RESEARCH)
+        stop = out["cities"][0]["stops"][0]
+        assert stop["match_type"] == "literal"
+        assert stop["book_hook"] == "Where Mitchell wrote the novel"
+
+    def test_vibe_stop_keeps_its_book_hook(self):
+        stop_in = _stop("A Moody Park", "vibe")
+        stop_in["book_hook"] = "The mood of the opening chapter"
+        out = downgrade_ungrounded_match_types(_itinerary_with_stops([stop_in]), _RESEARCH)
+        assert out["cities"][0]["stops"][0]["book_hook"] == "The mood of the opening chapter"
+
     def test_ungrounded_historical_downgraded(self):
         itin = _itinerary_with_stops([_stop("Nonexistent Battlefield", "historical")])
         out = downgrade_ungrounded_match_types(itin, _RESEARCH)

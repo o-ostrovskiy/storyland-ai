@@ -176,8 +176,8 @@ def downgrade_ungrounded_match_types(
     ``literal``/``historical`` whose name is not grounded in the discovery
     research (city/landmark/author/context; see ``is_title_grounded`` for the
     token-overlap matching rule) is downgraded to the
-    weakest claim (``vibe``) and has its ``grounding_source`` cleared, since the
-    cited evidence didn't hold up. Stops are never dropped and never upgraded.
+    weakest claim (``vibe``) and has its ``grounding_source`` and ``book_hook``
+    cleared, since the cited evidence didn't hold up. Stops are never dropped and never upgraded.
 
     Conservative and fail-open by design (it must never make results worse):
       * No grounding text captured -> return unchanged (we cannot prove anything
@@ -210,6 +210,11 @@ def downgrade_ungrounded_match_types(
                 continue
             stop["match_type"] = _DOWNGRADE_TARGET
             stop["grounding_source"] = None
+            # The v7 hook ("Where Theo stays") asserts the very book event that
+            # just failed the check, so it goes too. `highlights` stay: they are
+            # copied from `reason`, not from the hook.
+            if "book_hook" in stop:
+                stop["book_hook"] = None
             downgraded += 1
 
     if downgraded:

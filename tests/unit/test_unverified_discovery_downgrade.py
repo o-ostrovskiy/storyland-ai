@@ -503,6 +503,18 @@ class TestAllPayloadsUnverified:
         assert stops["Dublin"]["match_type"] == "vibe"
         assert stops["Dublin"]["grounding_source"] is None
 
+    def test_disqualified_evidence_clears_every_demoted_book_hook(self):
+        itinerary = _itinerary()
+        for stop in itinerary["cities"][0]["stops"]:
+            stop["book_hook"] = "In the book: " + stop["name"]
+        result = downgrade_ungrounded_match_types(itinerary, "", True)
+        for stop in result["cities"][0]["stops"]:
+            if stop["match_type"] == "vibe" and stop["grounding_source"] is None:
+                assert stop.get("book_hook") is None, stop["name"]
+        stops = {s["name"]: s for s in result["cities"][0]["stops"]}
+        assert stops["Personal Office"]["book_hook"] is None
+        assert stops["Dublin"]["book_hook"] is None
+
     def test_empty_haystack_without_the_flag_still_fails_open(self):
         """The converse row: this is the pre-fix behaviour, and it must persist
         for the no-discovery case. If this ever demotes, the flag has stopped
