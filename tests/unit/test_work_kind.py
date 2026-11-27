@@ -380,6 +380,61 @@ class TestScreenClaim:
         assert built_kinds == [expected]
 
 
+class TestTraceWorkKindWiring:
+    """ai-private#67 Part 3: discovery and compose hand the journey's kind
+    to the Langfuse plugin, so the trace tag is the session's real kind."""
+
+    async def _run(self, monkeypatch, **discover_kwargs):
+        executor, ex = _make_executor(monkeypatch)
+        kinds = []
+        real = executor._create_langfuse_plugin
+
+        def spy(*args, **kw):
+            plugin = real(*args, **kw)
+            kinds.append(plugin._work_kind)
+            return plugin
+
+        monkeypatch.setattr(executor, "_create_langfuse_plugin", spy)
+        monkeypatch.setattr(
+            ex,
+            "Runner",
+            _state_writing_runner(
+                lambda: {
+                    SessionStateKeys.REGION_ANALYSIS: {
+                        "regions": _REGIONS,
+                        "analysis_note": "note",
+                    }
+                }
+            ),
+        )
+        job_id = None
+        async for ev in executor.discover(**discover_kwargs):
+            job_id = getattr(ev, "job_id", job_id)
+        monkeypatch.setattr(
+            ex,
+            "Runner",
+            _state_writing_runner(
+                lambda: {SessionStateKeys.COMPOSER_ENVELOPE: _envelope_with_claim(None)}
+            ),
+        )
+        async for _ in executor.compose(job_id=job_id, region_ids=[1]):
+            pass
+        return kinds
+
+    async def test_a_book_journey_traces_as_book(self, monkeypatch):
+        kinds = await self._run(monkeypatch, book_title="Persuasion", author="Jane Austen")
+        assert kinds == ["book", "book"]
+
+    async def test_a_film_journey_traces_as_film_in_both_phases(self, monkeypatch):
+        kinds = await self._run(
+            monkeypatch,
+            book_title="Persuasion",
+            author="Carrie Cracknell",
+            work=WorkRef(**FILM),
+        )
+        assert kinds == ["film", "film"]
+
+
 class TestPromptSeam:
     def test_book_returns_the_book_prompts_unchanged(self):
         from agents.prompts import load_prompts

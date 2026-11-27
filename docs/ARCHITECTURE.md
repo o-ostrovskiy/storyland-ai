@@ -1397,6 +1397,19 @@ ADR #31 left `agents/work_prompts.py::for_kind` as a seam that returned the book
 ### Trade-offs
 Two places now version prompts (`vN.json` for books, `screen_vN.json` for films). The overlay rides whichever book version is current, so a future book bump also changes film text that the overlay does not replace; the film key moves with it because the global fingerprint is in every key. The `screen_v1` numbers (ai-private#68's eval set, live Gemini) are Part 3/3.
 
+## 37. A Trace Names Its Work Kind (2026-11-21)
+
+### Context
+With film and series journeys on the same graph (ADR #36), a Langfuse trace looked the same whatever it ran for, so screen-journey cost, latency and errors could not be read apart from book journeys (storyland-ai-private#67 Part 3).
+
+### Decision
+- `LangfusePlugin(work_kind=...)` writes `work_kind` into the trace metadata (beside `prompt_version` / `prompt_hash`) and a `work_kind:<kind>` trace tag via `propagate_attributes`. A film or series trace also carries `screen_prompt_hash`.
+- An MCP-started job (storyland-services#266) adds its source tags after the kind tag: `work_kind:<kind>`, `mcp`, `tool:<tool>`, `client:<client>`. A website job carries the kind tag alone.
+- `WorkflowExecutor._create_langfuse_plugin(work_kind)`: discovery passes the request's kind, composition the session's `work_kind`. Every other run keeps the `book` default.
+
+### Trade-offs
+A book trace's metadata gains one key (`work_kind: book`); nothing a reader sees changes. A film's local-atmosphere run is tagged `book`, because only discovery and composition use the screen prompts.
+
 ## 39. Cancel Cleanup Runs Shielded; a Reader Leaving Is Counted, Not Reported (2026-11-23)
 
 ### Context
@@ -1505,6 +1518,7 @@ transport here.
 | **Persistent place→book cache (ADR #30)** | A restart costs no repeat AI runs; a failed check is never remembered as "no books here" | In-place prompt edits wait out the 6h TTL; the gateway still holds a failed check for 1h |
 | **Work kind on the AI contract (ADR #31)** | Films and series ride the same pipeline; a book request, its metadata event and its cache key are byte-identical | Book fields and `work` coexist on the wire; film prompts are a later story |
 | **Screen claims need evidence (ADR #34)** | A film/series stop is "set here" only with a cited, research-traced source | Unsupported "set here" ships as "filmed here" + vibe: under-claims, never over-claims |
+| **Work kind on every trace (ADR #37)** | Screen journeys filter apart from books in Langfuse (`work_kind:<kind>` tag + metadata, overlay hash on films) | Only discovery and composition carry a screen kind; other runs say `book` |
 | **Cancellation-safe session DB (ADR #32)** | A dropped SSE stream returns its pooled connection; caller cancellation is unchanged | One wrapper method per ADK DB call to keep in step on upgrades |
 | **Shielded cancel cleanup + abandonment count (ADR #39)** | A dropped stream still marks its job failed / clears its in-progress flag; each early close is one countable info line | The dying response waits up to 5 s for the cleanup |
 | **Reader-wait latency report (ADR #33)** | First-region and full-journey p50/p95 from Langfuse, never a fake 0 s | Fresh runs only, measured inside the agent service (no be hop or SSE delivery) |

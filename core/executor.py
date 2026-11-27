@@ -37,6 +37,7 @@ from typing import AsyncGenerator, List, Optional
 
 from google.genai import types
 
+from common.request_source import RequestSource
 from core.retry import build_retry_options
 from google.adk.events import Event
 from google.adk.events.event_actions import EventActions
@@ -490,12 +491,19 @@ class WorkflowExecutor:
                 total=total,
             )
 
-    def _create_langfuse_plugin(self) -> LangfusePlugin:
-        """Fresh plugin per workflow run to isolate token tracking."""
+    def _create_langfuse_plugin(
+        self, work_kind: str = DEFAULT_WORK_KIND
+    ) -> LangfusePlugin:
+        """Fresh plugin per workflow run to isolate token tracking.
+
+        ``work_kind`` tags the trace (ai-private#67); runs that aren't a
+        journey's discovery or composition keep the book default.
+        """
         return LangfusePlugin(
             secret_key=self._config.langfuse_secret_key,
             public_key=self._config.langfuse_public_key,
             host=self._config.langfuse_host,
+            work_kind=work_kind,
         )
 
     def _build_runner(self, workflow, langfuse_plugin=None) -> Runner:
@@ -679,6 +687,7 @@ class WorkflowExecutor:
         vibe: Optional[str] = None,
         taste_context: Optional[dict] = None,
         work: Optional[WorkRef] = None,
+        request_source: Optional[RequestSource] = None,
     ) -> AsyncGenerator[DomainEvent, None]:
         """Run phases 1-2: confirm book metadata + location discovery.
 
@@ -692,6 +701,8 @@ class WorkflowExecutor:
             user_id: User identifier for session isolation
             work: Optional work (book/film/series); absent means a book, and
                 book_title/author already mirror it (ADR #31)
+            request_source: Set for an MCP-started run; stored in session
+                state so every trace on this job is tagged (services#266)
         """
         job_id = str(uuid.uuid4())
 
@@ -712,6 +723,8 @@ class WorkflowExecutor:
         }
         if preferences:
             initial_state[SessionStateKeys.USER_PREFERENCES] = preferences
+        if request_source is not None:
+            initial_state[SessionStateKeys.REQUEST_SOURCE] = request_source.to_state()
 
         try:
             await self._session_service.create_session(
@@ -789,7 +802,7 @@ class WorkflowExecutor:
                 phase=Phase.DISCOVERY, step="Starting location discovery"
             )
 
-            langfuse_plugin = self._create_langfuse_plugin()
+            langfuse_plugin = self._create_langfuse_plugin(_work_kind(work))
             # vibe/taste ride the researcher instructions now (ADR #24:
             # graph-scoped context — branch researchers never see the user
             # prompt that used to carry them).
@@ -1018,6 +1031,7 @@ class WorkflowExecutor:
         job_id: str,
         region_ids: List[int],
         user_id: str = "default",
+        request_source: Optional[RequestSource] = None,
     ) -> AsyncGenerator[DomainEvent, None]:
         """Run phase 3: itinerary composition for selected regions.
 
@@ -1027,6 +1041,8 @@ class WorkflowExecutor:
             job_id: Session ID from the discover step
             region_ids: Region IDs selected by the user
             user_id: User identifier (must match the discover request)
+            request_source: Set for an MCP-started call; overrides the source
+                discover stored (None keeps it), services#266
         """
         try:
             session = await self._session_service.get_session(
@@ -1103,17 +1119,18 @@ class WorkflowExecutor:
 
         # Persist retry-clear state: unmark failure, clear stale itinerary, record selection.
         # In-place mutation of session.state does NOT survive get_session(); use append_event.
+        clear_delta = {
+            SessionStateKeys.JOB_FAILED: False,
+            SessionStateKeys.FINAL_ITINERARY: None,
+            SessionStateKeys.COMPOSER_ENVELOPE: None,
+            SessionStateKeys.SELECTED_REGIONS: selected_regions,
+        }
+        if request_source is not None:
+            clear_delta[SessionStateKeys.REQUEST_SOURCE] = request_source.to_state()
         clear_event = Event(
             invocation_id="system",
             author="system",
-            actions=EventActions(
-                state_delta={
-                    SessionStateKeys.JOB_FAILED: False,
-                    SessionStateKeys.FINAL_ITINERARY: None,
-                    SessionStateKeys.COMPOSER_ENVELOPE: None,
-                    SessionStateKeys.SELECTED_REGIONS: selected_regions,
-                }
-            ),
+            actions=EventActions(state_delta=clear_delta),
         )
         await self._session_service.append_event(session, clear_event)
 
@@ -1355,7 +1372,7 @@ class WorkflowExecutor:
             detail=f"{len(selected_regions)} region(s) selected",
         )
 
-        langfuse_plugin = self._create_langfuse_plugin()
+        langfuse_plugin = self._create_langfuse_plugin(work_kind)
         composition_workflow = create_book_to_place_composition_workflow(
             self._model, work_kind=work_kind
         )
