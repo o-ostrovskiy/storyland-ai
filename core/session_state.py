@@ -8,6 +8,8 @@ magic string key access scattered across the codebase.
 import json
 from typing import Optional, List
 
+from common.request_source import STATE_KEY as REQUEST_SOURCE_STATE_KEY
+
 
 class SessionStateKeys:
     """Constants for all session state keys used by agents and orchestration."""
@@ -44,11 +46,18 @@ class SessionStateKeys:
     USER_PREFERENCES = "user:preferences"
     USER_LOCATION = "user_location"
     JOB_FAILED = "job_failed"
+    # Where the run came from (common/request_source.py): only MCP-started jobs
+    # carry it; the Langfuse plugin turns it into trace tags/metadata.
+    REQUEST_SOURCE = REQUEST_SOURCE_STATE_KEY
     # Set by discover() when the book-identity guard rejects the run (the
     # search researched a different work, or none). compose() refuses such a
     # job: a cleared JOB_FAILED must never turn the wrong-book research into
     # an itinerary (Codex on ai#317). Value: the BookNotFound error payload.
     BOOK_IDENTITY_REJECTED = "book_identity_rejected"
+    # The discover() cache key (unversioned) this job was discovered under.
+    # compose() builds its own cache key from it (ADR #40); a session that
+    # predates it has none and simply composes fresh.
+    DISCOVERY_CACHE_KEY = "discovery_cache_key"
 
 
 class SessionStateAccessor:
@@ -125,6 +134,11 @@ class SessionStateAccessor:
     def work_kind(self) -> str:
         """Kind of work this journey starts from; ``"book"`` when unset."""
         return self._state.get(SessionStateKeys.WORK_KIND) or "book"
+
+    @property
+    def discovery_cache_key(self) -> Optional[str]:
+        value = self._state.get(SessionStateKeys.DISCOVERY_CACHE_KEY)
+        return value if isinstance(value, str) and value else None
 
     @property
     def composer_envelope(self) -> Optional[dict]:

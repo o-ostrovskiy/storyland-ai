@@ -206,6 +206,18 @@ class TestCityStop:
             )
             assert stop.time_of_day == time
 
+    def test_full_day_is_defined_in_the_schema_the_model_sees(self):
+        """The composer, expansion and local-atmosphere agents pass CityStop to the
+        model through output_schema, so this description is the model's only
+        definition of full_day; the web chip reads "Full day" (web#775)."""
+        from models.itinerary import ComposerEnvelope, ExpansionResult
+
+        desc = CityStop.model_json_schema()["properties"]["time_of_day"]["description"]
+        assert "full_day means the visit itself fills most of a day" in desc
+        assert "not 'any time of day'" in desc
+        for envelope in (ComposerEnvelope, ExpansionResult):
+            assert "full_day means" in str(envelope.model_json_schema())
+
     def test_city_stop_match_type_defaults_to_vibe(self):
         """Unlabelled stops degrade to the weakest claim ('vibe')."""
         stop = CityStop(

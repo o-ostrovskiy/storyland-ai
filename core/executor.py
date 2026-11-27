@@ -32,10 +32,12 @@ import hashlib
 import re
 import uuid
 from collections import OrderedDict
+from dataclasses import dataclass
 from typing import AsyncGenerator, List, Optional
 
 from google.genai import types
 
+from common.request_source import RequestSource
 from core.retry import build_retry_options
 from google.adk.events import Event
 from google.adk.events.event_actions import EventActions
@@ -54,6 +56,7 @@ from agents.orchestrator import (
     create_local_atmosphere_workflow,
 )
 from google.adk.tools import google_search
+from common.config import COMPOSER_MAX_OUTPUT_TOKENS
 from common.logging import get_logger
 from models.book import BookMetadata
 from models.work import DEFAULT_WORK_KIND, WorkRef
@@ -85,6 +88,7 @@ from .extraction import (
     extract_expansion_from_state,
     extract_book_recommendations_from_state,
     filter_grounded_recommendations,
+    validate_composer_envelope,
     validate_trip_itinerary,
     _matches_city_as_standalone_word,
 )
@@ -93,8 +97,8 @@ from .prompts import (
     build_composition_prompt,
     build_local_atmosphere_prompt,
 )
-from .cache import TTLCache, build_discovery_cache
-from .cache_version import compute_cache_version
+from .cache import TTLCache, build_compose_cache, build_discovery_cache
+from .cache_version import compute_cache_version, compute_compose_cache_version
 from .regions import (
     enrich_region_analysis,
     get_valid_region_ids,
@@ -209,6 +213,14 @@ BOOK_RECOMMENDATION_AGENT_STEPS: dict[str, str] = {
 }
 
 
+@dataclass
+class _ComposerOutcome:
+    """The last item _run_composer yields: never a stream event."""
+
+    langfuse_plugin: object
+    result: Optional[tuple]
+
+
 def _work_kind(work: Optional[WorkRef]) -> str:
     """The journey's work kind; no ``work`` means a book (ADR #31)."""
     return work.kind if work is not None else DEFAULT_WORK_KIND
@@ -270,6 +282,14 @@ class WorkflowExecutor:
         # backend persists them across deploys — no stale grounded recs, and no
         # post-deploy warmup needed).
         self._cache_version = compute_cache_version(config.model_name)
+        # Compose cache (ADR #40): the reader's FIRST compose of a discovered
+        # book (Home composes regions[0]). Same backend/TTL/budget as the
+        # Discovery cache, its own store, its own namespace (the Discovery
+        # inputs + the composer's modules), so a prompt change flips both.
+        self._compose_cache = build_compose_cache(config)
+        self._compose_cache_version = compute_compose_cache_version(
+            config.model_name, COMPOSER_MAX_OUTPUT_TOKENS
+        )
         # Per-session locks serializing the check-then-set concurrency guards
         # in expand()/recommend_books() (MYS-401): without this, two
         # overlapping requests for the same job_id can both read their
@@ -471,12 +491,19 @@ class WorkflowExecutor:
                 total=total,
             )
 
-    def _create_langfuse_plugin(self) -> LangfusePlugin:
-        """Fresh plugin per workflow run to isolate token tracking."""
+    def _create_langfuse_plugin(
+        self, work_kind: str = DEFAULT_WORK_KIND
+    ) -> LangfusePlugin:
+        """Fresh plugin per workflow run to isolate token tracking.
+
+        ``work_kind`` tags the trace (ai-private#67); runs that aren't a
+        journey's discovery or composition keep the book default.
+        """
         return LangfusePlugin(
             secret_key=self._config.langfuse_secret_key,
             public_key=self._config.langfuse_public_key,
             host=self._config.langfuse_host,
+            work_kind=work_kind,
         )
 
     def _build_runner(self, workflow, langfuse_plugin=None) -> Runner:
@@ -660,6 +687,7 @@ class WorkflowExecutor:
         vibe: Optional[str] = None,
         taste_context: Optional[dict] = None,
         work: Optional[WorkRef] = None,
+        request_source: Optional[RequestSource] = None,
     ) -> AsyncGenerator[DomainEvent, None]:
         """Run phases 1-2: confirm book metadata + location discovery.
 
@@ -673,16 +701,30 @@ class WorkflowExecutor:
             user_id: User identifier for session isolation
             work: Optional work (book/film/series); absent means a book, and
                 book_title/author already mirror it (ADR #31)
+            request_source: Set for an MCP-started run; stored in session
+                state so every trace on this job is tagged (services#266)
         """
         job_id = str(uuid.uuid4())
 
+        discovery_key = self._discovery_cache_key(
+            book_title,
+            author,
+            preferences,
+            vibe,
+            taste_context,
+            kind=_work_kind(work),
+        )
         initial_state = {
             SessionStateKeys.BOOK_TITLE: book_title,
             SessionStateKeys.AUTHOR: author,
             SessionStateKeys.WORK_KIND: _work_kind(work),
+            # compose() keys its cache on this (ADR #40).
+            SessionStateKeys.DISCOVERY_CACHE_KEY: discovery_key,
         }
         if preferences:
             initial_state[SessionStateKeys.USER_PREFERENCES] = preferences
+        if request_source is not None:
+            initial_state[SessionStateKeys.REQUEST_SOURCE] = request_source.to_state()
 
         try:
             await self._session_service.create_session(
@@ -707,16 +749,7 @@ class WorkflowExecutor:
         # the previously computed (already validated) regions and makes ZERO
         # Gemini calls. Only non-empty region sets are ever cached, so a hit
         # cannot introduce a new fabrication; staleness is bounded by the TTL.
-        cache_key = self._versioned_key(
-            self._discovery_cache_key(
-                book_title,
-                author,
-                preferences,
-                vibe,
-                taste_context,
-                kind=_work_kind(work),
-            )
-        )
+        cache_key = self._versioned_key(discovery_key)
         cached_region_analysis = (
             await self._discovery_cache.get(cache_key)
             if self._cache_enabled
@@ -769,7 +802,7 @@ class WorkflowExecutor:
                 phase=Phase.DISCOVERY, step="Starting location discovery"
             )
 
-            langfuse_plugin = self._create_langfuse_plugin()
+            langfuse_plugin = self._create_langfuse_plugin(_work_kind(work))
             # vibe/taste ride the researcher instructions now (ADR #24:
             # graph-scoped context — branch researchers never see the user
             # prompt that used to carry them).
@@ -998,6 +1031,7 @@ class WorkflowExecutor:
         job_id: str,
         region_ids: List[int],
         user_id: str = "default",
+        request_source: Optional[RequestSource] = None,
     ) -> AsyncGenerator[DomainEvent, None]:
         """Run phase 3: itinerary composition for selected regions.
 
@@ -1007,6 +1041,8 @@ class WorkflowExecutor:
             job_id: Session ID from the discover step
             region_ids: Region IDs selected by the user
             user_id: User identifier (must match the discover request)
+            request_source: Set for an MCP-started call; overrides the source
+                discover stored (None keeps it), services#266
         """
         try:
             session = await self._session_service.get_session(
@@ -1083,17 +1119,18 @@ class WorkflowExecutor:
 
         # Persist retry-clear state: unmark failure, clear stale itinerary, record selection.
         # In-place mutation of session.state does NOT survive get_session(); use append_event.
+        clear_delta = {
+            SessionStateKeys.JOB_FAILED: False,
+            SessionStateKeys.FINAL_ITINERARY: None,
+            SessionStateKeys.COMPOSER_ENVELOPE: None,
+            SessionStateKeys.SELECTED_REGIONS: selected_regions,
+        }
+        if request_source is not None:
+            clear_delta[SessionStateKeys.REQUEST_SOURCE] = request_source.to_state()
         clear_event = Event(
             invocation_id="system",
             author="system",
-            actions=EventActions(
-                state_delta={
-                    SessionStateKeys.JOB_FAILED: False,
-                    SessionStateKeys.FINAL_ITINERARY: None,
-                    SessionStateKeys.COMPOSER_ENVELOPE: None,
-                    SessionStateKeys.SELECTED_REGIONS: selected_regions,
-                }
-            ),
+            actions=EventActions(state_delta=clear_delta),
         )
         await self._session_service.append_event(session, clear_event)
 
@@ -1101,18 +1138,6 @@ class WorkflowExecutor:
         exact_author = state.author
 
         async def body() -> AsyncGenerator[DomainEvent, None]:
-            yield ProgressEvent(
-                phase=Phase.COMPOSITION,
-                step="Creating personalized itinerary",
-                detail=f"{len(selected_regions)} region(s) selected",
-            )
-
-            langfuse_plugin = self._create_langfuse_plugin()
-            composition_workflow = create_book_to_place_composition_workflow(
-                self._model, work_kind=state.work_kind
-            )
-            runner = self._build_runner(composition_workflow, langfuse_plugin)
-
             # Graph-runtime history is scoped per invocation (ADR #24): the
             # composer sees none of the discovery conversation, so its
             # grounded inputs are passed explicitly from session state.
@@ -1126,52 +1151,35 @@ class WorkflowExecutor:
                 author_sites=state.author_sites,
                 preferences=state.user_preferences,
             )
-            message = types.Content(
-                role="user", parts=[types.Part(text=prompt)]
+            compose_key = self._compose_cache_key(
+                state, region_ids, selected_regions, prompt
             )
+            cached_envelope = await self._read_compose_cache(compose_key, job_id)
 
-            # ai-private#33: a truncated envelope raises at the model boundary
-            # (agents/composer_truncation.py) and gets exactly one retry. A
-            # second truncation re-raises into run_guarded, whose mapper turns
-            # it into the client-safe transient DiscoveryComposeError -- never
-            # a half-recovered itinerary.
-            for attempt in range(1, COMPOSER_ATTEMPTS + 1):
-                capture = RunCapture()
-                try:
-                    async for ev in pump_events(
-                        runner,
-                        user_id=user_id,
-                        session_id=job_id,
-                        message=message,
-                        phase=Phase.COMPOSITION,
-                        agent_steps={},
-                        capture=capture,
-                        track_final_response=True,
-                    ):
+            langfuse_plugin = None
+            result = None
+            if cached_envelope is not None:
+                # ADR #40: replay the stored RAW envelope through the same
+                # extraction + guards a fresh run uses, against THIS session's
+                # grounding. No ProgressEvent: like a discover hit, a hit is
+                # told apart from a fresh run by its absence.
+                result = await self._replay_cached_envelope(
+                    job_id, user_id, cached_envelope
+                )
+            if result is None:
+                async for ev in self._run_composer(
+                    job_id,
+                    user_id,
+                    session,
+                    selected_regions,
+                    prompt,
+                    compose_key,
+                    work_kind=state.work_kind,
+                ):
+                    if isinstance(ev, _ComposerOutcome):
+                        langfuse_plugin, result = ev.langfuse_plugin, ev.result
+                    else:
                         yield ev
-                    break
-                except Exception as exc:
-                    truncated = find_composer_truncation(exc)
-                    if truncated is None or attempt == COMPOSER_ATTEMPTS:
-                        raise
-                    logger.warning(
-                        "composer_truncation_retry",
-                        job_id=job_id,
-                        attempt=attempt,
-                        finish_reason=truncated.finish_reason,
-                        output_length=truncated.output_length,
-                    )
-
-            # Re-fetch session to get output_key data
-            refreshed = await self._session_service.get_session(
-                app_name=APP_NAME, user_id=user_id, session_id=job_id
-            )
-            active_session = refreshed if refreshed is not None else session
-
-            run_state = SessionStateAccessor(active_session.state)
-            result = extract_itinerary_from_response(
-                capture.final_response, run_state
-            )
 
             if result is None:
                 await self._mark_session_failed(job_id, user_id)
@@ -1201,7 +1209,11 @@ class WorkflowExecutor:
                 book_recommendation_chip=book_recommendation_chip,
             )
 
-            token_usage = await collect_token_usage(langfuse_plugin)
+            token_usage = (
+                await collect_token_usage(langfuse_plugin)
+                if langfuse_plugin is not None
+                else None
+            )
             yield WorkflowComplete(job_id=job_id, token_usage=token_usage)
 
         spec = GuardSpec(
@@ -1221,6 +1233,201 @@ class WorkflowExecutor:
         )
         async for ev in run_guarded(body(), spec):
             yield ev
+
+    def _compose_cache_key(
+        self,
+        state: SessionStateAccessor,
+        region_ids: List[int],
+        selected_regions: list,
+        prompt: str,
+    ) -> Optional[str]:
+        """The compose cache key, or None when this compose is not cached.
+
+        Cached: only the reader's FIRST compose of a discovered book, i.e. a
+        selection of exactly ``regions[0]`` (what Home composes,
+        ``regionToComposeFirst``). That bounds the store to one compose entry
+        per discovery entry. Keyed on the discover key (title, author,
+        preferences, vibe, taste, kind), the region's place_key, and a digest of
+        the exact composer prompt: if the discovery entry was evicted and
+        recomputed with different grounding or regions, the digest changes, so
+        an envelope is only ever replayed for the very input it answered.
+        """
+        if not self._cache_enabled:
+            return None
+        discovery_key = state.discovery_cache_key
+        regions = state.regions
+        if not discovery_key or not regions or len(selected_regions) != 1:
+            return None
+        if list(region_ids) != [regions[0].get("region_id")]:
+            return None
+        region = selected_regions[0]
+        region_ref = region.get("place_key") or f"id={region.get('region_id')}"
+        prompt_sig = hashlib.sha1(prompt.encode("utf-8")).hexdigest()[:16]
+        return (
+            f"dv:{self._compose_cache_version}:compose:v1:"
+            f"{discovery_key}|region={region_ref}|in={prompt_sig}"
+        )
+
+    async def _read_compose_cache(
+        self, compose_key: Optional[str], job_id: str
+    ) -> Optional[dict]:
+        """A cached raw envelope, or None. A read error is a miss, never a failure."""
+        if compose_key is None:
+            return None
+        try:
+            cached = await self._compose_cache.get(compose_key)
+        except Exception as exc:  # noqa: BLE001 - the cache must never break compose
+            logger.warning("compose_cache_unreadable", job_id=job_id[:8], error=str(exc))
+            return None
+        if not isinstance(cached, dict):
+            return None
+        logger.info("compose_cache_hit", job_id=job_id[:8])
+        return cached
+
+    async def _replay_cached_envelope(
+        self, job_id: str, user_id: str, envelope: dict
+    ):
+        """Write a cached envelope where the composer's output_key puts it, then
+        extract exactly as a fresh run does. Returns the extraction result, or
+        None (logged) so compose() falls back to a fresh run.
+        """
+        session = await self._session_service.get_session(
+            app_name=APP_NAME, user_id=user_id, session_id=job_id
+        )
+        if session is None:
+            return None
+        await self._session_service.append_event(
+            session,
+            Event(
+                invocation_id="system",
+                author="system",
+                actions=EventActions(
+                    state_delta={SessionStateKeys.COMPOSER_ENVELOPE: envelope}
+                ),
+            ),
+        )
+        refreshed = await self._session_service.get_session(
+            app_name=APP_NAME, user_id=user_id, session_id=job_id
+        )
+        if refreshed is None:
+            return None
+        result = extract_itinerary_from_response(
+            None, SessionStateAccessor(refreshed.state)
+        )
+        if result is None:
+            logger.warning("compose_cache_hit_unusable", job_id=job_id[:8])
+            await self._session_service.append_event(
+                refreshed,
+                Event(
+                    invocation_id="system",
+                    author="system",
+                    actions=EventActions(
+                        state_delta={SessionStateKeys.COMPOSER_ENVELOPE: None}
+                    ),
+                ),
+            )
+        return result
+
+    async def _store_composed_envelope(
+        self, compose_key: Optional[str], job_id: str, envelope, result
+    ) -> None:
+        """Store a fresh run's RAW envelope (ADR #40).
+
+        Only an envelope that extracted into an itinerary with at least one
+        city: an empty journey is a degraded answer, and pinning it for the
+        TTL would serve it to every reader of that book. A write error is
+        logged, never raised.
+        """
+        if compose_key is None or result is None:
+            return
+        # Only an envelope that validates on its own: one the text fallback
+        # rescued would extract to None on replay.
+        if validate_composer_envelope(envelope) is None:
+            return
+        itinerary_data, _ = result
+        if not (itinerary_data or {}).get("cities"):
+            return
+        try:
+            await self._compose_cache.set(compose_key, envelope)
+            logger.info("compose_cache_store", job_id=job_id[:8])
+        except Exception as exc:  # noqa: BLE001 - the cache must never break compose
+            logger.warning("compose_cache_write_failed", job_id=job_id[:8], error=str(exc))
+
+    async def _run_composer(
+        self,
+        job_id: str,
+        user_id: str,
+        session,
+        selected_regions: list,
+        prompt: str,
+        compose_key: Optional[str],
+        work_kind: str = DEFAULT_WORK_KIND,
+    ):
+        """Run the composer live. Yields its stream events, then one final
+        :class:`_ComposerOutcome` that compose() consumes itself.
+        """
+        yield ProgressEvent(
+            phase=Phase.COMPOSITION,
+            step="Creating personalized itinerary",
+            detail=f"{len(selected_regions)} region(s) selected",
+        )
+
+        langfuse_plugin = self._create_langfuse_plugin(work_kind)
+        composition_workflow = create_book_to_place_composition_workflow(
+            self._model, work_kind=work_kind
+        )
+        runner = self._build_runner(composition_workflow, langfuse_plugin)
+        message = types.Content(
+            role="user", parts=[types.Part(text=prompt)]
+        )
+
+        # ai-private#33: a truncated envelope raises at the model boundary
+        # (agents/composer_truncation.py) and gets exactly one retry. A
+        # second truncation re-raises into run_guarded, whose mapper turns
+        # it into the client-safe transient DiscoveryComposeError -- never
+        # a half-recovered itinerary.
+        for attempt in range(1, COMPOSER_ATTEMPTS + 1):
+            capture = RunCapture()
+            try:
+                async for ev in pump_events(
+                    runner,
+                    user_id=user_id,
+                    session_id=job_id,
+                    message=message,
+                    phase=Phase.COMPOSITION,
+                    agent_steps={},
+                    capture=capture,
+                    track_final_response=True,
+                ):
+                    yield ev
+                break
+            except Exception as exc:
+                truncated = find_composer_truncation(exc)
+                if truncated is None or attempt == COMPOSER_ATTEMPTS:
+                    raise
+                logger.warning(
+                    "composer_truncation_retry",
+                    job_id=job_id,
+                    attempt=attempt,
+                    finish_reason=truncated.finish_reason,
+                    output_length=truncated.output_length,
+                )
+
+        # Re-fetch session to get output_key data
+        refreshed = await self._session_service.get_session(
+            app_name=APP_NAME, user_id=user_id, session_id=job_id
+        )
+        active_session = refreshed if refreshed is not None else session
+
+        run_state = SessionStateAccessor(active_session.state)
+        result = extract_itinerary_from_response(
+            capture.final_response, run_state
+        )
+
+        await self._store_composed_envelope(
+            compose_key, job_id, run_state.composer_envelope, result
+        )
+        yield _ComposerOutcome(langfuse_plugin=langfuse_plugin, result=result)
 
     async def local_atmosphere(
         self,
@@ -2302,6 +2509,7 @@ class WorkflowExecutor:
 
     async def close(self) -> None:
         """Cleanup resources."""
-        close = getattr(self._discovery_cache, "close", None)
-        if callable(close):
-            close()
+        for cache in (self._discovery_cache, self._compose_cache):
+            close = getattr(cache, "close", None)
+            if callable(close):
+                close()

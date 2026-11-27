@@ -15,6 +15,7 @@ from common.config import Config, load_config
 from common.logging import configure_logging, get_logger
 from core.cache import build_place_to_book_cache
 from core.executor import WorkflowExecutor
+from common.request_source import MCP_SOURCE, RequestSource
 from core.place_to_book import PLACE_TO_BOOK_MAX_ENTRIES, PLACE_TO_BOOK_TTL_SECONDS, PlaceToBookResolver
 from core.types import ExecutorConfig
 from api.ratelimit import InFlightLimiter, SlidingWindowRateLimiter
@@ -247,6 +248,26 @@ def get_gateway_user_id(
     if get_app_state().config.allow_dev_user:
         return "dev_user"
     raise HTTPException(status_code=403, detail="X-User-ID header is required")
+
+
+def get_request_source(
+    x_request_source: str | None = Header(default=None, alias="X-Request-Source"),
+    x_mcp_tool: str | None = Header(default=None, alias="X-MCP-Tool"),
+    x_mcp_client: str | None = Header(default=None, alias="X-MCP-Client"),
+    x_mcp_client_version: str | None = Header(default=None, alias="X-MCP-Client-Version"),
+    x_mcp_session: str | None = Header(default=None, alias="X-MCP-Session"),
+) -> RequestSource | None:
+    """The run's source for Langfuse tags (storyland-services#266), or None.
+
+    Only the gateway's MCP server sends these headers; a website call sends
+    none and gets None, so its trace is unchanged. Trusted exactly as far as
+    X-User-ID (the router-level gateway-secret check), and only as labels:
+    nothing here grants or scopes access. Any other X-Request-Source value is
+    ignored, so an unknown header never changes behaviour.
+    """
+    if (x_request_source or "").strip().lower() != MCP_SOURCE:
+        return None
+    return RequestSource.mcp(x_mcp_tool, x_mcp_client, x_mcp_client_version, x_mcp_session)
 
 
 def _rate_limit_key(request: Request, x_user_id: str | None) -> str:

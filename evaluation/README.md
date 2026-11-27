@@ -378,6 +378,8 @@ Use `--prompt-version <label>` to tag a run in Langfuse before merging a prompt 
 
 Production traces carry the prompt identity too: `LangfusePlugin` sets the trace `version` to `CURRENT_PROMPT_VERSION` and adds `prompt_version` + `prompt_hash` (a 12-char hash of the active `agents/prompts/vN.json` content, which tells an in-place edit apart from the published version) to trace metadata. Filter on those in the Langfuse Traces view to compare production behaviour across prompt changes. Prompts themselves stay in git; the app never reads prompts from Langfuse.
 
+Every discovery and composition trace also names the kind of work it ran for (storyland-ai-private#67): `work_kind` (`book`, `film` or `series`) in trace metadata and a `work_kind:<kind>` tag. A film or series trace adds `screen_prompt_hash`, the 12-char hash of `agents/prompts/screen_v1.json`, so an overlay edit is visible apart from the book prompt version it rides on. To compare screen journeys with book ones, filter the Traces view on the tag; to compare two overlay edits, filter on `screen_prompt_hash`. Other runs (local atmosphere, expansion, book recommendations) carry `work_kind: book`.
+
 **Langfuse mirror (playground only).** `evaluation/tools/sync_prompts_to_langfuse.py` pushes each agent's *effective* instruction (tone guardrail included) for the current version to Langfuse as a text prompt named `storyland-ai/<agent>`, labelled `vN` (never `production`), tagged `git-synced`, with `prompt_version` / `prompt_hash` / `git_sha` / `variables` in its config. Python `{field}` placeholders become Langfuse `{{field}}` variables so they're fillable in the playground. Unchanged prompts are skipped, so re-runs create no new versions.
 
 - `make prompts-sync-dry` — show what would change; `make prompts-sync` — write (needs `LANGFUSE_*` in `.env`).
@@ -493,6 +495,23 @@ eval_run_YYYYMMDD_v2  (dataset run root — from start_as_current_observation)
 **Two tracing mechanisms used:**
 - **ADK plugin callbacks** — everything inside `runner.run_async()`: agents, model calls, tools. This is the only way to hook into ADK's internal lifecycle.
 - **`@observe` decorator** — `score_itinerary()` in `llm_scorer.py`. Used for standalone LLM calls outside the ADK runner. Note: `@observe` is not used on `discover()`/`compose()` because those are async generators — OTel context is lost after each `yield` (Langfuse issue [#8447](https://github.com/langfuse/langfuse/issues/8447)).
+
+### Trace source tags (MCP vs website)
+
+Every plugin root span carries `metadata.prompt_version` / `prompt_hash` (MYS-462).
+A job started by a My Storyland MCP tool (storyland-services#266) additionally gets:
+
+- **tags** `mcp`, `tool:<search_book_places|get_literary_route|plan_trip>`, `client:<clientInfo.name>`
+  (`client:unknown` when the client did not identify itself);
+- **metadata** `source: "mcp"`, `mcp_tool`, `mcp_client`, `mcp_client_version`, `mcp_session` (the MCP
+  session id or `none`).
+
+The gateway sends them as `X-Request-Source: mcp` + `X-MCP-Tool` / `X-MCP-Client` / `X-MCP-Client-Version` /
+`X-MCP-Session` (`api/dependencies.py:get_request_source`); discover stores them in session state
+(`request_source`, `common/request_source.py`), so compose on the same job is tagged too. Values are
+re-cleaned to 64 ASCII characters. Website calls send none of the headers, and their traces have no tags
+and no `source` key, exactly as before. Filter by tag `mcp` in Langfuse to see MCP traffic; `tool:plan_trip`
+splits it by tool.
 
 ### Disabling the Plugin
 

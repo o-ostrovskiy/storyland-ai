@@ -1397,9 +1397,22 @@ ADR #31 left `agents/work_prompts.py::for_kind` as a seam that returned the book
 ### Trade-offs
 Two places now version prompts (`vN.json` for books, `screen_vN.json` for films). The overlay rides whichever book version is current, so a future book bump also changes film text that the overlay does not replace; the film key moves with it because the global fingerprint is in every key. The `screen_v1` numbers (ai-private#68's eval set, live Gemini) are Part 3/3.
 
+## 37. A Trace Names Its Work Kind (2026-11-21)
+
+### Context
+With film and series journeys on the same graph (ADR #36), a Langfuse trace looked the same whatever it ran for, so screen-journey cost, latency and errors could not be read apart from book journeys (storyland-ai-private#67 Part 3).
+
+### Decision
+- `LangfusePlugin(work_kind=...)` writes `work_kind` into the trace metadata (beside `prompt_version` / `prompt_hash`) and a `work_kind:<kind>` trace tag via `propagate_attributes`. A film or series trace also carries `screen_prompt_hash`.
+- An MCP-started job (storyland-services#266) adds its source tags after the kind tag: `work_kind:<kind>`, `mcp`, `tool:<tool>`, `client:<client>`. A website job carries the kind tag alone.
+- `WorkflowExecutor._create_langfuse_plugin(work_kind)`: discovery passes the request's kind, composition the session's `work_kind`. Every other run keeps the `book` default.
+
+### Trade-offs
+A book trace's metadata gains one key (`work_kind: book`); nothing a reader sees changes. A film's local-atmosphere run is tagged `book`, because only discovery and composition use the screen prompts.
+
 ## 38. The Discovery User Message States the Research Task; Agents Own the Shape (2026-11-20)
 
-(#37 is taken by storyland-ai#315, the trace work-kind ADR, still in review.)
+(#37 is storyland-ai#315, the trace work-kind ADR, merged before this one.)
 
 ### Context
 The discovery user message read like a trip-planning order: "Discover travel locations for … Find cities, landmarks, and author-related sites, then group them into practical travel regions." The researchers answered from memory and skipped Google Search on about a third of runs (storyland-ai-private#7). On the card's 11-04 measurements, a stronger MUST clause changed nothing (6/12 → 6/12) and an explicit search request did best; ADK's `GoogleSearch` tool has no force setting, so no config flag fixes it.
@@ -1428,6 +1441,28 @@ The effect is measured by one paid eval run (pinned judge) against the v6 baseli
 
 ### Trade-offs
 A dropped stream's response task stays alive for the cleanup (milliseconds on SQLite, 5 s at most). The cleanup can still lose a race with a shielded `append_event` the cancelled run started just before (ADK raises `StaleSessionError`); that case is logged as `{flow}_cancel_cleanup_failed` at warning level, not retried.
+
+## 40. The Reader's First Compose Is Cached Too (2026-11-23)
+
+### Context
+Only `discover()` was cached. On mystoryland.ai on 2026-11-22, a first search for *A Gentleman in Moscow* showed the journey after 17.4 s, and a repeat showed it after 4.7 s. The repeat still waited for a live compose: `compose()` ran the composer on every call (about 4–5 s on prod, about $0.0027 a call). So a reader who clicked a book the site offers waited for a model call even when that book's discovery was cached.
+
+### Decision
+- `compose()` now caches the reader's **first** compose of a discovered book: a selection of exactly `regions[0]`, which is what Home composes (`regionToComposeFirst` in the web app). Any other selection composes fresh and is not stored. This keeps the store at no more than one compose entry per discovery entry.
+- **Key:** `dv:<compose_version>:compose:v1:<discover key>|region=<place_key>|in=<prompt digest>`. The discover key is the one `discover()` used (title, author, preferences, vibe, taste and kind, but no user id). `compose()` receives only the session, so `discover()` now writes that key into session state as `discovery_cache_key`. The region falls back to `id=<region_id>` when it has no `place_key`. The prompt digest is a sha1 of the exact composer prompt. It protects one case: the discovery entry is evicted or expires, and a fresh discover finds other grounding or other regions. The prompt then changes, so an old envelope is never replayed for a new input.
+- **Value:** the composer's **raw envelope**, as ADK's `output_key` writes it into `composer_envelope`, not the finished itinerary. On a hit, `compose()` writes that envelope into the session and runs the same `extract_itinerary_from_response()` that a fresh run uses, against the new session's own grounding. So every guard that runs after the model (match-type downgrades, set-here checks, city regrouping, explanation sanitizing) also runs on every hit. A guard fix therefore applies to hits on the next request, with no cache flush.
+- **A hit leaves the session exactly as a fresh compose leaves it.** A fresh compose writes `job_failed=False` and `selected_regions`, then `composer_envelope` (through `output_key`), then `final_itinerary`, `last_suggestions`, `book_recommendation_chip` and `book_recommendation_chip_id` (through `_persist_suggestions`). A hit takes the same first step and the same last steps. The suggestion chip ids and the book-recommendation chip id are minted fresh on every call. Two readers therefore never share an id, and `expand()` resolves a hit's chips exactly as it resolves a fresh run's chips. The only difference is the ADK event history: a hit has no `trip_composer` events. Nothing reads those events, because each graph invocation sees only its own history (ADR #24) and `expand()` builds its prompt from state. `tests/unit/test_compose_cache.py` compares the two sessions key by key.
+- **What is stored:** only an envelope that validates on its own and extracts into a journey with at least one city. An empty journey is a degraded answer, and storing it would serve it to every reader of that book for the whole TTL. An itinerary rescued by the text fallback is not stored either, because its envelope would extract to nothing on replay.
+- **Namespace:** `compute_compose_cache_version()` hashes everything the Discovery namespace hashes (the model, `_PROMPT_MODULES` and the active `vN.json`). It adds the composer's own modules (`_COMPOSE_MODULES`: `agents.trip_composer_agent`, `models.itinerary` for the response schema, and `agents.composer_truncation`) and the `COMPOSER_MAX_OUTPUT_TOKENS` value. A prompt change or a model change flips both caches. A change to the composer alone flips only the compose cache, because a discover costs about three times as much as a compose, plus about ten search queries. `_PROMPT_MODULES` is unchanged, so this change does not empty the discovery cache.
+- **Store:** the same backend, TTL and entry budget as the Discovery cache, in its own directory (`<cache_dir>/compose`, like `place2book`). Compose entries therefore never evict discovery entries from a shared LRU. On prod that means disk, 30 days (`2592000` s) and 500 entries, which gives a 16 MB byte budget (500 × 32 KB). A saved three-city journey from the site is about 4 KB of JSON, so 500 envelopes fit with room to spare.
+- **Failure:** a cache read or write error is logged (`compose_cache_unreadable`, `compose_cache_write_failed`), and the compose runs fresh. If a stored entry no longer extracts (`compose_cache_hit_unusable`), it is cleared from the session, the compose runs fresh, and the fresh envelope replaces the entry. Hits and stores log `compose_cache_hit` and `compose_cache_store`, and Sentry counts both through `log.events`.
+- **Stream:** a hit emits `ItineraryReady` and then `WorkflowComplete`, with no `ProgressEvent` and no `token_usage`. A client, or the warm-up script's `--compose` step, tells a hit from a fresh run by that absence, the same way it does for discover.
+
+### Trade-offs
+- A hit serves the same journey to every reader of that book for up to 30 days. That is the purpose, and the discovery cache already does the same with the regions.
+- The guards after the model run on every hit, but the model output itself does not change. A fix that needs the model to answer differently (a prompt or schema change) flips the namespace instead.
+- If two first readers of an uncached book arrive at the same moment, both compose and both store, and the later write wins. The discovery cache accepts the same race.
+- The compose cache starts empty after the first deploy of this change, while the discovery cache keeps its entries. Sessions created by a discover before the deploy have no `discovery_cache_key`, so they compose fresh.
 
 ## Summary: Key Architectural Patterns
 
@@ -1462,10 +1497,12 @@ A dropped stream's response task stays alive for the cleanup (milliseconds on SQ
 | **Persistent place→book cache (ADR #30)** | A restart costs no repeat AI runs; a failed check is never remembered as "no books here" | In-place prompt edits wait out the 6h TTL; the gateway still holds a failed check for 1h |
 | **Work kind on the AI contract (ADR #31)** | Films and series ride the same pipeline; a book request, its metadata event and its cache key are byte-identical | Book fields and `work` coexist on the wire; film prompts are a later story |
 | **Screen claims need evidence (ADR #34)** | A film/series stop is "set here" only with a cited, research-traced source | Unsupported "set here" ships as "filmed here" + vibe: under-claims, never over-claims |
+| **Work kind on every trace (ADR #37)** | Screen journeys filter apart from books in Langfuse (`work_kind:<kind>` tag + metadata, overlay hash on films) | Only discovery and composition carry a screen kind; other runs say `book` |
 | **Cancellation-safe session DB (ADR #32)** | A dropped SSE stream returns its pooled connection; caller cancellation is unchanged | One wrapper method per ADK DB call to keep in step on upgrades |
 | **Shielded cancel cleanup + abandonment count (ADR #39)** | A dropped stream still marks its job failed / clears its in-progress flag; each early close is one countable info line | The dying response waits up to 5 s for the cleanup |
 | **Reader-wait latency report (ADR #33)** | First-region and full-journey p50/p95 from Langfuse, never a fake 0 s | Fresh runs only, measured inside the agent service (no be hop or SSE delivery) |
 | **Book-identity guard (ADR #35)** | A title the search resolves to a different work stops with BookNotFound ("did you mean …?") instead of a trip for that other book | Runs after the full discovery graph; trusts the model's label (fails open when silent) |
 | **Screen prompts as an overlay (ADR #36)** | A film or series journey gets its own instructions on the same graph; a book journey does not move by a byte | Overlay edits re-key film entries only; a book version bump also changes the film text the overlay does not replace |
+| **Compose cache (ADR #40)** | A reader who opens a book the site offers gets the first journey without a composer call; every guard still runs on the replayed envelope | The same journey for every reader of that book for the TTL; one more on-disk store |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.
