@@ -731,6 +731,15 @@ class TestPromptV3:
         # v5 (Luga, 2026-11-21) is current; v4 stays pinnable for eval/rollback.
         assert "exists only inside fiction" in load_prompts("v4").place_to_book_researcher
 
+    def test_v7_is_v6_with_every_agent_byte_identical(self):
+        # ai-private#7: v7 labels the eval run of the discovery USER message change
+        # (core/prompts.py); no agent instruction moves with it.
+        v6 = json.loads(Path("agents/prompts/v6.json").read_text(encoding="utf-8"))
+        v7 = json.loads(Path("agents/prompts/v7.json").read_text(encoding="utf-8"))
+        assert v7["version"] == "v7"
+        assert v7["agents"] == v6["agents"]
+        assert load_prompts("v7") == load_prompts("v6")
+
     def test_v2_is_still_loadable(self):
         # Published versions are immutable and must stay pinnable (eval/rollback).
         assert load_prompts("v2").region_analyzer

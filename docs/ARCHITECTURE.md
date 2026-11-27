@@ -1410,6 +1410,23 @@ With film and series journeys on the same graph (ADR #36), a Langfuse trace look
 ### Trade-offs
 A book trace's metadata gains one key (`work_kind: book`); nothing a reader sees changes. A film's local-atmosphere run is tagged `book`, because only discovery and composition use the screen prompts.
 
+## 38. The Discovery User Message States the Research Task; Agents Own the Shape (2026-11-20)
+
+(#37 is storyland-ai#315, the trace work-kind ADR, merged before this one.)
+
+### Context
+The discovery user message read like a trip-planning order: "Discover travel locations for … Find cities, landmarks, and author-related sites, then group them into practical travel regions." The researchers answered from memory and skipped Google Search on about a third of runs (storyland-ai-private#7). On the card's 11-04 measurements, a stronger MUST clause changed nothing (6/12 → 6/12) and an explicit search request did best; ADK's `GoogleSearch` tool has no force setting, so no config flag fixes it.
+
+### Decision
+- `core/prompts.py::build_discovery_prompt` sends only the research request: `Research "<title>" by <author>: use Google Search to find the real places tied to this book and its author.` The pipeline's shape (cities, landmarks, author sites, regions) is each agent's own instruction.
+- The `vibe` and `taste_context` clauses weigh places the research already tied to the book and never add one; "factual grounding always wins" stays.
+- The request reaches every discovery researcher. Under the ADK 2 graph (ADR #24) the user message reaches only `book_context_researcher`; the city, landmark and author researchers (the ones that skipped search) see only BookContext and their instruction. So `agents/prompts.py::book_facts_block` carries the same request, vibe and taste clauses, from one function (`discovery_request`) that `build_discovery_prompt` also returns. It lives in `agents/prompts.py`, which the discovery cache fingerprints.
+- `run_scheduled_eval.py` builds its message with the same function (it had a copy of the old text, so a prompt eval would have measured the old wording).
+- Labelled prompt version `v7` for evals; each agent's own instruction text in `v7.json` is byte-identical to v6. The discovery cache flips by itself (`core.prompts` is fingerprinted); `CURRENT_PROMPT_VERSION` is not bumped, so the place-to-book cache is untouched.
+
+### Trade-offs
+The effect is measured by one paid eval run (pinned judge) against the v6 baseline; until then the change rests on the 11-04 sample. If grounding doesn't rise, the fallback on the card is an explicit query step built in code.
+
 ## 39. Cancel Cleanup Runs Shielded; a Reader Leaving Is Counted, Not Reported (2026-11-23)
 
 ### Context

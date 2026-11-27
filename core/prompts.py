@@ -8,6 +8,8 @@ delivery mechanisms (API, CLI, Streamlit).
 import json
 from typing import List
 
+from agents.prompts import discovery_request
+
 
 def build_discovery_prompt(
     book_title: str,
@@ -34,40 +36,10 @@ def build_discovery_prompt(
     ``taste_context`` leaves the prompt byte-identical to a no-taste
     request.
     """
-    prompt = (
-        f'Discover travel locations for "{book_title}" by {author}.\n\n'
-        f"Find cities, landmarks, and author-related sites, "
-        f"then group them into practical travel regions."
-    )
-    if vibe:
-        prompt += (
-            f"\n\nThe reader has chosen a \"{vibe}\" mood. Among places that are "
-            f"genuinely and verifiably connected to the book, prefer those whose "
-            f"atmosphere best fits a {vibe} feeling, and name that {vibe} "
-            f"atmosphere in each place's connection note. Do NOT include or "
-            f"invent any place that is not truly tied to the book just to match "
-            f"the mood — factual grounding always wins over vibe."
-        )
-    if taste_context:
-        titles = [t for t in (taste_context.get("titles") or []) if t]
-        moods = [m for m in (taste_context.get("moods") or []) if m]
-        descriptors = []
-        if titles:
-            descriptors.append("books such as " + ", ".join(titles))
-        if moods:
-            descriptors.append("moods like " + ", ".join(moods))
-        if descriptors:
-            taste_desc = "; ".join(descriptors)
-            prompt += (
-                f"\n\nThe reader's own reading history leans toward {taste_desc}. "
-                f"Among places that are genuinely and verifiably connected to the "
-                f"book, prefer those whose atmosphere resonates with that taste, and "
-                f"you may name that resonance in the place's connection note. Do NOT "
-                f"include or invent any place that is not truly tied to the book just "
-                f"to match the reader's taste — factual grounding always wins over "
-                f"taste."
-            )
-    return prompt
+    # ai-private#7: the text lives in agents/prompts.py::discovery_request so
+    # the branch researchers' book_facts_block carries the very same words
+    # (they never receive this user message under the ADK 2 graph, ADR #24).
+    return discovery_request(book_title, author, vibe, taste_context)
 
 
 def build_composition_prompt(

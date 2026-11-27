@@ -4,6 +4,26 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 
 ---
 
+## v7 — 2026-11-23 (built 2026-11-20 as v5; renumbered after main took v5 and v6)
+
+**Card:** storyland-ai-private#7 (researchers skip Google Search a third of the time). The discovery **request** changed, and it reaches every discovery researcher: `book_context_researcher` gets it as the user message (`core/prompts.py::build_discovery_prompt`), and the city, landmark and author researchers get the same words in their instruction's `book_facts_block` (`agents/prompts.py`), because under the ADK 2 graph (ADR #24) the user message never reaches them. Both read one function, `agents/prompts.py::discovery_request`. Each agent's own v6 instruction text is byte-identical (`agents/prompts/v7.json` = v6's agents, pinned by `test_v7_is_v6_with_every_agent_byte_identical`). `v7.json` exists so an eval run can be tagged `--prompt-version v7` against the v6 baselines; `CURRENT_PROMPT_VERSION` stays `v6` (a bump would also move the `place2book` cache key, and the place-to-book prompts did not change). The discovery cache still flips on deploy: `core.prompts` is in the cache fingerprint.
+
+### Changes
+| Where | Before (v6) | After (v7) |
+|---|---|---|
+| Discovery user message, base | `Discover travel locations for "<title>" by <author>.` + `Find cities, landmarks, and author-related sites, then group them into practical travel regions.` | `Research "<title>" by <author>: use Google Search to find the real places tied to this book and its author.` |
+| `vibe` clause | "Among places that are genuinely and verifiably connected to the book, prefer…" | "It only weighs places your research has already tied to the book: among those, favour…"; "Never add a place your research did not tie to the book…"; grounding-wins sentence kept |
+| `taste_context` clause | same pattern as vibe | same rewording as vibe |
+| `book_facts_block` (city, landmark, author researchers) | title, author, `Reader's requested vibe: …`, `Reader also loved: …`, `Reader's preferred moods: …` | title, author, then `RESEARCH REQUEST …` + the whole discovery request above (base + vibe + taste clauses, same words); the three one-line labels are gone |
+| `run_scheduled_eval.py` | its own copy of the old user message | calls `build_discovery_prompt`, so an eval sends what prod sends |
+
+Not changed (11-04 evidence on the card): agents' own instructions, `thinking_level` (HIGH made `city` worse), the fail-closed `vibe` guard.
+
+### Eval
+**Pending: needs eval (spend).** One paid baseline-comparison run is approved (Olga's A, 2026-11-14): `make eval-run` with `--prompt-version v7`, pinned judge, `storyland_eval` (10 cases), compared with the latest v6 baseline on `search_grounding` (`researchers_grounded / researchers_total`, `cases_fully_grounded`, `unsearched_by_agent` per agent) and the judge dimensions. The results table goes here and in the PR walkthrough.
+
+---
+
 ## v6 — 2026-11-22
 
 **Why:** prod run "dddd" by "ddd" was researched as Inio Asano's *Dead Dead Demon's Dededede Destruction* and produced a Tokyo trip under the typed title. Only `book_context_researcher` and `book_context_formatter` changed; every other agent is byte-identical to v5 (pinned by `test_v6_is_v5_plus_the_book_context_change_only`).
