@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 MatchType = Literal["literal", "vibe"]
@@ -45,6 +45,40 @@ class PlaceBookCandidate(BaseModel):
         description=(
             "Real location the story maps to (literal matches only). "
             "MUST be null for vibe matches."
+        ),
+    )
+
+
+CandidateSource = Literal["search", "wikidata"]
+
+
+class PlaceBookCandidateWithReceipts(PlaceBookCandidate):
+    """A resolver candidate with where it came from (ai-private#81).
+
+    Kept apart from ``PlaceBookCandidate`` on purpose: that class is the
+    formatter's ``output_schema``, and a model that sees a ``work_qid`` field
+    can invent one. These fields are filled only by code, from the Wikidata
+    lookup and the researcher's grounded text. All are optional, so the
+    ``/place-to-book`` contract stays backward compatible and cached answers
+    written before this field existed still validate.
+    """
+
+    sources: Optional[List[CandidateSource]] = Field(
+        default=None,
+        description=(
+            "Where the book was found: 'search' (named in the researcher's "
+            "grounded search text) and/or 'wikidata' (a P840 narrative-location "
+            "statement). Null when the resolver ran search only (the default)."
+        ),
+    )
+    work_qid: Optional[str] = Field(
+        default=None, description="Wikidata QID of the work (receipt), when Wikidata listed it"
+    )
+    place_qid: Optional[str] = Field(
+        default=None,
+        description=(
+            "Wikidata QID of the place the P840 statement names: the place asked "
+            "for, or a place inside it"
         ),
     )
 
@@ -82,7 +116,18 @@ class PlaceToBookResult(BaseModel):
         default=None,
         description="Human-readable note for the not-found state; null when found",
     )
-    candidates: List[PlaceBookCandidate] = Field(
+    candidates: List[PlaceBookCandidateWithReceipts] = Field(
         default_factory=list,
         description="Labelled candidates; empty when not found",
     )
+
+    @field_validator("candidates", mode="before")
+    @classmethod
+    def _accept_plain_candidates(cls, value):
+        """A plain ``PlaceBookCandidate`` is still a valid entry (it has no
+        receipts): Pydantic would otherwise reject the parent class here."""
+        if isinstance(value, list):
+            return [
+                v.model_dump() if isinstance(v, PlaceBookCandidate) else v for v in value
+            ]
+        return value

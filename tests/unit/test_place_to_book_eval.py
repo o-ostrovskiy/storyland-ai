@@ -198,3 +198,94 @@ def test_evalset_has_small_towns_found_and_invented_places_not_found():
     assert cases["p2b_small_town_holcomb"]["expect"] == "found"
     for invented in ("p2b_notfound_wakanda", "p2b_notfound_macondo", "p2b_notfound_gibberish"):
         assert cases[invented]["expect"] == "not_found", invented
+
+
+# --- ai-private#81: the --variant switch -----------------------------------------
+
+
+def test_variant_stats_skip_cache_hits_and_count_wikidata_gaps():
+    from evaluation.tools.run_place_to_book_eval import variant_stats
+
+    cases = [
+        {"latency_s": 4.0, "cached": False, "search_queries": 3, "wikidata_status": "found",
+         "token_usage": {"total_tokens": 100, "cost_usd": 0.01}},
+        {"latency_s": 9.0, "cached": False, "search_queries": 2, "wikidata_status": "not_found",
+         "token_usage": {"total_tokens": 50, "cost_usd": 0.02}},
+        {"latency_s": 0.01, "cached": True, "search_queries": 0, "wikidata_status": None},
+        {"latency_s": 6.0, "cached": False, "search_queries": 1, "wikidata_status": "unavailable",
+         "token_usage": None},
+        {"item_id": "skipped", "status": "skipped"},
+    ]
+    stats = variant_stats(cases)
+    assert stats["cases_run"] == 3 and stats["cases_cached"] == 1
+    assert stats["latency_p50_s"] == 6.0 and stats["latency_p95_s"] == 9.0
+    assert stats["search_calls"] == 6
+    assert stats["wikidata_asked"] == 3 and stats["wikidata_nothing"] == 2
+    assert stats["total_tokens"] == 150 and stats["cost_usd"] == 0.03
+
+
+def test_variant_stats_on_a_search_only_run():
+    from evaluation.tools.run_place_to_book_eval import variant_stats
+
+    stats = variant_stats([{"latency_s": 2.0, "cached": False, "search_queries": 4, "wikidata_status": None}])
+    assert stats["wikidata_asked"] == 0 and stats["wikidata_nothing"] == 0
+    assert stats["total_tokens"] is None and stats["cost_usd"] is None
+    assert variant_stats([])["latency_p50_s"] is None
+
+
+def test_variant_stats_never_shows_an_unpriced_run_as_a_total():
+    """ai-private#81 round 3: get_session_stats() returns cost_usd 0.0 with
+    cost_unknown for a model with no pricing row; the sum must not hide it."""
+    from evaluation.tools.run_place_to_book_eval import format_variant_cost, variant_stats
+
+    cases = [
+        {"latency_s": 3.0, "cached": False, "token_usage": {"total_tokens": 100, "cost_usd": 0.02}},
+        {"latency_s": 4.0, "cached": False,
+         "token_usage": {"total_tokens": 80, "cost_usd": 0.0, "cost_unknown": True}},
+    ]
+    stats = variant_stats(cases)
+    assert stats["cost_usd"] is None
+    assert stats["cost_complete"] is False
+    assert stats["total_tokens"] == 180
+    assert format_variant_cost(stats) == "unknown"
+
+    only_unpriced = variant_stats([cases[1]])
+    assert only_unpriced["cost_usd"] is None and only_unpriced["cost_complete"] is False
+    assert format_variant_cost(only_unpriced) == "unknown"
+
+
+def test_variant_cost_reads_as_dollars_only_when_every_run_is_priced():
+    from evaluation.tools.run_place_to_book_eval import format_variant_cost, variant_stats
+
+    priced = variant_stats([
+        {"latency_s": 3.0, "cached": False, "token_usage": {"total_tokens": 100, "cost_usd": 0.02}},
+        {"latency_s": 4.0, "cached": False,
+         "token_usage": {"total_tokens": 80, "cost_usd": 0.01, "cost_unknown": False}},
+    ])
+    assert priced["cost_usd"] == 0.03 and priced["cost_complete"] is True
+    assert format_variant_cost(priced) == "$0.0300"
+
+    no_langfuse = variant_stats([{"latency_s": 2.0, "cached": False, "token_usage": None}])
+    assert no_langfuse["cost_usd"] is None and no_langfuse["cost_complete"] is None
+    assert format_variant_cost(no_langfuse) == "n/a (no Langfuse credentials)"
+
+
+def test_cli_offers_the_three_variants_and_defaults_to_search(monkeypatch):
+    import evaluation.tools.run_place_to_book_eval as tool
+
+    seen = {}
+
+    async def fake_run(**kwargs):
+        seen.update(kwargs)
+        return {"evaluated": 0, "passed": 0, "metrics": {}}
+
+    monkeypatch.setattr(tool, "run", fake_run)
+    monkeypatch.setattr(tool, "exit_with_verdict", lambda *a, **k: 0)
+    for argv, expected in ((["prog"], "search"), (["prog", "--variant", "both"], "both")):
+        monkeypatch.setattr("sys.argv", argv)
+        try:
+            tool.main()
+        except SystemExit:
+            pass
+        assert seen["variant"] == expected
+    assert tool.VARIANTS == ("search", "wikidata", "both")

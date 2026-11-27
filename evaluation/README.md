@@ -103,8 +103,18 @@ not-found state with no fabricated list. It has its own runner:
 ```bash
 make eval-place-to-book
 # Or directly (re-registers the dataset items from the evalset, then runs all cases):
-python evaluation/tools/run_place_to_book_eval.py [--max-cases N] [--no-register]
+python evaluation/tools/run_place_to_book_eval.py [--max-cases N] [--no-register] [--variant search|wikidata|both]
 ```
+
+`--variant` (ai-private#81, ADR #42) picks where the candidates come from: `search` (the default and production:
+the Google Search researcher), `wikidata` (Wikidata's P840 "narrative location" records only, no search) or `both`
+(the two side by side, merged by the formatter). The variant is stamped next to `model_under_test` in the Langfuse run
+metadata, the run name (`p2b_eval_<variant>_…`) and the results JSON, which also carries a `variant_stats` block:
+p50/p95 latency over the cases the resolver ran (cache hits excluded), search calls, tokens and cost (null without
+Langfuse credentials, and null with `cost_complete: false` when any case ran on a model with no pricing row; the
+printed cost line then reads `unknown`, never `$0`), and `wikidata_nothing`, the cases where Wikidata was asked and returned no written work. Each
+variant caches under its own key, so a `wikidata` or `both` run never writes into the answers production reads.
+Comparing the three costs three live runs (paid Gemini): ask Olga first.
 
 Each case logs a Langfuse dataset run (`p2b_eval_YYYYMMDD_HHMMSS`) under `place_to_book_v1`
 with scores: `case_pass` (0/1), `found_classification` (0/1), `literal_grounded` (count),
