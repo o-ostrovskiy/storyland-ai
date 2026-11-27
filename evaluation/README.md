@@ -43,6 +43,16 @@ This creates the Langfuse datasets:
   them (*Piranesi*, *Project Hail Mary*) are **fictional/non-Earth-setting**
   books, a shape the set carried none of until 2026-08-09.
 
+### Reading highlights (deterministic, prompt v7)
+
+The itinerary runner also reports `reading_highlights` per case and as a
+dataset roll-up: how many bold phrases the composer picked, how many appear
+verbatim in their field (`verbatim_rate`; None when nothing was picked), how
+many fields exceed the two-phrase cap, how many stops carry a `book_hook`, and
+how many cases have a `headline`. The page bolds only verbatim phrases, so a
+low `verbatim_rate` means wasted picks, not a broken page. Measured, not
+judged; no pass rule yet. See `PROMPT_CHANGELOG.md` v7.
+
 ### Search grounding (deterministic, MYS-817)
 
 The itinerary runner reports `search_grounding` per case and as a dataset

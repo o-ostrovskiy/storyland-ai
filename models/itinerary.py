@@ -69,6 +69,21 @@ class CityStop(BaseModel):
             "Leave null for 'thematic'/'vibe' matches or when no specific source is available."
         ),
     )
+    # Reading highlights (prompt v7, 2026-11-25). All optional: older
+    # itineraries and the expansion/local flows leave them out, and the page
+    # renders plain text then. The page bolds a phrase only when it appears in
+    # `reason` verbatim, so a wrong pick costs nothing.
+    book_hook: Optional[str] = Field(
+        default=None,
+        description=(
+            "One short line (max ~10 words) on how this place appears in or connects to the "
+            "book, shown as 'In the book'. Must agree with match_type."
+        ),
+    )
+    highlights: List[str] = Field(
+        default_factory=list,
+        description="0-2 phrases copied verbatim from `reason` for the page to bold.",
+    )
 
 
 class CityPlan(BaseModel):
@@ -85,6 +100,10 @@ class CityPlan(BaseModel):
     def coerce_days_to_int(cls, v: object) -> int:
         return round(float(v))
     overview: str = Field(description="Brief overview of what to expect in this city")
+    overview_highlights: List[str] = Field(
+        default_factory=list,
+        description="0-2 phrases copied verbatim from `overview` for the page to bold.",
+    )
     stops: List[CityStop] = Field(description="Places to visit in this city")
 
 
@@ -93,6 +112,14 @@ class TripItinerary(BaseModel):
 
     cities: List[CityPlan] = Field(description="City-by-city travel plans")
     summary_text: str = Field(description="Engaging overview of the entire trip")
+    headline: Optional[str] = Field(
+        default=None,
+        description="One sentence (max ~15 words) with the gist of the whole trip.",
+    )
+    summary_highlights: List[str] = Field(
+        default_factory=list,
+        description="0-2 phrases copied verbatim from `summary_text` for the page to bold.",
+    )
 
 
 class SuggestionChip(BaseModel):

@@ -14,6 +14,7 @@ from typing import Optional, Sequence, Tuple
 from pydantic import ValidationError
 
 from common.logging import get_logger
+from core.reading_highlights import apply_reading_highlights, names_from_state
 from core.guardrails import (
     sanitize_itinerary_explanations,
     sanitize_expansion_explanations,
@@ -175,8 +176,8 @@ def downgrade_ungrounded_match_types(
     ``literal``/``historical`` whose name is not grounded in the discovery
     research (city/landmark/author/context; see ``is_title_grounded`` for the
     token-overlap matching rule) is downgraded to the
-    weakest claim (``vibe``) and has its ``grounding_source`` cleared, since the
-    cited evidence didn't hold up. Stops are never dropped and never upgraded.
+    weakest claim (``vibe``) and has its ``grounding_source`` and ``book_hook``
+    cleared, since the cited evidence didn't hold up. Stops are never dropped and never upgraded.
 
     Conservative and fail-open by design (it must never make results worse):
       * No grounding text captured -> return unchanged (we cannot prove anything
@@ -209,6 +210,11 @@ def downgrade_ungrounded_match_types(
                 continue
             stop["match_type"] = _DOWNGRADE_TARGET
             stop["grounding_source"] = None
+            # The v7 hook ("Where Theo stays") asserts the very book event that
+            # just failed the check, so it goes too. `highlights` stay: they are
+            # copied from `reason`, not from the hook.
+            if "book_hook" in stop:
+                stop["book_hook"] = None
             downgraded += 1
 
     if downgraded:
@@ -822,6 +828,12 @@ def extract_itinerary_from_response(
         itinerary_dict = sanitize_itinerary_explanations(itinerary_dict)
         itinerary_dict = clear_screen_claims_unless_screen_work(
             itinerary_dict, state_accessor.work_kind
+        )
+        # Prompt v7: bold the book's known names in code and keep at most one
+        # verified model pick per field (core/reading_highlights.py). Runs
+        # last, on the text the page will actually show.
+        itinerary_dict = apply_reading_highlights(
+            itinerary_dict, names_from_state(state_accessor)
         )
         return itinerary_dict, suggestions
 

@@ -680,8 +680,8 @@ class TestCacheNamespaceFlush:
         import inspect
         import agents.prompts as prompts_module
 
-        assert CURRENT_PROMPT_VERSION == "v6"
-        assert 'CURRENT_PROMPT_VERSION = "v6"' in inspect.getsource(prompts_module)
+        assert CURRENT_PROMPT_VERSION == "v7"
+        assert 'CURRENT_PROMPT_VERSION = "v7"' in inspect.getsource(prompts_module)
 
 
 class TestPromptV3:

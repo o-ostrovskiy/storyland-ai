@@ -1448,6 +1448,19 @@ Only `discover()` was cached. On mystoryland.ai on 2026-11-22, a first search fo
 - If two first readers of an uncached book arrive at the same moment, both compose and both store, and the later write wins. The discovery cache accepts the same race.
 - The compose cache starts empty after the first deploy of this change, while the discovery cache keeps its entries. Sessions created by a discover before the deploy have no `discovery_cache_key`, so they compose fresh.
 
+## 41. Reading Highlights: Names by Code, One Fact by the Model (2026-11-25)
+
+### Context
+The itinerary page bolds up to two phrases per paragraph (storyland-web#814). Three live runs on prompt v7 asked the composer to pick them while it wrote: about half the picks were generic ("central hub", "visual splendor") even when the prompt banned them, and some were not in the text.
+
+### Decision
+Split the choice. `core/reading_highlights.py` bolds the book's known names in code: the title, the author (and surname) and the main characters (and their first or last names), which `book_context` now returns as `main_characters`. The composer adds at most one other phrase per field; it is kept only if it appears verbatim, holds a name or a number, and does not overlap. The step runs last in `extract_itinerary_from_response._finalize`, so a replayed compose-cache envelope gets it too, and the eval runner applies the same function. Main places are not bolded: a city name already sits in the heading above its overview.
+
+### Trade-offs
+- Known names are exact and free; a character missing from `main_characters` (older cached discovery, a thin search) is simply not bolded.
+- A first or last name alone ("Theo") is matched as a whole word; a character who shares a common word as a name would be bolded where the word appears capitalized.
+- The model's one pick can still be weak; the page and this step both drop it unless it holds a name or number.
+
 ## Summary: Key Architectural Patterns
 
 | Pattern | Benefit | Trade-off |
@@ -1488,5 +1501,6 @@ Only `discover()` was cached. On mystoryland.ai on 2026-11-22, a first search fo
 | **Book-identity guard (ADR #35)** | A title the search resolves to a different work stops with BookNotFound ("did you mean …?") instead of a trip for that other book | Runs after the full discovery graph; trusts the model's label (fails open when silent) |
 | **Screen prompts as an overlay (ADR #36)** | A film or series journey gets its own instructions on the same graph; a book journey does not move by a byte | Overlay edits re-key film entries only; a book version bump also changes the film text the overlay does not replace |
 | **Compose cache (ADR #40)** | A reader who opens a book the site offers gets the first journey without a composer call; every guard still runs on the replayed envelope | The same journey for every reader of that book for the TTL; one more on-disk store |
+| **Reading highlights (ADR #41)** | Bolded names are exact and cost nothing; the model adds one checked fact per field | Bolds only names discovery returned; a first name shared with a common word can over-bold |
 
 These patterns work together to create a **reliable, performant, and user-friendly** multi-agent system for generating literary travel itineraries.

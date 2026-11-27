@@ -121,6 +121,36 @@ class TestSanitizeWalkers:
         assert out["cities"][0]["stops"][0]["reason"] == "Foggy quays echo the novel's gloom."
         assert "kind of reader" not in out["cities"][0]["stops"][1]["reason"]
 
+    def test_itinerary_headline_and_book_hook_sanitized(self):
+        # v7's one-line fields reach the reader too (ai#326 review, Codex P2).
+        itin = {
+            "headline": "Follow Theo to The Hague. This says a lot about you and your taste.",
+            "cities": [
+                {
+                    "overview": "Canals and fog.",
+                    "stops": [
+                        {"name": "Hotel", "reason": "Theo stays here.",
+                         "book_hook": "You're the kind of reader who drinks alone."},
+                        {"name": "Museum", "reason": "The painting hangs here.",
+                         "book_hook": "Your reading habits suggest you'd love this. The painting the novel is named after."},
+                        {"name": "Quay", "reason": "Foggy quays.", "book_hook": "Where Theo walks at night."},
+                    ],
+                }
+            ],
+        }
+        out = sanitize_itinerary_explanations(itin)
+        assert out["headline"] == "Follow Theo to The Hague."
+        stops = out["cities"][0]["stops"]
+        # A fully reader-directed optional line is dropped, never replaced by
+        # the generic fallback (the page hides an absent hook).
+        assert stops[0]["book_hook"] is None
+        assert stops[1]["book_hook"] == "The painting the novel is named after."
+        assert stops[2]["book_hook"] == "Where Theo walks at night."
+
+    def test_itinerary_fully_reader_directed_headline_dropped(self):
+        out = sanitize_itinerary_explanations({"headline": "This says a lot about you and your taste.", "cities": []})
+        assert out["headline"] is None
+
     def test_itinerary_fail_open(self):
         assert sanitize_itinerary_explanations(None) is None
         assert sanitize_itinerary_explanations({}) == {}

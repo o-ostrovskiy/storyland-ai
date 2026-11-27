@@ -40,6 +40,13 @@ class BookContext(BaseModel):
         default=None, description="Historical era or time period of the story"
     )
     themes: List[str] = Field(description="Main themes of the book")
+    # Prompt v7 (2026-11-25): the names the itinerary page bolds wherever they
+    # appear (core/reading_highlights.py). Optional: older cached discovery
+    # and the local-atmosphere flow leave it empty.
+    main_characters: List[str] = Field(
+        default_factory=list,
+        description="Main characters (or, for non-fiction, main real people), as the book spells them",
+    )
     # Book identity (prompts v6). A web search can resolve a title to a
     # DIFFERENT work -- "dddd" by "ddd" came back as Inio Asano's "Dead Dead
     # Demon's Dededede Destruction", set in Tokyo -- and every later agent then

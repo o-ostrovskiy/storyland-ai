@@ -4,6 +4,48 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 
 ---
 
+## v7 — 2026-11-25
+
+**Why:** Olga found the itinerary page hard to read (2026-11-25) and approved a design where the page bolds the key details and leads each stop with how it appears in the book (canvas https://claude.ai/artifact/RjAqBvV5vd5ughn3wpKGtu). Three agents changed; every other agent is byte-identical to v6 (pinned by `test_v7_is_v6_plus_the_composer_and_book_context_changes_only`).
+
+### Changes
+| Agent | Change |
+|---|---|
+| trip_composer | New output fields: `headline` (one sentence, the gist of the trip), per stop `book_hook` (one line, ≤10 words, must agree with `match_type`; the page labels thematic/vibe hooks "Why it fits"), and `summary_highlights` / `overview_highlights` / `highlights` holding at most ONE phrase per field: a named detail that is not the title, author or a main character, copied verbatim, with a name or number. |
+| book_context_researcher | New item 4: the main characters' names (up to 8; main real people for non-fiction). |
+| book_context_formatter | New field `main_characters`. |
+
+Review fix (2026-11-26, ai#326): the first v7 text had dropped v6's "Non-urban settings (trails, wilderness, road trips)" block from trip_composer by mistake; it is back, verbatim (pinned by `test_v7_composer_keeps_v6_non_urban_block_verbatim`). The eval rows below ran on the text without it. The tone guardrail (`sanitize_itinerary_explanations`) now also covers `headline` and `book_hook`; a line that is reader-directed throughout is dropped (set to null), not replaced by the stock fallback.
+
+Code: `core/reading_highlights.py` (ADR #41) bolds the title, author and main characters wherever they appear and keeps the model's one pick only if it is verbatim and holds a name or number; it runs last in `_finalize`. All new fields are optional on the models.
+
+### Eval
+`run_scheduled_eval` records a deterministic `reading_highlights` block per case and per dataset: phrases picked, phrases found verbatim (`verbatim_rate`, None when nothing was picked), fields over the two-phrase cap, stops with a `book_hook`, cases with a `headline`. No pass rule yet.
+
+Live runs 2026-11-25 (`storyland_eval`, 5 cases, `--region-selection first`, three prompt iterations before merge; final text = iteration 3):
+
+| Iteration | Picked | Found verbatim | Shown (verbatim + has a name) | Over cap | Stops with hook | Headlines |
+|---|---|---|---|---|---|---|
+| 1 (`eval_run_20261125_170243_v7`) | 74 | 72 (97%) | — | 0 | 26/26 | 5/5 |
+| 2: hook must match `match_type`; no generic or preference phrases | 67 | 66 (99%) | — | 0 | 25/25 | 5/5 |
+| 3: every phrase must hold a name or number | 72 | 63 (88%) | 50 (69%) | 0 | 31/31 | 5/5 |
+
+**Reading:** iteration 1 bolded generic phrases ("scholarly city", "moderate budget") and wrote vibe hooks as book events ("Where Ryland Grace's scientific career began." on a vibe filming location). Iteration 2 fixed most hooks but about half the picks stayed generic. Iteration 3 picks names and titles; the misses are names that are not in the stop's own `reason` (e.g. "Andy Weir"), which the page skips. The page also enforces the name rule (`hasName`) and labels a thematic/vibe hook "Why it fits", not "In the book". Iteration 1 counts were recomputed after fixing the counter to unwrap the saved `ComposerEnvelope`.
+
+Cache: the version bump moves the place2book key to `place2book:v1:v7:…`, so that cache is flushed although place-to-book prompts did not change.
+
+**Final text (names by code, one fact by the model), 3 repeats × 10 cases** (`eval_run_20261125_18…_v7`, `storyland_eval`, `--region-selection first`):
+
+| Repeat | Cases (empty) | Picked | Found verbatim | Shown | Over cap | Stops with hook | Headlines |
+|---|---|---|---|---|---|---|---|
+| 1 | 10 (0) | 116 | 116 | 116 | 0 | 57/57 | 10/10 |
+| 2 | 10 (0) | 121 | 121 | 121 | 0 | 61/61 | 10/10 |
+| 3 | 10 (0) | 119 | 119 | 119 | 0 | 64/64 | 10/10 |
+
+Every bolded phrase is now a name, title or specific detail (e.g. "Platform 9 3/4", "Hercule Poirot's study", "Rosings Park"). Known limits seen: a frequent author name is bolded in most stops of an author-works trip ("Agatha Christie"), and a first name alone can be bolded ("Jacques"). One repeat turned ö/å into U+0006 in a Swedish trip (storyland-ai-private#99), unrelated to highlights.
+
+---
+
 ## v6 — 2026-11-22
 
 **Why:** prod run "dddd" by "ddd" was researched as Inio Asano's *Dead Dead Demon's Dededede Destruction* and produced a Tokyo trip under the typed title. Only `book_context_researcher` and `book_context_formatter` changed; every other agent is byte-identical to v5 (pinned by `test_v6_is_v5_plus_the_book_context_change_only`).

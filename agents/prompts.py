@@ -37,7 +37,12 @@ from pathlib import Path
 # core/book_identity.py so a title the search resolves to a different work
 # stops with BookNotFound instead of a trip for that other book. Also moves the
 # place2book cache key to place2book:v1:v6:…, so no v5 answer is served under v6.
-CURRENT_PROMPT_VERSION = "v6"
+# v7 (2026-11-25): v6 + trip_composer emits reading highlights for the
+# itinerary page (headline, summary_highlights, overview_highlights, book_hook,
+# highlights; all optional on the models). Only trip_composer changed. The bump
+# also moves the place2book cache key to place2book:v1:v7:…, a flush of that
+# cache that this change does not itself need.
+CURRENT_PROMPT_VERSION = "v7"
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _cache: dict[str, "AgentPrompts"] = {}
