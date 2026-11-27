@@ -197,7 +197,7 @@ def _with_search_receipts(monkeypatch, executor, *agents):
     for name in agents:
         plugin._agents_seen.add(name)
         plugin._agents_searched.add(name)
-    monkeypatch.setattr(executor, "_create_langfuse_plugin", lambda: plugin)
+    monkeypatch.setattr(executor, "_create_langfuse_plugin", lambda *_a, **_k: plugin)
     return plugin
 
 
