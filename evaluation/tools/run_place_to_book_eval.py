@@ -205,6 +205,11 @@ def variant_stats(case_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         for c in ran
         if isinstance((c.get("token_usage") or {}).get("cost_usd"), (int, float))
     ]
+    # get_session_stats() answers cost_usd 0.0 with cost_unknown for a model
+    # that has no pricing row, so a sum would read an unpriced run as $0 and a
+    # partly priced one as complete. Any unpriced case makes the total unknown.
+    unpriced = any((c.get("token_usage") or {}).get("cost_unknown") for c in ran)
+    cost_complete: Optional[bool] = None if not costs else not unpriced
     return {
         "cases_run": len(ran),
         "cases_cached": sum(1 for c in case_results if c.get("cached")),
@@ -214,9 +219,20 @@ def variant_stats(case_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         "wikidata_asked": len(asked),
         "wikidata_nothing": sum(1 for c in asked if c.get("wikidata_status") != "found"),
         "total_tokens": sum(tokens) if tokens else None,
-        # None when the run had no Langfuse credentials (no cost was priced).
-        "cost_usd": round(sum(costs), 4) if costs else None,
+        # None when the run had no Langfuse credentials (no cost was priced),
+        # or when any case ran on a model with no pricing row (cost_complete False).
+        "cost_usd": round(sum(costs), 4) if cost_complete else None,
+        "cost_complete": cost_complete,
     }
+
+
+def format_variant_cost(stats: Dict[str, Any]) -> str:
+    """The variant table's cost cell: dollars only when every run was priced."""
+    if stats.get("cost_complete") is False:
+        return "unknown"
+    if stats.get("cost_usd") is None:
+        return "n/a (no Langfuse credentials)"
+    return f"${stats['cost_usd']:.4f}"
 
 
 async def run(
@@ -384,6 +400,7 @@ async def run(
     print(f"Result: {passed}/{len(evaluated)} PASS | Langfuse run: {run_name}")
     print(f"Metrics: {json.dumps(summary['metrics'])}")
     print(f"Variant {variant}: {json.dumps(summary['variant_stats'])}")
+    print(f"Variant {variant} cost: {format_variant_cost(summary['variant_stats'])}")
     print(f"Results saved to {out_path}")
     summary["_results_path"] = str(out_path)
     return summary

@@ -233,6 +233,43 @@ def test_variant_stats_on_a_search_only_run():
     assert variant_stats([])["latency_p50_s"] is None
 
 
+def test_variant_stats_never_shows_an_unpriced_run_as_a_total():
+    """ai-private#81 round 3: get_session_stats() returns cost_usd 0.0 with
+    cost_unknown for a model with no pricing row; the sum must not hide it."""
+    from evaluation.tools.run_place_to_book_eval import format_variant_cost, variant_stats
+
+    cases = [
+        {"latency_s": 3.0, "cached": False, "token_usage": {"total_tokens": 100, "cost_usd": 0.02}},
+        {"latency_s": 4.0, "cached": False,
+         "token_usage": {"total_tokens": 80, "cost_usd": 0.0, "cost_unknown": True}},
+    ]
+    stats = variant_stats(cases)
+    assert stats["cost_usd"] is None
+    assert stats["cost_complete"] is False
+    assert stats["total_tokens"] == 180
+    assert format_variant_cost(stats) == "unknown"
+
+    only_unpriced = variant_stats([cases[1]])
+    assert only_unpriced["cost_usd"] is None and only_unpriced["cost_complete"] is False
+    assert format_variant_cost(only_unpriced) == "unknown"
+
+
+def test_variant_cost_reads_as_dollars_only_when_every_run_is_priced():
+    from evaluation.tools.run_place_to_book_eval import format_variant_cost, variant_stats
+
+    priced = variant_stats([
+        {"latency_s": 3.0, "cached": False, "token_usage": {"total_tokens": 100, "cost_usd": 0.02}},
+        {"latency_s": 4.0, "cached": False,
+         "token_usage": {"total_tokens": 80, "cost_usd": 0.01, "cost_unknown": False}},
+    ])
+    assert priced["cost_usd"] == 0.03 and priced["cost_complete"] is True
+    assert format_variant_cost(priced) == "$0.0300"
+
+    no_langfuse = variant_stats([{"latency_s": 2.0, "cached": False, "token_usage": None}])
+    assert no_langfuse["cost_usd"] is None and no_langfuse["cost_complete"] is None
+    assert format_variant_cost(no_langfuse) == "n/a (no Langfuse credentials)"
+
+
 def test_cli_offers_the_three_variants_and_defaults_to_search(monkeypatch):
     import evaluation.tools.run_place_to_book_eval as tool
 
