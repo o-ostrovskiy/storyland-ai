@@ -18,6 +18,7 @@ from core.events import JobStarted, ProgressEvent
 from common.request_source import RequestSource
 from core.session_state import SessionStateKeys
 from core.types import ExecutorConfig
+from models.work import DEFAULT_WORK_KIND
 from plugins.langfuse_plugin import LangfusePlugin
 
 MCP_HEADERS = {
@@ -177,7 +178,7 @@ class _Root:
         pass
 
 
-def _plugin(monkeypatch):
+def _plugin(monkeypatch, work_kind=DEFAULT_WORK_KIND):
     calls = []
 
     def propagate(**kwargs):
@@ -185,7 +186,7 @@ def _plugin(monkeypatch):
         return SimpleNamespace(__enter__=lambda *a: None, __exit__=lambda *a: None)
 
     monkeypatch.setattr("plugins.langfuse_plugin.propagate_attributes", propagate)
-    plugin = LangfusePlugin(secret_key=None, public_key=None, host=None)
+    plugin = LangfusePlugin(secret_key=None, public_key=None, host=None, work_kind=work_kind)
     plugin.enabled = True
     plugin.client = SimpleNamespace(start_observation=lambda **kw: _Root())
     plugin.root_name = "book_to_place_composition"
@@ -209,7 +210,9 @@ class TestPluginTags:
             invocation_context=_ctx({SessionStateKeys.REQUEST_SOURCE: SOURCE.to_state()}), user_message="go"
         )
         (attrs,) = calls
-        assert attrs["tags"] == ["mcp", "tool:plan_trip", "client:claude-ai"]
+        assert attrs["tags"] == [
+            f"work_kind:{DEFAULT_WORK_KIND}", "mcp", "tool:plan_trip", "client:claude-ai"
+        ]
         assert attrs["metadata"]["source"] == "mcp"
         assert attrs["metadata"]["mcp_tool"] == "plan_trip"
         assert attrs["metadata"]["mcp_client"] == "claude-ai"
@@ -224,5 +227,19 @@ class TestPluginTags:
         plugin, calls = _plugin(monkeypatch)
         await plugin.on_user_message_callback(invocation_context=_ctx(state), user_message="go")
         (attrs,) = calls
-        assert attrs["tags"] is None
-        assert set(attrs["metadata"]) == {"prompt_version", "prompt_hash"}
+        assert attrs["tags"] == [f"work_kind:{DEFAULT_WORK_KIND}"], "only the ai-private#67 kind tag"
+        assert set(attrs["metadata"]) == {"prompt_version", "prompt_hash", "work_kind"}
+
+    @pytest.mark.asyncio
+    async def test_an_mcp_film_trace_carries_both_tag_sets(self, monkeypatch):
+        """ai#315 x ai#318: the work_kind tag and the MCP source tags land on
+        the same trace, and a screen trace keeps its overlay hash."""
+        plugin, calls = _plugin(monkeypatch, work_kind="film")
+        await plugin.on_user_message_callback(
+            invocation_context=_ctx({SessionStateKeys.REQUEST_SOURCE: SOURCE.to_state()}), user_message="go"
+        )
+        (attrs,) = calls
+        assert attrs["tags"] == ["work_kind:film", "mcp", "tool:plan_trip", "client:claude-ai"]
+        assert attrs["metadata"]["work_kind"] == "film"
+        assert attrs["metadata"]["source"] == "mcp"
+        assert attrs["metadata"]["screen_prompt_hash"]
