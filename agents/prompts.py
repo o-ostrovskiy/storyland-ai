@@ -66,6 +66,62 @@ class AgentPrompts:
     place_to_book_formatter: str  # template with {place}
 
 
+def discovery_request(
+    book_title: str,
+    author: str,
+    vibe: str | None = None,
+    taste_context: dict | None = None,
+) -> str:
+    """The research request: the discovery user message, and the same words in
+    the branch researchers' ``book_facts_block`` (ai-private#7).
+
+    ``core/prompts.py::build_discovery_prompt`` returns this as the user
+    message, which reaches only ``book_context_researcher``. The city, landmark
+    and author researchers get it inside their instruction instead. One source
+    for both, so the two cannot drift; see ``build_discovery_prompt`` for what
+    each clause does.
+    """
+    # ai-private#7: the user message states the RESEARCH task and nothing else.
+    # The old pipeline-shaped wording ("Discover travel locations … then group
+    # them into practical travel regions") read as a trip-planning order, and the
+    # researchers skipped Google Search a third of the time; an explicit search
+    # request measured best (11-04 evidence on the card). Each agent's own
+    # instruction owns the pipeline's shape (cities, landmarks, regions).
+    prompt = (
+        f'Research "{book_title}" by {author}: use Google Search to find the '
+        f"real places tied to this book and its author."
+    )
+    if vibe:
+        prompt += (
+            f"\n\nThe reader's chosen mood is \"{vibe}\". It only weighs places "
+            f"your research has already tied to the book: among those, favour the "
+            f"ones whose atmosphere fits a {vibe} feeling, and name that {vibe} "
+            f"atmosphere in each place's connection note. Never add a place your "
+            f"research did not tie to the book to match the mood — factual "
+            f"grounding always wins over vibe."
+        )
+    if taste_context:
+        titles = [t for t in (taste_context.get("titles") or []) if t]
+        moods = [m for m in (taste_context.get("moods") or []) if m]
+        descriptors = []
+        if titles:
+            descriptors.append("books such as " + ", ".join(titles))
+        if moods:
+            descriptors.append("moods like " + ", ".join(moods))
+        if descriptors:
+            taste_desc = "; ".join(descriptors)
+            prompt += (
+                f"\n\nThe reader's own reading history leans toward {taste_desc}. "
+                f"It only weighs places your research has already tied to the book: "
+                f"among those, favour the ones whose atmosphere resonates with that "
+                f"taste, and you may name that resonance in the place's connection "
+                f"note. Never add a place your research did not tie to the book to "
+                f"match the reader's taste — factual grounding always wins over "
+                f"taste."
+            )
+    return prompt
+
+
 def book_facts_block(
     book_title: str,
     author: str,
@@ -79,7 +135,10 @@ def book_facts_block(
     BookContext emitted by their direct predecessor — which carries locations,
     period, and themes but NOT the exact title, author, or the reader's
     vibe/taste biasing that ride the discovery user prompt. On 1.x templates
-    they saw all of it implicitly. This block restores those facts explicitly.
+    they saw all of it implicitly. This block restores those facts explicitly,
+    and since ai-private#7 it also carries the research request itself
+    (``discovery_request``), which these researchers need most: they are the
+    ones that skipped Google Search.
 
     Lives in THIS module deliberately: core/cache_version.py fingerprints
     ``agents.prompts`` source, so any edit here flips the discovery cache
@@ -91,16 +150,13 @@ def book_facts_block(
         "BOOK FACTS (explicit — the conversation may not contain them):",
         f'Title: "{book_title}"',
         f"Author: {author}",
+        "",
+        # ai-private#7: the discovery user message never reaches this agent,
+        # so the research request and the reader's vibe/taste clauses ride
+        # here, in the same words (discovery_request is the one source).
+        "RESEARCH REQUEST (the reader's request; the conversation does not carry it):",
+        discovery_request(book_title, author, vibe, taste_context),
     ]
-    if vibe:
-        lines.append(f"Reader's requested vibe: {vibe}")
-    if taste_context:
-        titles = ", ".join(taste_context.get("titles") or [])
-        moods = ", ".join(taste_context.get("moods") or [])
-        if titles:
-            lines.append(f"Reader also loved: {titles}")
-        if moods:
-            lines.append(f"Reader's preferred moods: {moods}")
     return "\n".join(lines) + "\n\n"
 
 

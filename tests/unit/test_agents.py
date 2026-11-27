@@ -86,6 +86,66 @@ class TestBookContextAgents:
         assert formatter.output_schema is not None
 
 
+class TestBranchResearchersGetTheResearchRequest:
+    """ai-private#7 round 3 (Codex P2 at core/prompts.py:45): under the ADK 2
+    graph the discovery user message reaches only book_context_researcher. The
+    city, landmark and author researchers -- the ones that skipped Google
+    Search -- see only BookContext plus their instruction, so the research
+    request and the reworded vibe/taste clauses must ride book_facts_block."""
+
+    REQUEST = (
+        'Research "Persuasion" by Jane Austen: use Google Search to find the '
+        "real places tied to this book and its author."
+    )
+
+    @pytest.fixture(params=["city", "landmark", "author"])
+    def researcher(self, request, model_name, mock_google_search_tool):
+        factory = {
+            "city": create_city_agents,
+            "landmark": create_landmark_agents,
+            "author": create_author_agents,
+        }[request.param]
+        researcher, _ = factory(
+            model_name,
+            mock_google_search_tool,
+            book_title="Persuasion",
+            author="Jane Austen",
+            vibe="melancholic coastal",
+            taste_context={"titles": ["Rebecca"], "moods": ["windswept"]},
+        )
+        return researcher
+
+    def test_carries_the_research_request(self, researcher):
+        assert self.REQUEST in researcher.instruction
+
+    def test_carries_the_whole_discovery_message_verbatim(self, researcher):
+        from core.prompts import build_discovery_prompt
+
+        message = build_discovery_prompt(
+            "Persuasion",
+            "Jane Austen",
+            "melancholic coastal",
+            {"titles": ["Rebecca"], "moods": ["windswept"]},
+        )
+        assert message in researcher.instruction
+
+    def test_vibe_and_taste_use_the_new_wording(self, researcher):
+        text = researcher.instruction
+        assert text.count("only weighs places your research has already tied to the book") == 2
+        assert text.count("Never add a place your research did not tie to the book") == 2
+        # the old one-line bias labels are gone, so there is one wording only
+        assert "Reader's requested vibe:" not in text
+        assert "Reader also loved:" not in text
+
+    def test_request_sits_in_the_block_before_the_agents_own_instruction(self, researcher):
+        own = getattr(load_prompts(), researcher.name)
+        text = researcher.instruction
+        assert text.startswith("BOOK FACTS")
+        # the agent's own instruction is unchanged and still comes last
+        assert text.endswith(own)
+        assert text.index(self.REQUEST) < len(text) - len(own)
+
+
 class TestCityAgents:
     def test_researcher_carries_book_facts(self, model_name, mock_google_search_tool):
         """Graph-scoped context (ADR #24): the branch researchers never see the

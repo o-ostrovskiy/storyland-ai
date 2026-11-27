@@ -6,7 +6,7 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 
 ## v7 — 2026-11-23 (built 2026-11-20 as v5; renumbered after main took v5 and v6)
 
-**Card:** storyland-ai-private#7 (researchers skip Google Search a third of the time). Only the discovery **user message** changed (`core/prompts.py::build_discovery_prompt`); every agent instruction is byte-identical to v6 (`agents/prompts/v7.json` = v6's agents, pinned by `test_v7_is_v6_with_every_agent_byte_identical`). `v7.json` exists so an eval run can be tagged `--prompt-version v7` against the v6 baselines; `CURRENT_PROMPT_VERSION` stays `v6` (a bump would also move the `place2book` cache key, and the place-to-book prompts did not change). The discovery cache still flips on deploy: `core.prompts` is in the cache fingerprint.
+**Card:** storyland-ai-private#7 (researchers skip Google Search a third of the time). The discovery **request** changed, and it reaches every discovery researcher: `book_context_researcher` gets it as the user message (`core/prompts.py::build_discovery_prompt`), and the city, landmark and author researchers get the same words in their instruction's `book_facts_block` (`agents/prompts.py`), because under the ADK 2 graph (ADR #24) the user message never reaches them. Both read one function, `agents/prompts.py::discovery_request`. Each agent's own v6 instruction text is byte-identical (`agents/prompts/v7.json` = v6's agents, pinned by `test_v7_is_v6_with_every_agent_byte_identical`). `v7.json` exists so an eval run can be tagged `--prompt-version v7` against the v6 baselines; `CURRENT_PROMPT_VERSION` stays `v6` (a bump would also move the `place2book` cache key, and the place-to-book prompts did not change). The discovery cache still flips on deploy: `core.prompts` is in the cache fingerprint.
 
 ### Changes
 | Where | Before (v6) | After (v7) |
@@ -14,6 +14,7 @@ Tracks prompt changes across agent files. Use `--prompt-version <label>` when ru
 | Discovery user message, base | `Discover travel locations for "<title>" by <author>.` + `Find cities, landmarks, and author-related sites, then group them into practical travel regions.` | `Research "<title>" by <author>: use Google Search to find the real places tied to this book and its author.` |
 | `vibe` clause | "Among places that are genuinely and verifiably connected to the book, prefer…" | "It only weighs places your research has already tied to the book: among those, favour…"; "Never add a place your research did not tie to the book…"; grounding-wins sentence kept |
 | `taste_context` clause | same pattern as vibe | same rewording as vibe |
+| `book_facts_block` (city, landmark, author researchers) | title, author, `Reader's requested vibe: …`, `Reader also loved: …`, `Reader's preferred moods: …` | title, author, then `RESEARCH REQUEST …` + the whole discovery request above (base + vibe + taste clauses, same words); the three one-line labels are gone |
 | `run_scheduled_eval.py` | its own copy of the old user message | calls `build_discovery_prompt`, so an eval sends what prod sends |
 
 Not changed (11-04 evidence on the card): agents' own instructions, `thinking_level` (HIGH made `city` worse), the fail-closed `vibe` guard.
