@@ -793,6 +793,36 @@ class TestDiscoverEndpoint:
     """Tests for POST /api/v1/itinerary/discover."""
 
     @pytest.mark.asyncio
+    async def test_mcp_headers_reach_discover_and_compose_and_web_sends_none(self, test_client, mock_executor):
+        """storyland-services#266: the gateway's MCP tool headers become the
+        job's request source; a website call (no headers) passes None."""
+        from common.request_source import RequestSource
+
+        seen = []
+
+        async def mock_stream(**kwargs):
+            seen.append(kwargs.get("request_source"))
+            yield WorkflowComplete(job_id="test-job")
+
+        mock_executor.discover = mock_stream
+        mock_executor.compose = mock_stream
+        mcp = {
+            "X-Request-Source": "mcp",
+            "X-MCP-Tool": "get_literary_route",
+            "X-MCP-Client": "claude-ai",
+            "X-MCP-Client-Version": "0.1.0",
+            "X-MCP-Session": "none",
+        }
+        book = {"book_title": "1984", "author": "George Orwell"}
+        await test_client.post("/api/v1/itinerary/discover", json=book, headers=mcp)
+        await test_client.post("/api/v1/itinerary/j1/compose", json={"region_ids": [1]}, headers=mcp)
+        await test_client.post("/api/v1/itinerary/discover", json=book)
+        await test_client.post("/api/v1/itinerary/j1/compose", json={"region_ids": [1]})
+
+        expected = RequestSource.mcp("get_literary_route", "claude-ai", "0.1.0", "none")
+        assert seen == [expected, expected, None, None]
+
+    @pytest.mark.asyncio
     async def test_discover_session_create_failure(self, test_client, mock_executor):
         async def mock_discover(**kwargs):
             yield WorkflowError(message="Failed to initialize session", error_type="SessionError")

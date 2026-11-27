@@ -6,6 +6,7 @@ All business logic lives in core.executor — routes are thin wiring.
 """
 
 import os
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
@@ -15,9 +16,11 @@ from api.dependencies import (
     get_app_state,
     get_gateway_user_id,
     get_place_to_book_resolver,
+    get_request_source,
     limit_inflight,
     verify_gateway_secret,
 )
+from common.request_source import RequestSource
 from api.models import (
     DiscoverRequest,
     ComposeRequest,
@@ -108,7 +111,11 @@ async def version() -> dict:
         }
     },
 )
-async def discover(request: DiscoverRequest, user_id: str = Depends(get_gateway_user_id)):
+async def discover(
+    request: DiscoverRequest,
+    user_id: str = Depends(get_gateway_user_id),
+    source: Annotated[Optional[RequestSource], Depends(get_request_source)] = None,
+):
     """
     Run location discovery (Phase 1). Book metadata arrives pre-confirmed
     from the gateway (the gateway owns the Google Books lookup; ADR #12) —
@@ -138,6 +145,7 @@ async def discover(request: DiscoverRequest, user_id: str = Depends(get_gateway_
         user_id=user_id,
         executor=app_state.executor,
         work=request.work,
+        request_source=source,
     )
 
     return EventSourceResponse(generator, media_type="text/event-stream")
@@ -162,7 +170,12 @@ async def discover(request: DiscoverRequest, user_id: str = Depends(get_gateway_
         }
     },
 )
-async def compose(job_id: str, request: ComposeRequest, user_id: str = Depends(get_gateway_user_id)):
+async def compose(
+    job_id: str,
+    request: ComposeRequest,
+    user_id: str = Depends(get_gateway_user_id),
+    source: Annotated[Optional[RequestSource], Depends(get_request_source)] = None,
+):
     """
     Create a personalized itinerary for selected regions (phase 3).
 
@@ -184,6 +197,7 @@ async def compose(job_id: str, request: ComposeRequest, user_id: str = Depends(g
         region_ids=request.region_ids,
         user_id=user_id,
         executor=app_state.executor,
+        request_source=source,
     )
 
     return EventSourceResponse(generator, media_type="text/event-stream")

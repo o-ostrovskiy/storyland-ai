@@ -312,6 +312,7 @@ class TestTracePromptIdentity:
         assert captured["metadata"] == {
             "prompt_version": CURRENT_PROMPT_VERSION,
             "prompt_hash": prompt_content_hash(),
+            "work_kind": "book",
         }
         assert len(captured["metadata"]["prompt_hash"]) == 12
 
@@ -339,6 +340,7 @@ class TestTracePromptIdentity:
         assert captured["metadata"] == {
             "prompt_version": "v2",
             "prompt_hash": prompt_content_hash("v2"),
+            "work_kind": "book",
         }
         assert captured["metadata"]["prompt_hash"] != prompt_content_hash()
 
@@ -367,3 +369,45 @@ class TestTracePromptIdentity:
             )
 
         assert seen["prompt_version"] == "v2"
+
+
+class TestTraceWorkKind:
+    """ai-private#67 Part 3: every trace says which kind of work it ran for,
+    so Langfuse can split book journeys from film and series ones."""
+
+    async def _capture(self, monkeypatch, **plugin_kwargs):
+        captured = {}
+
+        def _propagate(**kwargs):
+            captured.update(kwargs)
+            return FakePropagation()
+
+        plugin = LangfusePlugin(**plugin_kwargs)
+        plugin.enabled = True
+        plugin.client = _make_plugin()[0].client
+        monkeypatch.setattr("plugins.langfuse_plugin.propagate_attributes", _propagate)
+        plugin.root_name = "book_to_place_discovery"
+        await plugin.on_user_message_callback(
+            invocation_context=_invocation_context(), user_message="Where is it set?"
+        )
+        return captured
+
+    async def test_a_book_trace_is_tagged_book_with_no_screen_hash(self, monkeypatch):
+        captured = await self._capture(monkeypatch)
+
+        assert captured["metadata"]["work_kind"] == "book"
+        assert "screen_prompt_hash" not in captured["metadata"]
+        assert captured["tags"] == ["work_kind:book"]
+
+    @pytest.mark.parametrize("kind", ["film", "series"])
+    async def test_a_screen_trace_is_tagged_with_its_kind_and_overlay_hash(
+        self, monkeypatch, kind
+    ):
+        from agents.work_prompts import screen_prompt_hash
+
+        captured = await self._capture(monkeypatch, work_kind=kind)
+
+        assert captured["metadata"]["work_kind"] == kind
+        assert captured["metadata"]["screen_prompt_hash"] == screen_prompt_hash()
+        assert captured["metadata"]["screen_prompt_hash"]
+        assert captured["tags"] == [f"work_kind:{kind}"]
