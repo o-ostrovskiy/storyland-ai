@@ -5,8 +5,10 @@ Contains models for book metadata from Google Books API and book context
 (setting, time period, themes).
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Literal, Optional, List
+
+from models.urls import https_only
 
 
 class BookMetadata(BaseModel):
@@ -28,6 +30,11 @@ class BookMetadata(BaseModel):
         default=True,
         description="Whether the book was found via Google Books API. False when search returned no results.",
     )
+
+    @field_validator("image_url", mode="before")
+    @classmethod
+    def _image_url_https_only(cls, value):
+        return https_only(value)
 
 
 class BookContext(BaseModel):
@@ -76,6 +83,11 @@ class BookRecommendation(BaseModel):
     recommendation_basis: Literal["destination", "themes", "author"] = Field(
         description="Primary reason for this recommendation: 'destination' (set in same place), 'themes' (similar mood/themes), or 'author' (same author)"
     )
+
+    @field_validator("image_url", mode="before")
+    @classmethod
+    def _image_url_https_only(cls, value):
+        return https_only(value)
 
 
 def _rec_min_results() -> int:
@@ -126,3 +138,9 @@ class BookInfo(BaseModel):
     image_url: Optional[str] = Field(
         default=None, description="Book cover image URL"
     )
+
+    @field_validator("image_url", mode="before")
+    @classmethod
+    def _image_url_https_only(cls, value):
+        return https_only(value)
+

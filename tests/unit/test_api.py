@@ -457,9 +457,10 @@ class TestHealthResponse:
         assert resp.status == "healthy"
         assert resp.version == "0.1.0"
 
-    def test_with_model_name(self):
-        resp = HealthResponse(model_name="gemini-2.0-flash")
-        assert resp.model_name == "gemini-2.0-flash"
+    def test_carries_no_model_name(self):
+        # ai-private#78: the health check is unauthenticated and never names the model.
+        assert set(HealthResponse.model_fields) == {"status", "version"}
+        assert "model_name" not in HealthResponse().model_dump()
 
 
 class TestJobStatusResponse:
@@ -628,7 +629,8 @@ class TestHealthEndpoint:
         data = response.json()
         assert data["status"] == "healthy"
         assert data["version"] == "0.1.0"
-        assert data["model_name"] == "gemini-2.0-flash-lite"
+        # ai-private#78: the unauthenticated health check does not name the model.
+        assert set(data) == {"status", "version"}
 
 
 class TestVersionEndpoint:
